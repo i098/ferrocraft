@@ -37,5 +37,4 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/sentrux" https://github.com/sentrux/sentrux/releases/download/v0.5.7/sentrux-linux-x86_64
           chmod +x "$RUNNER_TEMP/sentrux"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - run: sentrux plugin add rust
       - run: sentrux gate .

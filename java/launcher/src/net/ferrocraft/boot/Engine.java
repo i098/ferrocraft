@@ -13,7 +13,7 @@ public final class Engine {
         System.out.println("ferrocraft-boot: ClientBrandRetriever=" + net.minecraft.client.ClientBrandRetriever.getClientModName()
                 + " from " + brand.getProtectionDomain().getCodeSource().getLocation());
 
-        File engine = findEngine(args);
+        File engine = findEngine();
         List<String> cmd = new ArrayList<String>();
         cmd.add(engine.getPath());
         for (String a : args) cmd.add(a);
@@ -21,12 +21,15 @@ public final class Engine {
         return new ProcessBuilder(cmd).inheritIO().start().waitFor();
     }
 
-    private static File findEngine(String[] args) {
+    private static File findEngine() throws Exception {
         String env = System.getenv("FERROCRAFT_ENGINE");
         if (env != null && !env.isEmpty()) return new File(env);
-        for (int i = 0; i + 1 < args.length; i++) {
-            if (args[i].equals("--gameDir")) return new File(args[i + 1], "ferrocraft/ferrocraft-engine");
-        }
-        throw new IllegalStateException("no engine: set FERROCRAFT_ENGINE or pass --gameDir");
+        File jar = new File(Engine.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        File mc = jar;
+        for (int i = 0; i < 6 && mc != null; i++) mc = mc.getParentFile();
+        if (mc == null) throw new IllegalStateException("no engine: boot jar is not under <minecraft-dir>/libraries");
+        File dir = new File(mc, "ferrocraft");
+        File exe = new File(dir, "ferrocraft-engine.exe");
+        return exe.isFile() ? exe : new File(dir, "ferrocraft-engine");
     }
 }

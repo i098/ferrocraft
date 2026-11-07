@@ -42,7 +42,8 @@ grep -q 'ferrocraft-engine: window' "$work/game.log"
 # Official launcher order: libraries first, vanilla client jar last (portablemc above puts it first).
 libs=$(find "$work/mc/libraries" -name '*.jar' ! -name 'boot-*' | tr '\n' ':')
 out=$(FERROCRAFT_WINDOW_SECS=1 xvfb-run -a java -cp "$work/mc/libraries/net/ferrocraft/boot/0.1.0/boot-0.1.0.jar:${libs}$work/mc/versions/1.8.9/1.8.9.jar" \
-  net.ferrocraft.boot.Main --gameDir "$work/mc")
+  net.ferrocraft.boot.Main --gameDir "$work/profile")
 echo "$out"
 echo "$out" | grep -q 'ClientBrandRetriever=ferrocraft from file:.*boot-0.1.0.jar'
+echo "$out" | grep -q 'ferrocraft-engine: window'
 echo "SMOKE OK"

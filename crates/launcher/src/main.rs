@@ -38,7 +38,10 @@ fn install(mc: &Path, boot_jar: &Path, engine: &Path) -> Result<(), String> {
     }
     let vdir = mc.join("versions").join(VERSION_ID);
     let jar_dst = mc.join(library_path(BOOT_COORD));
-    let engine_dst = mc.join("ferrocraft/ferrocraft-engine");
+    let engine_dst = mc.join("ferrocraft").join(match engine.extension() {
+        Some(ext) => format!("ferrocraft-engine.{}", ext.to_string_lossy()),
+        None => "ferrocraft-engine".to_string(),
+    });
     for dir in [
         &vdir,
         jar_dst.parent().unwrap(),

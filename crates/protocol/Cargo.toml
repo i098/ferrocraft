@@ -1,0 +1,10 @@
+[package]
+name = "ferrocraft-protocol"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Minecraft Java 1.8.9 (protocol 47) wire codec: packets, NBT, compression and encryption framing"
+
+[dependencies]
+aes = "0.8"
+flate2 = "1"

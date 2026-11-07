@@ -1,9 +1,0 @@
-/home/administrator/.no-mistakes/worktrees/b150b37dbb51/01M6W2NX5ES2A4F7ZAWT5VBE1B/crates/launcher/target/debug/deps/ab_glyph_rasterizer-47e86b9532e4fc88.d: /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/lib.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/geometry.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/raster.rs
-
-/home/administrator/.no-mistakes/worktrees/b150b37dbb51/01M6W2NX5ES2A4F7ZAWT5VBE1B/crates/launcher/target/debug/deps/libab_glyph_rasterizer-47e86b9532e4fc88.rlib: /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/lib.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/geometry.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/raster.rs
-
-/home/administrator/.no-mistakes/worktrees/b150b37dbb51/01M6W2NX5ES2A4F7ZAWT5VBE1B/crates/launcher/target/debug/deps/libab_glyph_rasterizer-47e86b9532e4fc88.rmeta: /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/lib.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/geometry.rs /home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/raster.rs
-
-/home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/lib.rs:
-/home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/geometry.rs:
-/home/administrator/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ab_glyph_rasterizer-0.1.10/src/raster.rs:

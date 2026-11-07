@@ -38,10 +38,12 @@ fn install(mc: &Path, boot_jar: &Path, engine: &Path) -> Result<(), String> {
     }
     let vdir = mc.join("versions").join(VERSION_ID);
     let jar_dst = mc.join(library_path(BOOT_COORD));
-    let engine_dst = mc.join("ferrocraft").join(match engine.extension() {
-        Some(ext) => format!("ferrocraft-engine.{}", ext.to_string_lossy()),
-        None => "ferrocraft-engine".to_string(),
-    });
+    let engine_name = if engine.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
+        "ferrocraft-engine.exe"
+    } else {
+        "ferrocraft-engine"
+    };
+    let engine_dst = mc.join("ferrocraft").join(engine_name);
     for dir in [
         &vdir,
         jar_dst.parent().unwrap(),
@@ -129,6 +131,21 @@ mod tests {
             fs::read(mc.join("ferrocraft/ferrocraft-engine")).unwrap(),
             b"bin"
         );
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn install_names_engine_by_platform_contract() {
+        let tmp = env::temp_dir().join(format!("fc-launcher-name-{}", process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("boot.jar"), b"jar").unwrap();
+        for (src, dst) in [("e.exe", "ferrocraft-engine.exe"), ("e.bin", "ferrocraft-engine")] {
+            fs::write(tmp.join(src), b"bin").unwrap();
+            let mc = tmp.join(dst).with_extension("mc");
+            install(&mc, &tmp.join("boot.jar"), &tmp.join(src)).unwrap();
+            assert!(mc.join("ferrocraft").join(dst).is_file(), "{src} -> {dst}");
+        }
         fs::remove_dir_all(&tmp).unwrap();
     }
 

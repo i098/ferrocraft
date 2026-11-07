@@ -1,5 +1,19 @@
 # ferrocraft
-Minecraft Java client rewritten in Rust (1.8.9 only)
+
+A Minecraft 1.8.9 client rewritten in Rust: vanilla behavior on PvP servers like Hypixel, and original Forge mod packs run through a Java 8 mod host.
+
+## Status
+In development. Scaffold slice in flight; protocol and mod-host slices next. Not yet playable.
+
+## Quick start
+
+No release yet. Development needs the Rust toolchain (edition 2021) and Java 8 for the mod host. Read the docs below first.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Workspace layout](docs/layout.md)
+- [Mod host](docs/mod-host.md)
 
 ## Tests
 

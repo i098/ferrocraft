@@ -1,6 +1,6 @@
 # Mod host: Forge 1.8.9 on a Rust client
 
-The mod host is a Java 8 process beside the Rust client. It runs the real Forge 1.8.9 (FML + LaunchWrapper) and the mods' own Mixin library without change.
+The mod host is a Java 8 process beside the Rust client. It is designed to run the real Forge 1.8.9 (FML + LaunchWrapper) and the mods' own Mixin library without change.
 The only part we write is the Minecraft classes that sit under them: a generated stand-in jar.
 
 ![Mod host](mod-host.svg)
@@ -42,24 +42,24 @@ java -Dfml.ignoreInvalidMinecraftCertificates=true \
 
 ## Mixin and ASM
 
-Mixin reads any class bytes the class loader provides, so it works on stand-ins unchanged. Three modes, chosen per method:
+Mixin reads any class bytes the class loader provides, so it should work on stand-ins unchanged. Three modes, chosen per method:
 
 - Mode A (shape-only, default): stand-in body is native. HEAD, RETURN, TAIL, `@Accessor`, `@Shadow`, `@Overwrite` apply to the shape; CallbackInfo maps to skip-native.
 - Mode B (real-on-demand): when a mod Mixin needs a body site (INVOKE, REDIRECT, MODIFY_VARIABLE), the host swaps in the real remapped body of that method before Mixin runs.
 - Mode C (Rust site tables, long term): the Rust port declares the same sites as the real body; the Java handler is called there.
 
-ASM coremods run unchanged through FML. A transformer that matches shape works on any tier; one that matches instructions needs a real body (T0, T2, or mode B). The bridge wrapper is applied last, after all coremods and Mixin.
+ASM coremods are designed to run unchanged through FML. A transformer that matches shape works on any tier; one that matches instructions needs a real body (T0, T2, or mode B). The bridge wrapper is applied last, after all coremods and Mixin.
 
 ## Events and rendering crossing to Rust
 
 - Hook table: Rust ports are annotated `#[vanilla_method("net/minecraft/client/Minecraft.func_71411_J()V")]`. If a mod or Mixin changed that method, Rust calls Java; otherwise the flag is unset.
-- Forge events (render, input, tick, chat, world, GUI) fire from Rust at the patched call sites, tested against the oracle's trace.
+- Forge events (render, input, tick, chat, world, GUI) are planned to fire from Rust at the patched call sites, to be tested against the oracle's trace.
 - Java draws through a small LWJGL 2 / GL shim that writes a command stream into shared memory; Rust replays it on the wgpu renderer.
-- Rust owns the window and feeds `Keyboard`/`Mouse` shim events so `GuiScreen.handleInput` and Forge `KeyInputEvent` work unchanged.
+- Rust owns the window and feeds `Keyboard`/`Mouse` shim events so `GuiScreen.handleInput` and Forge `KeyInputEvent` are designed to work unchanged.
 
 ## Acceptance
 
-The first real acceptance test is the OneClient/Polyfrost 1.8.9 PvP mod set: Keystrokes, CPS, Toggle sprint, HUD/overlay mods, and OneConfig itself.
+The planned first acceptance test is the OneClient/Polyfrost 1.8.9 PvP mod set: Keystrokes, CPS, Toggle sprint, HUD/overlay mods, and OneConfig itself.
 Non-rendering mods must work; stand-in classes route Gui/FontRenderer/overlay drawing to the Rust renderer.
 
 ## Main risks

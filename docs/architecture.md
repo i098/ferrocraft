@@ -1,7 +1,7 @@
 # Architecture
 
-Ferrocraft is a Minecraft 1.8.9 client rewritten in Rust that loads original Forge mod packs through a Java 8 mod host running beside it.
-The client behaves like vanilla on servers, and every ported method passes differential tests against the real 1.8.9 jar.
+Ferrocraft is a Minecraft 1.8.9 client rewritten in Rust. It is designed to load original Forge mod packs through a Java 8 mod host running beside it.
+Goal: the client behaves like vanilla on servers. Method: each ported method is tested against the real 1.8.9 jar.
 
 ![Architecture](architecture.svg)
 
@@ -19,8 +19,8 @@ The Rust process owns the game and every subsystem that matters for play.
 
 ## Java mod host
 
-A separate Java 8 process runs the real Forge 1.8.9 machinery: LaunchWrapper, FMLTweaker, CoreModManager, ASM coremods, and the mods' own Mixin library, over generated stand-in Minecraft classes.
-This is how original mod packs load unchanged. See [mod-host.md](mod-host.md).
+A separate Java 8 process is designed to run the real Forge 1.8.9 machinery: LaunchWrapper, FMLTweaker, CoreModManager, ASM coremods, and the mods' own Mixin library, over generated stand-in Minecraft classes.
+This is the planned way to load original mod packs unchanged. See [mod-host.md](mod-host.md).
 
 ## Communication
 
@@ -39,7 +39,7 @@ The installer writes one `versions` entry, mirroring the Forge 1.8.9 installer:
 .minecraft/mods/         normal Forge 1.8.9 mods
 ```
 
-The official launcher picks the version up. OneClient, Prism, MultiMC and CurseForge can load the jar as a mod in a Forge 1.8.9 instance.
+Target: the official launcher picks the version up, and OneClient, Prism, MultiMC and CurseForge load the jar as a mod in a Forge 1.8.9 instance.
 Lunar and Badlion cannot load custom versions, so they are out of scope.
 Nothing from Mojang or Forge ships with the project; all derived files are generated on the player's machine.
 

@@ -47,3 +47,5 @@ Nothing from Mojang or Forge ships with the project; all derived files are gener
 
 - Vanilla behavior on servers only; no cheats, no anti-cheat bypass.
 - Development and automated tests use local offline servers only.
+
+Quality gate: run `sentrux gate .` before a PR; it must pass against `.sentrux/baseline.json`.

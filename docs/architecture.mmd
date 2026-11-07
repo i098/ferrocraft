@@ -1,0 +1,44 @@
+flowchart TB
+    subgraph IN["Drop-in install"]
+        VJ["versions/ferrocraft-1.8.9.json"]
+        BJ["boot jar: Java + native library"]
+    end
+    subgraph R["Rust client process"]
+        L["launcher: install and boot"]
+        E["engine: game loop, ECS, tick scheduling"]
+        P["protocol: 1.8.9 protocol 47 codec"]
+        W["world: chunks, blocks, entities, physics"]
+        D["render: wgpu, GUI/font/overlay targets"]
+        I["input-audio"]
+        M["modhost-api: stable Rust-to-Java API"]
+    end
+    subgraph J["Java 8 process: Forge mod host"]
+        LW["LaunchWrapper"]
+        FM["FMLTweaker -> CoreModManager (ASM)"]
+        MX["Mixin over stand-in classes"]
+        MO["Forge mods: @Mod, events, coremods"]
+        SH["LWJGL 2 / GL shim"]
+        MN["ferro-runtime.Main"]
+    end
+    subgraph X["Generated locally by ferro-prepare"]
+        SI["stand-in Minecraft jar: notch names"]
+        FJ["ferro-forge.jar: no binpatches"]
+        HI["hook-index.json"]
+    end
+    IN --> L
+    L --> E
+    E --> P
+    E --> W
+    E --> D
+    E --> I
+    E --> M
+    J <-->|"shared-memory ring + sync hook calls"| M
+    SH -->|"GL command stream"| D
+    SI --> MX
+    FJ --> LW
+    HI --> E
+    LW --> FM
+    FM --> MX
+    MX --> MO
+    MO --> MN
+    MN --> SH

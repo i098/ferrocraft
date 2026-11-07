@@ -1,0 +1,35 @@
+flowchart LR
+    subgraph Prep["ferro-prepare: runs once on the player machine"]
+        CJ["player's 1.8.9 client jar"]
+        FJ["Forge universal jar 11.15.1.2318"]
+        SI["ferro-mc-1.8.9.jar: patched notch classes, body tiers"]
+        FF["ferro-forge.jar: universal minus binpatches"]
+        HI["hook-index.json: per-method body hash + sites"]
+    end
+    CJ --> SI
+    FJ --> SI
+    FJ --> FF
+    FJ --> HI
+    subgraph RustP["Rust process"]
+        VK["vanilla_method! wrappers: hook table"]
+        WR["world, net, physics, wgpu render"]
+        GR["GL replay from ring buffer"]
+    end
+    subgraph J8["Java 8 process: Forge host"]
+        LW["LaunchWrapper"]
+        FT["FMLTweaker"]
+        CM["CoreModManager: ASM coremods"]
+        MT["mods' MixinTweaker: Mixin over stand-in jar"]
+        BR["ferro.bridge.Native + Main"]
+        SH["LWJGL 2 / GL shim"]
+    end
+    SI --> MT
+    FF --> LW
+    HI --> VK
+    LW --> FT
+    FT --> CM
+    CM --> MT
+    MT --> BR
+    BR --> SH
+    VK <-->|hook-table dispatch| BR
+    SH -->|GL command stream| GR

@@ -129,7 +129,8 @@ pub struct Player {
 
 const WIDTH: f32 = 0.6;
 const HEIGHT: f32 = 1.8;
-const STEP_HEIGHT: f64 = 0.6;
+// vanilla `stepHeight` is a float (0.6F)
+const STEP_HEIGHT: f64 = 0.6_f32 as f64;
 /// `PlayerAbilities.walkSpeed` and the base of `generic.movementSpeed`.
 const WALK_SPEED: f32 = 0.1;
 /// `PlayerAbilities.flyingSpeed`; the air acceleration of a walking player.

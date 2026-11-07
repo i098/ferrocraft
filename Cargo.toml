@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "loaders/*", "adapters/*"]
+exclude = ["loaders/fabric", "adapters/universal-closed-client"]
 
 [workspace.package]
 edition = "2021"

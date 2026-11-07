@@ -2,7 +2,7 @@
 //!
 //! [`Oracle::get`] downloads the client jar and its libraries from Mojang's public version
 //! manifest (no login), remaps the jar with Ornithe Calamus + Feather mappings, compiles
-//! `harness/Harness.java` against it, and caches everything under `target/oracle`
+//! `java/oracle/Harness.java` against it, and caches everything under `target/oracle`
 //! (override with `FERROCRAFT_ORACLE_DIR`). [`Oracle::run`] feeds the harness a script and
 //! returns its output lines. Needs a JDK (`javac` and `java`) from `JAVA_HOME` or `PATH`.
 //!
@@ -142,7 +142,7 @@ impl Oracle {
 
         cp.insert(0, named);
         let classes = dir.join("classes");
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../harness/Harness.java");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/oracle/Harness.java");
         let class = classes.join("Harness.class");
         if !newer(&class, &src) {
             fs::create_dir_all(&classes)?;
@@ -164,7 +164,7 @@ impl Oracle {
         })
     }
 
-    /// Run the harness on `script` (see `harness/Harness.java`) and return its output lines.
+    /// Run the harness on `script` (see `java/oracle/Harness.java`) and return its output lines.
     pub fn run(&self, script: &str) -> Result<Vec<String>> {
         let mut child = Command::new(&self.java)
             .arg("-cp")

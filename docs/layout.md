@@ -1,6 +1,5 @@
 # Workspace layout
 
-The workspace layout contract was approved on 2026-11-07.
 Slices never share files; every directory has a README with an Owner line.
 
 ![Workspace layout](layout.svg)

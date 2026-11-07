@@ -46,4 +46,4 @@ Nothing from Mojang or Forge ships with the project; all derived files are gener
 ## Hard rules
 
 - Vanilla behavior on servers only; no cheats, no anti-cheat bypass.
-- Never connect to a live server; test against local offline servers only.
+- Development and automated tests use local offline servers only.

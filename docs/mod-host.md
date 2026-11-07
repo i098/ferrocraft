@@ -64,6 +64,6 @@ Non-rendering mods must work; stand-in classes route Gui/FontRenderer/overlay dr
 
 ## Main risks
 
-- Body-dependent Mixin points (about 37% of the census) need mode B then mode C.
+- Body-dependent Mixin points need mode B then mode C.
 - Mirror state must stay coherent for real bodies (write barrier + harness diff).
 - LWJGL shim fidelity for mods that call odd GL functions.

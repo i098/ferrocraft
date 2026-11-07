@@ -40,7 +40,7 @@ The installer writes one `versions` entry, mirroring the Forge 1.8.9 installer:
 ```
 
 Target: the official launcher picks the version up, and OneClient, Prism, MultiMC and CurseForge load the jar as a mod in a Forge 1.8.9 instance.
-Lunar and Badlion cannot load custom versions, so they are out of scope.
+Lunar and Badlion start only their own builds; we found no supported way to load a custom version.
 Nothing from Mojang or Forge ships with the project; all derived files are generated on the player's machine.
 
 ## Hard rules

@@ -436,7 +436,7 @@ pub mod clientbound {
                 data: Wire::read(r)?,
                 velocity: None,
             };
-            if p.data != 0 {
+            if p.data > 0 {
                 p.velocity = Some(Wire::read(r)?);
             }
             Ok(p)
@@ -450,7 +450,7 @@ pub mod clientbound {
             self.pitch.write(w);
             self.yaw.write(w);
             self.data.write(w);
-            if let (true, Some(v)) = (self.data != 0, &self.velocity) {
+            if let (true, Some(v)) = (self.data > 0, &self.velocity) {
                 v.write(w);
             }
         }

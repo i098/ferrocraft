@@ -113,18 +113,34 @@ fn vanilla_server_status_login_and_play() {
     };
     let mut server = Server::start(&jar);
 
-    // Status.
+    // Status. The vanilla server answers "{}" for a moment after "Done", so retry.
+    let mut resp = None;
+    for _ in 0..50 {
+        let mut conn = server.connect();
+        server.handshake(&mut conn, 1);
+        conn.send(&status::serverbound::Packet::from(
+            status::serverbound::Request {},
+        ))
+        .unwrap();
+        let status::clientbound::Packet::Response(r) = conn.recv().unwrap() else {
+            panic!("not a response")
+        };
+        if r.json != "{}" {
+            resp = Some(r);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let resp = resp.expect("server never filled its status");
+    assert!(resp.json.contains("\"protocol\":47"), "{}", resp.json);
+    assert!(resp.json.contains("1.8.9"), "{}", resp.json);
     let mut conn = server.connect();
     server.handshake(&mut conn, 1);
     conn.send(&status::serverbound::Packet::from(
         status::serverbound::Request {},
     ))
     .unwrap();
-    let status::clientbound::Packet::Response(resp) = conn.recv().unwrap() else {
-        panic!("not a response")
-    };
-    assert!(resp.json.contains("\"protocol\":47"), "{}", resp.json);
-    assert!(resp.json.contains("1.8.9"), "{}", resp.json);
+    conn.recv::<status::clientbound::Packet>().unwrap();
     conn.send(&status::serverbound::Packet::from(
         status::serverbound::Ping { time: 1234567 },
     ))
@@ -284,15 +300,14 @@ fn vanilla_server_status_login_and_play() {
                 sentinel |= c.json.contains("ferro-sentinel");
             }
             cb::Packet::TabComplete(t) => tab_matches |= t.matches.iter().any(|m| m == "/gamemode"),
-            cb::Packet::UpdateHealth(h) if h.health <= 0.0
-                && !dead => {
-                    dead = true;
-                    server.command("say ferro-sentinel");
-                    conn.send(&sb::Packet::from(sb::ClientStatus {
-                        action_id: VarInt(0),
-                    }))
-                    .unwrap();
-                }
+            cb::Packet::UpdateHealth(h) if h.health <= 0.0 && !dead => {
+                dead = true;
+                server.command("say ferro-sentinel");
+                conn.send(&sb::Packet::from(sb::ClientStatus {
+                    action_id: VarInt(0),
+                }))
+                .unwrap();
+            }
             _ => {}
         }
         if sentinel && seen.contains("Respawn") {

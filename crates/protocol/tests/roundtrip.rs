@@ -305,7 +305,7 @@ fn handshake_status_login_bytes() {
 
 #[test]
 fn conditional_fields_follow_their_selector() {
-    // SpawnObject: velocity only when data != 0.
+    // SpawnObject: velocity only when data > 0 (vanilla S0EPacketSpawnObject).
     let mut o = cb::SpawnObject {
         entity_id: VarInt(1),
         kind: 50,
@@ -320,7 +320,33 @@ fn conditional_fields_follow_their_selector() {
     let without = rt(cb::Packet::from(o.clone()));
     o.data = 9;
     o.velocity = Some([1, -2, 3]);
-    assert_eq!(rt(cb::Packet::from(o)).len(), without.len() + 6);
+    assert_eq!(rt(cb::Packet::from(o.clone())).len(), without.len() + 6);
+    o.data = -1;
+    o.velocity = None;
+    assert_eq!(rt(cb::Packet::from(o)).len(), without.len());
+
+    // Literal wire bytes, independent of this crate's own encoder.
+    let props = cb::Packet::from(cb::EntityProperties {
+        entity_id: VarInt(5),
+        attributes: Vec32(vec![Attribute {
+            key: "ab".into(),
+            value: 1.0,
+            modifiers: vec![],
+        }]),
+    });
+    assert_eq!(
+        props.encode(),
+        [0x20, 5, 0, 0, 0, 1, 2, b'a', b'b', 0x3F, 0xF0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    let health = cb::Packet::from(cb::UpdateHealth {
+        health: 20.0,
+        food: VarInt(300),
+        saturation: 5.0,
+    });
+    assert_eq!(
+        health.encode(),
+        [0x06, 0x41, 0xA0, 0, 0, 0xAC, 0x02, 0x40, 0xA0, 0, 0]
+    );
 
     for (id, n) in [(0, 0), (36, 2), (37, 1), (38, 1), (3, 0)] {
         rt(cb::Packet::from(cb::Particle {

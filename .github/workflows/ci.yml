@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install sentrux
         run: |
-          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/sentrux" https://github.com/sentrux/sentrux/releases/download/v0.5.7/sentrux-linux-x86_64
+          curl -fsSL -o "$RUNNER_TEMP/sentrux" https://github.com/sentrux/sentrux/releases/download/v0.5.7/sentrux-linux-x86_64
           chmod +x "$RUNNER_TEMP/sentrux"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: sentrux gate .

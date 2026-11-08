@@ -10,13 +10,20 @@ const COLUMNS: usize = 16;
 
 pub enum AssetSource {
     Jar(zip::ZipArchive<std::fs::File>),
-    Dir(PathBuf),
+    /// An extracted tree, or a launcher `assets` dir whose `indexes/1.8.json` maps names to `objects/xx/hash`.
+    Dir {
+        dir: PathBuf,
+        index: HashMap<String, String>,
+    },
 }
 
 impl AssetSource {
     pub fn open(path: &Path) -> Option<AssetSource> {
         if path.is_dir() {
-            return Some(AssetSource::Dir(path.to_path_buf()));
+            return Some(AssetSource::Dir {
+                dir: path.to_path_buf(),
+                index: read_index(path),
+            });
         }
         let file = std::fs::File::open(path).ok()?;
         zip::ZipArchive::new(file).ok().map(AssetSource::Jar)
@@ -30,14 +37,31 @@ impl AssetSource {
                 zip.by_name(name).ok()?.read_to_end(&mut bytes).ok()?;
                 Some(bytes)
             }
-            AssetSource::Dir(dir) => {
+            AssetSource::Dir { dir, index } => {
                 let stripped = name.strip_prefix("assets/").unwrap_or(name);
                 std::fs::read(dir.join(name))
                     .or_else(|_| std::fs::read(dir.join(stripped)))
                     .ok()
+                    .or_else(|| {
+                        let hash = index.get(stripped)?;
+                        std::fs::read(dir.join("objects").join(hash.get(..2)?).join(hash)).ok()
+                    })
             }
         }
     }
+}
+
+fn read_index(dir: &Path) -> HashMap<String, String> {
+    let Ok(bytes) = std::fs::read(dir.join("indexes/1.8.json")) else {
+        return HashMap::new();
+    };
+    let index: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    index["objects"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, o)| Some((name.clone(), o["hash"].as_str()?.to_string())))
+        .collect()
 }
 
 pub struct Image {
@@ -227,5 +251,29 @@ impl Font {
         } else {
             self.glyph[c as usize] as u32 + 1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dir_source_resolves_names_through_the_hashed_index() {
+        let dir = std::env::temp_dir().join(format!("fc-assets-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("indexes")).unwrap();
+        std::fs::create_dir_all(dir.join("objects/ab")).unwrap();
+        std::fs::write(
+            dir.join("indexes/1.8.json"),
+            r#"{"objects":{"minecraft/textures/font/ascii.png":{"hash":"abcdef","size":3}}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("objects/ab/abcdef"), b"png").unwrap();
+        let mut src = AssetSource::open(&dir).unwrap();
+        let hit = src.read("assets/minecraft/textures/font/ascii.png");
+        let miss = src.read("assets/minecraft/textures/blocks/stone.png");
+        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(hit.as_deref(), Some(&b"png"[..]));
+        assert_eq!(miss, None);
     }
 }

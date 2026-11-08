@@ -61,6 +61,9 @@ fn resolve_assets(
     game_dir: Option<&Path>,
     version: Option<&str>,
 ) -> Option<PathBuf> {
+    if assets.as_deref().is_some_and(Path::is_file) {
+        return assets;
+    }
     let roots = [
         assets.as_deref().and_then(Path::parent),
         game_dir,
@@ -105,7 +108,14 @@ mod tests {
             Some(jar.clone())
         );
         let flag = format!("--gameDir {} --assetsDir /elsewhere/assets", mc.display());
-        assert_eq!(parse(&v(&flag), None).unwrap().assets_dir, Some(jar));
+        assert_eq!(
+            parse(&v(&flag), None).unwrap().assets_dir,
+            Some(jar.clone())
+        );
+        let own = mc.join("own.jar");
+        std::fs::write(&own, b"").unwrap();
+        let flag = format!("--gameDir {} --assetsDir {}", mc.display(), own.display());
+        assert_eq!(parse(&v(&flag), None).unwrap().assets_dir, Some(own));
         std::fs::remove_dir_all(mc).unwrap();
         let a = parse(&v("--fullscreen --username Foo --demo"), None).unwrap();
         assert_eq!(a.username, "Foo");

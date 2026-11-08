@@ -53,6 +53,11 @@ fn engine_file_name(engine: &Path) -> &'static str {
 
 fn copy(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst.parent().unwrap()).map_err(|e| format!("{}: {e}", dst.display()))?;
+    if let (Ok(a), Ok(b)) = (fs::canonicalize(src), fs::canonicalize(dst)) {
+        if a == b {
+            return Ok(());
+        }
+    }
     fs::copy(src, dst).map_err(|e| format!("{}: {e}", src.display()))?;
     Ok(())
 }
@@ -214,9 +219,7 @@ fn uninstall(manifest: &Path) -> Result<(Vec<String>, Vec<String>), String> {
 fn keep_launcher(home: &Path) -> Result<PathBuf, String> {
     let me = env::current_exe().map_err(|e| e.to_string())?;
     let dst = home.join(".ferrocraft").join(me.file_name().unwrap());
-    if me != dst {
-        copy(&me, &dst)?;
-    }
+    copy(&me, &dst)?;
     Ok(dst)
 }
 
@@ -463,6 +466,28 @@ mod tests {
             !mods.join(FABRIC_JAR).exists() && !tmp.join("mc/versions/ferrocraft-1.8.9").exists()
         );
         assert!(!manifest.exists());
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn fabric_install_keeps_engine_already_in_place() {
+        let tmp = tmp("same");
+        let home = tmp.join("home");
+        fs::create_dir_all(home.join(".ferrocraft")).unwrap();
+        let engine = home.join(".ferrocraft/ferrocraft-engine");
+        fs::write(&engine, b"bin").unwrap();
+        fs::write(tmp.join("mod.jar"), b"jar").unwrap();
+        let mods = tmp.join("cluster/mods");
+        install_fabric(
+            std::slice::from_ref(&mods),
+            &tmp.join("mod.jar"),
+            &engine,
+            &home,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(fs::read(&engine).unwrap(), b"bin");
+        assert_eq!(fs::read(mods.join(FABRIC_JAR)).unwrap(), b"jar");
         fs::remove_dir_all(&tmp).unwrap();
     }
 

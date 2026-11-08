@@ -793,6 +793,7 @@ fn add_box(
                 pos: tf(corners[i]),
                 uv: uvs[i],
                 color: [color[0] * shade, color[1] * shade, color[2] * shade, 1.0],
+                light: [1.0, 1.0],
             });
         }
         out.indices

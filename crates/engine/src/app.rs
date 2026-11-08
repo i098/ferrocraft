@@ -4,7 +4,7 @@ use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, InputState};
-use render::{Camera, ChunkBlocks, Environment, Hand, Renderer};
+use render::{Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, Renderer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Fullscreen, Window, WindowId};
 use world::chunk::Chunk;
+use world::entities::{look_vector, Entity, Kind};
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
@@ -144,6 +145,24 @@ impl App {
         }
     }
 
+    /// Left click: hit the entity under the crosshair (`EntityRenderer.getMouseOver`, entity part).
+    /// Reach is 3 blocks in survival, 6 in creative; the swing is sent either way.
+    fn attack(&mut self) {
+        let Some(p) = &self.game.player else { return };
+        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
+        let dir = look_vector(p.yaw, self.game.pitch);
+        let reach = if self.game.creative { 6.0 } else { 3.0 };
+        let hit = self
+            .game
+            .entities
+            .pick(eye, dir, reach, self.game.entity_id, None);
+        let r = match hit {
+            Some(id) => self.session.attack_entity(id),
+            None => self.session.swing_arm(),
+        };
+        self.send_result(r);
+    }
+
     fn sync_cursor(&mut self) {
         let want = self.input.wants_cursor_grab();
         if want == self.grabbed {
@@ -182,6 +201,7 @@ impl App {
                 let open = self.input.chat_input().is_some();
                 self.hud.chat.scroll(step * 7, open);
             }
+            Action::Attack => self.attack(),
             _ => {}
         }
     }
@@ -228,6 +248,13 @@ impl App {
             swing: self.game.swing.progress(frac as f32),
             lowered: 0.0,
         }));
+        let draws: Vec<EntityDraw> = self
+            .game
+            .entities
+            .iter()
+            .map(|e| entity_draw(e, frac))
+            .collect();
+        r.set_entities(&draws);
         r.render(&cam, &quads);
     }
 
@@ -324,6 +351,44 @@ impl ApplicationHandler for App {
         if let Some(w) = &self.window {
             w.request_redraw();
         }
+    }
+}
+
+fn entity_draw(e: &Entity, partial: f64) -> EntityDraw {
+    let class = match e.kind {
+        Kind::Player => Class::Player {
+            slim: e.uuid.is_some_and(|u| {
+                (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
+            }),
+        },
+        Kind::Mob(id) => Class::Mob(id),
+        Kind::Object(id) => Class::Object(id),
+        Kind::ExperienceOrb => Class::Orb,
+    };
+    let p = partial as f32;
+    EntityDraw {
+        class,
+        pos: e.lerp_pos(partial),
+        yaw: e.yaw,
+        head_yaw: e.head_yaw,
+        pitch: e.pitch,
+        limb_swing: e.limb_swing - e.limb_swing_amount * (1.0 - p),
+        limb_swing_amount: e.prev_limb_swing_amount
+            + (e.limb_swing_amount - e.prev_limb_swing_amount) * p,
+        swing: e.swing_progress(p),
+        age: e.age as f32 + p,
+        sneaking: e.sneaking(),
+        hurt: e.hurt_time > 0,
+        death_time: if e.is_dead() {
+            e.death_time as f32 + p
+        } else {
+            0.0
+        },
+        invisible: e.invisible(),
+        size: e.kind.size(),
+        held: e.equipment[0].map_or(0, |i| i.id),
+        armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
+        name: e.name.clone(),
     }
 }
 

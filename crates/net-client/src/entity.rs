@@ -1,0 +1,273 @@
+//! Entity packets as [`EntityEvent`] values, and the combat packets a client sends.
+
+use crate::{send, Session};
+use ferrocraft_protocol::codec::{MetaEntry, MetaValue, Metadata, Slot, VarInt};
+use ferrocraft_protocol::play::clientbound as cb;
+use ferrocraft_protocol::play::{serverbound as sb, PlayerListAction, UseAction};
+use std::io;
+use world::entities::{EntityEvent, ItemRef};
+
+fn item(slot: &Slot) -> Option<ItemRef> {
+    slot.as_ref().map(|s| ItemRef {
+        id: s.id,
+        damage: s.damage,
+    })
+}
+
+fn find(meta: &Metadata, index: u8) -> Option<&MetaValue> {
+    meta.0
+        .iter()
+        .find(|e: &&MetaEntry| e.index == index)
+        .map(|e| &e.value)
+}
+
+fn flags(meta: &Metadata) -> Option<u8> {
+    match find(meta, 0) {
+        Some(MetaValue::Byte(b)) => Some(*b as u8),
+        _ => None,
+    }
+}
+
+fn name(meta: &Metadata) -> Option<String> {
+    match find(meta, 2) {
+        Some(MetaValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn stack(meta: &Metadata) -> Option<ItemRef> {
+    match find(meta, 10) {
+        Some(MetaValue::Slot(s)) => item(s),
+        _ => None,
+    }
+}
+
+/// The events of an entity packet; empty for every other packet.
+pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
+    if let cb::Packet::PlayerListItem(p) = packet {
+        return player_list(&p.action);
+    }
+    spawn_event(packet)
+        .or_else(|| motion_event(packet))
+        .or_else(|| state_event(packet))
+        .into_iter()
+        .collect()
+}
+
+fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
+    use cb::Packet as P;
+    Some(match packet {
+        P::SpawnPlayer(p) => EntityEvent::SpawnPlayer {
+            id: p.entity_id.0,
+            uuid: p.uuid.0,
+            pos: [p.x, p.y, p.z],
+            yaw: p.yaw,
+            pitch: p.pitch,
+            held: p.current_item,
+            flags: flags(&p.metadata),
+        },
+        P::SpawnMob(p) => EntityEvent::SpawnMob {
+            id: p.entity_id.0,
+            kind: p.kind,
+            pos: [p.x, p.y, p.z],
+            yaw: p.yaw,
+            pitch: p.pitch,
+            head_yaw: p.head_pitch,
+            vel: [p.velocity_x, p.velocity_y, p.velocity_z],
+            flags: flags(&p.metadata),
+            name: name(&p.metadata),
+        },
+        P::SpawnObject(p) => EntityEvent::SpawnObject {
+            id: p.entity_id.0,
+            kind: p.kind,
+            pos: [p.x, p.y, p.z],
+            yaw: p.yaw,
+            pitch: p.pitch,
+            vel: p.velocity.unwrap_or([0; 3]),
+        },
+        P::SpawnExperienceOrb(p) => EntityEvent::SpawnExperienceOrb {
+            id: p.entity_id.0,
+            pos: [p.x, p.y, p.z],
+        },
+        _ => return None,
+    })
+}
+
+fn motion_event(packet: &cb::Packet) -> Option<EntityEvent> {
+    use cb::Packet as P;
+    Some(match packet {
+        P::EntityRelativeMove(p) => EntityEvent::Move {
+            id: p.entity_id.0,
+            delta: [p.dx, p.dy, p.dz],
+            look: None,
+            on_ground: p.on_ground,
+        },
+        P::EntityLookAndRelativeMove(p) => EntityEvent::Move {
+            id: p.entity_id.0,
+            delta: [p.dx, p.dy, p.dz],
+            look: Some((p.yaw, p.pitch)),
+            on_ground: p.on_ground,
+        },
+        P::EntityLook(p) => EntityEvent::Look {
+            id: p.entity_id.0,
+            yaw: p.yaw,
+            pitch: p.pitch,
+            on_ground: p.on_ground,
+        },
+        P::EntityTeleport(p) => EntityEvent::Teleport {
+            id: p.entity_id.0,
+            pos: [p.x, p.y, p.z],
+            yaw: p.yaw,
+            pitch: p.pitch,
+            on_ground: p.on_ground,
+        },
+        P::EntityHeadLook(p) => EntityEvent::HeadLook {
+            id: p.entity_id.0,
+            head_yaw: p.head_yaw,
+        },
+        P::EntityVelocity(p) => EntityEvent::Velocity {
+            id: p.entity_id.0,
+            vel: [p.x, p.y, p.z],
+        },
+        P::DestroyEntities(p) => EntityEvent::Destroy(p.entity_ids.iter().map(|v| v.0).collect()),
+        _ => return None,
+    })
+}
+
+fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
+    use cb::Packet as P;
+    Some(match packet {
+        P::EntityMetadata(p) => EntityEvent::Metadata {
+            id: p.entity_id.0,
+            flags: flags(&p.metadata),
+            name: name(&p.metadata),
+            stack: stack(&p.metadata),
+        },
+        P::EntityEquipment(p) => EntityEvent::Equipment {
+            id: p.entity_id.0,
+            slot: p.slot,
+            item: item(&p.item),
+        },
+        P::Animation(p) => EntityEvent::Animation {
+            id: p.entity_id.0,
+            animation: p.animation,
+        },
+        P::EntityStatus(p) => EntityEvent::Status {
+            id: p.entity_id,
+            status: p.status,
+        },
+        P::AttachEntity(p) => EntityEvent::Attach {
+            id: p.entity_id,
+            vehicle: p.vehicle_id,
+        },
+        _ => return None,
+    })
+}
+
+fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
+    match action {
+        PlayerListAction::Add(v) => v
+            .iter()
+            .map(|(u, a)| EntityEvent::PlayerName {
+                uuid: u.0,
+                name: a.name.clone(),
+            })
+            .collect(),
+        PlayerListAction::Remove(v) => v
+            .iter()
+            .map(|u| EntityEvent::PlayerRemove { uuid: u.0 })
+            .collect(),
+        _ => vec![],
+    }
+}
+
+impl Session {
+    /// Left click on an entity: `UseEntity` attack, then the arm swing (vanilla order).
+    pub fn attack_entity(&mut self, target: i32) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::UseEntity {
+                target: VarInt(target),
+                action: UseAction::Attack,
+            }),
+        )?;
+        self.swing_arm()
+    }
+
+    /// Right click on an entity.
+    pub fn interact_entity(&mut self, target: i32) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::UseEntity {
+                target: VarInt(target),
+                action: UseAction::Interact,
+            }),
+        )
+    }
+
+    /// `C0A`: the arm swing of a left click.
+    pub fn swing_arm(&mut self) -> io::Result<()> {
+        send(&self.writer, sb::Packet::from(sb::Animation {}))
+    }
+
+    /// `C0B` entity action: 0 sneak, 1 unsneak, 3 start sprint, 4 stop sprint.
+    pub fn entity_action(&mut self, entity_id: i32, action: i32) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::EntityAction {
+                entity_id: VarInt(entity_id),
+                action_id: VarInt(action),
+                jump_boost: VarInt(0),
+            }),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrocraft_protocol::PacketSet;
+
+    #[test]
+    fn spawn_mob_metadata_gives_flags_and_name() {
+        let p = cb::Packet::from(cb::SpawnMob {
+            entity_id: VarInt(5),
+            kind: 54,
+            x: 32,
+            y: 64,
+            z: 96,
+            yaw: 0,
+            pitch: 0,
+            head_pitch: 0,
+            velocity_x: 0,
+            velocity_y: 0,
+            velocity_z: 0,
+            metadata: Metadata(vec![
+                MetaEntry {
+                    index: 0,
+                    value: MetaValue::Byte(0b10),
+                },
+                MetaEntry {
+                    index: 2,
+                    value: MetaValue::String("Bob".into()),
+                },
+            ]),
+        });
+        let frame = p.encode();
+        let decoded = cb::Packet::decode(&frame).unwrap();
+        let EntityEvent::SpawnMob {
+            id,
+            flags,
+            name,
+            pos,
+            ..
+        } = events(&decoded).remove(0)
+        else {
+            panic!("not a spawn")
+        };
+        assert_eq!(
+            (id, flags, name.as_deref(), pos),
+            (5, Some(2), Some("Bob"), [32, 64, 96])
+        );
+    }
+}

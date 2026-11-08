@@ -4,6 +4,7 @@ use crate::swing::Swing;
 use crate::weather::Weather;
 use ferrocraft_net_client::{NetEvent, Styled};
 use world::chunk::ChunkStore;
+use world::entities::Entities;
 use world::{Block, Input, Player, World};
 
 pub const EYE_HEIGHT: f64 = 1.62;
@@ -39,6 +40,11 @@ impl World for Collision<'_> {
 
 pub struct Game {
     pub store: ChunkStore,
+    pub entities: Entities,
+    /// The local player's entity id, from `JoinGame`.
+    pub entity_id: i32,
+    /// Creative mode (6 block entity reach instead of 3).
+    pub creative: bool,
     pub player: Option<Player>,
     /// Player position before the latest tick, for partial-tick interpolation.
     pub prev_pos: [f64; 3],
@@ -58,6 +64,9 @@ impl Game {
     pub fn new() -> Game {
         Game {
             store: ChunkStore::default(),
+            entities: Entities::default(),
+            entity_id: -1,
+            creative: false,
             player: None,
             prev_pos: [0.0; 3],
             teleported: false,
@@ -72,7 +81,18 @@ impl Game {
 
     pub fn apply(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::JoinGame { .. } => None,
+            NetEvent::JoinGame {
+                entity_id,
+                gamemode,
+            } => {
+                self.entity_id = entity_id;
+                self.creative = gamemode == 1;
+                None
+            }
+            NetEvent::Entity(e) => {
+                self.entities.apply(e);
+                None
+            }
             NetEvent::Respawn => {
                 self.store.clear();
                 Some(Effect::Clear)
@@ -154,6 +174,7 @@ impl Game {
         self.ticks += 1;
         self.weather.tick();
         self.swing.tick();
+        self.entities.tick();
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
         let (cx, cz) = (

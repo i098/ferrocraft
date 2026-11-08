@@ -86,13 +86,19 @@ impl Sound {
 
     fn gain(&self, cat: Category) -> f32 {
         let master = self.volumes[&Category::Master];
-        if cat == Category::Master { master } else { master * self.volumes[&cat] }
+        if cat == Category::Master {
+            master
+        } else {
+            master * self.volumes[&cat]
+        }
     }
 
     /// Plays `event`; `at` is a world position, `None` is a non-positional (UI) sound.
     pub fn play(&mut self, event: &str, at: Option<[f64; 3]>, volume: f32, pitch: f32) {
         let roll = self.rand();
-        let Some(ev) = self.index.event(event) else { return };
+        let Some(ev) = self.index.event(event) else {
+            return;
+        };
         let Some(v) = ev.pick(roll) else { return };
         let mut gain = (volume * v.volume).clamp(0.0, 1.0) * self.gain(ev.category);
         if let Some(p) = at {
@@ -114,8 +120,12 @@ impl Sound {
         if self.players.len() >= MAX_SOUNDS {
             return;
         }
-        let Ok(file) = File::open(&v.file) else { return };
-        let Ok(dec) = Decoder::try_from(file) else { return };
+        let Ok(file) = File::open(&v.file) else {
+            return;
+        };
+        let Ok(dec) = Decoder::try_from(file) else {
+            return;
+        };
         let player = Player::connect_new(self.sink.mixer());
         player.set_volume(gain);
         player.append(dec.speed((pitch * v.pitch).clamp(0.5, 2.0)));
@@ -164,11 +174,19 @@ impl Sound {
             return;
         }
         let roll = self.rand();
-        let Some(event) = self.ticker.tick(in_world, self.music.is_some(), roll) else { return };
+        let Some(event) = self.ticker.tick(in_world, self.music.is_some(), roll) else {
+            return;
+        };
         let pick = self.rand();
-        let Some(v) = self.index.event(event).and_then(|e| e.pick(pick)) else { return };
-        let Ok(file) = File::open(&v.file) else { return };
-        let Ok(dec) = Decoder::try_from(file) else { return };
+        let Some(v) = self.index.event(event).and_then(|e| e.pick(pick)) else {
+            return;
+        };
+        let Ok(file) = File::open(&v.file) else {
+            return;
+        };
+        let Ok(dec) = Decoder::try_from(file) else {
+            return;
+        };
         let player = Player::connect_new(self.sink.mixer());
         player.set_volume(self.gain(Category::Music) * v.volume);
         player.append(dec);

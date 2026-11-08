@@ -19,7 +19,11 @@ impl MusicTicker {
             self.delay -= 1;
             return None;
         }
-        let (min, max, event) = if in_world { (12000, 24000, "music.game") } else { (20, 600, "music.menu") };
+        let (min, max, event) = if in_world {
+            (12000, 24000, "music.game")
+        } else {
+            (20, 600, "music.menu")
+        };
         self.delay = min + rand % (max - min);
         Some(event)
     }

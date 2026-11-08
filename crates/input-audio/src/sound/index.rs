@@ -109,11 +109,15 @@ impl SoundIndex {
             .ok_or("no asset index in assets/indexes")?;
         let objects = parse_objects(&std::fs::read(&index).map_err(|e| e.to_string())?)?;
         let object = |name: &str| {
-            objects.get(name).map(|h| assets.join("objects").join(&h[..2]).join(h))
+            objects
+                .get(name)
+                .map(|h| assets.join("objects").join(&h[..2]).join(h))
         };
         let json_path = object("minecraft/sounds.json").ok_or("sounds.json not in asset index")?;
         let json = std::fs::read(&json_path).map_err(|e| e.to_string())?;
-        Self::from_json(&json, |name| object(&format!("minecraft/sounds/{name}.ogg")))
+        Self::from_json(&json, |name| {
+            object(&format!("minecraft/sounds/{name}.ogg"))
+        })
     }
 
     /// `resolve` maps a sound name such as `random/click` to its `.ogg` path.
@@ -139,7 +143,12 @@ impl SoundIndex {
                     _ => continue,
                 };
                 if let Some(path) = resolve(file) {
-                    variants.push(Variant { file: path, volume, pitch, weight });
+                    variants.push(Variant {
+                        file: path,
+                        volume,
+                        pitch,
+                        weight,
+                    });
                 }
             }
             events.insert(name.clone(), Event { category, variants });
@@ -157,7 +166,12 @@ fn parse_objects(index: &[u8]) -> Result<HashMap<String, String>, String> {
     let objs = v["objects"].as_object().ok_or("index has no objects")?;
     Ok(objs
         .iter()
-        .filter_map(|(k, o)| Some((k.clone(), o["hash"].as_str().filter(|h| h.len() > 2)?.to_owned())))
+        .filter_map(|(k, o)| {
+            Some((
+                k.clone(),
+                o["hash"].as_str().filter(|h| h.len() > 2)?.to_owned(),
+            ))
+        })
         .collect())
 }
 
@@ -169,13 +183,17 @@ mod tests {
     fn parses_strings_objects_and_weights() {
         let json = br#"{"random.click":{"category":"master","sounds":["random/click"]},
             "mob.pig.say":{"category":"neutral","sounds":[{"name":"mob/pig/say1","weight":3,"volume":0.5},{"name":"mob/pig/say2"},"missing"]}}"#;
-        let idx = SoundIndex::from_json(json, |n| (n != "missing").then(|| PathBuf::from(n))).unwrap();
+        let idx =
+            SoundIndex::from_json(json, |n| (n != "missing").then(|| PathBuf::from(n))).unwrap();
         let pig = idx.event("mob.pig.say").unwrap();
         assert_eq!(pig.category, Category::Neutral);
         assert_eq!(pig.variants.len(), 2);
         assert_eq!(pig.pick(0).unwrap().volume, 0.5);
         assert_eq!(pig.pick(2).unwrap().volume, 0.5);
         assert_eq!(pig.pick(3).unwrap().weight, 1);
-        assert_eq!(idx.event("random.click").unwrap().category, Category::Master);
+        assert_eq!(
+            idx.event("random.click").unwrap().category,
+            Category::Master
+        );
     }
 }

@@ -5,10 +5,13 @@ mod args;
 mod game;
 mod swing;
 mod weather;
+mod log;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() {
+    log::install_panic_hook();
+    let started = std::time::Instant::now();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match args::parse(&argv, std::env::var("FERROCRAFT_SERVER").ok()) {
         Ok(a) => a,
@@ -32,8 +35,12 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = app::App::new(args, session);
     event_loop.run_app(&mut app).expect("run");
+    let up = started.elapsed().as_secs();
     if let Some(reason) = app.exit_reason() {
-        eprintln!("ferrocraft-engine: disconnected: {reason}");
+        log::line(&format!("disconnected after {up}s: {reason}"));
         std::process::exit(1);
     }
+    log::line(&format!(
+        "event loop ended after {up}s without disconnect (window closed or deadline)"
+    ));
 }

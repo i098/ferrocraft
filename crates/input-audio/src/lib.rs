@@ -49,6 +49,36 @@ pub fn apply_cursor_grab(window: &Window, want: bool) -> bool {
     }
 }
 
+/// The queued action for a bind press, if it has one.
+fn press_action(bind: Bind, ctrl: bool) -> Option<Action> {
+    Some(match bind {
+        Bind::Inventory => Action::Inventory,
+        Bind::Drop => Action::Drop { whole_stack: ctrl },
+        Bind::Attack => Action::Attack,
+        Bind::Use => Action::Use,
+        Bind::PickBlock => Action::PickBlock,
+        Bind::Screenshot => Action::Screenshot,
+        Bind::Perspective => Action::TogglePerspective,
+        Bind::Fullscreen => Action::ToggleFullscreen,
+        Bind::Hotbar(n) => Action::Hotbar(n),
+        _ => return None,
+    })
+}
+
+/// F3 + key combos of `Minecraft.processKeyF3`.
+fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
+    Some(match code {
+        KeyCode::KeyA => DebugCombo::ReloadChunks,
+        KeyCode::KeyB => DebugCombo::Hitboxes,
+        KeyCode::KeyD => DebugCombo::ClearChat,
+        KeyCode::KeyG => DebugCombo::ChunkBorders,
+        KeyCode::KeyH => DebugCombo::AdvancedTooltips,
+        KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
+        KeyCode::KeyQ => DebugCombo::Help,
+        _ => return None,
+    })
+}
+
 #[derive(Debug)]
 pub struct InputState {
     sensitivity: f32,
@@ -140,21 +170,23 @@ impl InputState {
             WindowEvent::MouseInput { state, button, .. } => {
                 self.mouse_button(*button, *state == ElementState::Pressed, now);
             }
-            WindowEvent::MouseWheel { delta, .. } => match delta {
-                MouseScrollDelta::LineDelta(_, y) => {
-                    self.wheel(f64::from(*y).signum() * f64::from(*y != 0.0) as f64)
-                }
-                MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
-                    self.scroll_px += y;
-                    while self.scroll_px.abs() >= PIXELS_PER_STEP {
-                        let s = self.scroll_px.signum();
-                        self.scroll_px -= s * PIXELS_PER_STEP;
-                        self.wheel(s);
-                    }
-                }
-            },
+            WindowEvent::MouseWheel { delta, .. } => self.scroll(*delta),
             WindowEvent::Focused(focused) => self.set_focused(*focused),
             _ => {}
+        }
+    }
+
+    fn scroll(&mut self, delta: MouseScrollDelta) {
+        match delta {
+            MouseScrollDelta::LineDelta(_, y) => self.wheel(f64::from(y)),
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
+                self.scroll_px += y;
+                while self.scroll_px.abs() >= PIXELS_PER_STEP {
+                    let s = self.scroll_px.signum();
+                    self.scroll_px -= s * PIXELS_PER_STEP;
+                    self.wheel(s);
+                }
+            }
         }
     }
 
@@ -172,7 +204,7 @@ impl InputState {
     }
 
     fn wheel(&mut self, y: f64) {
-        let step = y.signum() as i32;
+        let step = if y == 0.0 { 0 } else { y.signum() as i32 };
         if step == 0 {
             return;
         }
@@ -201,16 +233,8 @@ impl InputState {
             KeyCode::F3 if !pressed => self.f3_down = false,
             _ => {}
         }
-        if self.chat.is_some() {
-            if pressed {
-                self.chat_key(code, text);
-            }
-            return;
-        }
-        if self.screen_open {
-            if pressed && !repeat && code == KeyCode::Escape {
-                self.actions.push_back(Action::CloseScreen);
-            }
+        if self.chat.is_some() || self.screen_open {
+            self.modal_key(code, pressed, repeat, text);
             return;
         }
         if pressed && !repeat && self.hard_coded_key(code) {
@@ -219,18 +243,20 @@ impl InputState {
         self.control(Control::Key(code), pressed, repeat, now);
     }
 
+    /// Key while chat or a GUI screen owns the keyboard.
+    fn modal_key(&mut self, code: KeyCode, pressed: bool, repeat: bool, text: Option<&str>) {
+        if self.chat.is_some() {
+            if pressed {
+                self.chat_key(code, text);
+            }
+        } else if pressed && !repeat && code == KeyCode::Escape {
+            self.actions.push_back(Action::CloseScreen);
+        }
+    }
+
     /// Esc, F1, F3 and the F3 combos: not rebindable in vanilla. True when consumed.
     fn hard_coded_key(&mut self, code: KeyCode) -> bool {
-        let combo = match code {
-            KeyCode::KeyA => Some(DebugCombo::ReloadChunks),
-            KeyCode::KeyB => Some(DebugCombo::Hitboxes),
-            KeyCode::KeyD => Some(DebugCombo::ClearChat),
-            KeyCode::KeyG => Some(DebugCombo::ChunkBorders),
-            KeyCode::KeyH => Some(DebugCombo::AdvancedTooltips),
-            KeyCode::KeyP => Some(DebugCombo::PauseOnLostFocus),
-            KeyCode::KeyQ => Some(DebugCombo::Help),
-            _ => None,
-        };
+        let combo = debug_combo(code);
         if let (true, Some(c)) = (self.f3_down, combo) {
             if c == DebugCombo::PauseOnLostFocus {
                 self.pause_on_lost_focus = !self.pause_on_lost_focus;
@@ -276,31 +302,28 @@ impl InputState {
             if !pressed || repeat {
                 continue;
             }
-            match bind {
-                Bind::Forward => {
-                    if self
-                        .last_forward_press
-                        .is_some_and(|t| now.duration_since(t) <= DOUBLE_TAP)
-                    {
-                        self.sprint_toggle = true;
-                    }
-                    self.last_forward_press = Some(now);
+            self.on_press(bind, now);
+        }
+    }
+
+    fn on_press(&mut self, bind: Bind, now: Instant) {
+        if let Some(action) = press_action(bind, self.ctrl_down) {
+            self.actions.push_back(action);
+            return;
+        }
+        match bind {
+            Bind::Forward => {
+                if self
+                    .last_forward_press
+                    .is_some_and(|t| now.duration_since(t) <= DOUBLE_TAP)
+                {
+                    self.sprint_toggle = true;
                 }
-                Bind::Chat => self.open_chat(String::new()),
-                Bind::Command => self.open_chat("/".into()),
-                Bind::Inventory => self.actions.push_back(Action::Inventory),
-                Bind::Drop => self.actions.push_back(Action::Drop {
-                    whole_stack: self.ctrl_down,
-                }),
-                Bind::Attack => self.actions.push_back(Action::Attack),
-                Bind::Use => self.actions.push_back(Action::Use),
-                Bind::PickBlock => self.actions.push_back(Action::PickBlock),
-                Bind::Screenshot => self.actions.push_back(Action::Screenshot),
-                Bind::Perspective => self.actions.push_back(Action::TogglePerspective),
-                Bind::Fullscreen => self.actions.push_back(Action::ToggleFullscreen),
-                Bind::Hotbar(n) => self.actions.push_back(Action::Hotbar(n)),
-                _ => {}
+                self.last_forward_press = Some(now);
             }
+            Bind::Chat => self.open_chat(String::new()),
+            Bind::Command => self.open_chat("/".into()),
+            _ => {}
         }
     }
 
@@ -316,17 +339,7 @@ impl InputState {
         };
         match code {
             KeyCode::Escape => self.chat = None,
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                let line = self.chat.take().unwrap_or_default();
-                if !line.trim().is_empty() {
-                    if self.history.last() != Some(&line) {
-                        self.history.push(line.clone());
-                        let extra = self.history.len().saturating_sub(CHAT_HISTORY);
-                        self.history.drain(..extra);
-                    }
-                    self.submit = Some(line);
-                }
-            }
+            KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
             KeyCode::Backspace => {
                 buf.pop();
             }
@@ -340,6 +353,19 @@ impl InputState {
                 }
             }
         }
+    }
+
+    fn submit_chat(&mut self) {
+        let line = self.chat.take().unwrap_or_default();
+        if line.trim().is_empty() {
+            return;
+        }
+        if self.history.last() != Some(&line) {
+            self.history.push(line.clone());
+            let extra = self.history.len().saturating_sub(CHAT_HISTORY);
+            self.history.drain(..extra);
+        }
+        self.submit = Some(line);
     }
 
     /// `GuiChat.getSentHistory`: -1 older, +1 newer; past the newest clears the line.

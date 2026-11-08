@@ -73,61 +73,64 @@ impl Bind {
         Self::ALL.iter().position(|b| *b == self).unwrap_or(0)
     }
 
-    /// The `options.txt` key without the `key_` prefix.
+    /// The `options.txt` key, e.g. `key_key.forward`.
     pub fn option_name(self) -> String {
-        let name = match self {
-            Bind::Forward => "forward",
-            Bind::Left => "left",
-            Bind::Back => "back",
-            Bind::Right => "right",
-            Bind::Jump => "jump",
-            Bind::Sneak => "sneak",
-            Bind::Sprint => "sprint",
-            Bind::Inventory => "inventory",
-            Bind::Drop => "drop",
-            Bind::Chat => "chat",
-            Bind::Command => "command",
-            Bind::PlayerList => "playerlist",
-            Bind::Attack => "attack",
-            Bind::Use => "use",
-            Bind::PickBlock => "pickItem",
-            Bind::Screenshot => "screenshot",
-            Bind::Perspective => "togglePerspective",
-            Bind::Fullscreen => "fullscreen",
-            Bind::Hotbar(n) => return format!("key_key.hotbar.{}", n + 1),
-        };
-        format!("key_key.{name}")
+        match self {
+            Bind::Hotbar(n) => format!("key_key.hotbar.{}", n + 1),
+            _ => format!("key_key.{}", BASE_BINDS[self.index()].0),
+        }
     }
 
     /// `GameSettings` default key.
     pub fn default_control(self) -> Control {
-        use KeyCode::*;
-        let key = match self {
-            Bind::Forward => KeyW,
-            Bind::Left => KeyA,
-            Bind::Back => KeyS,
-            Bind::Right => KeyD,
-            Bind::Jump => Space,
-            Bind::Sneak => ShiftLeft,
-            Bind::Sprint => ControlLeft,
-            Bind::Inventory => KeyE,
-            Bind::Drop => KeyQ,
-            Bind::Chat => KeyT,
-            Bind::Command => Slash,
-            Bind::PlayerList => Tab,
-            Bind::Screenshot => F2,
-            Bind::Perspective => F5,
-            Bind::Fullscreen => F11,
-            Bind::Attack => return Control::Mouse(MouseButton::Left),
-            Bind::Use => return Control::Mouse(MouseButton::Right),
-            Bind::PickBlock => return Control::Mouse(MouseButton::Middle),
-            Bind::Hotbar(n) => [
-                Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
-            ][usize::from(n.min(8))],
-        };
-        Control::Key(key)
+        match self {
+            Bind::Hotbar(n) => Control::Key(HOTBAR_KEYS[usize::from(n.min(8))]),
+            _ => BASE_BINDS[self.index()].1,
+        }
     }
 }
+
+use KeyCode as K;
+const fn key(k: KeyCode) -> Control {
+    Control::Key(k)
+}
+const fn mouse(b: MouseButton) -> Control {
+    Control::Mouse(b)
+}
+
+/// `options.txt` name and default for each non-hotbar bind, in `Bind::ALL` order.
+const BASE_BINDS: [(&str, Control); 18] = [
+    ("forward", key(K::KeyW)),
+    ("left", key(K::KeyA)),
+    ("back", key(K::KeyS)),
+    ("right", key(K::KeyD)),
+    ("jump", key(K::Space)),
+    ("sneak", key(K::ShiftLeft)),
+    ("sprint", key(K::ControlLeft)),
+    ("inventory", key(K::KeyE)),
+    ("drop", key(K::KeyQ)),
+    ("chat", key(K::KeyT)),
+    ("command", key(K::Slash)),
+    ("playerlist", key(K::Tab)),
+    ("attack", mouse(MouseButton::Left)),
+    ("use", mouse(MouseButton::Right)),
+    ("pickItem", mouse(MouseButton::Middle)),
+    ("screenshot", key(K::F2)),
+    ("togglePerspective", key(K::F5)),
+    ("fullscreen", key(K::F11)),
+];
+
+const HOTBAR_KEYS: [KeyCode; 9] = [
+    K::Digit1,
+    K::Digit2,
+    K::Digit3,
+    K::Digit4,
+    K::Digit5,
+    K::Digit6,
+    K::Digit7,
+    K::Digit8,
+    K::Digit9,
+];
 
 /// Current control for every [`Bind`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,7 +206,6 @@ pub fn lwjgl_from_control(control: Control) -> Option<i32> {
     }
 }
 
-use KeyCode as K;
 const LWJGL_KEYS: &[(i32, KeyCode)] = &[
     (1, K::Escape),
     (2, K::Digit1),

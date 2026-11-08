@@ -559,10 +559,7 @@ fn packet_layouts_match_protocol_47_bytes() {
         columns: 0,
         update: None,
     });
-    assert_eq!(
-        icons_only.encode(),
-        [0x34, 0xAC, 0x02, 1, 1, 0x31, 1, 2, 0]
-    );
+    assert_eq!(icons_only.encode(), [0x34, 0xAC, 0x02, 1, 1, 0x31, 1, 2, 0]);
     let with_columns = cb::Packet::from(cb::Maps {
         item_damage: VarInt(0),
         scale: 1,

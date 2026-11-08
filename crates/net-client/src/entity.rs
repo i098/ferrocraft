@@ -44,8 +44,19 @@ fn stack(meta: &Metadata) -> Option<ItemRef> {
 
 /// The events of an entity packet; empty for every other packet.
 pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
+    if let cb::Packet::PlayerListItem(p) = packet {
+        return player_list(&p.action);
+    }
+    spawn_event(packet)
+        .or_else(|| motion_event(packet))
+        .or_else(|| state_event(packet))
+        .into_iter()
+        .collect()
+}
+
+fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
     use cb::Packet as P;
-    let ev = match packet {
+    Some(match packet {
         P::SpawnPlayer(p) => EntityEvent::SpawnPlayer {
             id: p.entity_id.0,
             uuid: p.uuid.0,
@@ -78,6 +89,13 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
             id: p.entity_id.0,
             pos: [p.x, p.y, p.z],
         },
+        _ => return None,
+    })
+}
+
+fn motion_event(packet: &cb::Packet) -> Option<EntityEvent> {
+    use cb::Packet as P;
+    Some(match packet {
         P::EntityRelativeMove(p) => EntityEvent::Move {
             id: p.entity_id.0,
             delta: [p.dx, p.dy, p.dz],
@@ -112,6 +130,13 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
             vel: [p.x, p.y, p.z],
         },
         P::DestroyEntities(p) => EntityEvent::Destroy(p.entity_ids.iter().map(|v| v.0).collect()),
+        _ => return None,
+    })
+}
+
+fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
+    use cb::Packet as P;
+    Some(match packet {
         P::EntityMetadata(p) => EntityEvent::Metadata {
             id: p.entity_id.0,
             flags: flags(&p.metadata),
@@ -135,10 +160,8 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
             id: p.entity_id,
             vehicle: p.vehicle_id,
         },
-        P::PlayerListItem(p) => return player_list(&p.action),
-        _ => return vec![],
-    };
-    vec![ev]
+        _ => return None,
+    })
 }
 
 fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {

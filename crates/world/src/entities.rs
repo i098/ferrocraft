@@ -31,32 +31,46 @@ impl Kind {
             Kind::Object(1) => (1.5, 0.6),
             Kind::Object(10..=12) => (0.98, 0.7),
             Kind::Object(_) => (0.98, 0.98),
-            Kind::Mob(id) => match id {
-                50 => (0.6, 1.7),
-                52 => (1.4, 0.9),
-                53 => (3.6, 10.8),
-                55 | 62 => (0.51, 0.51),
-                56 => (4.0, 4.0),
-                58 => (0.6, 2.9),
-                59 => (0.7, 0.5),
-                60 | 67 => (0.4, 0.3),
-                63 => (16.0, 8.0),
-                64 => (0.9, 3.5),
-                65 => (0.5, 0.9),
-                68 => (0.85, 0.85),
-                90 => (0.9, 0.9),
-                91 | 92 | 96 => (0.9, 1.3),
-                93 => (0.4, 0.7),
-                94 => (0.95, 0.95),
-                95 => (0.6, 0.8),
-                97 => (0.7, 1.9),
-                98 | 101 => (0.6, 0.7),
-                99 => (1.4, 2.9),
-                100 => (1.4, 1.6),
-                _ => (0.6, 1.8),
-            },
+            Kind::Mob(id) => mob_size(id),
         }
     }
+}
+
+/// Hitbox `(width, height)` per `SpawnMob` type id; other ids are 0.6 x 1.8.
+const MOB_SIZES: [(u8, f32, f32); 26] = [
+    (50, 0.6, 1.7),
+    (52, 1.4, 0.9),
+    (53, 3.6, 10.8),
+    (55, 0.51, 0.51),
+    (62, 0.51, 0.51),
+    (56, 4.0, 4.0),
+    (58, 0.6, 2.9),
+    (59, 0.7, 0.5),
+    (60, 0.4, 0.3),
+    (67, 0.4, 0.3),
+    (63, 16.0, 8.0),
+    (64, 0.9, 3.5),
+    (65, 0.5, 0.9),
+    (68, 0.85, 0.85),
+    (90, 0.9, 0.9),
+    (91, 0.9, 1.3),
+    (92, 0.9, 1.3),
+    (96, 0.9, 1.3),
+    (93, 0.4, 0.7),
+    (94, 0.95, 0.95),
+    (95, 0.6, 0.8),
+    (97, 0.7, 1.9),
+    (98, 0.6, 0.7),
+    (101, 0.6, 0.7),
+    (99, 1.4, 2.9),
+    (100, 1.4, 1.6),
+];
+
+fn mob_size(id: u8) -> (f32, f32) {
+    MOB_SIZES
+        .iter()
+        .find(|m| m.0 == id)
+        .map_or((0.6, 1.8), |m| (m.1, m.2))
 }
 
 /// Metadata index 0 bit flags (`Entity.getFlag`).
@@ -244,6 +258,41 @@ impl Entity {
         }
     }
 
+    fn set_metadata(&mut self, flags: Option<u8>, name: Option<String>, stack: Option<ItemRef>) {
+        if let Some(f) = flags {
+            self.flags = f;
+        }
+        if let (Kind::Mob(_), Some(n)) = (self.kind, name) {
+            self.name = Some(n).filter(|n| !n.is_empty());
+        }
+        if stack.is_some() {
+            self.stack = stack;
+        }
+    }
+
+    fn animate(&mut self, animation: u8) {
+        match animation {
+            // `swingItem`: restart unless a swing is already in its first half.
+            0 if !self.swinging || self.swing_ticks >= 3 || self.swing_ticks < 0 => {
+                self.swing_ticks = -1;
+                self.swinging = true;
+            }
+            1 => self.hurt_time = 10,
+            _ => {}
+        }
+    }
+
+    fn set_status(&mut self, status: i8) {
+        match status {
+            2 => self.hurt_time = 10,
+            3 if self.death_time == 0 => {
+                self.hurt_time = 10;
+                self.death_time = 1;
+            }
+            _ => {}
+        }
+    }
+
     /// Arm swing progress in `0.0..1.0`, interpolated between ticks (`getSwingProgress`).
     pub fn swing_progress(&self, partial: f32) -> f32 {
         if !self.swinging {
@@ -407,7 +456,66 @@ impl Entities {
     }
 
     pub fn apply(&mut self, ev: EntityEvent) {
+        use EntityEvent as E;
         match ev {
+            E::SpawnPlayer { .. } | E::SpawnMob { .. } | E::SpawnObject { .. } => self.spawn(ev),
+            E::SpawnExperienceOrb { id, pos } => {
+                let e = Entity::new(id, Kind::ExperienceOrb, pos, 0, 0);
+                self.map.insert(id, e);
+            }
+            E::Move {
+                id,
+                delta,
+                look,
+                on_ground,
+            } => self.with(id, |e| {
+                let raw = std::array::from_fn(|i| e.server_pos[i] + i32::from(delta[i]));
+                let (yaw, pitch) = look.map_or((e.target.yaw, e.target.pitch), |(y, p)| {
+                    (angle(y), angle(p))
+                });
+                e.set_target(raw, yaw, pitch);
+                e.on_ground = on_ground;
+            }),
+            E::Look {
+                id,
+                yaw,
+                pitch,
+                on_ground,
+            } => self.with(id, |e| {
+                e.set_target(e.server_pos, angle(yaw), angle(pitch));
+                e.on_ground = on_ground;
+            }),
+            E::Teleport {
+                id,
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            } => self.with(id, |e| {
+                e.set_target(pos, angle(yaw), angle(pitch));
+                e.on_ground = on_ground;
+            }),
+            E::HeadLook { id, head_yaw } => self.with(id, |e| {
+                e.target.head_yaw = angle(head_yaw);
+                e.target.steps = e.target.steps.max(STEPS);
+            }),
+            E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
+            E::Destroy(ids) => ids.iter().for_each(|id| {
+                self.map.remove(id);
+            }),
+            E::Clear => self.map.clear(),
+            other => self.apply_state(other),
+        }
+    }
+
+    fn with(&mut self, id: i32, f: impl FnOnce(&mut Entity)) {
+        if let Some(e) = self.map.get_mut(&id) {
+            f(e);
+        }
+    }
+
+    fn spawn(&mut self, ev: EntityEvent) {
+        let (id, e) = match ev {
             EntityEvent::SpawnPlayer {
                 id,
                 uuid,
@@ -427,7 +535,7 @@ impl Entities {
                         damage: 0,
                     });
                 }
-                self.map.insert(id, e);
+                (id, e)
             }
             EntityEvent::SpawnMob {
                 id,
@@ -446,7 +554,7 @@ impl Entities {
                 e.vel = velocity(vel);
                 e.flags = flags.unwrap_or(0);
                 e.name = name.filter(|n| !n.is_empty());
-                self.map.insert(id, e);
+                (id, e)
             }
             EntityEvent::SpawnObject {
                 id,
@@ -458,133 +566,43 @@ impl Entities {
             } => {
                 let mut e = Entity::new(id, Kind::Object(kind), pos, yaw, pitch);
                 e.vel = velocity(vel);
-                self.map.insert(id, e);
+                (id, e)
             }
-            EntityEvent::SpawnExperienceOrb { id, pos } => {
-                self.map
-                    .insert(id, Entity::new(id, Kind::ExperienceOrb, pos, 0, 0));
-            }
-            EntityEvent::Move {
-                id,
-                delta,
-                look,
-                on_ground,
-            } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    let raw = std::array::from_fn(|i| e.server_pos[i] + i32::from(delta[i]));
-                    let (yaw, pitch) = look.map_or((e.target.yaw, e.target.pitch), |(y, p)| {
-                        (angle(y), angle(p))
-                    });
-                    e.set_target(raw, yaw, pitch);
-                    e.on_ground = on_ground;
-                }
-            }
-            EntityEvent::Look {
-                id,
-                yaw,
-                pitch,
-                on_ground,
-            } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    e.set_target(e.server_pos, angle(yaw), angle(pitch));
-                    e.on_ground = on_ground;
-                }
-            }
-            EntityEvent::Teleport {
-                id,
-                pos,
-                yaw,
-                pitch,
-                on_ground,
-            } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    e.set_target(pos, angle(yaw), angle(pitch));
-                    e.on_ground = on_ground;
-                }
-            }
-            EntityEvent::HeadLook { id, head_yaw } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    e.target.head_yaw = angle(head_yaw);
-                    e.target.steps = e.target.steps.max(STEPS);
-                }
-            }
-            EntityEvent::Velocity { id, vel } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    e.vel = velocity(vel);
-                }
-            }
-            EntityEvent::Destroy(ids) => {
-                for id in ids {
-                    self.map.remove(&id);
-                }
-            }
-            EntityEvent::Metadata {
+            _ => return,
+        };
+        self.map.insert(id, e);
+    }
+
+    /// Metadata, equipment, animation and status events.
+    fn apply_state(&mut self, ev: EntityEvent) {
+        use EntityEvent as E;
+        match ev {
+            E::Metadata {
                 id,
                 flags,
                 name,
                 stack,
-            } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    if let Some(f) = flags {
-                        e.flags = f;
-                    }
-                    if let (Kind::Mob(_), Some(n)) = (e.kind, name) {
-                        e.name = Some(n).filter(|n| !n.is_empty());
-                    }
-                    if stack.is_some() {
-                        e.stack = stack;
-                    }
+            } => self.with(id, |e| e.set_metadata(flags, name, stack)),
+            E::Equipment { id, slot, item } => self.with(id, |e| {
+                if let Some(s) = e.equipment.get_mut(slot as usize) {
+                    *s = item;
                 }
+            }),
+            E::Animation { id, animation } => self.with(id, |e| e.animate(animation)),
+            E::Status { id, status } => self.with(id, |e| e.set_status(status)),
+            E::Attach { id, vehicle } => {
+                self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
-            EntityEvent::Equipment { id, slot, item } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    if let Some(s) = e.equipment.get_mut(slot as usize) {
-                        *s = item;
-                    }
-                }
-            }
-            EntityEvent::Animation { id, animation } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    match animation {
-                        0 => {
-                            // `swingItem`: restart unless a swing is already in its first half.
-                            if !e.swinging || e.swing_ticks >= 3 || e.swing_ticks < 0 {
-                                e.swing_ticks = -1;
-                                e.swinging = true;
-                            }
-                        }
-                        1 => e.hurt_time = 10,
-                        _ => {}
-                    }
-                }
-            }
-            EntityEvent::Status { id, status } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    match status {
-                        2 => e.hurt_time = 10,
-                        3 if e.death_time == 0 => {
-                            e.hurt_time = 10;
-                            e.death_time = 1;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            EntityEvent::Attach { id, vehicle } => {
-                if let Some(e) = self.map.get_mut(&id) {
-                    e.vehicle = (vehicle >= 0).then_some(vehicle);
-                }
-            }
-            EntityEvent::PlayerName { uuid, name } => {
+            E::PlayerName { uuid, name } => {
                 for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
                     e.name = Some(name.clone());
                 }
                 self.names.insert(uuid, name);
             }
-            EntityEvent::PlayerRemove { uuid } => {
+            E::PlayerRemove { uuid } => {
                 self.names.remove(&uuid);
             }
-            EntityEvent::Clear => self.map.clear(),
+            _ => {}
         }
     }
 

@@ -95,6 +95,55 @@ fn cos(v: f32) -> f32 {
     v.cos()
 }
 
+struct Pose {
+    r_arm: V3,
+    l_arm: V3,
+    body_rot: V3,
+    r_arm_pivot: V3,
+    l_arm_pivot: V3,
+    head_pivot: V3,
+    leg_pivots: [V3; 2],
+}
+
+impl Pose {
+    /// Attack swing of the right arm and the body twist (`ModelBiped`, `swingProgress > -9990`).
+    fn swing(&mut self, swing: f32, head_rot_x: f32) {
+        let s = (swing.sqrt() * 2.0 * PI).sin() * 0.2;
+        self.body_rot[1] = s;
+        self.r_arm_pivot[2] = s.sin() * 5.0;
+        self.r_arm_pivot[0] = -s.cos() * 5.0;
+        self.l_arm_pivot[2] = -s.sin() * 5.0;
+        self.l_arm_pivot[0] = s.cos() * 5.0;
+        self.r_arm[1] += s;
+        self.l_arm[1] += s;
+        self.l_arm[0] += s;
+        let f1 = 1.0 - (1.0 - swing).powi(4);
+        let f2 = (f1 * PI).sin() * (swing * PI).sin() * -(head_rot_x - 0.7) * 0.75;
+        self.r_arm[0] -= f1 * 1.2 + f2;
+        self.r_arm[1] += s * 2.0;
+        self.r_arm[2] += (swing * PI).sin() * -0.4;
+    }
+
+    /// Idle arm sway driven by the entity age.
+    fn sway(&mut self, age: f32) {
+        self.r_arm[2] += cos(age * 0.09) * 0.05 + 0.05;
+        self.l_arm[2] -= cos(age * 0.09) * 0.05 + 0.05;
+        self.r_arm[0] += (age * 0.067).sin() * 0.05;
+        self.l_arm[0] -= (age * 0.067).sin() * 0.05;
+    }
+
+    fn sneak(&mut self) {
+        self.body_rot[0] = 0.5;
+        self.r_arm[0] += 0.4;
+        self.l_arm[0] += 0.4;
+        for leg in &mut self.leg_pivots {
+            leg[1] = 9.0;
+            leg[2] = 4.0;
+        }
+        self.head_pivot[1] = 1.0;
+    }
+}
+
 /// `ModelBiped.setRotationAngles` and the box layout. `arm_w` and `limb` are the arm and leg
 /// widths (4 for a player, 3 for alex, 2 for a skeleton).
 fn biped(
@@ -135,47 +184,34 @@ fn biped(
     if d.held != 0 && !raised {
         r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27;
     }
-    if swing > 0.0 {
-        let s = (swing.sqrt() * 2.0 * PI).sin() * 0.2;
-        body_rot[1] = s;
-        r_arm_pivot[2] = s.sin() * 5.0;
-        r_arm_pivot[0] = -s.cos() * 5.0;
-        l_arm_pivot[2] = -s.sin() * 5.0;
-        l_arm_pivot[0] = s.cos() * 5.0;
-        r_arm[1] += s;
-        l_arm[1] += s;
-        l_arm[0] += s;
-        let inv = (1.0 - swing).powi(4);
-        let f1s = 1.0 - inv;
-        let f2 = (f1s * PI).sin() * (swing * PI).sin() * -(head_rot_x - 0.7) * 0.75;
-        r_arm[0] -= f1s * 1.2 + f2;
-        r_arm[1] += s * 2.0;
-        r_arm[2] += (swing * PI).sin() * -0.4;
-    }
-    r_arm[2] += cos(d.age * 0.09) * 0.05 + 0.05;
-    l_arm[2] -= cos(d.age * 0.09) * 0.05 + 0.05;
-    r_arm[0] += (d.age * 0.067).sin() * 0.05;
-    l_arm[0] -= (d.age * 0.067).sin() * 0.05;
-    if d.sneaking {
-        body_rot[0] = 0.5;
-        r_arm[0] += 0.4;
-        l_arm[0] += 0.4;
-        leg_pivots[0][1] = 9.0;
-        leg_pivots[1][1] = 9.0;
-        leg_pivots[0][2] = 4.0;
-        leg_pivots[1][2] = 4.0;
-        head_pivot[1] = 1.0;
-        r_arm_pivot[1] += 0.0;
-    }
-
-    let arm_min = if arm_w == 4.0 {
-        -3.0
-    } else if arm_w == 3.0 {
-        -2.0
-    } else {
-        -1.0
+    let mut pose = Pose {
+        r_arm,
+        l_arm,
+        body_rot,
+        r_arm_pivot,
+        l_arm_pivot,
+        head_pivot,
+        leg_pivots,
     };
-    let l_arm_min = if arm_w == 4.0 { -1.0 } else { -1.0 };
+    if swing > 0.0 {
+        pose.swing(swing, head_rot_x);
+    }
+    pose.sway(d.age);
+    if d.sneaking {
+        pose.sneak();
+    }
+    let Pose {
+        r_arm,
+        l_arm,
+        body_rot,
+        r_arm_pivot,
+        l_arm_pivot,
+        head_pivot,
+        leg_pivots,
+    } = pose;
+
+    let arm_min = -(arm_w - 1.0);
+    let l_arm_min = -1.0;
     let limb_min = -limb_w / 2.0;
     let arm_d = if limb_w == 2.0 { 2.0 } else { 4.0 };
     let arm_z = -arm_d / 2.0;
@@ -493,146 +529,143 @@ pub fn build(draws: &[EntityDraw], skins: &Skins) -> MeshData {
     out
 }
 
-fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
-    let m = model(d);
-    let (skin, mut tint) = if skins.has(m.skin) {
-        (m.skin, m.tint)
-    } else {
-        (
-            Skin::White,
-            if m.skin == Skin::White {
-                m.tint
+/// Model-space to world-space transform of one entity: yaw, death tilt, sneak drop and bob.
+struct Xf {
+    pos: [f64; 3],
+    st: f32,
+    ct: f32,
+    lift: f32,
+    sneak_drop: f32,
+    fall: f32,
+    height: f32,
+    scale: f32,
+    /// The generic box is built y-up from the feet, so it skips the body offset.
+    generic: bool,
+}
+
+impl Xf {
+    fn new(d: &EntityDraw, generic: bool) -> Xf {
+        let spinning = matches!(d.class, Class::Object(2) | Class::Orb);
+        let body_yaw = if spinning {
+            (d.age * 0.1).to_degrees()
+        } else {
+            d.yaw
+        };
+        let (st, ct) = (180.0 - body_yaw).to_radians().sin_cos();
+        // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees).
+        let fall = if d.death_time > 0.0 {
+            ((d.death_time - 1.0) / 20.0 * 1.6).sqrt().min(1.0) * FRAC_PI_2
+        } else {
+            0.0
+        };
+        Xf {
+            pos: d.pos,
+            st,
+            ct,
+            lift: if matches!(d.class, Class::Object(2)) {
+                (d.age * 0.1).sin() * 0.1 + 0.1
             } else {
-                fallback_tint(m.skin)
+                0.0
             },
-        )
-    };
-    if d.hurt || d.death_time > 0.0 {
-        tint = [tint[0], tint[1] * 0.45, tint[2] * 0.45];
+            sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
+            fall,
+            height: d.size.1,
+            // `RenderPlayer.preRenderCallback` scales the player model by 15/16.
+            scale: if matches!(d.class, Class::Player { .. }) {
+                0.9375
+            } else {
+                1.0
+            },
+            generic,
+        }
     }
-    let v0 = skins.v_offset(skin);
-    let spin = if matches!(d.class, Class::Object(2) | Class::Orb) {
-        d.age * 0.1
-    } else {
-        0.0
-    };
-    let body_yaw = if spin != 0.0 {
-        spin.to_degrees()
-    } else {
-        d.yaw
-    };
-    let theta = (180.0 - body_yaw).to_radians();
-    let (st, ct) = theta.sin_cos();
-    let lift = match d.class {
-        Class::Object(2) => (d.age * 0.1).sin() * 0.1 + 0.1,
-        _ => 0.0,
-    };
-    let sneak_drop = if d.sneaking { 0.125 } else { 0.0 };
-    // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees).
-    let fall = if d.death_time > 0.0 {
-        ((d.death_time - 1.0) / 20.0 * 1.6).sqrt().min(1.0) * FRAC_PI_2
-    } else {
-        0.0
-    };
-    let height = d.size.1;
-    // `RenderPlayer.preRenderCallback` scales the player model by 15/16.
-    let scale = if matches!(d.class, Class::Player { .. }) {
-        0.9375
-    } else {
-        1.0
-    };
-    let pos = d.pos;
-    let to_world = |p: V3| -> V3 {
-        // model pixels -> entity-local blocks (scale -1,-1,1), then death tilt, yaw and position.
-        let (x, y) = (-p[0] / 16.0 * scale, (BODY_OFFSET - p[1] / 16.0) * scale);
-        let z = p[2] / 16.0 * scale;
-        let (x, y) = if fall != 0.0 {
-            let (sf, cf) = fall.sin_cos();
-            let cy = height / 2.0;
-            let (rx, ry) = (x, y - cy);
-            (rx * cf - ry * sf, rx * sf + ry * cf + cy)
+
+    fn yaw(&self, x: f32, y: f32, z: f32, y_shift: f32) -> V3 {
+        let (wx, wz) = (x * self.ct + z * self.st, -x * self.st + z * self.ct);
+        [
+            (self.pos[0] + f64::from(wx)) as f32,
+            (self.pos[1] + f64::from(y + y_shift)) as f32,
+            (self.pos[2] + f64::from(wz)) as f32,
+        ]
+    }
+
+    /// Model pixels (y down) to world blocks.
+    fn world(&self, q: V3) -> V3 {
+        if self.generic {
+            // y-up block coordinates: the box hangs from y = 0 downward in model space.
+            return self.yaw(-q[0] / 16.0, -q[1] / 16.0, q[2] / 16.0, self.lift);
+        }
+        let s = self.scale;
+        let (x, y) = (-q[0] / 16.0 * s, (BODY_OFFSET - q[1] / 16.0) * s);
+        let z = q[2] / 16.0 * s;
+        let (x, y) = if self.fall != 0.0 {
+            let (sf, cf) = self.fall.sin_cos();
+            let cy = self.height / 2.0;
+            let ry = y - cy;
+            (x * cf - ry * sf, x * sf + ry * cf + cy)
         } else {
             (x, y)
         };
-        let (wx, wz) = (x * ct + z * st, -x * st + z * ct);
-        [
-            (pos[0] + f64::from(wx)) as f32,
-            (pos[1] + f64::from(y + lift - sneak_drop)) as f32,
-            (pos[2] + f64::from(wz)) as f32,
-        ]
+        self.yaw(x, y, z, self.lift - self.sneak_drop)
+    }
+}
+
+/// Texture and tint of the main layer: the real skin when loaded, else white with a stand-in tint.
+fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
+    let (skin, tint) = if skins.has(m.skin) {
+        (m.skin, m.tint)
+    } else if m.skin == Skin::White {
+        (Skin::White, m.tint)
+    } else {
+        (Skin::White, fallback_tint(m.skin))
     };
-    // The generic box is built y-up from the feet, so it skips the body offset.
-    let generic_box = m.skin == Skin::White
+    if d.hurt || d.death_time > 0.0 {
+        return (skin, [tint[0], tint[1] * 0.45, tint[2] * 0.45]);
+    }
+    (skin, tint)
+}
+
+fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_off: f32) {
+    let min = part.min.map(|m| m - grow);
+    let size = part.size.map(|s| s + 2.0 * grow);
+    let tf = |p: V3| -> V3 {
+        let r = rotate(p, part.rot);
+        xf.world([
+            r[0] + part.pivot[0],
+            r[1] + part.pivot[1],
+            r[2] + part.pivot[2],
+        ])
+    };
+    add_box(out, &tf, min, size, part.uv, v_off, color, skin_dims());
+}
+
+fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
+    let m = model(d);
+    let (skin, tint) = base_look(&m, d, skins);
+    let generic = m.skin == Skin::White
         && matches!(d.class, Class::Mob(_) | Class::Object(_) | Class::Orb)
         && m.parts.len() == 1;
+    let xf = Xf::new(d, generic);
+    let white = skins.v_offset(Skin::White);
 
-    let mut emit = |out: &mut MeshData, part: &Part, grow: f32, color: [f32; 3], v_off: f32| {
-        let min = [part.min[0] - grow, part.min[1] - grow, part.min[2] - grow];
-        let size = [
-            part.size[0] + 2.0 * grow,
-            part.size[1] + 2.0 * grow,
-            part.size[2] + 2.0 * grow,
-        ];
-        let tf = |p: V3| -> V3 {
-            let r = rotate(p, part.rot);
-            let q = [
-                r[0] + part.pivot[0],
-                r[1] + part.pivot[1],
-                r[2] + part.pivot[2],
-            ];
-            if generic_box {
-                // y-up block coordinates: the box hangs from y = 0 downward in model space.
-                let (x, y, z) = (-q[0] / 16.0, -q[1] / 16.0, q[2] / 16.0);
-                let (wx, wz) = (x * ct + z * st, -x * st + z * ct);
-                [
-                    (pos[0] + f64::from(wx)) as f32,
-                    (pos[1] + f64::from(y + lift)) as f32,
-                    (pos[2] + f64::from(wz)) as f32,
-                ]
-            } else {
-                to_world(q)
-            }
-        };
-        add_box(out, &tf, min, size, part.uv, v_off, color, skin_dims());
-    };
-
-    for part in &m.parts {
-        let is_hat = part.inflate > 0.0;
-        if is_hat && skin == Skin::White {
-            continue;
-        }
-        emit(out, part, part.inflate, tint, v0);
+    for part in m
+        .parts
+        .iter()
+        .filter(|p| p.inflate == 0.0 || skin != Skin::White)
+    {
+        emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
     }
-    for part in &m.parts {
-        if let Some((slot, scale)) = part.armor {
-            if let Some(color) = armor_tint(d.armor[slot]) {
-                if part.inflate == 0.0 {
-                    emit(
-                        out,
-                        part,
-                        scale * 0.5 + 0.2,
-                        color,
-                        skins.v_offset(Skin::White),
-                    );
-                }
-            }
+    for part in m.parts.iter().filter(|p| p.inflate == 0.0) {
+        let worn = part
+            .armor
+            .and_then(|(slot, scale)| Some((armor_tint(d.armor[slot])?, scale)));
+        if let Some((color, scale)) = worn {
+            emit_part(out, &xf, part, scale * 0.5 + 0.2, color, white);
         }
     }
-    if d.held != 0 {
-        if let Some(arm) = m
-            .parts
-            .get(3)
-            .filter(|_| matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51)))
-        {
-            let bar = held_bar(arm);
-            emit(
-                out,
-                &bar,
-                0.0,
-                [0.75, 0.6, 0.35],
-                skins.v_offset(Skin::White),
-            );
-        }
+    let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
+    if let Some(arm) = m.parts.get(3).filter(|_| d.held != 0 && holds) {
+        emit_part(out, &xf, &held_bar(arm), 0.0, [0.75, 0.6, 0.35], white);
     }
 }
 

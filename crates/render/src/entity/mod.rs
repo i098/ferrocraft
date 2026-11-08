@@ -161,12 +161,12 @@ fn biped(
 
     let mut r_arm = [cos(f * 0.6662 + PI) * 2.0 * f1 * 0.5, 0.0, 0.0];
     let mut l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let mut r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
-    let mut l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
-    let mut body_rot = [0.0f32; 3];
+    let r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
+    let l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
+    let body_rot = [0.0f32; 3];
     let mut r_arm_pivot = [-5.0, 2.0, 0.0];
     let mut l_arm_pivot = [5.0, 2.0, 0.0];
-    let mut head_pivot = [0.0, 0.0, 0.0];
+    let head_pivot = [0.0, 0.0, 0.0];
     let mut leg_pivots = [[-1.9, 12.0, 0.0], [1.9, 12.0, 0.0]];
     if arm_w < 4.0 && limb_w == arm_w {
         // Skeleton limbs sit closer to the body.
@@ -507,6 +507,8 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
 }
 
 type V3 = [f32; 3];
+/// Corners in model space, texel corners, outward normal, shade.
+type Face = ([V3; 4], [[f32; 2]; 4], V3, f32);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.
 fn rotate(p: V3, rot: V3) -> V3 {
@@ -704,7 +706,7 @@ fn add_box(
     let v0 = v0 + v_off;
     let uv = |u: f32, v: f32| [u / tex[0], v / tex[1]];
     // (corners in model space, texel corners, outward model-space normal, shade)
-    let faces: [([V3; 4], [[f32; 2]; 4], V3, f32); 6] = [
+    let faces: [Face; 6] = [
         // +x: u grows with z
         (
             [[x2, y1, z1], [x2, y1, z2], [x2, y2, z2], [x2, y2, z1]],

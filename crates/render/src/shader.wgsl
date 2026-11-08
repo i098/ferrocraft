@@ -70,31 +70,3 @@ fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
 }
 
-struct HudIn {
-    @location(0) pos: vec2<f32>,
-    @location(1) uv: vec2<f32>,
-    @location(2) color: vec4<f32>,
-};
-struct HudOut {
-    @builtin(position) clip: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
-};
-
-@vertex
-fn vs_hud(v: HudIn) -> HudOut {
-    var o: HudOut;
-    o.clip = vec4<f32>(v.pos.x / g.screen.x * 2.0 - 1.0, 1.0 - v.pos.y / g.screen.y * 2.0, 0.0, 1.0);
-    o.uv = v.uv;
-    o.color = v.color;
-    return o;
-}
-
-@fragment
-fn fs_hud(i: HudOut) -> @location(0) vec4<f32> {
-    let t = textureSample(tex, samp, i.uv);
-    if (t.a < 0.5) {
-        discard;
-    }
-    return vec4<f32>(t.rgb * i.color.rgb, i.color.a);
-}

@@ -124,8 +124,8 @@ pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
 /// Right arm box `addBox(-3, -2, -2, 4, 12, 4)` at skin pixel (40, 16); model y points down.
 const BOX: [[f32; 2]; 3] = [[-3.0, 1.0], [-2.0, 10.0], [-2.0, 2.0]];
 
-/// `RenderPlayer.renderRightArm` seen through `ItemRenderer`: the arm of the default skin.
-pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
+/// Eye-space placement of the right arm: `ItemRenderer` swing, `ModelRenderer` rotation point and z rotation.
+fn arm_model(hand: &Hand) -> Mat {
     let (swing, root) = (hand.swing, hand.swing.sqrt());
     let place = chain(&[
         translate(
@@ -143,13 +143,17 @@ pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
         rotate(-135.0, 1),
         translate(5.6, 0.0, 0.0),
     ]);
-    // ModelRenderer: rotation point (-5, 2, 0) px, then z rotation 0.05 rad from `ModelBiped.setRotationAngles`.
-    let model = chain(&[
+    // Rotation point (-5, 2, 0) px, then z rotation 0.05 rad from `ModelBiped.setRotationAngles`.
+    chain(&[
         place,
         translate(-5.0 / 16.0, 2.0 / 16.0, 0.0),
         rotate(0.05f32.to_degrees(), 2),
-    ]);
+    ])
+}
 
+/// `RenderPlayer.renderRightArm` seen through `ItemRenderer`: the arm of the default skin.
+pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
+    let model = arm_model(hand);
     let [[x0, x1], [y0, y1], [z0, z1]] = BOX;
     let (tw, th) = (64.0, skin_height.max(32) as f32);
     // Each face: normal, then four corners as (position, u, v) in skin pixels.

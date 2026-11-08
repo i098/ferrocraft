@@ -1,6 +1,6 @@
 //! Meshes a synthetic terrain chunk, renders it offscreen and writes a PNG (`RENDER_PNG` overrides the path).
 
-use render::{encode_png, Camera, ChunkBlocks, Environment, Hand, Hud, Renderer};
+use render::{encode_png, Camera, ChunkBlocks, Environment, Hand, Renderer};
 
 struct Synthetic(i32, i32);
 
@@ -41,19 +41,7 @@ fn renders_synthetic_chunks_to_png() {
         pitch: 25.0,
         fov_deg: 70.0,
     };
-    let hud = Hud {
-        crosshair: true,
-        chat: vec![
-            "<Steve> hello world".into(),
-            "§eAlex joined the game".into(),
-        ],
-        chat_input: Some("/say hi".into()),
-        debug: vec![
-            "Minecraft 1.8.9 (ferrocraft)".into(),
-            "XYZ: 8.000 / 68.000 / -4.000".into(),
-        ],
-    };
-    let (w, h, rgba) = r.render_to_rgba(&cam, &hud);
+    let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
 
     let px = |x: u32, y: u32| &rgba[((y * w + x) * 4) as usize..][..4];
     assert_ne!(
@@ -76,7 +64,7 @@ fn renders_synthetic_chunks_to_png() {
     encode_png(path.as_ref(), w, h, &rgba).expect("write png");
 }
 
-/// Rain and the first-person hand: the rainy frame differs from the clear one, and the hand fills the lower right.
+/// Rain and the first-person hand: each changes the frame, and a held block differs from the bare arm.
 #[test]
 fn rain_and_hand_draw_on_top_of_the_world() {
     let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
@@ -96,10 +84,6 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         pitch: 10.0,
         fov_deg: 70.0,
     };
-    let hud = Hud {
-        crosshair: true,
-        ..Hud::default()
-    };
     let frame = |r: &mut Renderer, rain: f32, hand: Option<Hand>| {
         r.set_environment(Environment {
             rain,
@@ -107,7 +91,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
             ..Environment::default()
         });
         r.set_hand(hand);
-        r.render_to_rgba(&cam, &hud).2
+        r.render_to_rgba(&cam, &[]).2
     };
     let bare = Hand {
         held: None,

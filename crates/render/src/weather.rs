@@ -48,67 +48,59 @@ pub fn build_rain(
         feet[1].floor() as i32,
         feet[2].floor() as i32,
     );
-    // `rendererUpdateCount` is a Java int.
-    let counter = env.ticks as i32;
     for z in k - RANGE..=k + RANGE {
         for x in i - RANGE..=i + RANGE {
-            let (dx, dz) = ((x - i) as f32, (z - k) as f32);
-            let len = (dx * dx + dz * dz).sqrt();
             // The vanilla offset table holds NaN at the centre column, which draws nothing.
-            if len == 0.0 {
+            if (x, z) == (i, k) {
                 continue;
             }
-            let (ox, oz) = (-dz / len * 0.5, dx / len * 0.5);
             let Some(ground) = top(x, z) else { continue };
-            let low = (j - RANGE).max(ground);
-            let high = (j + RANGE).max(ground);
-            if low == high {
-                continue;
+            let (low, high) = ((j - RANGE).max(ground), (j + RANGE).max(ground));
+            if low != high {
+                g.quad(column_quad(env, feet, (x, z), (low as f32, high as f32)));
             }
-            let seed = (x.wrapping_mul(x).wrapping_mul(3121))
-                .wrapping_add(x.wrapping_mul(45_238_971))
-                ^ (z.wrapping_mul(z).wrapping_mul(418_711)).wrapping_add(z.wrapping_mul(13_761));
-            let mut rng = JavaRandom::new(i64::from(seed));
-            let phase = ((counter.wrapping_add(column_hash(x, z)) & 31) as f32 + env.partial)
-                / 32.0
-                * (3.0 + rng.next_float());
-            let (cx, cz) = (
-                x as f32 + 0.5 - feet[0] as f32,
-                z as f32 + 0.5 - feet[2] as f32,
-            );
-            let f3 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
-            let alpha = ((1.0 - f3 * f3) * 0.5 + 0.5) * env.rain;
-            let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
-            let (low_f, high_f) = (low as f32, high as f32);
-            let color = [1.0, 1.0, 1.0, alpha];
-            g.quad([
-                (
-                    [xf - ox, high_f, zf - oz],
-                    [0.0, low_f * 0.25 + phase],
-                    color,
-                ),
-                (
-                    [xf + ox, high_f, zf + oz],
-                    [1.0, low_f * 0.25 + phase],
-                    color,
-                ),
-                (
-                    [xf + ox, low_f, zf + oz],
-                    [1.0, high_f * 0.25 + phase],
-                    color,
-                ),
-                (
-                    [xf - ox, low_f, zf - oz],
-                    [0.0, high_f * 0.25 + phase],
-                    color,
-                ),
-            ]);
         }
     }
     for v in &mut g.vertices {
         v.light = RAIN_LIGHT;
     }
     g
+}
+
+type Corner = ([f32; 3], [f32; 2], [f32; 4]);
+
+/// One rain slab through the middle of column `(x, z)` between heights `low` and `high`.
+fn column_quad(
+    env: &Environment,
+    feet: [f64; 3],
+    (x, z): (i32, i32),
+    (low, high): (f32, f32),
+) -> [Corner; 4] {
+    let (dx, dz) = (
+        x as f32 - feet[0].floor() as f32,
+        z as f32 - feet[2].floor() as f32,
+    );
+    let len = (dx * dx + dz * dz).sqrt();
+    let (ox, oz) = (-dz / len * 0.5, dx / len * 0.5);
+    let seed = (x.wrapping_mul(x).wrapping_mul(3121)).wrapping_add(x.wrapping_mul(45_238_971))
+        ^ (z.wrapping_mul(z).wrapping_mul(418_711)).wrapping_add(z.wrapping_mul(13_761));
+    let mut rng = JavaRandom::new(i64::from(seed));
+    // `rendererUpdateCount` is a Java int.
+    let tick = (env.ticks as i32).wrapping_add(column_hash(x, z)) & 31;
+    let phase = (tick as f32 + env.partial) / 32.0 * (3.0 + rng.next_float());
+    let (cx, cz) = (
+        x as f32 + 0.5 - feet[0] as f32,
+        z as f32 + 0.5 - feet[2] as f32,
+    );
+    let f3 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
+    let color = [1.0, 1.0, 1.0, ((1.0 - f3 * f3) * 0.5 + 0.5) * env.rain];
+    let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
+    [
+        ([xf - ox, high, zf - oz], [0.0, low * 0.25 + phase], color),
+        ([xf + ox, high, zf + oz], [1.0, low * 0.25 + phase], color),
+        ([xf + ox, low, zf + oz], [1.0, high * 0.25 + phase], color),
+        ([xf - ox, low, zf - oz], [0.0, high * 0.25 + phase], color),
+    ]
 }
 
 /// `x*x*3121 + x*45238971 + z*z*418711 + z*13761` as a Java int.

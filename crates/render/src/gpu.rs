@@ -1,12 +1,11 @@
 //! wgpu device, pipelines and frame rendering.
 
-use crate::assets::{decode_png, AssetSource, Atlas, Font};
+use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::hand::{self, Hand};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
-use crate::text::{layout, HudVertex};
 use crate::weather::{build_rain, precipitation_height};
-use crate::{Camera, ChunkBlocks, Hud};
+use crate::{Camera, ChunkBlocks, Quad};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -59,12 +58,15 @@ pub struct Renderer {
     target: Target,
     depth: wgpu::TextureView,
     globals: wgpu::Buffer,
+    layout_bg: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     world_group: wgpu::BindGroup,
-    hud_group: wgpu::BindGroup,
     env_group: wgpu::BindGroup,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
-    hud_pipe: wgpu::RenderPipeline,
+    sky_pipe: wgpu::RenderPipeline,
+    sky_add_pipe: wgpu::RenderPipeline,
+    cloud_pipe: wgpu::RenderPipeline,
     hand_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
@@ -72,10 +74,12 @@ pub struct Renderer {
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
-    held_mesh: Option<(u16, crate::mesh::MeshData)>,
-    sky_pipe: wgpu::RenderPipeline,
-    sky_add_pipe: wgpu::RenderPipeline,
-    cloud_pipe: wgpu::RenderPipeline,
+    held_mesh: Option<(u16, MeshData)>,
+    /// Indexed by `Blend as usize`.
+    gui_pipes: [wgpu::RenderPipeline; 4],
+    /// GUI textures by path, loaded on first use.
+    textures: HashMap<String, wgpu::BindGroup>,
+    source: Option<AssetSource>,
     atlas: Atlas,
     font: Option<Font>,
     env_tex: EnvTexture,
@@ -83,6 +87,14 @@ pub struct Renderer {
     blocks: HashMap<(i32, i32), Vec<u16>>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     dirty: HashSet<(i32, i32)>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GuiVertex {
+    pos: [f32; 2],
+    uv: [f32; 2],
+    color: [f32; 4],
 }
 
 impl Renderer {
@@ -167,12 +179,13 @@ impl Renderer {
         let rain_img = load_png("environment/rain");
         let skin_img = load_png("entity/steve");
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
-        let (fw, fh, frgba) = font_texture(font.as_ref());
-        let font_view = upload_texture(&device, &queue, fw, fh, &frgba);
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            // GL_REPEAT: `options_background.png` tiles with texture coordinates past 1.
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
             ..Default::default()
         });
         let layout_bg = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -200,66 +213,31 @@ impl Renderer {
                 ),
             ],
         });
-        // Rain scrolls its v coordinate far outside 0..1.
-        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            ..Default::default()
-        });
-        let group_with =
-            |buffer: &wgpu::Buffer, view: &wgpu::TextureView, sampler: &wgpu::Sampler| {
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &layout_bg,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(sampler),
-                        },
-                    ],
-                })
-            };
-        let group = |view: &wgpu::TextureView| group_with(&globals, view, &sampler);
-        let world_group = group(&atlas_view);
-        let hud_group = group(&font_view);
-        let env_group = group(&env_view);
-
-        let hand_atlas_group = group_with(&hand_globals, &atlas_view, &sampler);
-        let hand_skin = skin_img.map(|img| {
-            let view = upload_texture(
+        let world_group = bind_group(&device, &layout_bg, &globals, &sampler, &atlas_view);
+        let env_group = bind_group(&device, &layout_bg, &globals, &sampler, &env_view);
+        let view_of = |img: &Image| {
+            upload_texture(
                 &device,
                 &queue,
                 img.width as u32,
                 img.height as u32,
                 &img.rgba,
-            );
+            )
+        };
+        let hand_atlas_group =
+            bind_group(&device, &layout_bg, &hand_globals, &sampler, &atlas_view);
+        let hand_skin = skin_img.map(|img| {
+            let view = view_of(&img);
             (
-                group_with(&hand_globals, &view, &sampler),
+                bind_group(&device, &layout_bg, &hand_globals, &sampler, &view),
                 img.height as u32,
             )
         });
-        let rain_group = rain_img.map(|img| {
-            let view = upload_texture(
-                &device,
-                &queue,
-                img.width as u32,
-                img.height as u32,
-                &img.rgba,
-            );
-            group_with(&globals, &view, &repeat_sampler)
-        });
-
-        let [opaque_pipe, water_pipe, hud_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe] =
+        let rain_group =
+            rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
+        let [opaque_pipe, water_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe] =
             build_pipelines(&device, &layout_bg, format);
+        let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
         let depth = depth_view(&device, w, h);
@@ -269,12 +247,15 @@ impl Renderer {
             target,
             depth,
             globals,
+            layout_bg,
+            sampler,
             world_group,
-            hud_group,
             env_group,
             opaque_pipe,
             water_pipe,
-            hud_pipe,
+            sky_pipe,
+            sky_add_pipe,
+            cloud_pipe,
             hand_pipe,
             hand_globals,
             hand_atlas_group,
@@ -282,9 +263,9 @@ impl Renderer {
             rain_group,
             hand: None,
             held_mesh: None,
-            sky_pipe,
-            sky_add_pipe,
-            cloud_pipe,
+            gui_pipes,
+            textures: HashMap::new(),
+            source,
             atlas,
             font,
             env_tex,
@@ -293,6 +274,56 @@ impl Renderer {
             meshes: HashMap::new(),
             dirty: HashSet::new(),
         }
+    }
+
+    /// Glyph widths of the vanilla font; `None` without assets.
+    pub fn font(&self) -> Option<&Font> {
+        self.font.as_ref()
+    }
+
+    /// Target size in pixels.
+    pub fn size(&self) -> (u32, u32) {
+        target_size(&self.target)
+    }
+
+    /// Upload `tex` the first time a quad names it: white for `""`, the missing tile when absent.
+    fn load_texture(&mut self, tex: &str) {
+        if self.textures.contains_key(tex) {
+            return;
+        }
+        let image = if tex.is_empty() {
+            Image {
+                width: 1,
+                height: 1,
+                rgba: vec![255; 4],
+            }
+        } else {
+            let path = format!("assets/minecraft/{tex}");
+            let image = self
+                .source
+                .as_mut()
+                .and_then(|s| s.read(&path))
+                .and_then(|b| decode_png(&b));
+            image.unwrap_or_else(|| {
+                eprintln!("ferrocraft-render: missing {path}");
+                missing_tile()
+            })
+        };
+        let view = upload_texture(
+            &self.device,
+            &self.queue,
+            image.width as u32,
+            image.height as u32,
+            &image.rgba,
+        );
+        let group = bind_group(
+            &self.device,
+            &self.layout_bg,
+            &self.globals,
+            &self.sampler,
+            &view,
+        );
+        self.textures.insert(tex.to_owned(), group);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -429,8 +460,8 @@ impl Renderer {
         })
     }
 
-    /// Draw one frame to the window. Offscreen renderers draw into their texture.
-    pub fn render(&mut self, cam: &Camera, hud: &Hud) {
+    /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
+    pub fn render(&mut self, cam: &Camera, overlay: &[Quad]) {
         self.flush_meshes();
         let frame = match &self.target {
             Target::Window { surface, .. } => match surface.get_current_texture() {
@@ -447,14 +478,10 @@ impl Renderer {
             (None, Target::Offscreen { texture, .. }) => texture.create_view(&Default::default()),
             _ => return,
         };
-        self.draw(&view, cam, hud);
+        self.draw(&view, cam, overlay);
         if let Some(f) = frame {
             f.present();
         }
-    }
-
-    fn size(&self) -> (u32, u32) {
-        target_size(&self.target)
     }
 
     /// Time of day, weather and render distance for sky, fog and the light curve.
@@ -477,7 +504,7 @@ impl Renderer {
         ))
     }
 
-    /// Hand geometry for this frame, if a hand is shown and its texture exists.
+    /// Hand geometry for this frame and whether it samples the skin; `None` when no hand or texture exists.
     fn hand_draw(&mut self) -> Option<(hand::Draw, bool)> {
         let hand = self.hand?;
         let Some(state) = hand.held else {
@@ -489,6 +516,46 @@ impl Renderer {
         }
         let mesh = &self.held_mesh.as_ref()?.1;
         Some((hand::block(&hand, mesh), false))
+    }
+
+    fn rain_mesh(&self, env: &Environment, cam: &Camera) -> Option<GpuMesh> {
+        self.rain_group.as_ref()?;
+        let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
+        let rain = build_rain(env, feet, |x, z| self.rain_top(x, z));
+        self.upload_geometry(&rain)
+    }
+
+    /// Uploads the hand and its own projection; the flag says whether it samples the skin.
+    fn hand_mesh(
+        &mut self,
+        cam: &Camera,
+        world: &Globals,
+        sun_brightness: f32,
+    ) -> Option<(GpuMesh, bool)> {
+        let (mut draw, skin) = self.hand_draw()?;
+        // A block above the eye keeps the hand dark.
+        let covered = self
+            .rain_top(cam.pos[0].floor() as i32, cam.pos[2].floor() as i32)
+            .is_some_and(|top| top as f64 > cam.pos[1]);
+        let light = if covered { [0.0, 0.0] } else { [1.0, 0.0] };
+        for v in &mut draw.vertices {
+            v.light = light;
+        }
+        let [w, h, ..] = world.screen;
+        let globals = Globals {
+            view_proj: mul(projection(cam.fov_deg, w / h), draw.model),
+            eye: [0.0; 4],
+            fog_color: world.fog_color,
+            fog: [1.0e6, 2.0e6, sun_brightness, 1.5],
+            screen: world.screen,
+        };
+        self.queue
+            .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
+        let geometry = SkyGeometry {
+            vertices: draw.vertices,
+            indices: draw.indices,
+        };
+        Some((self.upload_geometry(&geometry)?, skin))
     }
 
     fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
@@ -513,7 +580,7 @@ impl Renderer {
         })
     }
 
-    fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, hud: &Hud) {
+    fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
         let env = self.environment;
         let sky = env.sky_state();
@@ -538,42 +605,14 @@ impl Renderer {
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
 
-        let rain = self
-            .rain_group
-            .as_ref()
-            .map(|_| {
-                let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
-                build_rain(&env, feet, |x, z| self.rain_top(x, z))
-            })
-            .and_then(|g| self.upload_geometry(&g));
-        let hand = self.hand_draw().map(|(mut draw, skin)| {
-            // The open-sky test: a block above the eye keeps the hand dark.
-            let eye = [cam.pos[0].floor() as i32, cam.pos[2].floor() as i32];
-            let covered = self
-                .rain_top(eye[0], eye[1])
-                .is_some_and(|top| top as f64 > cam.pos[1]);
-            let light = if covered { [0.0, 0.0] } else { [1.0, 0.0] };
-            for v in &mut draw.vertices {
-                v.light = light;
-            }
-            let globals = Globals {
-                view_proj: mul(projection(cam.fov_deg, w as f32 / h as f32), draw.model),
-                eye: [0.0; 4],
-                fog_color: globals.fog_color,
-                fog: [1.0e6, 2.0e6, sky.sun_brightness, 1.5],
-                screen: globals.screen,
-            };
-            self.queue
-                .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
-            let geometry = SkyGeometry {
-                vertices: draw.vertices,
-                indices: draw.indices,
-            };
-            (self.upload_geometry(&geometry), skin)
-        });
+        let rain = self.rain_mesh(&env, cam);
+        let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
 
-        let verts = layout(hud, self.font.as_ref(), w, h);
-        let hud_buf = (!verts.is_empty()).then(|| {
+        for q in overlay {
+            self.load_texture(&q.tex);
+        }
+        let verts: Vec<GuiVertex> = overlay.iter().flat_map(quad_vertices).collect();
+        let gui_buf = (!verts.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
@@ -663,7 +702,7 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if let Some((Some(m), skin)) = &hand {
+            if let Some((m, skin)) = &hand {
                 let group = match (&self.hand_skin, skin) {
                     (Some((g, _)), true) => g,
                     _ => &self.hand_atlas_group,
@@ -672,19 +711,25 @@ impl Renderer {
                 pass.set_pipeline(&self.hand_pipe);
                 draw_mesh(&mut pass, m);
             }
-            if let Some(buf) = &hud_buf {
-                pass.set_bind_group(0, &self.hud_group, &[]);
-                pass.set_pipeline(&self.hud_pipe);
+            if let Some(buf) = &gui_buf {
                 pass.set_vertex_buffer(0, buf.slice(..));
-                pass.draw(0..verts.len() as u32, 0..1);
+                // Consecutive quads with the same texture and blend share one draw; order is kept.
+                let mut start = 0;
+                for run in overlay.chunk_by(|a, b| a.tex == b.tex && a.blend == b.blend) {
+                    pass.set_bind_group(0, &self.textures[&*run[0].tex], &[]);
+                    pass.set_pipeline(&self.gui_pipes[run[0].blend as usize]);
+                    let end = start + run.len() as u32 * 6;
+                    pass.draw(start..end, 0..1);
+                    start = end;
+                }
             }
         }
         self.queue.submit([enc.finish()]);
     }
 
     /// Render one frame offscreen and return `(width, height, rgba8)`. Only valid for offscreen renderers.
-    pub fn render_to_rgba(&mut self, cam: &Camera, hud: &Hud) -> (u32, u32, Vec<u8>) {
-        self.render(cam, hud);
+    pub fn render_to_rgba(&mut self, cam: &Camera, overlay: &[Quad]) -> (u32, u32, Vec<u8>) {
+        self.render(cam, overlay);
         let Target::Offscreen {
             texture,
             width,
@@ -731,11 +776,105 @@ impl Renderer {
     }
 }
 
+fn argb(c: u32) -> [f32; 4] {
+    let ch = |s: u32| ((c >> s) & 255) as f32 / 255.0;
+    [ch(16), ch(8), ch(0), ch(24)]
+}
+
+/// Two triangles over the corners top-left, top-right, bottom-right, bottom-left.
+fn quad_vertices(q: &Quad) -> [GuiVertex; 6] {
+    let v = |i: usize| GuiVertex {
+        pos: q.pos[i],
+        uv: q.uv[i],
+        color: argb(q.color[i]),
+    };
+    [v(0), v(3), v(2), v(0), v(2), v(1)]
+}
+
+fn gui_pipelines(
+    device: &wgpu::Device,
+    layout_bg: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+) -> [wgpu::RenderPipeline; 4] {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(include_str!("gui.wgsl").into()),
+    });
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[layout_bg],
+        push_constant_ranges: &[],
+    });
+    let attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
+    use wgpu::{BlendComponent as C, BlendFactor as F, BlendOperation::Add};
+    let comp = |src, dst| C {
+        src_factor: src,
+        dst_factor: dst,
+        operation: Add,
+    };
+    let alpha = comp(F::One, F::OneMinusSrcAlpha);
+    [
+        wgpu::BlendState {
+            color: comp(F::SrcAlpha, F::OneMinusSrcAlpha),
+            alpha,
+        },
+        wgpu::BlendState {
+            color: comp(F::OneMinusDst, F::OneMinusSrc),
+            alpha,
+        },
+        wgpu::BlendState {
+            color: comp(F::Zero, F::OneMinusSrc),
+            alpha,
+        },
+        wgpu::BlendState {
+            color: comp(F::Src, F::One),
+            alpha,
+        },
+    ]
+    .map(|blend| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_gui"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GuiVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_gui"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(blend),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        })
+    })
+}
+
 fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 7] {
+) -> [wgpu::RenderPipeline; 6] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -747,7 +886,6 @@ fn build_pipelines(
     });
     let world_attrs =
         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Float32x2];
-    let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
     let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
     // Vanilla draws the sun and moon with `SRC_ALPHA, ONE`.
     let additive = Some(wgpu::BlendState {
@@ -831,16 +969,6 @@ fn build_pipelines(
         true,
         false,
     );
-    let hud_pipe = pipe(
-        "vs_hud",
-        "fs_hud",
-        std::mem::size_of::<HudVertex>(),
-        &hud_attrs,
-        alpha,
-        false,
-        false,
-        false,
-    );
     let sky_pipe = pipe(
         "vs_world",
         "fs_sky",
@@ -885,7 +1013,6 @@ fn build_pipelines(
     [
         opaque_pipe,
         water_pipe,
-        hud_pipe,
         sky_pipe,
         sky_add_pipe,
         cloud_pipe,
@@ -932,6 +1059,33 @@ fn bgl_entry(binding: u32, ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry 
         ty,
         count: None,
     }
+}
+
+fn bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    globals: &wgpu::Buffer,
+    sampler: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
 }
 
 fn target_size(t: &Target) -> (u32, u32) {
@@ -1004,15 +1158,6 @@ fn upload_texture(
         rgba,
     );
     tex.create_view(&Default::default())
-}
-
-/// Font image with one opaque white row appended (solid rectangles sample it); 128x129 transparent when there is no font.
-fn font_texture(font: Option<&Font>) -> (u32, u32, Vec<u8>) {
-    let (side, mut rgba) = font.map_or((128, vec![0u8; 128 * 128 * 4]), |f| {
-        (f.image.width, f.image.rgba.clone())
-    });
-    rgba.extend(std::iter::repeat_n(255u8, side * 4));
-    (side as u32, side as u32 + 1, rgba)
 }
 
 /// Column-major view-projection (OpenGL-style camera math, wgpu 0..1 depth).

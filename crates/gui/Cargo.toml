@@ -1,0 +1,11 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vanilla 1.8.9 GUI toolkit (Gui, FontRenderer, ScaledResolution, widgets) and the in-game HUD"
+
+[dependencies]
+render = { path = "../render" }
+ferrocraft-net-client = { path = "../net-client" }

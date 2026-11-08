@@ -3,8 +3,8 @@
 use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
-use input_audio::{apply_cursor_grab, Action, InputState};
-use render::{Camera, ChunkBlocks, Environment, Hand, Hud, Renderer};
+use input_audio::{apply_cursor_grab, scroll_slot, Action, InputState};
+use render::{Camera, ChunkBlocks, Environment, Hand, Renderer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,6 +27,9 @@ pub struct App {
     input: InputState,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    hud: gui::Hud,
+    /// Rendered frames in the last second, for the F3 `fps` line.
+    fps: (u32, u32, Instant),
     next_tick: Instant,
     grabbed: bool,
     show_debug: bool,
@@ -44,6 +47,8 @@ impl App {
             input: InputState::new(0.5),
             window: None,
             renderer: None,
+            hud: gui::Hud::default(),
+            fps: (0, 0, Instant::now()),
             next_tick: Instant::now(),
             grabbed: false,
             show_debug: false,
@@ -73,6 +78,14 @@ impl App {
                 Some(e @ (Effect::Upload(x, z) | Effect::Remove(x, z))) => {
                     dirty.insert((x, z), e);
                 }
+                Some(Effect::Chat(runs)) => {
+                    let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+                    let open = self.input.chat_input().is_some();
+                    self.hud
+                        .chat
+                        .print(runs, 0, self.hud.update_counter, open, m);
+                }
+                Some(Effect::ActionBar(text)) => self.hud.set_action_bar(text),
                 None => {}
             }
         }
@@ -102,9 +115,11 @@ impl App {
             self.next_tick += TICK;
             ran += 1;
             if let Some(line) = self.input.take_chat_submit() {
+                self.hud.chat.add_sent(&line);
                 let r = self.session.send_chat(&line);
                 self.send_result(r);
             }
+            self.hud.tick();
             self.game.tick(self.input.movement());
             self.send_pose();
         }
@@ -150,57 +165,53 @@ impl App {
                         w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                     }
                 }
-                _ => {}
+                other => self.hud_action(other),
             }
+        }
+    }
+
+    fn hud_action(&mut self, action: Action) {
+        match action {
+            Action::Hotbar(n) => self.hud.selected_slot = i32::from(n),
+            Action::HotbarScroll(step) => {
+                let slot = scroll_slot(self.hud.selected_slot as u8, step);
+                self.hud.selected_slot = i32::from(slot);
+            }
+            // shortcut: vanilla scrolls 1 line with Shift held; the action carries no Shift state.
+            Action::ChatScroll(step) => {
+                let open = self.input.chat_input().is_some();
+                self.hud.chat.scroll(step * 7, open);
+            }
+            _ => {}
         }
     }
 
     fn draw(&mut self) {
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
-        let (Some(r), Some(p)) = (&mut self.renderer, &self.game.player) else {
-            if let Some(r) = &mut self.renderer {
-                r.render(
-                    &Camera {
-                        pos: [0.0; 3],
-                        yaw: 0.0,
-                        pitch: 0.0,
-                        fov_deg: 70.0,
-                    },
-                    &Hud {
-                        chat: self.game.chat.clone(),
-                        chat_input: self.input.chat_input().map(String::from),
-                        crosshair: false,
-                        debug: vec!["waiting for position".into()],
-                    },
-                );
+        let quads = self.overlay(frac);
+        let Some(r) = &mut self.renderer else { return };
+        self.fps.0 += 1;
+        if self.fps.2.elapsed() >= Duration::from_secs(1) {
+            self.fps = (0, self.fps.0, Instant::now());
+        }
+        let cam = match &self.game.player {
+            Some(p) => {
+                let [px, py, pz] = p.pos;
+                let [qx, qy, qz] = self.game.prev_pos;
+                let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
+                Camera {
+                    pos: [lerp(qx, px), lerp(qy, py) + EYE_HEIGHT, lerp(qz, pz)],
+                    yaw: p.yaw,
+                    pitch: self.game.pitch,
+                    fov_deg: 70.0,
+                }
             }
-            return;
-        };
-        let [px, py, pz] = p.pos;
-        let [qx, qy, qz] = self.game.prev_pos;
-        let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
-        let cam = Camera {
-            pos: [lerp(qx, px), lerp(qy, py) + EYE_HEIGHT, lerp(qz, pz)],
-            yaw: p.yaw,
-            pitch: self.game.pitch,
-            fov_deg: 70.0,
-        };
-        let hud = Hud {
-            chat: if self.hide_hud {
-                Vec::new()
-            } else {
-                self.game.chat.clone()
-            },
-            chat_input: self.input.chat_input().map(String::from),
-            crosshair: !self.hide_hud,
-            debug: if self.show_debug && !self.hide_hud {
-                vec![
-                    format!("XYZ: {:.3} / {:.5} / {:.3}", p.pos[0], p.pos[1], p.pos[2]),
-                    format!("chunks: {}", self.game.store.len()),
-                ]
-            } else {
-                Vec::new()
+            None => Camera {
+                pos: [0.0; 3],
+                yaw: 0.0,
+                pitch: 0.0,
+                fov_deg: 70.0,
             },
         };
         let (rain, thunder) = self.game.weather.strengths(frac as f32);
@@ -217,7 +228,50 @@ impl App {
             swing: self.game.swing.progress(frac as f32),
             lowered: 0.0,
         }));
-        r.render(&cam, &hud);
+        r.render(&cam, &quads);
+    }
+
+    /// `GuiIngame.renderGameOverlay` laid out as quads; F1 (`hideGUI`) skips it unless a
+    /// screen (chat) is open, as in `EntityRenderer`.
+    fn overlay(&mut self, frac: f64) -> Vec<render::Quad> {
+        let Some(r) = &self.renderer else {
+            return Vec::new();
+        };
+        if self.hide_hud && self.input.chat_input().is_none() {
+            return Vec::new();
+        }
+        let left = self.game.player.as_ref().map(|p| {
+            gui::debug::left_lines(&gui::debug::DebugInfo {
+                fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
+                provider: format!(
+                    "MultiplayerChunkCache: {}, {}",
+                    self.game.store.len(),
+                    self.game.store.len()
+                ),
+                pos: p.pos,
+                yaw: p.yaw,
+                pitch: self.game.pitch,
+                ..Default::default()
+            })
+        });
+        let (w, h) = r.size();
+        let mut g = gui::Gui::new(gui::GuiScale::new(w, h, 0), r.font(), 0);
+        self.hud.draw(
+            &mut g,
+            &gui::Frame {
+                partial_ticks: frac as f32,
+                chat_input: self.input.chat_input(),
+                debug: left
+                    .as_deref()
+                    .filter(|_| self.show_debug)
+                    .map(|l| (l, &[][..])),
+                fancy: true,
+                brightness: 1.0,
+                player_view: self.game.player.is_some(),
+                ..Default::default()
+            },
+        );
+        g.into_quads()
     }
 }
 

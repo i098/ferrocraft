@@ -121,7 +121,10 @@ fn record(manifest: &Path, roots: &[PathBuf], new: &[PathBuf]) -> Result<(), Str
             .filter_map(|r| fs::canonicalize(r).ok())
             .map(|r| format!("{ROOT_PREFIX}{}", r.display())),
     );
-    all.extend(new.iter().map(|p| p.display().to_string()));
+    for p in new {
+        let abs = std::path::absolute(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        all.insert(abs.display().to_string());
+    }
     let body: Vec<_> = all.into_iter().collect();
     fs::create_dir_all(manifest.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(manifest, body.join("\n") + "\n").map_err(|e| format!("{}: {e}", manifest.display()))
@@ -318,8 +321,8 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     })();
     let mut roots: Vec<PathBuf> = mc.iter().chain(&mods).cloned().collect();
     roots.push(env.home.join(".ferrocraft"));
-    let kept = record(&manifest_path(&env.home), &roots, &written)
-        .and_then(|()| keep_launcher(&env.home));
+    let kept =
+        record(&manifest_path(&env.home), &roots, &written).and_then(|()| keep_launcher(&env.home));
     res?;
     let kept = kept?;
     println!("Lunar Client and Badlion cannot start custom versions: not installed there.");
@@ -410,13 +413,7 @@ mod tests {
         ] {
             fs::write(tmp.join(src), b"bin").unwrap();
             let mc = tmp.join(dst).with_extension("mc");
-            install_official(
-                &mc,
-                &tmp.join("boot.jar"),
-                &tmp.join(src),
-                &mut Vec::new(),
-            )
-            .unwrap();
+            install_official(&mc, &tmp.join("boot.jar"), &tmp.join(src), &mut Vec::new()).unwrap();
             assert!(mc.join("ferrocraft").join(dst).is_file(), "{src} -> {dst}");
         }
         fs::remove_dir_all(&tmp).unwrap();
@@ -466,6 +463,32 @@ mod tests {
             !mods.join(FABRIC_JAR).exists() && !tmp.join("mc/versions/ferrocraft-1.8.9").exists()
         );
         assert!(!manifest.exists());
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn uninstall_removes_install_made_with_relative_dir() {
+        let tmp = tmp("rel");
+        fs::write(tmp.join("boot.jar"), b"jar").unwrap();
+        fs::write(tmp.join("engine"), b"bin").unwrap();
+        let rel = PathBuf::from(format!("fc-rel-mc-{}", process::id()));
+        let mut written = Vec::new();
+        let res = install_official(
+            &rel,
+            &tmp.join("boot.jar"),
+            &tmp.join("engine"),
+            &mut written,
+        );
+        let manifest = tmp.join("manifest.txt");
+        let rec = record(&manifest, std::slice::from_ref(&rel), &written);
+        let out = uninstall(&manifest);
+        let left = rel.join("versions/ferrocraft-1.8.9").exists();
+        let _ = fs::remove_dir_all(&rel);
+        res.unwrap();
+        rec.unwrap();
+        let (removed, skipped) = out.unwrap();
+        assert!(skipped.is_empty() && removed.len() == written.len());
+        assert!(!left);
         fs::remove_dir_all(&tmp).unwrap();
     }
 
@@ -551,7 +574,10 @@ mod tests {
             assert!(!ours.exists(), "{bad}");
             assert!(victim.join("data").is_file(), "{bad}");
             assert!(other_mods.join(FABRIC_JAR).is_file(), "{bad}");
-            assert!(nested.join("data").is_file() && nested_jar.is_file(), "{bad}");
+            assert!(
+                nested.join("data").is_file() && nested_jar.is_file(),
+                "{bad}"
+            );
             assert!(manifest.exists(), "{bad}");
         }
         fs::remove_dir_all(&tmp).unwrap();

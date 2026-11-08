@@ -40,7 +40,7 @@ The installer writes one `versions` entry, mirroring the Forge 1.8.9 installer:
 .minecraft/mods/         normal Forge 1.8.9 mods
 ```
 
-Target: the official launcher picks the version up, and OneClient, Prism, MultiMC and CurseForge load the jar as a mod in a Forge 1.8.9 instance.
+Target: the official launcher picks the version up, and Prism, MultiMC and CurseForge load the jar as a mod in a Forge 1.8.9 instance. OneClient only takes a Minecraft version plus a loader, so it uses the Fabric mod in `loaders/fabric/README.md`, which starts the engine binary.
 Lunar and Badlion start only their own builds; we found no supported way to load a custom version.
 Nothing from Mojang or Forge ships with the project; all derived files are generated on the player's machine.
 

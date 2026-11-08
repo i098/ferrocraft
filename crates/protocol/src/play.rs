@@ -410,7 +410,7 @@ pub mod clientbound {
     });
     packet!(CollectItem = 0x0D { collected: VarInt, collector: VarInt });
 
-    /// Velocity is present on the wire only when `data` is not zero.
+    /// Velocity is present on the wire only when `data` is greater than zero.
     #[derive(Debug, Clone, PartialEq)]
     pub struct SpawnObject {
         pub entity_id: VarInt,

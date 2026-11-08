@@ -449,6 +449,200 @@ fn conditional_fields_follow_their_selector() {
     }));
 }
 
+/// Expected bytes are written by hand from the protocol 47 packet layouts (wiki.vg / vanilla
+/// 1.8.9 `S*Packet` classes), so a layout mistake shared by `read` and `write` is caught.
+#[test]
+fn packet_layouts_match_protocol_47_bytes() {
+    let uuid = Uuid(0x0123456789abcdef0123456789abcdef);
+    let uuid_bytes = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF].repeat(2);
+    let pos = [0, 0, 0, 0x41, 0x03, 0xFF, 0xFF, 0xFD]; // x=1, y=64, z=-3
+    let cat = |parts: &[&[u8]]| parts.concat();
+
+    // 0x27: i32 record count (not VarInt), 3 signed-byte offsets per record, then velocity.
+    let explosion = cb::Packet::from(cb::Explosion {
+        x: 1.0,
+        y: 2.0,
+        z: 3.0,
+        radius: 4.0,
+        records: Vec32(vec![Offset { x: 1, y: -1, z: 0 }]),
+        velocity_x: 0.0,
+        velocity_y: 0.5,
+        velocity_z: 0.0,
+    });
+    assert_eq!(
+        explosion.encode(),
+        cat(&[
+            &[0x27],
+            &[0x3F, 0x80, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0, 0x40, 0x80, 0, 0],
+            &[0, 0, 0, 1, 0x01, 0xFF, 0x00],
+            &[0, 0, 0, 0, 0x3F, 0, 0, 0, 0, 0, 0, 0],
+        ])
+    );
+
+    // 0x21: x, z as i32, continuous bool, u16 bitmask, VarInt-prefixed data.
+    let chunk = cb::Packet::from(cb::ChunkData {
+        x: -2,
+        z: 3,
+        continuous: true,
+        bitmask: 1,
+        data: Bytes(vec![7, 8, 9]),
+    });
+    assert_eq!(
+        chunk.encode(),
+        [0x21, 0xFF, 0xFF, 0xFF, 0xFE, 0, 0, 0, 3, 1, 0, 1, 3, 7, 8, 9]
+    );
+
+    // 0x26: sky-light bool, VarInt chunk count, (i32 x, i32 z, u16 mask) per chunk, raw data.
+    let bulk = cb::Packet::from(cb::MapChunkBulk {
+        sky_light: true,
+        chunks: vec![ChunkMeta {
+            x: 1,
+            z: -1,
+            bitmask: 0xFFFF,
+        }],
+        data: Rest(vec![9, 9, 9]),
+    });
+    assert_eq!(
+        bulk.encode(),
+        [0x26, 1, 1, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 9, 9, 9]
+    );
+
+    // 0x33: packed position, then four length-prefixed strings.
+    let sign = cb::Packet::from(cb::UpdateSign {
+        location: Position { x: 1, y: 64, z: -3 },
+        lines: ["a".into(), "b".into(), "".into(), "d".into()],
+    });
+    assert_eq!(
+        sign.encode(),
+        cat(&[&[0x33], &pos, &[1, b'a', 1, b'b', 0, 1, b'd']])
+    );
+
+    // 0x2A: i32 id, bool, 7 floats, i32 count, then 2 VarInts for id 36 and none for id 0.
+    let particle = |id, data: Vec<VarInt>| {
+        cb::Packet::from(cb::Particle {
+            id,
+            long_distance: true,
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            offset_z: 0.0,
+            speed: 0.5,
+            count: 4,
+            data,
+        })
+    };
+    let head = |id: u8| {
+        cat(&[
+            &[0x2A, 0, 0, 0, id, 1],
+            &[0x3F, 0x80, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0],
+            &[0; 12],
+            &[0x3F, 0, 0, 0, 0, 0, 0, 4],
+        ])
+    };
+    assert_eq!(
+        particle(36, vec![VarInt(5), VarInt(300)]).encode(),
+        cat(&[&head(36), &[5, 0xAC, 0x02]])
+    );
+    assert_eq!(particle(0, vec![]).encode(), head(0));
+
+    // 0x34: icon = (direction/type byte, x, z); the update block exists only when columns > 0.
+    let icons_only = cb::Packet::from(cb::Maps {
+        item_damage: VarInt(300),
+        scale: 1,
+        icons: vec![MapIcon {
+            dir_type: 0x31,
+            x: 1,
+            z: 2,
+        }],
+        columns: 0,
+        update: None,
+    });
+    assert_eq!(
+        icons_only.encode(),
+        [0x34, 0xAC, 0x02, 1, 1, 0x31, 1, 2, 0]
+    );
+    let with_columns = cb::Packet::from(cb::Maps {
+        item_damage: VarInt(0),
+        scale: 1,
+        icons: vec![],
+        columns: 2,
+        update: Some(MapUpdate {
+            rows: 3,
+            x: 4,
+            z: 5,
+            data: Bytes(vec![1, 2, 3, 4]),
+        }),
+    });
+    assert_eq!(
+        with_columns.encode(),
+        [0x34, 0, 1, 0, 2, 3, 4, 5, 4, 1, 2, 3, 4]
+    );
+
+    // 0x38 action 0: uuid, name, properties (name, value, bool + signature), gamemode, ping,
+    // bool + display name.
+    let add = cb::Packet::from(cb::PlayerListItem {
+        action: PlayerListAction::Add(vec![(
+            uuid,
+            PlayerListAdd {
+                name: "Steve".into(),
+                properties: vec![
+                    ProfileProperty {
+                        name: "textures".into(),
+                        value: "v".into(),
+                        signature: Opt(Some("s".into())),
+                    },
+                    ProfileProperty {
+                        name: "x".into(),
+                        value: "y".into(),
+                        signature: Opt(None),
+                    },
+                ],
+                gamemode: VarInt(1),
+                ping: VarInt(50),
+                display_name: Opt(Some("{\"text\":\"S\"}".into())),
+            },
+        )]),
+    });
+    assert_eq!(
+        add.encode(),
+        cat(&[
+            &[0x38, 0, 1],
+            &uuid_bytes,
+            b"\x05Steve",
+            &[2],
+            b"\x08textures\x01v\x01\x01s",
+            b"\x01x\x01y\x00",
+            &[1, 50, 1, 12],
+            b"{\"text\":\"S\"}",
+        ])
+    );
+
+    // 0x44 action 3: four doubles, VarLong speed, three VarInts.
+    let border = cb::Packet::from(cb::WorldBorder {
+        action: WorldBorderAction::Initialize {
+            x: 1.0,
+            z: 2.0,
+            old_diameter: 4.0,
+            new_diameter: 8.0,
+            speed: VarLong(300),
+            portal_teleport_boundary: VarInt(29999984),
+            warning_time: VarInt(15),
+            warning_blocks: VarInt(5),
+        },
+    });
+    assert_eq!(
+        border.encode(),
+        cat(&[
+            &[0x44, 3],
+            &[0x3F, 0xF0, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0],
+            &[0x40, 0x10, 0, 0, 0, 0, 0, 0, 0x40, 0x20, 0, 0, 0, 0, 0, 0],
+            &[0xAC, 0x02, 0xF0, 0x86, 0xA7, 0x0E, 15, 5],
+        ])
+    );
+}
+
 #[test]
 fn enum_payload_packets() {
     let uuid = Uuid(0x0123456789abcdef0123456789abcdef);

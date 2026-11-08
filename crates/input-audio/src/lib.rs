@@ -1,5 +1,5 @@
 //! Input state: vanilla 1.8.9 default keys, mouse look, chat entry.
-use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, MouseButton, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 /// Vanilla look scale: degrees per scaled mouse pixel.
@@ -11,6 +11,17 @@ const CHAT_MAX_CHARS: usize = 100;
 pub fn look_gain(sensitivity: f32) -> f32 {
     let f = sensitivity * 0.6 + 0.2;
     f * f * f * 8.0
+}
+
+/// Left-button state for one client tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Attack {
+    /// The button is down while the game owns the mouse.
+    pub held: bool,
+    /// Presses since the last tick, not counting the click that grabbed the mouse.
+    pub presses: u32,
+    /// The mouse was grabbed by a click since the last tick.
+    pub grabbed: bool,
 }
 
 #[derive(Debug)]
@@ -27,6 +38,9 @@ pub struct InputState {
     chat: Option<String>,
     submit: Option<String>,
     grab_requested: bool,
+    attack_held: bool,
+    attack_presses: u32,
+    grab_click: bool,
 }
 
 impl Default for InputState {
@@ -51,6 +65,9 @@ impl InputState {
             chat: None,
             submit: None,
             grab_requested: true,
+            attack_held: false,
+            attack_presses: 0,
+            grab_click: false,
         }
     }
 
@@ -63,12 +80,36 @@ impl InputState {
                 }
             }
             WindowEvent::MouseInput {
-                state: ElementState::Pressed,
+                state,
                 button: MouseButton::Left,
                 ..
-            } => self.grab_requested = true,
+            } => self.left_button(state.is_pressed()),
             WindowEvent::Focused(false) => self.release_all(),
             _ => {}
+        }
+    }
+
+    /// The left button: the click that grabs the mouse is not an attack (vanilla
+    /// `setIngameFocus`), but the button still counts as held.
+    fn left_button(&mut self, pressed: bool) {
+        if !pressed {
+            self.attack_held = false;
+        } else if !self.grab_requested {
+            self.grab_requested = true;
+            self.grab_click = true;
+            self.attack_held = self.chat.is_none();
+        } else if self.chat.is_none() {
+            self.attack_presses += 1;
+            self.attack_held = true;
+        }
+    }
+
+    /// Attack-button state for one tick; presses and the grab click are consumed.
+    pub fn take_attack(&mut self) -> Attack {
+        Attack {
+            held: self.attack_held && self.chat.is_none() && self.grab_requested,
+            presses: std::mem::take(&mut self.attack_presses),
+            grabbed: std::mem::take(&mut self.grab_click),
         }
     }
 
@@ -90,7 +131,10 @@ impl InputState {
             KeyCode::ControlLeft | KeyCode::ControlRight => self.sprint = pressed,
             KeyCode::KeyT if pressed => self.open_chat(String::new()),
             KeyCode::Slash if pressed => self.open_chat("/".into()),
-            KeyCode::Escape if pressed => self.grab_requested = false,
+            KeyCode::Escape if pressed => {
+                self.grab_requested = false;
+                self.attack_held = false;
+            }
             _ => {}
         }
     }
@@ -133,6 +177,7 @@ impl InputState {
         self.jump = false;
         self.sneak = false;
         self.sprint = false;
+        self.attack_held = false;
     }
 
     /// Raw mouse delta in pixels (from `DeviceEvent::MouseMotion`).
@@ -288,5 +333,20 @@ mod tests {
         assert!(!s.wants_cursor_grab());
         s.on_mouse_motion(10.0, 10.0);
         assert_eq!(s.take_look_delta(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn grab_click_is_not_an_attack_but_later_clicks_are() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::Escape);
+        s.left_button(true);
+        let grab = s.take_attack();
+        assert_eq!((grab.held, grab.presses, grab.grabbed), (true, 0, true));
+        s.left_button(false);
+        s.left_button(true);
+        let click = s.take_attack();
+        assert_eq!((click.held, click.presses, click.grabbed), (true, 1, false));
+        press(&mut s, KeyCode::KeyT);
+        assert!(!s.take_attack().held, "chat releases the button");
     }
 }

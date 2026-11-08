@@ -57,7 +57,11 @@ fn handle(
         }
         cb::Packet::Respawn(r) => {
             *dimension = r.dimension;
-            vec![NetEvent::Respawn]
+            vec![NetEvent::Respawn, NetEvent::GameMode(r.gamemode & 7)]
+        }
+        // Reason 3 is "change game mode"; the value is the mode as a float.
+        cb::Packet::ChangeGameState(g) if g.reason == 3 => {
+            vec![NetEvent::GameMode(g.value as u8 & 7)]
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);

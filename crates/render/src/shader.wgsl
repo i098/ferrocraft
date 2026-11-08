@@ -36,6 +36,11 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(t.rgb * i.color.rgb, i.color.a);
 }
 
+@fragment
+fn fs_flat(i: WorldOut) -> @location(0) vec4<f32> {
+    return i.color;
+}
+
 struct HudIn {
     @location(0) pos: vec2<f32>,
     @location(1) uv: vec2<f32>,

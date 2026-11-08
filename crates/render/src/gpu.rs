@@ -12,6 +12,11 @@ use wgpu::util::DeviceExt;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SKY: [f64; 3] = [0.47, 0.65, 1.0];
 const OFFSCREEN: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Vertices of the 12 edges of the block selection outline.
+const SELECTION_VERTICES: u32 = 24;
+/// Vanilla draws the outline black at 40% alpha with 2 px lines; wgpu lines are 1 px, so the
+/// alpha is raised to keep it as visible.
+const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -56,6 +61,8 @@ pub struct Renderer {
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     hud_pipe: wgpu::RenderPipeline,
+    line_pipe: wgpu::RenderPipeline,
+    selection: Option<[f64; 6]>,
     atlas: Atlas,
     font: Option<Font>,
     blocks: HashMap<(i32, i32), Vec<u16>>,
@@ -190,7 +197,8 @@ impl Renderer {
         let world_group = group(&atlas_view);
         let hud_group = group(&font_view);
 
-        let [opaque_pipe, water_pipe, hud_pipe] = build_pipelines(&device, &layout_bg, format);
+        let [opaque_pipe, water_pipe, hud_pipe, line_pipe] =
+            build_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
         let depth = depth_view(&device, w, h);
@@ -205,12 +213,19 @@ impl Renderer {
             opaque_pipe,
             water_pipe,
             hud_pipe,
+            line_pipe,
+            selection: None,
             atlas,
             font,
             blocks: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
         }
+    }
+
+    /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
+    pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
+        self.selection = selection;
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -394,6 +409,15 @@ impl Renderer {
                 })
         });
 
+        let sel_buf = self.selection.map(|b| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&selection_lines(b)),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -431,6 +455,11 @@ impl Renderer {
             pass.set_pipeline(&self.water_pipe);
             for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {
                 draw_mesh(&mut pass, m);
+            }
+            if let Some(buf) = &sel_buf {
+                pass.set_pipeline(&self.line_pipe);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..SELECTION_VERTICES, 0..1);
             }
             if let Some(buf) = &hud_buf {
                 pass.set_bind_group(0, &self.hud_group, &[]);
@@ -495,7 +524,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 3] {
+) -> [wgpu::RenderPipeline; 4] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -508,6 +537,8 @@ fn build_pipelines(
     let world_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
     let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
     let pipe = |vs: &str,
+                fs: &str,
+                topology: wgpu::PrimitiveTopology,
                 stride: usize,
                 attrs: &[wgpu::VertexAttribute],
                 blend: bool,
@@ -529,7 +560,7 @@ fn build_pipelines(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_world"),
+                entry_point: Some(fs),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -538,6 +569,7 @@ fn build_pipelines(
                 })],
             }),
             primitive: wgpu::PrimitiveState {
+                topology,
                 cull_mode: cull.then_some(wgpu::Face::Back),
                 front_face: wgpu::FrontFace::Ccw,
                 ..Default::default()
@@ -560,6 +592,8 @@ fn build_pipelines(
     };
     let opaque_pipe = pipe(
         "vs_world",
+        "fs_world",
+        wgpu::PrimitiveTopology::TriangleList,
         std::mem::size_of::<Vertex>(),
         &world_attrs,
         false,
@@ -569,6 +603,8 @@ fn build_pipelines(
     );
     let water_pipe = pipe(
         "vs_world",
+        "fs_world",
+        wgpu::PrimitiveTopology::TriangleList,
         std::mem::size_of::<Vertex>(),
         &world_attrs,
         true,
@@ -578,6 +614,8 @@ fn build_pipelines(
     );
     let hud_pipe = pipe(
         "vs_hud",
+        "fs_world",
+        wgpu::PrimitiveTopology::TriangleList,
         std::mem::size_of::<HudVertex>(),
         &hud_attrs,
         true,
@@ -585,7 +623,43 @@ fn build_pipelines(
         false,
         false,
     );
-    [opaque_pipe, water_pipe, hud_pipe]
+    let line_pipe = pipe(
+        "vs_world",
+        "fs_flat",
+        wgpu::PrimitiveTopology::LineList,
+        std::mem::size_of::<Vertex>(),
+        &world_attrs,
+        true,
+        false,
+        true,
+        false,
+    );
+    [opaque_pipe, water_pipe, hud_pipe, line_pipe]
+}
+
+/// The 12 edges of a world-space box `[x0, y0, z0, x1, y1, z1]` as line-list vertices.
+fn selection_lines(b: [f64; 6]) -> [Vertex; SELECTION_VERTICES as usize] {
+    let corner = |i: usize| {
+        let pick = |axis: usize| b[axis + 3 * ((i >> axis) & 1)] as f32;
+        Vertex {
+            pos: [pick(0), pick(1), pick(2)],
+            uv: [0.0; 2],
+            color: SELECTION_COLOR,
+        }
+    };
+    let mut v = [corner(0); SELECTION_VERTICES as usize];
+    let mut n = 0;
+    // Corner indices differ in exactly one bit along an edge.
+    for a in 0..8usize {
+        for axis in 0..3 {
+            if a & (1 << axis) == 0 {
+                v[n] = corner(a);
+                v[n + 1] = corner(a | 1 << axis);
+                n += 2;
+            }
+        }
+    }
+    v
 }
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

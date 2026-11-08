@@ -113,7 +113,9 @@ impl Oracle {
             cp.push(fetch(&libs_dir.join(name), url, Some(sha))?);
         }
 
-        let named = dir.join("named.jar");
+        // Not `named.jar`: the remapper wrote a directory there (see `tmp` below), and CI
+        // caches restored it as an empty tree, which hid the missing classes.
+        let named = dir.join("mapped.jar");
         if !named.exists() {
             let inter = dir.join("inter.jar");
             let calamus_tiny = extract_mappings(&calamus, &dir.join("calamus.tiny"), false)?;
@@ -127,7 +129,8 @@ impl Oracle {
                 "official",
                 "intermediary",
             )?;
-            let tmp = dir.join("named.jar.tmp");
+            // The remapper writes a directory unless the output path ends in `.jar`.
+            let tmp = dir.join("mapped.tmp.jar");
             remap(
                 &java,
                 &remapper,

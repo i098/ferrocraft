@@ -31,6 +31,8 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   block <x> <y> <z> <block>     extra block; must come before "start"
  *   start <x> <y> <z> <yaw>           spawn the player and build the world
  *   tick <n> <fwd> <strafe> <jump> <sprint>
+ *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
+ *                                 (float bits in hex), toolNotRequired; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -162,6 +164,19 @@ public class Harness {
                             + (player.onGround ? 1 : 0));
                     }
                     break;
+                case "mine": {
+                    Block b = Block.byId(Integer.parseInt(t[1]));
+                    BlockPos at = new BlockPos(0, 10, 0);
+                    player.onGround = true;
+                    float grounded = b.getMiningSpeed(player, world, at);
+                    player.onGround = false;
+                    float airborne = b.getMiningSpeed(player, world, at);
+                    System.out.println(Integer.toHexString(Float.floatToRawIntBits(b.getMiningTime(world, at))) + " "
+                        + Integer.toHexString(Float.floatToRawIntBits(grounded)) + " "
+                        + Integer.toHexString(Float.floatToRawIntBits(airborne)) + " "
+                        + (b.getMaterial().isToolNotRequired() ? 1 : 0));
+                    break;
+                }
                 default:
                     throw new IllegalArgumentException(line);
             }

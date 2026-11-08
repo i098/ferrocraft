@@ -474,12 +474,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrocraft-engine"
+version = "0.1.0"
+dependencies = [
+ "ferrocraft-net-client",
+ "input-audio",
+ "render",
+ "winit",
+ "world",
+]
+
+[[package]]
 name = "ferrocraft-launcher"
 version = "0.1.0"
 dependencies = [
- "raw-window-handle",
  "serde_json",
- "winit",
 ]
 
 [[package]]

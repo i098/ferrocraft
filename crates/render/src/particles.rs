@@ -61,7 +61,9 @@ impl Kind {
             (37, 38, Kind::BlockCrack),
             (39, 39, Kind::Droplet),
         ];
-        IDS.iter().find(|(lo, hi, _)| (*lo..=*hi).contains(&id)).map(|e| e.2)
+        IDS.iter()
+            .find(|(lo, hi, _)| (*lo..=*hi).contains(&id))
+            .map(|e| e.2)
     }
 }
 
@@ -182,20 +184,37 @@ impl Particles {
         }
     }
 
-    fn spawn_motion(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3], data: i32) -> Option<Particle> {
+    fn spawn_motion(
+        &mut self,
+        kind: Kind,
+        pos: [f64; 3],
+        motion: [f64; 3],
+        data: i32,
+    ) -> Option<Particle> {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
         match kind {
             Kind::BlockCrack => {
                 let jitter = [(self.rand() * 3.0) as f32, (self.rand() * 3.0) as f32];
-                p = self.base(pos, motion, Sprite::Block { state: (data & 0xFFFF) as u16, jitter });
+                p = self.base(
+                    pos,
+                    motion,
+                    Sprite::Block {
+                        state: (data & 0xFFFF) as u16,
+                        jitter,
+                    },
+                );
                 p.gravity = 1.0;
                 p.color = [0.6; 3];
                 p.scale /= 2.0;
             }
             Kind::Smoke | Kind::LargeSmoke => {
                 p = self.base(pos, [0.0; 3], sheet(0, true));
-                p.vel = [motion[0] + (self.rand() * 2.0 - 1.0) * 0.001, motion[1] + 0.1, motion[2]];
+                p.vel = [
+                    motion[0] + (self.rand() * 2.0 - 1.0) * 0.001,
+                    motion[1] + 0.1,
+                    motion[2],
+                ];
                 let g = (self.rand() * 0.3) as f32;
                 p.color = [g; 3];
                 p.scale *= if kind == Kind::LargeSmoke { 2.5 } else { 0.75 };
@@ -323,8 +342,14 @@ impl Particles {
         count: i32,
         data: &[i32],
     ) {
-        let Some(kind) = Kind::from_id(id) else { return };
-        let data0 = if kind == Kind::BlockCrack { data.first().copied().unwrap_or(0) } else { 0 };
+        let Some(kind) = Kind::from_id(id) else {
+            return;
+        };
+        let data0 = if kind == Kind::BlockCrack {
+            data.first().copied().unwrap_or(0)
+        } else {
+            0
+        };
         let pos = pos.map(f64::from);
         if count == 0 {
             let m = offset.map(|o| f64::from(o * speed));
@@ -356,7 +381,11 @@ impl Particles {
                         f64::from(y) + (f64::from(j) + 0.5) / 4.0,
                         f64::from(z) + (f64::from(k) + 0.5) / 4.0,
                     ];
-                    let m = [c[0] - f64::from(x) - 0.5, c[1] - f64::from(y) - 0.5, c[2] - f64::from(z) - 0.5];
+                    let m = [
+                        c[0] - f64::from(x) - 0.5,
+                        c[1] - f64::from(y) - 0.5,
+                        c[2] - f64::from(z) - 0.5,
+                    ];
                     self.spawn(Kind::BlockCrack, c, m, i32::from(state));
                 }
             }
@@ -422,14 +451,25 @@ impl Particles {
     }
 
     /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`.
-    pub fn vertices(&self, atlas: &Atlas, cam_yaw: f32, cam_pitch: f32, cam_pos: [f64; 3], partial: f32) -> Quads {
+    pub fn vertices(
+        &self,
+        atlas: &Atlas,
+        cam_yaw: f32,
+        cam_pitch: f32,
+        cam_pos: [f64; 3],
+        partial: f32,
+    ) -> Quads {
         let (right, up) = basis(cam_yaw, cam_pitch);
         let mut out = Quads::default();
         for p in &self.list {
             let t = f64::from(partial);
             let c = [0, 1, 2].map(|i| (p.prev[i] + (p.pos[i] - p.prev[i]) * t - cam_pos[i]) as f32);
             let (is_block, uv) = sprite_uv(p, atlas);
-            let target = if is_block { &mut out.block } else { &mut out.sheet };
+            let target = if is_block {
+                &mut out.block
+            } else {
+                &mut out.sheet
+            };
             push_quad(target, p, c, uv, right, up);
         }
         out
@@ -454,12 +494,28 @@ fn sprite_uv(p: &Particle, atlas: &Atlas) -> (bool, [[f32; 2]; 2]) {
     }
 }
 
-fn push_quad(target: &mut Vec<Vertex>, p: &Particle, c: [f32; 3], uv: [[f32; 2]; 2], right: [f32; 3], up: [f32; 3]) {
+fn push_quad(
+    target: &mut Vec<Vertex>,
+    p: &Particle,
+    c: [f32; 3],
+    uv: [[f32; 2]; 2],
+    right: [f32; 3],
+    up: [f32; 3],
+) {
     let half = 0.1 * p.scale;
     let color = [p.color[0], p.color[1], p.color[2], p.alpha];
-    for (dx, dy, u, v) in [(-1.0, -1.0, 0, 1), (1.0, -1.0, 1, 1), (1.0, 1.0, 1, 0), (-1.0, 1.0, 0, 0)] {
+    for (dx, dy, u, v) in [
+        (-1.0, -1.0, 0, 1),
+        (1.0, -1.0, 1, 1),
+        (1.0, 1.0, 1, 0),
+        (-1.0, 1.0, 0, 0),
+    ] {
         let pos = [0, 1, 2].map(|i| c[i] + (right[i] * dx + up[i] * dy) * half);
-        target.push(Vertex { pos, uv: [uv[u][0], uv[v][1]], color });
+        target.push(Vertex {
+            pos,
+            uv: [uv[u][0], uv[v][1]],
+            color,
+        });
     }
 }
 
@@ -468,9 +524,13 @@ fn blocked(solid: &impl Fn(i32, i32, i32) -> bool, pos: [f64; 3]) -> bool {
     let h = 0.1;
     [-h, h].iter().any(|dx| {
         [-h, h].iter().any(|dy| {
-            [-h, h]
-                .iter()
-                .any(|dz| solid((pos[0] + dx).floor() as i32, (pos[1] + dy).floor() as i32, (pos[2] + dz).floor() as i32))
+            [-h, h].iter().any(|dz| {
+                solid(
+                    (pos[0] + dx).floor() as i32,
+                    (pos[1] + dy).floor() as i32,
+                    (pos[2] + dz).floor() as i32,
+                )
+            })
         })
     })
 }

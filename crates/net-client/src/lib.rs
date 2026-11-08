@@ -4,6 +4,7 @@
 //! Only for servers with `online-mode=false`: no encryption, no Microsoft sign-in.
 
 mod chat;
+mod entity;
 mod link;
 mod play;
 
@@ -49,6 +50,8 @@ pub enum NetEvent {
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.
     ActionBar(String),
+    /// Spawn, move, metadata or destroy of a remote entity.
+    Entity(world::entities::EntityEvent),
     /// The server kicked the client or the connection ended. Always the last event.
     Disconnect(String),
 }

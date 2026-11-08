@@ -5,6 +5,7 @@ use std::borrow::Cow;
 
 mod assets;
 mod blocks;
+mod entity;
 mod gpu;
 mod light;
 mod mesh;
@@ -15,6 +16,7 @@ mod sky;
 pub use sky::Environment;
 
 pub use assets::{encode_png, Font};
+pub use entity::{nametags, Class, EntityDraw};
 pub use gpu::Renderer;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 

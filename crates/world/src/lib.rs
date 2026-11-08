@@ -7,6 +7,7 @@
 //! The differential tests check every tick against the real 1.8.9 jar through `oracle`.
 
 pub mod chunk;
+pub mod entities;
 
 use std::sync::LazyLock;
 

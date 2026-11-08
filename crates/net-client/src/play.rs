@@ -1,12 +1,13 @@
 //! Reader thread: play packets in, [`NetEvent`] values out.
 
 use crate::link::{Reader, Writer};
-use crate::{chat, send, NetEvent};
+use crate::{chat, entity, send, NetEvent};
 use ferrocraft_protocol::play::{clientbound as cb, serverbound as sb};
 use std::io;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use world::chunk::Chunk;
+use world::entities::EntityEvent;
 
 pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>) {
     let mut dimension = 0;
@@ -57,7 +58,7 @@ fn handle(
         }
         cb::Packet::Respawn(r) => {
             *dimension = r.dimension;
-            vec![NetEvent::Respawn]
+            vec![NetEvent::Respawn, NetEvent::Entity(EntityEvent::Clear)]
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
@@ -97,7 +98,10 @@ fn handle(
         cb::Packet::MultiBlockChange(m) => multi_block_change(&m),
         cb::Packet::ChunkData(c) => chunk_data(&c, *dimension == 0)?,
         cb::Packet::MapChunkBulk(b) => chunk_bulk(&b)?,
-        _ => vec![],
+        other => entity::events(&other)
+            .into_iter()
+            .map(NetEvent::Entity)
+            .collect(),
     })
 }
 

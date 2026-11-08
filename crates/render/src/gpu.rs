@@ -1,6 +1,7 @@
 //! wgpu device, pipelines and frame rendering.
 
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
+use crate::entity::{self, EntityDraw, Skins};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
 use crate::{Camera, ChunkBlocks, Quad};
@@ -58,6 +59,9 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     world_group: wgpu::BindGroup,
     env_group: wgpu::BindGroup,
+    entity_group: wgpu::BindGroup,
+    entity_skins: Skins,
+    entity_mesh: Option<GpuMesh>,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
@@ -140,6 +144,7 @@ impl Renderer {
         let atlas = source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets);
         let font = source.as_mut().and_then(Font::load);
         let env_tex = EnvTexture::load(source.as_mut());
+        let entity_skins = source.as_mut().map_or_else(Skins::flat, Skins::from_assets);
         if font.is_none() {
             eprintln!(
                 "ferrocraft-render: no textures/font/ascii.png in {assets:?}; text is not drawn"
@@ -154,6 +159,13 @@ impl Renderer {
         });
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
+        let entity_view = upload_texture(
+            &device,
+            &queue,
+            Skins::width(),
+            Skins::height(),
+            &entity_skins.rgba,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
@@ -189,6 +201,7 @@ impl Renderer {
         });
         let world_group = bind_group(&device, &layout_bg, &globals, &sampler, &atlas_view);
         let env_group = bind_group(&device, &layout_bg, &globals, &sampler, &env_view);
+        let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let [opaque_pipe, water_pipe, sky_pipe, sky_add_pipe, cloud_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -205,6 +218,9 @@ impl Renderer {
             sampler,
             world_group,
             env_group,
+            entity_group,
+            entity_skins,
+            entity_mesh: None,
             opaque_pipe,
             water_pipe,
             sky_pipe,
@@ -407,6 +423,12 @@ impl Renderer {
         })
     }
 
+    /// Replaces the entities drawn each frame: models are meshed here and live until the next call.
+    pub fn set_entities(&mut self, draws: &[EntityDraw]) {
+        let mesh = entity::build(draws, &self.entity_skins);
+        self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
+    }
+
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
     pub fn render(&mut self, cam: &Camera, overlay: &[Quad]) {
         self.flush_meshes();
@@ -538,6 +560,11 @@ impl Renderer {
             pass.set_pipeline(&self.opaque_pipe);
             for m in self.meshes.values().filter_map(|m| m.opaque.as_ref()) {
                 draw_mesh(&mut pass, m);
+            }
+            if let Some(m) = &self.entity_mesh {
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
             }
             pass.set_pipeline(&self.water_pipe);
             for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {

@@ -105,15 +105,92 @@ fn variant_name(p: &impl std::fmt::Debug) -> String {
     format!("{p:?}").split('(').next().unwrap().to_string()
 }
 
-#[test]
-fn vanilla_server_status_login_and_play() {
-    let Ok(jar) = std::env::var("FC_SERVER_JAR") else {
-        eprintln!("FC_SERVER_JAR not set: skipping the vanilla server test");
-        return;
-    };
-    let mut server = Server::start(&jar);
+fn send_client_hello(conn: &mut Connection<TcpStream>) {
+    conn.send(&sb::Packet::from(sb::PluginMessage {
+        channel: "MC|Brand".into(),
+        data: Rest(b"ferrocraft".to_vec()),
+    }))
+    .unwrap();
+    conn.send(&sb::Packet::from(sb::ClientSettings {
+        locale: "en_US".into(),
+        view_distance: 3,
+        chat_mode: 0,
+        chat_colors: true,
+        skin_parts: 0x7F,
+    }))
+    .unwrap();
+}
 
-    // Status. The vanilla server answers "{}" for a moment after "Done", so retry.
+fn send_play_burst(conn: &mut Connection<TcpStream>, x: f64, y: f64, z: f64) {
+    for p in [
+        sb::Packet::from(sb::ChatMessage {
+            message: "hello from ferrocraft".into(),
+        }),
+        sb::Packet::from(sb::TabComplete {
+            text: "/gamemo".into(),
+            looked_at: Opt(None),
+        }),
+        sb::Packet::from(sb::HeldItemChange { slot: 2 }),
+        sb::Packet::from(sb::Animation {}),
+        sb::Packet::from(sb::EntityAction {
+            entity_id: VarInt(0),
+            action_id: VarInt(0),
+            jump_boost: VarInt(0),
+        }),
+        sb::Packet::from(sb::PlayerPosition {
+            x,
+            y,
+            z,
+            on_ground: true,
+        }),
+        sb::Packet::from(sb::PlayerLook {
+            yaw: 10.0,
+            pitch: 5.0,
+            on_ground: true,
+        }),
+        sb::Packet::from(sb::Player { on_ground: true }),
+        sb::Packet::from(sb::PlayerAbilities {
+            flags: 0,
+            flying_speed: 0.05,
+            walking_speed: 0.1,
+        }),
+    ] {
+        conn.send(&p).unwrap();
+    }
+}
+
+/// Login: the server enables compression before LoginSuccess.
+fn login_phase(server: &Server) -> Connection<TcpStream> {
+    let mut conn = server.connect();
+    server.handshake(&mut conn, 2);
+    conn.send(&login::serverbound::Packet::from(
+        login::serverbound::LoginStart {
+            name: "Ferro".into(),
+        },
+    ))
+    .unwrap();
+    let mut saw_compression = false;
+    loop {
+        match conn.recv::<login::clientbound::Packet>().unwrap() {
+            login::clientbound::Packet::SetCompression(c) => {
+                assert_eq!(c.threshold.0, 256);
+                conn.set_compression(c.threshold.0);
+                saw_compression = true;
+            }
+            login::clientbound::Packet::LoginSuccess(ok) => {
+                assert_eq!(ok.username, "Ferro");
+                assert_eq!(ok.uuid.len(), 36);
+                break;
+            }
+            other => panic!("unexpected login packet {other:?}"),
+        }
+    }
+    assert!(saw_compression);
+    conn
+}
+
+/// Status. The vanilla server answers "{}" for a moment after "Done", so retry.
+fn status_phase(server: &Server) {
     let mut resp = None;
     for _ in 0..50 {
         let mut conn = server.connect();
@@ -149,33 +226,19 @@ fn vanilla_server_status_login_and_play() {
         panic!("not a pong")
     };
     assert_eq!(pong.time, 1234567);
+}
 
-    // Login: the server enables compression before LoginSuccess.
-    let mut conn = server.connect();
-    server.handshake(&mut conn, 2);
-    conn.send(&login::serverbound::Packet::from(
-        login::serverbound::LoginStart {
-            name: "Ferro".into(),
-        },
-    ))
-    .unwrap();
-    let mut saw_compression = false;
-    loop {
-        match conn.recv::<login::clientbound::Packet>().unwrap() {
-            login::clientbound::Packet::SetCompression(c) => {
-                assert_eq!(c.threshold.0, 256);
-                conn.set_compression(c.threshold.0);
-                saw_compression = true;
-            }
-            login::clientbound::Packet::LoginSuccess(ok) => {
-                assert_eq!(ok.username, "Ferro");
-                assert_eq!(ok.uuid.len(), 36);
-                break;
-            }
-            other => panic!("unexpected login packet {other:?}"),
-        }
-    }
-    assert!(saw_compression);
+#[test]
+fn vanilla_server_status_login_and_play() {
+    let Ok(jar) = std::env::var("FC_SERVER_JAR") else {
+        eprintln!("FC_SERVER_JAR not set: skipping the vanilla server test");
+        return;
+    };
+    let mut server = Server::start(&jar);
+
+    status_phase(&server);
+
+    let mut conn = login_phase(&server);
 
     let commands = [
         "op Ferro",
@@ -228,19 +291,7 @@ fn vanilla_server_status_login_and_play() {
         seen.insert(variant_name(&packet));
         match packet {
             cb::Packet::JoinGame(_) => {
-                conn.send(&sb::Packet::from(sb::PluginMessage {
-                    channel: "MC|Brand".into(),
-                    data: Rest(b"ferrocraft".to_vec()),
-                }))
-                .unwrap();
-                conn.send(&sb::Packet::from(sb::ClientSettings {
-                    locale: "en_US".into(),
-                    view_distance: 3,
-                    chat_mode: 0,
-                    chat_colors: true,
-                    skin_parts: 0x7F,
-                }))
-                .unwrap();
+                send_client_hello(&mut conn);
                 commands.iter().for_each(|c| server.command(c));
             }
             cb::Packet::KeepAlive(k) => conn
@@ -258,41 +309,7 @@ fn vanilla_server_status_login_and_play() {
                 .unwrap();
                 if !sent_chat {
                     sent_chat = true;
-                    for p in [
-                        sb::Packet::from(sb::ChatMessage {
-                            message: "hello from ferrocraft".into(),
-                        }),
-                        sb::Packet::from(sb::TabComplete {
-                            text: "/gamemo".into(),
-                            looked_at: Opt(None),
-                        }),
-                        sb::Packet::from(sb::HeldItemChange { slot: 2 }),
-                        sb::Packet::from(sb::Animation {}),
-                        sb::Packet::from(sb::EntityAction {
-                            entity_id: VarInt(0),
-                            action_id: VarInt(0),
-                            jump_boost: VarInt(0),
-                        }),
-                        sb::Packet::from(sb::PlayerPosition {
-                            x: p.x,
-                            y: p.y,
-                            z: p.z,
-                            on_ground: true,
-                        }),
-                        sb::Packet::from(sb::PlayerLook {
-                            yaw: 10.0,
-                            pitch: 5.0,
-                            on_ground: true,
-                        }),
-                        sb::Packet::from(sb::Player { on_ground: true }),
-                        sb::Packet::from(sb::PlayerAbilities {
-                            flags: 0,
-                            flying_speed: 0.05,
-                            walking_speed: 0.1,
-                        }),
-                    ] {
-                        conn.send(&p).unwrap();
-                    }
+                    send_play_burst(&mut conn, p.x, p.y, p.z);
                 }
             }
             cb::Packet::ChatMessage(c) => {

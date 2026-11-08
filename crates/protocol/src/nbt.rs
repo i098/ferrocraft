@@ -62,21 +62,7 @@ impl Tag {
                 Tag::ByteArray(r.take(n)?.iter().map(|&b| b as i8).collect())
             }
             8 => Tag::String(read_mutf8(r)?),
-            9 => {
-                let ty = u8::read(r)?;
-                let n = i32::read(r)?.max(0) as usize;
-                if n > 0 && ty == 0 {
-                    return Err(Error::Nbt("list without element type"));
-                }
-                if n > r.remaining() {
-                    return Err(Error::Eof);
-                }
-                Tag::List(
-                    (0..n)
-                        .map(|_| Tag::read(ty, r, depth + 1))
-                        .collect::<Result<_>>()?,
-                )
-            }
+            9 => read_list(r, depth)?,
             10 => Tag::Compound(read_compound(r, depth)?),
             11 => {
                 let n = array_len(r, 4)?;
@@ -113,6 +99,22 @@ impl Tag {
             }
         }
     }
+}
+
+fn read_list(r: &mut Reader, depth: usize) -> Result<Tag> {
+    let ty = u8::read(r)?;
+    let n = i32::read(r)?.max(0) as usize;
+    if n > 0 && ty == 0 {
+        return Err(Error::Nbt("list without element type"));
+    }
+    if n > r.remaining() {
+        return Err(Error::Eof);
+    }
+    Ok(Tag::List(
+        (0..n)
+            .map(|_| Tag::read(ty, r, depth + 1))
+            .collect::<Result<_>>()?,
+    ))
 }
 
 fn array_len(r: &mut Reader, elem_size: usize) -> Result<usize> {

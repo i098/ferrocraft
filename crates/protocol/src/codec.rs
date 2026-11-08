@@ -457,37 +457,46 @@ impl Wire for Metadata {
     }
     fn write(&self, w: &mut Vec<u8>) {
         for e in &self.0 {
-            let ty: u8 = match &e.value {
-                MetaValue::Byte(_) => 0,
-                MetaValue::Short(_) => 1,
-                MetaValue::Int(_) => 2,
-                MetaValue::Float(_) => 3,
-                MetaValue::String(_) => 4,
-                MetaValue::Slot(_) => 5,
-                MetaValue::BlockPos(_) => 6,
-                MetaValue::Rotation(..) => 7,
-            };
-            w.push(ty << 5 | (e.index & 0x1F));
-            match &e.value {
-                MetaValue::Byte(v) => v.write(w),
-                MetaValue::Short(v) => v.write(w),
-                MetaValue::Int(v) => v.write(w),
-                MetaValue::Float(v) => v.write(w),
-                MetaValue::String(v) => v.write(w),
-                MetaValue::Slot(v) => v.write(w),
-                MetaValue::BlockPos(p) => {
-                    p.x.write(w);
-                    p.y.write(w);
-                    p.z.write(w);
-                }
-                MetaValue::Rotation(a, b, c) => {
-                    a.write(w);
-                    b.write(w);
-                    c.write(w);
-                }
-            }
+            w.push(e.value.type_id() << 5 | (e.index & 0x1F));
+            e.value.write_body(w);
         }
         w.push(0x7F);
+    }
+}
+
+impl MetaValue {
+    fn type_id(&self) -> u8 {
+        match self {
+            MetaValue::Byte(_) => 0,
+            MetaValue::Short(_) => 1,
+            MetaValue::Int(_) => 2,
+            MetaValue::Float(_) => 3,
+            MetaValue::String(_) => 4,
+            MetaValue::Slot(_) => 5,
+            MetaValue::BlockPos(_) => 6,
+            MetaValue::Rotation(..) => 7,
+        }
+    }
+
+    fn write_body(&self, w: &mut Vec<u8>) {
+        match self {
+            MetaValue::Byte(v) => v.write(w),
+            MetaValue::Short(v) => v.write(w),
+            MetaValue::Int(v) => v.write(w),
+            MetaValue::Float(v) => v.write(w),
+            MetaValue::String(v) => v.write(w),
+            MetaValue::Slot(v) => v.write(w),
+            MetaValue::BlockPos(p) => {
+                p.x.write(w);
+                p.y.write(w);
+                p.z.write(w);
+            }
+            MetaValue::Rotation(a, b, c) => {
+                a.write(w);
+                b.write(w);
+                c.write(w);
+            }
+        }
     }
 }
 

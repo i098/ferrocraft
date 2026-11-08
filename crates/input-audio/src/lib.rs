@@ -1,11 +1,27 @@
-//! Input state: vanilla 1.8.9 default keys, mouse look, chat entry.
-use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
+//! Input state: vanilla 1.8.9 key bindings, mouse look, mouse buttons, wheel, chat entry.
+mod actions;
+mod keys;
+
+pub use actions::{scroll_slot, Action, DebugCombo};
+pub use keys::{control_from_lwjgl, lwjgl_from_control, Bind, Control, KeyBindings};
+
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+use winit::dpi::PhysicalPosition;
+use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{CursorGrabMode, Window};
 
 /// Vanilla look scale: degrees per scaled mouse pixel.
 const DEGREES_PER_PIXEL: f32 = 0.15;
 /// Vanilla 1.8.9 chat limit.
 const CHAT_MAX_CHARS: usize = 100;
+/// Vanilla `GuiNewChat` keeps 100 sent lines.
+const CHAT_HISTORY: usize = 100;
+/// `sprintToggleTimer` is 7 ticks.
+const DOUBLE_TAP: Duration = Duration::from_millis(350);
+/// Trackpads report pixels; one wheel step per this many.
+const PIXELS_PER_STEP: f64 = 40.0;
 
 /// Vanilla `f^3 * 8` look gain for a sensitivity slider value (1.0 = 100%).
 pub fn look_gain(sensitivity: f32) -> f32 {
@@ -13,20 +29,46 @@ pub fn look_gain(sensitivity: f32) -> f32 {
     f * f * f * 8.0
 }
 
+/// Own the OS cursor grab state. Returns the new "grabbed" state.
+///
+/// macOS has no `Confined` mode and refuses grabs while the window is not key, so the caller
+/// must retry until this returns `want` and must forget the grab when focus is lost: the OS
+/// drops it then.
+pub fn apply_cursor_grab(window: &Window, want: bool) -> bool {
+    if want {
+        let ok = window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+            .is_ok();
+        window.set_cursor_visible(!ok);
+        ok
+    } else {
+        let _ = window.set_cursor_grab(CursorGrabMode::None);
+        window.set_cursor_visible(true);
+        false
+    }
+}
+
 #[derive(Debug)]
 pub struct InputState {
     sensitivity: f32,
-    forward: bool,
-    back: bool,
-    left: bool,
-    right: bool,
-    jump: bool,
-    sneak: bool,
-    sprint: bool,
+    bindings: KeyBindings,
+    held: [bool; Bind::ALL.len()],
+    actions: VecDeque<Action>,
+    ctrl_down: bool,
+    f3_down: bool,
+    last_forward_press: Option<Instant>,
+    sprint_toggle: bool,
+    scroll_px: f64,
     look: (f32, f32),
     chat: Option<String>,
     submit: Option<String>,
+    history: Vec<String>,
+    history_pos: Option<usize>,
     grab_requested: bool,
+    screen_open: bool,
+    focused: bool,
+    pause_on_lost_focus: bool,
 }
 
 impl Default for InputState {
@@ -40,63 +82,231 @@ impl InputState {
     pub fn new(sensitivity: f32) -> Self {
         Self {
             sensitivity,
-            forward: false,
-            back: false,
-            left: false,
-            right: false,
-            jump: false,
-            sneak: false,
-            sprint: false,
+            bindings: KeyBindings::default(),
+            held: [false; Bind::ALL.len()],
+            actions: VecDeque::new(),
+            ctrl_down: false,
+            f3_down: false,
+            last_forward_press: None,
+            sprint_toggle: false,
+            scroll_px: 0.0,
             look: (0.0, 0.0),
             chat: None,
             submit: None,
+            history: Vec::new(),
+            history_pos: None,
             grab_requested: true,
+            screen_open: false,
+            focused: true,
+            pause_on_lost_focus: true,
         }
     }
 
+    pub fn set_sensitivity(&mut self, sensitivity: f32) {
+        self.sensitivity = sensitivity;
+    }
+
+    pub fn set_bindings(&mut self, bindings: KeyBindings) {
+        self.release_all();
+        self.bindings = bindings;
+    }
+
+    pub fn bindings(&self) -> &KeyBindings {
+        &self.bindings
+    }
+
+    /// The engine tells input that a GUI screen (inventory, pause menu...) is open: movement
+    /// stops and the cursor is free. Clicks and keys then belong to the screen.
+    pub fn set_screen_open(&mut self, open: bool) {
+        if open {
+            self.release_all();
+        }
+        self.screen_open = open;
+        self.grab_requested = !open;
+    }
+
     pub fn on_window_event(&mut self, event: &WindowEvent) {
+        self.on_window_event_at(event, Instant::now());
+    }
+
+    fn on_window_event_at(&mut self, event: &WindowEvent, now: Instant) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     let text = event.text.as_deref();
-                    self.on_key(code, event.state.is_pressed(), text);
+                    self.key_event(code, event.state.is_pressed(), event.repeat, text, now);
                 }
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } => self.grab_requested = true,
-            WindowEvent::Focused(false) => self.release_all(),
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.mouse_button(*button, *state == ElementState::Pressed, now);
+            }
+            WindowEvent::MouseWheel { delta, .. } => match delta {
+                MouseScrollDelta::LineDelta(_, y) => {
+                    self.wheel(f64::from(*y).signum() * f64::from(*y != 0.0) as f64)
+                }
+                MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
+                    self.scroll_px += y;
+                    while self.scroll_px.abs() >= PIXELS_PER_STEP {
+                        let s = self.scroll_px.signum();
+                        self.scroll_px -= s * PIXELS_PER_STEP;
+                        self.wheel(s);
+                    }
+                }
+            },
+            WindowEvent::Focused(focused) => self.set_focused(*focused),
             _ => {}
+        }
+    }
+
+    fn set_focused(&mut self, focused: bool) {
+        let was_playing = self.wants_cursor_grab();
+        self.focused = focused;
+        if focused {
+            return;
+        }
+        self.release_all();
+        if was_playing && self.pause_on_lost_focus {
+            self.grab_requested = false;
+            self.actions.push_back(Action::Pause);
+        }
+    }
+
+    fn wheel(&mut self, y: f64) {
+        let step = y.signum() as i32;
+        if step == 0 {
+            return;
+        }
+        if self.chat.is_some() {
+            self.actions.push_back(Action::ChatScroll(step));
+        } else if !self.screen_open {
+            self.actions.push_back(Action::HotbarScroll(step));
         }
     }
 
     /// Key press/release. `text` is the character text of a press, used in chat mode.
     pub fn on_key(&mut self, code: KeyCode, pressed: bool, text: Option<&str>) {
+        self.key_event(code, pressed, false, text, Instant::now());
+    }
+
+    fn key_event(
+        &mut self,
+        code: KeyCode,
+        pressed: bool,
+        repeat: bool,
+        text: Option<&str>,
+        now: Instant,
+    ) {
+        match code {
+            KeyCode::ControlLeft | KeyCode::ControlRight => self.ctrl_down = pressed,
+            KeyCode::F3 if !pressed => self.f3_down = false,
+            _ => {}
+        }
         if self.chat.is_some() {
             if pressed {
                 self.chat_key(code, text);
             }
             return;
         }
-        match code {
-            KeyCode::KeyW => self.forward = pressed,
-            KeyCode::KeyS => self.back = pressed,
-            KeyCode::KeyA => self.left = pressed,
-            KeyCode::KeyD => self.right = pressed,
-            KeyCode::Space => self.jump = pressed,
-            KeyCode::ShiftLeft | KeyCode::ShiftRight => self.sneak = pressed,
-            KeyCode::ControlLeft | KeyCode::ControlRight => self.sprint = pressed,
-            KeyCode::KeyT if pressed => self.open_chat(String::new()),
-            KeyCode::Slash if pressed => self.open_chat("/".into()),
-            KeyCode::Escape if pressed => self.grab_requested = false,
-            _ => {}
+        if self.screen_open {
+            if pressed && !repeat && code == KeyCode::Escape {
+                self.actions.push_back(Action::CloseScreen);
+            }
+            return;
+        }
+        if pressed && !repeat && self.hard_coded_key(code) {
+            return;
+        }
+        self.control(Control::Key(code), pressed, repeat, now);
+    }
+
+    /// Esc, F1, F3 and the F3 combos: not rebindable in vanilla. True when consumed.
+    fn hard_coded_key(&mut self, code: KeyCode) -> bool {
+        let combo = match code {
+            KeyCode::KeyA => Some(DebugCombo::ReloadChunks),
+            KeyCode::KeyB => Some(DebugCombo::Hitboxes),
+            KeyCode::KeyD => Some(DebugCombo::ClearChat),
+            KeyCode::KeyG => Some(DebugCombo::ChunkBorders),
+            KeyCode::KeyH => Some(DebugCombo::AdvancedTooltips),
+            KeyCode::KeyP => Some(DebugCombo::PauseOnLostFocus),
+            KeyCode::KeyQ => Some(DebugCombo::Help),
+            _ => None,
+        };
+        if let (true, Some(c)) = (self.f3_down, combo) {
+            if c == DebugCombo::PauseOnLostFocus {
+                self.pause_on_lost_focus = !self.pause_on_lost_focus;
+            }
+            self.actions.push_back(Action::Debug(c));
+            return true;
+        }
+        let action = match code {
+            KeyCode::Escape => {
+                self.grab_requested = false;
+                Action::Pause
+            }
+            KeyCode::F1 => Action::ToggleHud,
+            KeyCode::F3 => {
+                self.f3_down = true;
+                Action::ToggleDebug
+            }
+            _ => return false,
+        };
+        self.actions.push_back(action);
+        true
+    }
+
+    fn mouse_button(&mut self, button: MouseButton, pressed: bool, now: Instant) {
+        if self.chat.is_some() || self.screen_open {
+            return;
+        }
+        if pressed && !self.grab_requested {
+            // Vanilla `setIngameFocus`: the click that regains the mouse does not attack.
+            self.grab_requested = true;
+            return;
+        }
+        self.control(Control::Mouse(button), pressed, false, now);
+    }
+
+    fn control(&mut self, control: Control, pressed: bool, repeat: bool, now: Instant) {
+        let binds: Vec<Bind> = self.bindings.matching(control).collect();
+        for bind in binds {
+            self.held[bind.index()] = pressed;
+            if bind == Bind::Forward && !pressed {
+                self.sprint_toggle = false;
+            }
+            if !pressed || repeat {
+                continue;
+            }
+            match bind {
+                Bind::Forward => {
+                    if self
+                        .last_forward_press
+                        .is_some_and(|t| now.duration_since(t) <= DOUBLE_TAP)
+                    {
+                        self.sprint_toggle = true;
+                    }
+                    self.last_forward_press = Some(now);
+                }
+                Bind::Chat => self.open_chat(String::new()),
+                Bind::Command => self.open_chat("/".into()),
+                Bind::Inventory => self.actions.push_back(Action::Inventory),
+                Bind::Drop => self.actions.push_back(Action::Drop {
+                    whole_stack: self.ctrl_down,
+                }),
+                Bind::Attack => self.actions.push_back(Action::Attack),
+                Bind::Use => self.actions.push_back(Action::Use),
+                Bind::PickBlock => self.actions.push_back(Action::PickBlock),
+                Bind::Screenshot => self.actions.push_back(Action::Screenshot),
+                Bind::Perspective => self.actions.push_back(Action::TogglePerspective),
+                Bind::Fullscreen => self.actions.push_back(Action::ToggleFullscreen),
+                Bind::Hotbar(n) => self.actions.push_back(Action::Hotbar(n)),
+                _ => {}
+            }
         }
     }
 
     fn open_chat(&mut self, initial: String) {
         self.release_all();
+        self.history_pos = None;
         self.chat = Some(initial);
     }
 
@@ -109,12 +319,19 @@ impl InputState {
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 let line = self.chat.take().unwrap_or_default();
                 if !line.trim().is_empty() {
+                    if self.history.last() != Some(&line) {
+                        self.history.push(line.clone());
+                        let extra = self.history.len().saturating_sub(CHAT_HISTORY);
+                        self.history.drain(..extra);
+                    }
                     self.submit = Some(line);
                 }
             }
             KeyCode::Backspace => {
                 buf.pop();
             }
+            KeyCode::ArrowUp => self.history_step(-1),
+            KeyCode::ArrowDown => self.history_step(1),
             _ => {
                 for c in text.unwrap_or("").chars().filter(|c| !c.is_control()) {
                     if buf.chars().count() < CHAT_MAX_CHARS {
@@ -125,19 +342,28 @@ impl InputState {
         }
     }
 
+    /// `GuiChat.getSentHistory`: -1 older, +1 newer; past the newest clears the line.
+    fn history_step(&mut self, dir: i32) {
+        let len = self.history.len();
+        let cur = self.history_pos.unwrap_or(len);
+        let next = (cur as i32 + dir).clamp(0, len as i32) as usize;
+        self.history_pos = Some(next);
+        self.chat = Some(self.history.get(next).cloned().unwrap_or_default());
+    }
+
     fn release_all(&mut self) {
-        self.forward = false;
-        self.back = false;
-        self.left = false;
-        self.right = false;
-        self.jump = false;
-        self.sneak = false;
-        self.sprint = false;
+        self.held = [false; Bind::ALL.len()];
+        self.sprint_toggle = false;
+        self.f3_down = false;
+    }
+
+    fn is_held(&self, bind: Bind) -> bool {
+        self.held[bind.index()]
     }
 
     /// Raw mouse delta in pixels (from `DeviceEvent::MouseMotion`).
     pub fn on_mouse_motion(&mut self, dx: f64, dy: f64) {
-        if self.chat.is_none() && self.grab_requested {
+        if self.wants_cursor_grab() && self.focused {
             self.look.0 += dx as f32;
             self.look.1 += dy as f32;
         }
@@ -157,18 +383,41 @@ impl InputState {
         (dx * k, dy * k)
     }
 
+    /// Queued actions since the last call, oldest first.
+    pub fn take_actions(&mut self) -> Vec<Action> {
+        self.actions.drain(..).collect()
+    }
+
     pub fn movement(&self) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
+        let forward = axis(self.is_held(Bind::Forward), self.is_held(Bind::Back));
         world::Input {
-            forward: axis(self.forward, self.back),
-            strafe: axis(self.left, self.right),
-            jump: self.jump,
-            sprint: self.sprint,
+            forward,
+            strafe: axis(self.is_held(Bind::Left), self.is_held(Bind::Right)),
+            jump: self.is_held(Bind::Jump),
+            sprint: forward > 0.0
+                && !self.sneaking()
+                && (self.is_held(Bind::Sprint) || self.sprint_toggle),
         }
     }
 
     pub fn sneaking(&self) -> bool {
-        self.sneak
+        self.is_held(Bind::Sneak)
+    }
+
+    /// Attack button held: vanilla keeps breaking blocks while it stays down.
+    pub fn attack_held(&self) -> bool {
+        self.is_held(Bind::Attack)
+    }
+
+    /// Use button held: vanilla repeats item use every 4 ticks while it stays down.
+    pub fn use_held(&self) -> bool {
+        self.is_held(Bind::Use)
+    }
+
+    /// Tab: show the player list while held.
+    pub fn player_list_held(&self) -> bool {
+        self.is_held(Bind::PlayerList)
     }
 
     pub fn chat_input(&self) -> Option<&str> {
@@ -179,9 +428,10 @@ impl InputState {
         self.submit.take()
     }
 
-    /// True while the game owns the mouse: not in chat and not released with Esc.
+    /// True while the game owns the mouse: in game, not in chat, not released with Esc,
+    /// and the window has focus (the OS drops the grab on focus loss).
     pub fn wants_cursor_grab(&self) -> bool {
-        self.chat.is_none() && self.grab_requested
+        self.chat.is_none() && !self.screen_open && self.grab_requested && self.focused
     }
 }
 
@@ -288,5 +538,92 @@ mod tests {
         assert!(!s.wants_cursor_grab());
         s.on_mouse_motion(10.0, 10.0);
         assert_eq!(s.take_look_delta(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn double_tap_forward_sprints_until_released() {
+        let mut s = InputState::default();
+        let t = Instant::now();
+        let k = |s: &mut InputState, p, dt| {
+            s.key_event(KeyCode::KeyW, p, false, None, t + Duration::from_millis(dt))
+        };
+        k(&mut s, true, 0);
+        k(&mut s, false, 50);
+        assert!(!s.movement().sprint);
+        k(&mut s, true, 200);
+        assert!(s.movement().sprint);
+        s.on_key(KeyCode::ShiftLeft, true, None);
+        assert!(!s.movement().sprint);
+        s.on_key(KeyCode::ShiftLeft, false, None);
+        k(&mut s, false, 900);
+        assert!(!s.movement().sprint);
+        k(&mut s, true, 2000);
+        assert!(!s.movement().sprint);
+    }
+
+    #[test]
+    fn hotbar_drop_f3_and_esc_actions() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::Digit3);
+        press(&mut s, KeyCode::KeyQ);
+        press(&mut s, KeyCode::ControlLeft);
+        press(&mut s, KeyCode::KeyQ);
+        press(&mut s, KeyCode::F3);
+        press(&mut s, KeyCode::KeyB);
+        press(&mut s, KeyCode::Escape);
+        assert_eq!(
+            s.take_actions(),
+            vec![
+                Action::Hotbar(2),
+                Action::Drop { whole_stack: false },
+                Action::Drop { whole_stack: true },
+                Action::ToggleDebug,
+                Action::Debug(DebugCombo::Hitboxes),
+                Action::Pause,
+            ]
+        );
+    }
+
+    #[test]
+    fn click_regrabs_without_attacking_then_attacks() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::Escape);
+        s.take_actions();
+        let t = Instant::now();
+        s.mouse_button(MouseButton::Left, true, t);
+        assert!(s.wants_cursor_grab() && s.take_actions().is_empty());
+        s.mouse_button(MouseButton::Left, false, t);
+        s.mouse_button(MouseButton::Left, true, t);
+        s.mouse_button(MouseButton::Right, true, t);
+        assert!(s.attack_held());
+        assert_eq!(s.take_actions(), vec![Action::Attack, Action::Use]);
+    }
+
+    #[test]
+    fn focus_loss_pauses_and_stops_movement() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        s.set_focused(false);
+        assert_eq!(s.movement().forward, 0.0);
+        assert_eq!(s.take_actions(), vec![Action::Pause]);
+        s.set_focused(true);
+        assert!(!s.wants_cursor_grab());
+    }
+
+    #[test]
+    fn chat_history_walks_up_and_down() {
+        let mut s = InputState::default();
+        for l in ["a", "b"] {
+            press(&mut s, KeyCode::KeyT);
+            typ(&mut s, KeyCode::KeyA, l);
+            press(&mut s, KeyCode::Enter);
+        }
+        press(&mut s, KeyCode::KeyT);
+        press(&mut s, KeyCode::ArrowUp);
+        press(&mut s, KeyCode::ArrowUp);
+        assert_eq!(s.chat_input(), Some("a"));
+        press(&mut s, KeyCode::ArrowDown);
+        press(&mut s, KeyCode::ArrowDown);
+        assert_eq!(s.chat_input(), Some(""));
     }
 }

@@ -837,6 +837,8 @@ version = "0.1.0"
 dependencies = [
  "ferrocraft-net-client",
  "render",
+ "serde_json",
+ "world",
 ]
 
 [[package]]

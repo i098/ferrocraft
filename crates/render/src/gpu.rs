@@ -2,6 +2,7 @@
 
 use crate::assets::{AssetSource, Atlas, Font};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
+use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
 use crate::text::{layout, HudVertex};
 use crate::{Camera, ChunkBlocks, Hud};
 use std::collections::{HashMap, HashSet};
@@ -10,14 +11,17 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const SKY: [f64; 3] = [0.47, 0.65, 1.0];
+const CLEAR_COLOR: [f64; 3] = [0.0; 3];
 const OFFSCREEN: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
     view_proj: [[f32; 4]; 4],
-    sky: [f32; 4],
+    eye: [f32; 4],
+    fog_color: [f32; 4],
+    /// Fog start, fog end, sun brightness, torch flicker factor.
+    fog: [f32; 4],
     screen: [f32; 4],
 }
 
@@ -53,11 +57,17 @@ pub struct Renderer {
     globals: wgpu::Buffer,
     world_group: wgpu::BindGroup,
     hud_group: wgpu::BindGroup,
+    env_group: wgpu::BindGroup,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     hud_pipe: wgpu::RenderPipeline,
+    sky_pipe: wgpu::RenderPipeline,
+    sky_add_pipe: wgpu::RenderPipeline,
+    cloud_pipe: wgpu::RenderPipeline,
     atlas: Atlas,
     font: Option<Font>,
+    env_tex: EnvTexture,
+    environment: Environment,
     blocks: HashMap<(i32, i32), Vec<u16>>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     dirty: HashSet<(i32, i32)>,
@@ -117,6 +127,7 @@ impl Renderer {
         let mut source = assets.and_then(AssetSource::open);
         let atlas = source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets);
         let font = source.as_mut().and_then(Font::load);
+        let env_tex = EnvTexture::load(source.as_mut());
         if font.is_none() {
             eprintln!(
                 "ferrocraft-render: no textures/font/ascii.png in {assets:?}; text is not drawn"
@@ -132,6 +143,7 @@ impl Renderer {
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
         let (fw, fh, frgba) = font_texture(font.as_ref());
         let font_view = upload_texture(&device, &queue, fw, fh, &frgba);
+        let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
@@ -184,8 +196,10 @@ impl Renderer {
         };
         let world_group = group(&atlas_view);
         let hud_group = group(&font_view);
+        let env_group = group(&env_view);
 
-        let [opaque_pipe, water_pipe, hud_pipe] = build_pipelines(&device, &layout_bg, format);
+        let [opaque_pipe, water_pipe, hud_pipe, sky_pipe, sky_add_pipe, cloud_pipe] =
+            build_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
         let depth = depth_view(&device, w, h);
@@ -197,11 +211,17 @@ impl Renderer {
             globals,
             world_group,
             hud_group,
+            env_group,
             opaque_pipe,
             water_pipe,
             hud_pipe,
+            sky_pipe,
+            sky_add_pipe,
+            cloud_pipe,
             atlas,
             font,
+            env_tex,
+            environment: Environment::default(),
             blocks: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
@@ -294,6 +314,7 @@ impl Renderer {
         };
         let get = |k| self.blocks.get(&k).map(Vec::as_slice);
         let hood = Neighborhood {
+            origin: (cx, cz),
             center,
             neighbors: [
                 get((cx - 1, cz)),
@@ -369,15 +390,57 @@ impl Renderer {
         target_size(&self.target)
     }
 
+    /// Time of day, weather and render distance for sky, fog and the light curve.
+    pub fn set_environment(&mut self, environment: Environment) {
+        self.environment = environment;
+    }
+
+    fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
+        if g.indices.is_empty() {
+            return None;
+        }
+        let buf = |contents: &[u8], usage| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents,
+                    usage,
+                })
+        };
+        Some(GpuMesh {
+            vertices: buf(
+                bytemuck::cast_slice(&g.vertices),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            indices: buf(bytemuck::cast_slice(&g.indices), wgpu::BufferUsages::INDEX),
+            count: g.indices.len() as u32,
+        })
+    }
+
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, hud: &Hud) {
         let (w, h) = self.size();
+        let env = self.environment;
+        let sky = env.sky_state();
         let globals = Globals {
             view_proj: view_proj(cam, w as f32 / h as f32),
-            sky: [0.0; 4],
+            eye: [cam.pos[0] as f32, cam.pos[1] as f32, cam.pos[2] as f32, 0.0],
+            fog_color: [sky.fog[0], sky.fog[1], sky.fog[2], 1.0],
+            // Torch flicker is a slow random walk around 0 in vanilla, so the factor stays near 1.5.
+            fog: [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
             screen: [w as f32, h as f32, 0.0, 0.0],
         };
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+
+        let layers = build_sky(&env, &sky, cam.pos);
+        let sky_solid = self.upload_geometry(&layers.solid);
+        let sky_blend = self.upload_geometry(&layers.blend);
+        let sky_add = self.upload_geometry(&layers.additive);
+        let clouds = self
+            .env_tex
+            .has_clouds
+            .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
+            .and_then(|g| self.upload_geometry(&g));
 
         let verts = layout(hud, self.font.as_ref(), w, h);
         let hud_buf = (!verts.is_empty()).then(|| {
@@ -399,9 +462,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: SKY[0],
-                            g: SKY[1],
-                            b: SKY[2],
+                            r: sky.fog[0] as f64 + CLEAR_COLOR[0],
+                            g: sky.fog[1] as f64 + CLEAR_COLOR[1],
+                            b: sky.fog[2] as f64 + CLEAR_COLOR[2],
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -418,6 +481,15 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            pass.set_bind_group(0, &self.env_group, &[]);
+            pass.set_pipeline(&self.sky_pipe);
+            for m in [&sky_solid, &sky_blend].into_iter().flatten() {
+                draw_mesh(&mut pass, m);
+            }
+            pass.set_pipeline(&self.sky_add_pipe);
+            if let Some(m) = &sky_add {
+                draw_mesh(&mut pass, m);
+            }
             pass.set_bind_group(0, &self.world_group, &[]);
             pass.set_pipeline(&self.opaque_pipe);
             for m in self.meshes.values().filter_map(|m| m.opaque.as_ref()) {
@@ -425,6 +497,11 @@ impl Renderer {
             }
             pass.set_pipeline(&self.water_pipe);
             for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {
+                draw_mesh(&mut pass, m);
+            }
+            if let Some(m) = &clouds {
+                pass.set_bind_group(0, &self.env_group, &[]);
+                pass.set_pipeline(&self.cloud_pipe);
                 draw_mesh(&mut pass, m);
             }
             if let Some(buf) = &hud_buf {
@@ -490,7 +567,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 3] {
+) -> [wgpu::RenderPipeline; 6] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -500,12 +577,24 @@ fn build_pipelines(
         bind_group_layouts: &[layout_bg],
         push_constant_ranges: &[],
     });
-    let world_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
+    let world_attrs =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Float32x2];
     let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
+    let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+    // Vanilla draws the sun and moon with `SRC_ALPHA, ONE`.
+    let additive = Some(wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent::OVER,
+    });
     let pipe = |vs: &str,
+                fs: &str,
                 stride: usize,
                 attrs: &[wgpu::VertexAttribute],
-                blend: bool,
+                blend: Option<wgpu::BlendState>,
                 depth_write: bool,
                 depth: bool,
                 cull: bool| {
@@ -524,11 +613,11 @@ fn build_pipelines(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_world"),
+                entry_point: Some(fs),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -553,34 +642,75 @@ fn build_pipelines(
             cache: None,
         })
     };
+    let stride = std::mem::size_of::<Vertex>();
     let opaque_pipe = pipe(
         "vs_world",
-        std::mem::size_of::<Vertex>(),
+        "fs_world",
+        stride,
         &world_attrs,
-        false,
+        None,
         true,
         true,
         true,
     );
     let water_pipe = pipe(
         "vs_world",
-        std::mem::size_of::<Vertex>(),
+        "fs_world",
+        stride,
         &world_attrs,
-        true,
+        alpha,
         false,
         true,
         false,
     );
     let hud_pipe = pipe(
         "vs_hud",
+        "fs_hud",
         std::mem::size_of::<HudVertex>(),
         &hud_attrs,
-        true,
+        alpha,
         false,
         false,
         false,
     );
-    [opaque_pipe, water_pipe, hud_pipe]
+    let sky_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        false,
+        false,
+    );
+    let sky_add_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        false,
+        false,
+    );
+    let cloud_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
+    [
+        opaque_pipe,
+        water_pipe,
+        hud_pipe,
+        sky_pipe,
+        sky_add_pipe,
+        cloud_pipe,
+    ]
 }
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

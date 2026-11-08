@@ -480,7 +480,7 @@ impl Particles {
 fn sprite_uv(p: &Particle, atlas: &Atlas) -> (bool, [[f32; 2]; 2]) {
     match p.sprite {
         Sprite::Block { state, jitter } => {
-            let name = crate::blocks::look(state >> 4).side;
+            let name = crate::blocks::look(state).tex[crate::blocks::NORTH];
             let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
             let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
             (true, [a, b])
@@ -515,6 +515,7 @@ fn push_quad(
             pos,
             uv: [uv[u][0], uv[v][1]],
             color,
+            light: [1.0, 1.0],
         });
     }
 }

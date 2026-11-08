@@ -63,7 +63,7 @@ fn renders_synthetic_chunks_to_png() {
     );
     assert_eq!(
         px(w - 5, 5),
-        [120, 166, 255, 255],
+        [121, 167, 255, 255],
         "top-right shows the sky clear color"
     );
 

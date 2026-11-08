@@ -127,7 +127,16 @@ impl Atlas {
         for (i, name) in names.iter().enumerate() {
             let cell = i + 1;
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
-            let image = source.read(&path).and_then(|b| decode_png(&b));
+            let mut image = source.read(&path).and_then(|b| decode_png(&b));
+            if *name == "grass_side" {
+                // Vanilla draws the tinted overlay over the side; the tint is constant here, so bake it.
+                let overlay = source
+                    .read("assets/minecraft/textures/blocks/grass_side_overlay.png")
+                    .and_then(|b| decode_png(&b));
+                if let (Some(base), Some(over)) = (image.as_mut(), overlay) {
+                    bake_overlay(base, &over, crate::blocks::rgb(crate::blocks::GRASS_COLOR));
+                }
+            }
             loaded += usize::from(image.is_some());
             blit(&mut rgba, w, cell, &image.unwrap_or_else(missing_tile));
             cells.insert(*name, cell as u32);
@@ -185,6 +194,26 @@ fn blit(atlas: &mut [u8], atlas_width: usize, cell: usize, image: &Image) {
             let src = (sy * image.width + sx) * 4;
             let dst = ((oy + y) * atlas_width + ox + x) * 4;
             atlas[dst..dst + 4].copy_from_slice(&image.rgba[src..src + 4]);
+        }
+    }
+}
+
+/// Alpha-composite `over` (multiplied by `tint`) onto `base`; ignored when the sizes differ.
+fn bake_overlay(base: &mut Image, over: &Image, tint: [f32; 3]) {
+    if (base.width, base.height) != (over.width, over.height) {
+        return;
+    }
+    for (b, o) in base
+        .rgba
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(over.rgba.as_chunks::<4>().0)
+    {
+        let a = o[3] as f32 / 255.0;
+        for c in 0..3 {
+            let top = o[c] as f32 * tint[c];
+            b[c] = (top * a + b[c] as f32 * (1.0 - a)) as u8;
         }
     }
 }

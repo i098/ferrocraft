@@ -218,6 +218,8 @@ pub struct Frame {
     /// The mouse was grabbed by a click this tick: `setIngameFocus`.
     pub grabbed: bool,
     pub creative: bool,
+    /// Adventure or spectator: `clickBlock` refuses, but the swing still happens.
+    pub no_dig: bool,
     pub on_ground: bool,
     pub target: Option<Hit>,
 }
@@ -286,6 +288,9 @@ impl Digger {
 
     /// `PlayerControllerMP.clickBlock`.
     fn click_block(&mut self, f: &Frame, hit: Hit, w: &mut impl DigWorld, out: &mut Vec<Action>) {
+        if f.no_dig {
+            return;
+        }
         let start = |status, pos| Action::Dig {
             status,
             pos,
@@ -319,6 +324,9 @@ impl Digger {
         w: &mut impl DigWorld,
         out: &mut Vec<Action>,
     ) -> bool {
+        if f.no_dig {
+            return false;
+        }
         if self.hit_delay > 0 {
             self.hit_delay -= 1;
             return true;

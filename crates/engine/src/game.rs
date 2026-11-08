@@ -215,15 +215,13 @@ impl Game {
         let Some(p) = &self.player else {
             return (actions, Vec::new());
         };
-        if self.gamemode > CREATIVE {
-            return (actions, Vec::new());
-        }
         let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
         let frame = Frame {
             held: attack.held,
             presses: attack.presses,
             grabbed: attack.grabbed,
             creative: self.creative(),
+            no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
             target: self.target(eye),
         };
@@ -461,6 +459,6 @@ mod dig_tests {
             presses: 1,
             grabbed: false,
         };
-        assert_eq!(g.dig_tick(attack), (vec![], vec![]));
+        assert_eq!(g.dig_tick(attack), (vec![Action::Swing], vec![]));
     }
 }

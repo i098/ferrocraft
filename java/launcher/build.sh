@@ -5,6 +5,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=$(realpath -m "$1")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-javac -source 8 -target 8 -Xlint:-options -d "$tmp" $(find "$here/src" -name '*.java')
+find "$here/src" -name '*.java' -exec javac -source 8 -target 8 -Xlint:-options -d "$tmp" {} +
 mkdir -p "$(dirname "$out")"
 jar cf "$out" -C "$tmp" .

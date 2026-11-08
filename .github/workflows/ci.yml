@@ -22,7 +22,7 @@ jobs:
       - name: Install software Vulkan driver (lavapipe) for the render test
         run: |
           sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
         with:

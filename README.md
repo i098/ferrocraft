@@ -3,7 +3,7 @@
 A Minecraft 1.8.9 client rewritten in Rust. Goal: vanilla behavior on PvP servers like Hypixel, and original Forge mod packs run through a Java 8 mod host.
 
 ## Status
-In development. Scaffold and protocol codec slices landed; mod-host slice next. Not yet playable.
+In development. The engine joins a local offline 1.8.9 server, renders the world, moves, and chats. Mod-host slice next.
 
 ## Quick start
 

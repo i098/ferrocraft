@@ -6,6 +6,7 @@ flowchart TD
     Root --> Java["java/"]
     Crates --> Engine["engine: game loop, ECS, tick scheduling (core)"]
     Crates --> Protocol["protocol: 1.8.9 protocol 47 codec + packets"]
+    Crates --> NetClient["net-client: 1.8.9 client session"]
     Crates --> World["world: chunks, blocks, entities, physics (vanilla ports)"]
     Crates --> Render["render: wgpu renderer, GUI/font/overlay draw targets"]
     Crates --> InputAudio["input-audio: input, audio"]

@@ -8,10 +8,16 @@ trap 'rm -rf "$work"' EXIT
 : "${JAVA_HOME:?set JAVA_HOME to a JDK 8}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
-cargo build --manifest-path "$root/crates/launcher/Cargo.toml"
+cargo build --manifest-path "$root/Cargo.toml" -p ferrocraft-launcher -p ferrocraft-engine
 tgt=$(cargo metadata --manifest-path "$root/crates/launcher/Cargo.toml" --format-version 1 --no-deps | python3 -c 'import json,sys;print(json.load(sys.stdin)["target_directory"])')
 "$root/java/launcher/build.sh" "$work/boot.jar"
-"$tgt/debug/ferrocraft-launcher" install --minecraft-dir "$work/mc" --boot-jar "$work/boot.jar" --engine "$tgt/debug/ferrocraft-engine-window"
+"$tgt/debug/ferrocraft-launcher" install --minecraft-dir "$work/mc" --boot-jar "$work/boot.jar" --engine "$tgt/debug/ferrocraft-engine"
+
+# The engine joins this local offline server (online-mode=false, 127.0.0.1:25565).
+FC_TESTSERVER_DIR="$work/server" FC_JAVA="$JAVA_HOME/bin/java" "$root/harness/testserver/run.sh" > "$work/server.log" 2>&1 &
+trap 'kill $! 2>/dev/null; rm -rf "$work"' EXIT
+for _ in $(seq 1 120); do grep -q "Done (" "$work/server.log" && break; sleep 1; done
+grep -q "Done (" "$work/server.log"
 
 # Polls X until a top-level window with the given title exists.
 finder='import sys, time
@@ -37,13 +43,16 @@ FERROCRAFT_WINDOW_SECS=20 xvfb-run -a -s "-screen 0 1280x720x24" sh -c '
 ' sh "$work/mc" "$work" "$finder" || { cat "$work/game.log"; exit 1; }
 grep -E "^log_raw|^terminated|^launched" "$work/game.log"
 grep -q 'ClientBrandRetriever=ferrocraft from file:.*boot-0.1.0.jar' "$work/game.log"
-grep -q 'ferrocraft-engine: window' "$work/game.log"
+grep -q 'ferrocraft-engine: joined' "$work/game.log"
+if grep -q 'text is not drawn' "$work/game.log"; then echo "font missing in portablemc leg" >&2; exit 1; fi
 
 # Official launcher order: libraries first, vanilla client jar last (portablemc above puts it first).
+# portablemc stores the vanilla client jar as versions/ferrocraft-1.8.9/ferrocraft-1.8.9.jar.
 libs=$(find "$work/mc/libraries" -name '*.jar' ! -name 'boot-*' | tr '\n' ':')
-out=$(FERROCRAFT_WINDOW_SECS=1 xvfb-run -a java -cp "$work/mc/libraries/net/ferrocraft/boot/0.1.0/boot-0.1.0.jar:${libs}$work/mc/versions/1.8.9/1.8.9.jar" \
+out=$(FERROCRAFT_WINDOW_SECS=1 xvfb-run -a java -cp "$work/mc/libraries/net/ferrocraft/boot/0.1.0/boot-0.1.0.jar:${libs}$work/mc/versions/ferrocraft-1.8.9/ferrocraft-1.8.9.jar" \
   net.ferrocraft.boot.Main --gameDir "$work/profile")
 echo "$out"
 echo "$out" | grep -q 'ClientBrandRetriever=ferrocraft from file:.*boot-0.1.0.jar'
-echo "$out" | grep -q 'ferrocraft-engine: window'
+echo "$out" | grep -q 'ferrocraft-engine: joined'
+if echo "$out" | grep -q 'text is not drawn'; then echo "font missing in official-order leg" >&2; exit 1; fi
 echo "SMOKE OK"

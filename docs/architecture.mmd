@@ -7,6 +7,7 @@ flowchart TB
         L["launcher: install and boot"]
         E["engine: game loop, ECS, tick scheduling"]
         P["protocol: 1.8.9 protocol 47 codec"]
+        N["net-client: 1.8.9 client session"]
         W["world: chunks, blocks, entities, physics"]
         D["render: wgpu, GUI/font/overlay targets"]
         I["input-audio"]
@@ -28,6 +29,7 @@ flowchart TB
     IN --> L
     L --> E
     E --> P
+    E --> N
     E --> W
     E --> D
     E --> I

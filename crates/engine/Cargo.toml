@@ -1,0 +1,18 @@
+[package]
+name = "ferrocraft-engine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Ferrocraft 1.8.9 game loop: session, chunks, physics at 20 TPS, renderer, input, chat"
+
+[[bin]]
+name = "ferrocraft-engine"
+path = "src/main.rs"
+
+[dependencies]
+world = { path = "../world" }
+ferrocraft-net-client = { path = "../net-client" }
+render = { path = "../render" }
+input-audio = { path = "../input-audio" }
+winit = "0.30"

@@ -564,7 +564,12 @@ mod tests {
         ] {
             fs::write(&ours, b"x").unwrap();
             let _ = fs::remove_file(&manifest);
-            record(&manifest, &[mods.clone()], &[ours.clone()]).unwrap();
+            record(
+                &manifest,
+                std::slice::from_ref(&mods),
+                std::slice::from_ref(&ours),
+            )
+            .unwrap();
             let mut text = fs::read_to_string(&manifest).unwrap();
             text.push_str(&format!("{bad}\n"));
             fs::write(&manifest, text).unwrap();
@@ -594,7 +599,12 @@ mod tests {
         fs::create_dir_all(&mc).unwrap();
         std::os::unix::fs::symlink(outside.join("ferrocraft"), mc.join("ferrocraft")).unwrap();
         let manifest = tmp.join("manifest.txt");
-        record(&manifest, &[mc.clone()], &[mc.join("ferrocraft")]).unwrap();
+        record(
+            &manifest,
+            std::slice::from_ref(&mc),
+            &[mc.join("ferrocraft")],
+        )
+        .unwrap();
         let (removed, skipped) = uninstall(&manifest).unwrap();
         assert!(removed.is_empty() && skipped.len() == 1);
         assert!(outside.join("ferrocraft/ferrocraft-engine").is_file());

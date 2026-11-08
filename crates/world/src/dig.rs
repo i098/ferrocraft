@@ -65,8 +65,10 @@ pub fn relative_hardness(id: u16, on_ground: bool) -> f32 {
 
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
 /// `None` when the block ray passes through (air, water, lava, fire). Doors, chests, fences,
-/// panes and walls read their neighbours; stairs, which vanilla traces as several boxes, are
-/// full cubes here.
+/// panes, walls and vines read their neighbours. Stairs, which vanilla traces as several boxes,
+/// pistons (29, 33, 34), the brewing stand (117), cocoa (127), tripwire hooks and wires (131,
+/// 132), anvils (145), skulls (144), double plants (175), banners (176, 177) and end rods (198)
+/// are full cubes here.
 pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     let state = at(pos);
     let id = state >> 4;
@@ -77,8 +79,9 @@ pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64
         64 | 71 | 193..=197 => door_at(at, pos, state),
         54 | 146 => chest_box(near().map(|n| n == id)),
         85 | 113 | 188..=192 => fence_box(near().map(|n| fence_connects(id, n))),
-        102 | 160 => pane_box(near().map(|n| opaque_cube(n) || matches!(n, 20 | 95 | 102 | 160))),
+        101 | 102 | 160 => pane_box(near().map(pane_joins)),
         139 => wall_box(near().map(|n| n == 139 || is_gate(n) || opaque_cube(n))),
+        106 => vine_box(state & 15, opaque_cube(at([x, y + 1, z]) >> 4)),
         _ => return state_box(state),
     })
 }
@@ -119,10 +122,19 @@ fn opaque_cube(id: u16) -> bool {
     matches!(
         id,
         1..=5 | 7 | 12 | 13 | 14..=17 | 19 | 21..=25 | 35 | 41..=43 | 45 | 47..=49 | 56..=58
-            | 61 | 62 | 73 | 74 | 80 | 82 | 84 | 87 | 88 | 97..=100 | 103 | 110 | 112
+            | 61 | 62 | 73 | 74 | 80 | 82 | 84 | 87 | 88 | 97..=100 | 110 | 112 | 174
             | 121 | 123 | 124 | 125 | 129 | 133 | 137 | 152 | 153 | 155 | 158 | 159 | 162
             | 168 | 170 | 172 | 173 | 179 | 181
     )
+}
+
+/// `BlockPane.canPaneConnectToBlock`: any opaque-cube block (`isFullBlock`), glass or a pane.
+fn pane_joins(id: u16) -> bool {
+    opaque_cube(id)
+        || matches!(
+            id,
+            20 | 46 | 86 | 89 | 91 | 95 | 101 | 102 | 103 | 160 | 169
+        )
 }
 
 /// `BlockFence.canConnectTo`: its own kind of fence, any gate or an opaque cube.
@@ -205,16 +217,21 @@ fn wall_box(joined: [bool; 4]) -> [f64; 6] {
     [x0, 0.0, z0, x1, top, z1]
 }
 
-/// `BlockVine.setBlockBoundsBasedOnState`: a 1/16 slab on each side the vine clings to, or a
-/// slab under the block above when it clings to none.
-fn vine_box(meta: u16) -> [f64; 6] {
+/// `BlockVine.setBlockBoundsBasedOnState`: a 1/16 slab on each side the vine clings to, and one
+/// under a solid block above; a vine with neither shows the slab under the block above.
+fn vine_box(meta: u16, up: bool) -> [f64; 6] {
     let slabs = [
         (1, [0.0, 0.0, 0.9375, 1.0, 1.0, 1.0]),
         (2, [0.0, 0.0, 0.0, 0.0625, 1.0, 1.0]),
         (4, [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625]),
         (8, [0.9375, 0.0, 0.0, 1.0, 1.0, 1.0]),
+        (16, [0.0, 0.9375, 0.0, 1.0, 1.0, 1.0]),
     ];
-    let mut sides = slabs.iter().filter(|(bit, _)| meta & bit != 0).map(|s| s.1);
+    let clings = meta | if up { 16 } else { 0 };
+    let mut sides = slabs
+        .iter()
+        .filter(|(bit, _)| clings & bit != 0)
+        .map(|s| s.1);
     let Some(first) = sides.next() else {
         return [0.0, 0.9375, 0.0, 1.0, 1.0, 1.0];
     };
@@ -254,7 +271,7 @@ fn mounted_box(id: u16, meta: u16) -> Option<[f64; 6]> {
         77 | 143 => button_box(meta),
         96 | 167 => trapdoor_box(meta),
         107 | 183..=187 => gate_box(meta),
-        106 => vine_box(meta),
+        90 => portal_box(meta),
         _ => return None,
     })
 }
@@ -362,6 +379,7 @@ fn rail_height(shape: u16) -> f64 {
 fn fixed_height(id: u16) -> Option<f64> {
     Some(match id {
         26 => 0.5625,
+        55 | 119 => 0.0625,
         60 => 0.9375,
         93 | 94 | 149 | 150 => 0.125,
         116 => 0.75,
@@ -370,6 +388,15 @@ fn fixed_height(id: u16) -> Option<f64> {
         171 => 0.0625,
         _ => return None,
     })
+}
+
+/// The nether portal pane is thin across its axis: meta 1 runs along x, meta 2 along z.
+fn portal_box(meta: u16) -> [f64; 6] {
+    if meta == 1 {
+        [0.0, 0.0, 0.375, 1.0, 1.0, 0.625]
+    } else {
+        [0.375, 0.0, 0.0, 0.625, 1.0, 1.0]
+    }
 }
 
 fn gate_box(meta: u16) -> [f64; 6] {
@@ -407,6 +434,7 @@ fn standing_box(id: u16) -> Option<[f64; 6]> {
         83 => [0.125, 0.0, 0.125, 0.875, 1.0, 0.875],
         140 => [0.3125, 0.0, 0.3125, 0.6875, 0.375, 0.6875],
         130 => [0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375],
+        122 => [0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375],
         _ => return None,
     })
 }
@@ -624,7 +652,7 @@ impl Digger {
         };
         if f.creative {
             out.push(start(Status::Start, hit.pos));
-            self.destroy(hit.pos, w);
+            self.creative_break(hit, w);
             self.hit_delay = HIT_DELAY;
         } else if !self.hitting || self.current != hit.pos {
             if self.hitting {
@@ -664,7 +692,7 @@ impl Digger {
                 pos: hit.pos,
                 face: hit.face,
             });
-            self.destroy(hit.pos, w);
+            self.creative_break(hit, w);
         } else if self.hitting && self.current == hit.pos {
             let id = w.state(hit.pos) >> 4;
             if id == 0 {
@@ -699,6 +727,25 @@ impl Digger {
             });
             self.hitting = false;
             self.progress = 0.0;
+        }
+    }
+
+    /// `PlayerControllerMP.clickBlockCreative`: `World.extinguishFire` puts out fire beside the
+    /// clicked face and leaves the block; otherwise the block goes.
+    fn creative_break(&mut self, hit: Hit, w: &mut impl DigWorld) {
+        let [x, y, z] = hit.pos;
+        let fire = match hit.face {
+            0 => [x, y - 1, z],
+            1 => [x, y + 1, z],
+            2 => [x, y, z - 1],
+            3 => [x, y, z + 1],
+            4 => [x - 1, y, z],
+            _ => [x + 1, y, z],
+        };
+        if w.state(fire) >> 4 == 51 {
+            w.remove(fire);
+        } else {
+            self.destroy(hit.pos, w);
         }
     }
 
@@ -1021,5 +1068,35 @@ mod tests {
         };
         let hit = raycast(&double, at_edge, 0.0, 0.0, 4.5);
         assert_eq!(hit.map(|h| h.pos), Some([0, 64, 2]));
+    }
+
+    #[test]
+    fn creative_punch_puts_out_fire_and_keeps_the_block() {
+        // Fire above netherrack: the ray lands on the netherrack's top face, the server only extinguishes.
+        let mut w = Blocks(HashMap::from([(AT.pos, 87 << 4), ([0, 64, 0], 51 << 4)]));
+        let mut out = vec![];
+        let f = Frame {
+            presses: 1,
+            ..held(true)
+        };
+        Digger::default().tick(&f, &mut w, &mut out);
+        assert_eq!(w.state(AT.pos), 87 << 4);
+        assert_eq!(w.state([0, 64, 0]), 0);
+        assert!(out.contains(&Action::Dig {
+            status: Status::Start,
+            pos: AT.pos,
+            face: 1
+        }));
+    }
+
+    #[test]
+    fn fence_does_not_join_a_melon() {
+        // A fence post beside a melon stays a post: a ray along +z at x 0.9 passes it.
+        let at = |p: [i32; 3]| match p {
+            [0, 64, 2] => 85 << 4,
+            [1, 64, 2] => 103 << 4,
+            _ => 0,
+        };
+        assert_eq!(raycast(&at, [0.9, 64.5, 0.5], 0.0, 0.0, 4.5), None);
     }
 }

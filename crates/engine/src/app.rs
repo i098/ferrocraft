@@ -4,14 +4,14 @@ use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
 use input_audio::InputState;
-use render::{Camera, Hud, Renderer};
-use std::path::Path;
+use render::{Camera, ChunkBlocks, Hud, Renderer};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{CursorGrabMode, Window, WindowId};
+use world::chunk::Chunk;
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
@@ -55,7 +55,7 @@ impl App {
             match effect {
                 Effect::Upload(x, z) => {
                     if let Some(c) = self.game.store.get(x, z) {
-                        r.upload_chunk(c);
+                        r.upload_chunk(&View(c));
                     }
                 }
                 Effect::Remove(x, z) => r.remove_chunk(x, z),
@@ -74,6 +74,7 @@ impl App {
                 self.send_result(r);
             }
             let (dx, dy) = self.input.take_look_delta();
+            self.game.look(dx, dy);
             self.game.tick(self.input.movement());
             if let Some(p) = &self.game.player {
                 let [x, y, z] = p.pos;
@@ -159,8 +160,10 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes().with_title("Ferrocraft 1.8.9");
         let window = Arc::new(el.create_window(attrs).expect("create window"));
-        let assets = self.args.assets_dir.as_deref().unwrap_or(Path::new(""));
-        self.renderer = Some(Renderer::new(window.clone(), assets));
+        self.renderer = Some(Renderer::new(
+            window.clone(),
+            self.args.assets_dir.as_deref(),
+        ));
         self.window = Some(window);
     }
 
@@ -194,5 +197,20 @@ impl ApplicationHandler for App {
         if let Some(w) = &self.window {
             w.request_redraw();
         }
+    }
+}
+
+/// Lets the renderer read a `world` chunk.
+struct View<'a>(&'a Chunk);
+
+impl ChunkBlocks for View<'_> {
+    fn chunk_x(&self) -> i32 {
+        self.0.x
+    }
+    fn chunk_z(&self) -> i32 {
+        self.0.z
+    }
+    fn block(&self, x: usize, y: usize, z: usize) -> u16 {
+        self.0.block(x, y, z)
     }
 }

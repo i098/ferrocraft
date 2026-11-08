@@ -415,118 +415,162 @@ impl Creative {
         self.clear_search = true;
         let shift = mode == 1;
         let mode = if id == OUTSIDE && mode == 0 { 4 } else { mode };
-        let max = |s: &ItemStack| inv::max_stack(s);
-        if slot.is_none() && self.tab != INVENTORY && mode != 5 {
-            if let Some(mut c) = inv.cursor.take() {
-                if button == 0 {
-                    Self::throw(c, out);
-                } else if button == 1 {
-                    Self::throw(with_count(&c, 1), out);
-                    c.count -= 1;
-                    inv.cursor = (c.count > 0).then_some(c);
-                } else {
-                    inv.cursor = Some(c);
-                }
+        match (self.tab == INVENTORY, slot) {
+            (true, Some(BIN)) => Self::click_bin(inv, shift, out),
+            (true, _) => Self::click_inventory_tab(inv, slot, id, button, mode, out),
+            (false, _) if mode == 5 => Self::click_hotbar_row(inv, slot, id, button, mode, out),
+            (false, None) => Self::click_outside(inv, button, out),
+            (false, Some(s)) if s < GRID => self.click_grid(inv, s, button, mode, shift, out),
+            (false, Some(_)) => Self::click_hotbar_row(inv, slot, id, button, mode, out),
+        }
+    }
+
+    /// A click outside the window: left drops the cursor stack, right drops one item.
+    fn click_outside(inv: &mut Inventory, button: u8, out: &mut Vec<Request>) {
+        let Some(mut c) = inv.cursor.take() else {
+            return;
+        };
+        match button {
+            0 => Self::throw(c, out),
+            1 => {
+                Self::throw(with_count(&c, 1), out);
+                c.count -= 1;
+                inv.cursor = (c.count > 0).then_some(c);
             }
-        } else if self.tab == INVENTORY && slot == Some(BIN) {
-            if shift {
-                for j in 0..PLAYER_SLOTS {
-                    out.push(Request::Creative {
-                        slot: j as i16,
-                        item: None,
-                    });
-                    inv.player[j] = None;
-                }
-            } else {
+            _ => inv.cursor = Some(c),
+        }
+    }
+
+    /// The destroy slot: shift clears the whole player inventory, else the cursor.
+    fn click_bin(inv: &mut Inventory, shift: bool, out: &mut Vec<Request>) {
+        if !shift {
+            inv.cursor = None;
+            return;
+        }
+        for j in 0..PLAYER_SLOTS {
+            out.push(Request::Creative {
+                slot: j as i16,
+                item: None,
+            });
+            inv.player[j] = None;
+        }
+    }
+
+    /// The survival inventory tab: drops leave as `C10` with slot -1; other clicks run
+    /// `slotClick` on the player window and send each changed slot.
+    fn click_inventory_tab(
+        inv: &mut Inventory,
+        slot: Option<usize>,
+        id: i16,
+        button: u8,
+        mode: i8,
+        out: &mut Vec<Request>,
+    ) {
+        let held = slot.and_then(|s| Some((s, inv.player[s].clone()?)));
+        if let (4, Some((s, st))) = (mode, held) {
+            let all = inv::max_stack(&st);
+            let n = (if button == 0 { 1 } else { all }).min(i32::from(st.count));
+            let left = i32::from(st.count) - n;
+            Self::throw(with_count(&st, n), out);
+            inv.player[s] = (left > 0).then(|| with_count(&st, left));
+        } else if let Some(c) = inv.cursor.take_if(|_| mode == 4) {
+            Self::throw(c, out);
+        } else {
+            let before = inv.player.clone();
+            inv.slot_click(
+                slot.map_or(i32::from(id), |s| s as i32),
+                i32::from(button),
+                mode,
+            );
+            Self::send_changes(&before, inv, out);
+        }
+    }
+
+    /// A click on the item grid of a creative tab.
+    fn click_grid(
+        &self,
+        inv: &mut Inventory,
+        s: usize,
+        button: u8,
+        mode: i8,
+        shift: bool,
+        out: &mut Vec<Request>,
+    ) {
+        let Some(p) = self.grid[s].clone() else {
+            if !matches!(mode, 2..=4) {
                 inv.cursor = None;
             }
-        } else if self.tab == INVENTORY {
-            let held = slot.and_then(|s| Some((s, inv.player[s].clone()?)));
-            if let (4, Some((s, st))) = (mode, held) {
-                let n = (if button == 0 { 1 } else { max(&st) }).min(i32::from(st.count));
-                let left = i32::from(st.count) - n;
-                Self::throw(with_count(&st, n), out);
-                inv.player[s] = (left > 0).then(|| with_count(&st, left));
-            } else if let Some(c) = inv.cursor.take_if(|_| mode == 4) {
-                Self::throw(c, out);
-            } else {
+            return;
+        };
+        let full = with_count(&p, inv::max_stack(&p));
+        match mode {
+            2 if button < 9 => {
                 let before = inv.player.clone();
-                inv.slot_click(
-                    slot.map_or(i32::from(id), |s| s as i32),
-                    i32::from(button),
-                    mode,
-                );
+                inv.player[36 + usize::from(button)] = Some(full);
                 Self::send_changes(&before, inv, out);
             }
-        } else if let Some(s) = slot.filter(|&s| s < GRID && mode != 5) {
-            let picked = self.grid[s].clone();
-            match mode {
-                2 => {
-                    if let (Some(p), true) = (&picked, button < 9) {
-                        let before = inv.player.clone();
-                        inv.player[36 + usize::from(button)] = Some(with_count(p, max(p)));
-                        Self::send_changes(&before, inv, out);
-                    }
+            2 => {}
+            3 => {
+                if inv.cursor.is_none() {
+                    inv.cursor = Some(full);
                 }
-                3 => {
-                    if let (None, Some(p)) = (&inv.cursor, &picked) {
-                        inv.cursor = Some(with_count(p, max(p)));
-                    }
-                }
-                4 => {
-                    if let Some(p) = &picked {
-                        Self::throw(with_count(p, if button == 0 { 1 } else { max(p) }), out);
-                    }
-                }
-                _ => match (inv.cursor.as_mut(), &picked) {
-                    (Some(c), Some(p)) if c.id == p.id && c.damage == p.damage => {
-                        if button == 0 {
-                            if shift {
-                                c.count = max(c) as i8;
-                            } else if i32::from(c.count) < max(c) {
-                                c.count += 1;
-                            }
-                        } else if c.count <= 1 {
-                            inv.cursor = None;
-                        } else {
-                            c.count -= 1;
-                        }
-                    }
-                    (None, Some(p)) => {
-                        inv.cursor = Some(if shift {
-                            with_count(p, max(p))
-                        } else {
-                            p.clone()
-                        });
-                    }
-                    _ => inv.cursor = None,
-                },
             }
-        } else {
-            // ContainerCreative.slotClick on the hotbar row (screen slots 45..54 are player 36..45).
-            let mapped = slot.map_or(i32::from(id), |s| (36 + s - GRID) as i32);
-            if mode == 1 {
-                if let Some(s) = slot {
-                    inv.player[36 + s - GRID] = None;
-                }
-            } else if mode == 6 {
-                Self::collect_hotbar(inv, button);
-            } else {
+            4 => Self::throw(if button == 0 { with_count(&p, 1) } else { full }, out),
+            _ => Self::grid_pickup(inv, p, full, button, shift),
+        }
+    }
+
+    /// A pickup click on a grid item: a matching cursor stack grows or shrinks by one,
+    /// an empty cursor takes the item (shift: a full stack), anything else clears the cursor.
+    fn grid_pickup(inv: &mut Inventory, p: ItemStack, full: ItemStack, button: u8, shift: bool) {
+        let Some(c) = inv.cursor.as_mut() else {
+            inv.cursor = Some(if shift { full } else { p });
+            return;
+        };
+        if c.id != p.id || c.damage != p.damage {
+            inv.cursor = None;
+        } else if button != 0 {
+            c.count -= 1;
+            if c.count <= 0 {
+                inv.cursor = None;
+            }
+        } else if shift {
+            c.count = full.count;
+        } else if c.count < full.count {
+            c.count += 1;
+        }
+    }
+
+    /// `ContainerCreative.slotClick` on the hotbar row (screen slots 45..54 are player 36..45).
+    fn click_hotbar_row(
+        inv: &mut Inventory,
+        slot: Option<usize>,
+        id: i16,
+        button: u8,
+        mode: i8,
+        out: &mut Vec<Request>,
+    ) {
+        let mapped = slot.map_or(i32::from(id), |s| (36 + s - GRID) as i32);
+        match (mode, slot) {
+            (1, Some(s)) => inv.player[36 + s - GRID] = None,
+            (1, None) => {}
+            (6, _) => Self::collect_hotbar(inv, button),
+            _ => {
                 inv.slot_click(mapped, i32::from(button), mode);
             }
-            if mode == 5 && button & 3 == 2 {
-                for k in 36..45 {
-                    out.push(Request::Creative {
-                        slot: k as i16,
-                        item: inv.player[k].clone(),
-                    });
-                }
-            } else if let Some(s) = slot {
+        }
+        if mode == 5 && button & 3 == 2 {
+            for k in 36..45 {
                 out.push(Request::Creative {
-                    slot: (s - 9) as i16,
-                    item: inv.player[s - 9].clone(),
+                    slot: k as i16,
+                    item: inv.player[k].clone(),
                 });
             }
+        } else if let Some(s) = slot {
+            out.push(Request::Creative {
+                slot: (s - 9) as i16,
+                item: inv.player[s - 9].clone(),
+            });
         }
     }
 
@@ -541,25 +585,26 @@ impl Creative {
         } else {
             (36..45).rev().collect()
         };
-        for pass in 0..2 {
-            for &k in &order {
-                if i32::from(c.count) >= max {
-                    break;
-                }
-                let Some(st) = inv.player[k].as_mut() else {
-                    continue;
-                };
-                if !inv::fits(Some(st), &c, true)
-                    || (pass == 0 && i32::from(st.count) == inv::max_stack(st))
-                {
-                    continue;
-                }
-                let n = (max - i32::from(c.count)).min(i32::from(st.count));
-                st.count -= n as i8;
-                c.count += n as i8;
-                if st.count <= 0 {
-                    inv.player[k] = None;
-                }
+        // Pass 0 skips full stacks, pass 1 takes from them too.
+        for (pass, &k) in [0, 1]
+            .iter()
+            .flat_map(|p| order.iter().map(move |k| (*p, k)))
+        {
+            if i32::from(c.count) >= max {
+                break;
+            }
+            let Some(st) = inv.player[k].as_mut() else {
+                continue;
+            };
+            let full = i32::from(st.count) == inv::max_stack(st);
+            if !inv::fits(Some(st), &c, true) || (pass == 0 && full) {
+                continue;
+            }
+            let n = (max - i32::from(c.count)).min(i32::from(st.count));
+            st.count -= n as i8;
+            c.count += n as i8;
+            if st.count <= 0 {
+                inv.player[k] = None;
             }
         }
         inv.cursor = Some(c);

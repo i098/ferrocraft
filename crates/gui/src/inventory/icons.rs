@@ -385,6 +385,110 @@ fn skull(kind: i16) -> Vec<Face> {
     f
 }
 
+/// The `gui` display transform of the nearest model in the chain that has one.
+fn gui_display(chain: &[(String, Value)]) -> Display {
+    chain
+        .iter()
+        .find_map(|(_, v)| v["display"].get("gui"))
+        .map_or(IDENTITY, |g| Display {
+            translation: g
+                .get("translation")
+                .and_then(v3)
+                .map_or([0.0; 3], |t| t.map(|c| (c / 16.0).clamp(-1.5, 1.5))),
+            rotation: g.get("rotation").and_then(v3).unwrap_or([0.0; 3]),
+            scale: g
+                .get("scale")
+                .and_then(v3)
+                .map_or([1.0; 3], |s| s.map(|c| c.clamp(-4.0, 4.0))),
+        })
+}
+
+/// Texture variables of the chain; a child's value hides its parents'.
+fn texture_map(chain: &[(String, Value)]) -> HashMap<String, String> {
+    let mut textures = HashMap::new();
+    for (_, v) in chain {
+        for (k, t) in v["textures"].as_object().into_iter().flatten() {
+            if let Some(t) = t.as_str() {
+                textures.entry(k.clone()).or_insert_with(|| t.to_string());
+            }
+        }
+    }
+    textures
+}
+
+/// Follows `#variable` references to a texture path; gives up after 8 hops.
+fn resolve_texture(textures: &HashMap<String, String>, t: &str) -> Option<String> {
+    let mut t = t.to_string();
+    for _ in 0..8 {
+        match t.strip_prefix('#') {
+            Some(k) => t = textures.get(k)?.clone(),
+            None => return Some(texture_path(&t)),
+        }
+    }
+    None
+}
+
+/// The faces `TileEntityItemStackRenderer` draws for a `builtin/entity` item.
+fn entity_faces(name: &str) -> Option<Vec<Face>> {
+    Some(match name {
+        "chest" => chest("textures/entity/chest/normal.png"),
+        "trapped_chest" => chest("textures/entity/chest/trapped.png"),
+        "ender_chest" => chest("textures/entity/chest/ender.png"),
+        n if n.starts_with("skull_") => {
+            let kinds = [
+                "skull_skeleton",
+                "skull_wither",
+                "skull_zombie",
+                "skull_char",
+                "skull_creeper",
+            ];
+            skull(kinds.iter().position(|k| *k == n).unwrap_or(0) as i16)
+        }
+        // shortcut: banners (TileEntityBannerRenderer with patterns) draw nothing yet; add when banner patterns are ported.
+        _ => return None,
+    })
+}
+
+/// The faces of the `elements` of the nearest model in the chain, as `FaceBakery` bakes them.
+fn element_faces(
+    chain: &[(String, Value)],
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Option<Vec<Face>> {
+    let elements = chain.iter().find_map(|(_, v)| v["elements"].as_array())?;
+    let mut faces = Vec::new();
+    for e in elements {
+        let (Some(f), Some(t)) = (e.get("from").and_then(v3), e.get("to").and_then(v3)) else {
+            continue;
+        };
+        for (dir, face) in e["faces"].as_object().into_iter().flatten() {
+            let Some((pts, default_uv)) = element_face(dir, f, t) else {
+                continue;
+            };
+            let Some(tex) = face["texture"].as_str().and_then(resolve) else {
+                continue;
+            };
+            let uv = face.get("uv").and_then(|u| {
+                let a = u.as_array()?;
+                Some([0, 1, 2, 3].map(|i| a.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32))
+            });
+            let [u0, v0, u1, v1] = uv.unwrap_or(default_uv).map(|c| c / 16.0);
+            let corners = [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
+            let r = (face["rotation"].as_u64().unwrap_or(0) / 90) as usize;
+            let pts = pts.map(|p| {
+                let p = e.get("rotation").map_or(p, |rot| element_rotation(rot, p));
+                p.map(|c| c / 16.0)
+            });
+            faces.push(Face {
+                pts,
+                uv: [0, 1, 2, 3].map(|k| corners[(k + r) % 4]),
+                tex,
+                tint: face["tintindex"].as_u64().map(|i| i as usize),
+            });
+        }
+    }
+    Some(faces)
+}
+
 /// A model and its parents, child first.
 fn chain(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, name: &str) -> Vec<(String, Value)> {
     let mut out = Vec::new();
@@ -434,115 +538,29 @@ impl Icons {
 
     fn load(&mut self, read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, name: &str) -> Option<Model> {
         let chain = chain(read, &format!("item/{name}"));
-        let gui = chain
-            .iter()
-            .find_map(|(_, v)| v["display"].get("gui"))
-            .map_or(IDENTITY, |g| Display {
-                translation: g
-                    .get("translation")
-                    .and_then(v3)
-                    .map_or([0.0; 3], |t| t.map(|c| (c / 16.0).clamp(-1.5, 1.5))),
-                rotation: g.get("rotation").and_then(v3).unwrap_or([0.0; 3]),
-                scale: g
-                    .get("scale")
-                    .and_then(v3)
-                    .map_or([1.0; 3], |s| s.map(|c| c.clamp(-4.0, 4.0))),
-            });
-        let mut textures: HashMap<String, String> = HashMap::new();
-        for (_, v) in &chain {
-            for (k, t) in v["textures"].as_object().into_iter().flatten() {
-                if let Some(t) = t.as_str() {
-                    textures.entry(k.clone()).or_insert_with(|| t.to_string());
-                }
-            }
-        }
-        let resolve = |t: &str| -> Option<String> {
-            let mut t = t.to_string();
-            for _ in 0..8 {
-                match t.strip_prefix('#') {
-                    Some(k) => t = textures.get(k)?.clone(),
-                    None => return Some(texture_path(&t)),
-                }
-            }
-            None
-        };
-        let root = chain.last().map(|(n, _)| n.as_str());
-        let model = match root {
-            Some("builtin/generated" | "builtin/compass" | "builtin/clock") => {
-                let layers: Vec<String> = (0..5)
+        let textures = texture_map(&chain);
+        let resolve = |t: &str| resolve_texture(&textures, t);
+        let model = match chain.last().map(|(n, _)| n.as_str()) {
+            Some("builtin/generated" | "builtin/compass" | "builtin/clock") => Model::Flat(
+                (0..5)
                     .map_while(|i| resolve(&format!("#layer{i}")))
-                    .collect();
-                for l in &layers {
-                    self.frame(read, l);
-                }
-                return Some(Model::Flat(layers));
-            }
-            Some("builtin/entity") => {
-                let faces = match name {
-                    "chest" => chest("textures/entity/chest/normal.png"),
-                    "trapped_chest" => chest("textures/entity/chest/trapped.png"),
-                    "ender_chest" => chest("textures/entity/chest/ender.png"),
-                    n if n.starts_with("skull_") => {
-                        let kinds = [
-                            "skull_skeleton",
-                            "skull_wither",
-                            "skull_zombie",
-                            "skull_char",
-                            "skull_creeper",
-                        ];
-                        skull(kinds.iter().position(|k| *k == n).unwrap_or(0) as i16)
-                    }
-                    // shortcut: banners (TileEntityBannerRenderer with patterns) draw nothing yet; add when banner patterns are ported.
-                    _ => return None,
-                };
-                Model::Solid { faces, gui }
-            }
-            _ => {
-                let elements = chain.iter().find_map(|(_, v)| v["elements"].as_array())?;
-                let mut faces = Vec::new();
-                for e in elements {
-                    let (Some(f), Some(t)) = (e.get("from").and_then(v3), e.get("to").and_then(v3))
-                    else {
-                        continue;
-                    };
-                    for (dir, face) in e["faces"].as_object().into_iter().flatten() {
-                        let Some((pts, default_uv)) = element_face(dir, f, t) else {
-                            continue;
-                        };
-                        let Some(tex) = face["texture"].as_str().and_then(resolve) else {
-                            continue;
-                        };
-                        let uv =
-                            face.get("uv").and_then(|u| {
-                                let a = u.as_array()?;
-                                Some([0, 1, 2, 3].map(|i| {
-                                    a.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32
-                                }))
-                            });
-                        let [u0, v0, u1, v1] = uv.unwrap_or(default_uv).map(|c| c / 16.0);
-                        let corners = [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
-                        let r = (face["rotation"].as_u64().unwrap_or(0) / 90) as usize;
-                        let pts = pts.map(|p| {
-                            let p = e.get("rotation").map_or(p, |rot| element_rotation(rot, p));
-                            p.map(|c| c / 16.0)
-                        });
-                        self.frame(read, &tex);
-                        faces.push(Face {
-                            pts,
-                            uv: [0, 1, 2, 3].map(|k| corners[(k + r) % 4]),
-                            tex,
-                            tint: face["tintindex"].as_u64().map(|i| i as usize),
-                        });
-                    }
-                }
-                Model::Solid { faces, gui }
-            }
+                    .collect(),
+            ),
+            Some("builtin/entity") => Model::Solid {
+                faces: entity_faces(name)?,
+                gui: gui_display(&chain),
+            },
+            _ => Model::Solid {
+                faces: element_faces(&chain, &resolve)?,
+                gui: gui_display(&chain),
+            },
         };
-        if let Model::Solid { faces, .. } = &model {
-            let texs: Vec<String> = faces.iter().map(|f| f.tex.clone()).collect();
-            for t in texs {
-                self.frame(read, &t);
-            }
+        let texs: Vec<String> = match &model {
+            Model::Flat(layers) => layers.clone(),
+            Model::Solid { faces, .. } => faces.iter().map(|f| f.tex.clone()).collect(),
+        };
+        for t in texs {
+            self.frame(read, &t);
         }
         Some(model)
     }

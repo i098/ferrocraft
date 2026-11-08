@@ -106,23 +106,72 @@ fn rarity(s: &ItemStack) -> &'static str {
     RARITY[r]
 }
 
-/// `ItemStack.getTooltip`, with the colors `renderToolTip` adds.
-pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
+/// The tooltip's first line: the name plus the id suffix of advanced tooltips.
+fn head_line(s: &ItemStack, advanced: bool) -> String {
     let item = items::item(s.id);
     let (n, custom) = name(s);
     let mut head = if custom { format!("{ITALIC}{n}") } else { n };
     head.push_str(RESET);
     // `head` always holds RESET here, so vanilla's empty-name branch never runs.
-    if advanced {
-        if item.subtypes {
-            head.push_str(&format!(" (#{:04}/{})", s.id, s.damage));
-        } else {
-            head.push_str(&format!(" (#{:04})", s.id));
-        }
+    if advanced && item.subtypes {
+        head.push_str(&format!(" (#{:04}/{})", s.id, s.damage));
+    } else if advanced {
+        head.push_str(&format!(" (#{:04})", s.id));
     } else if !custom && item.key == "filled_map" {
         head.push_str(&format!(" #{}", s.damage));
     }
-    let mut out = vec![head];
+    head
+}
+
+/// Lines from the stack's tag: enchantments, then the dye color and lore of `display`.
+fn tag_lines(t: &Compound, hide: i32, advanced: bool, out: &mut Vec<String>) {
+    if hide & 1 == 0 {
+        out.extend(
+            enchantments(t, "ench")
+                .into_iter()
+                .filter_map(|(id, l)| enchantment_name(id, l)),
+        );
+    }
+    let Some(d) = compound(t, "display") else {
+        return;
+    };
+    if matches!(get(d, "color"), Some(Tag::Int(_))) {
+        out.push(if advanced {
+            format!("Color: #{:X}", int(d, "color"))
+        } else {
+            format!("{ITALIC}Dyed")
+        });
+    }
+    out.extend(list(d, "Lore").iter().filter_map(|l| match l {
+        Tag::String(l) => Some(format!("{DARK_PURPLE}{ITALIC}{l}")),
+        _ => None,
+    }));
+}
+
+/// The `CanDestroy` and `CanPlaceOn` block lists of adventure mode.
+fn block_lines(t: Option<&Compound>, hide: i32, out: &mut Vec<String>) {
+    for (key, label, bit) in [
+        ("CanDestroy", "Can break:", 8),
+        ("CanPlaceOn", "Can be placed on:", 16),
+    ] {
+        let blocks = t.map_or(&[][..], |t| list(t, key));
+        if blocks.is_empty() || hide & bit != 0 {
+            continue;
+        }
+        out.push(String::new());
+        out.push(format!("{GRAY}{label}"));
+        // shortcut: block ids are shown raw (vanilla prints the block's local name); upgrade with a block name table.
+        out.extend(blocks.iter().filter_map(|b| match b {
+            Tag::String(b) => Some(format!("{GRAY}{b}")),
+            _ => None,
+        }));
+    }
+}
+
+/// `ItemStack.getTooltip`, with the colors `renderToolTip` adds.
+pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
+    let item = items::item(s.id);
+    let mut out = vec![head_line(s, advanced)];
     let t = tag(s);
     let hide = t.map_or(0, |t| int(t, "HideFlags"));
     let variant = items::variant(s.id, s.damage);
@@ -143,27 +192,7 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
         }
     }
     if let Some(t) = t {
-        if hide & 1 == 0 {
-            out.extend(
-                enchantments(t, "ench")
-                    .into_iter()
-                    .filter_map(|(id, l)| enchantment_name(id, l)),
-            );
-        }
-        if let Some(d) = compound(t, "display") {
-            if matches!(get(d, "color"), Some(Tag::Int(_))) {
-                if advanced {
-                    out.push(format!("Color: #{:X}", int(d, "color")));
-                } else {
-                    out.push(format!("{ITALIC}Dyed"));
-                }
-            }
-            for l in list(d, "Lore") {
-                if let Tag::String(l) = l {
-                    out.push(format!("{DARK_PURPLE}{ITALIC}{l}"));
-                }
-            }
-        }
+        tag_lines(t, hide, advanced, &mut out);
     }
     // shortcut: AttributeModifiers tags are not read; the item defaults are shown, as for untagged stacks.
     if let Some(v) = variant.filter(|v| !v.attributes.is_empty() && hide & 2 == 0) {
@@ -174,21 +203,7 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
     if unbreakable && hide & 4 == 0 {
         out.push(format!("{BLUE}Unbreakable"));
     }
-    for (key, label, bit) in [
-        ("CanDestroy", "Can break:", 8),
-        ("CanPlaceOn", "Can be placed on:", 16),
-    ] {
-        let blocks = t.map_or(&[][..], |t| list(t, key));
-        if !blocks.is_empty() && hide & bit == 0 {
-            out.push(String::new());
-            out.push(format!("{GRAY}{label}"));
-            // shortcut: block ids are shown raw (vanilla prints the block's local name); upgrade with a block name table.
-            out.extend(blocks.iter().filter_map(|b| match b {
-                Tag::String(b) => Some(format!("{GRAY}{b}")),
-                _ => None,
-            }));
-        }
-    }
+    block_lines(t, hide, &mut out);
     if advanced && item.max_damage > 0 && !unbreakable && s.damage > 0 {
         out.push(format!(
             "Durability: {} / {}",

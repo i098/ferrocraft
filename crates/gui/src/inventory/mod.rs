@@ -241,33 +241,44 @@ impl ContainerScreen {
                 slot.map(|s| s as i16)
             };
             if let (Some(id), None) = (id, &self.split) {
-                if inv.cursor.is_none() {
-                    if button == PICK_BUTTON {
-                        self.click(inv, slot, id, button, 3, &mut out);
-                    } else {
-                        let shift = id != OUTSIDE && mods.shift;
-                        let mode = if shift {
-                            self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
-                            1
-                        } else if id == OUTSIDE {
-                            4
-                        } else {
-                            0
-                        };
-                        self.click(inv, slot, id, button, mode, &mut out);
-                    }
-                    self.ignore_up = true;
-                } else {
-                    self.split = Some(Split {
-                        button,
-                        limit: button.min(2),
-                        slots: Vec::new(),
-                    });
-                }
+                self.press(inv, slot, id, button, mods, &mut out);
             }
         }
         self.last_click = Some((slot, now_ms, button));
         out
+    }
+
+    /// A press that is not part of a drag: an empty cursor clicks at once, a held stack
+    /// starts a drag split that the release finishes.
+    fn press(
+        &mut self,
+        inv: &mut Inventory,
+        slot: Option<usize>,
+        id: i16,
+        button: u8,
+        mods: Mods,
+        out: &mut Vec<Request>,
+    ) {
+        if inv.cursor.is_some() {
+            self.split = Some(Split {
+                button,
+                limit: button.min(2),
+                slots: Vec::new(),
+            });
+            return;
+        }
+        let shift = id != OUTSIDE && mods.shift;
+        let mode = match () {
+            _ if button == PICK_BUTTON => 3,
+            _ if shift => {
+                self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
+                1
+            }
+            _ if id == OUTSIDE => 4,
+            _ => 0,
+        };
+        self.click(inv, slot, id, button, mode, out);
+        self.ignore_up = true;
     }
 
     /// `GuiContainer.mouseClickMove`: called while a button is held and the mouse moves.
@@ -322,65 +333,86 @@ impl ContainerScreen {
             slot.map_or(-1, |s| s as i16)
         };
         if let Some(s) = slot.filter(|&s| self.double_click && button == 0 && self.can_merge(s)) {
-            if mods.shift {
-                if let Some(shifted) = self.shift_clicked.clone() {
-                    let same_part = |a: usize, b: usize| self.same_inventory(inv, a, b);
-                    let targets: Vec<usize> = (0..self.slots().len())
-                        .filter(|&j| {
-                            same_part(j, s)
-                                && self
-                                    .stack(inv, j)
-                                    .as_ref()
-                                    .is_some_and(|st| inv::fits(Some(st), &shifted, true))
-                        })
-                        .collect();
-                    for j in targets {
-                        self.click(inv, Some(j), j as i16, button, 1, &mut out);
-                    }
-                }
-            } else {
-                self.click(inv, Some(s), id, button, 6, &mut out);
-            }
-            self.double_click = false;
-            self.last_click = None;
+            self.double_click_up(inv, s, id, button, mods, &mut out);
         } else {
-            if self.split.as_ref().is_some_and(|sp| sp.button != button) {
-                self.split = None;
-                self.ignore_up = true;
-                return out;
-            }
-            if self.ignore_up {
-                self.ignore_up = false;
-                return out;
-            }
-            match self.split.take() {
-                Some(sp) if !sp.slots.is_empty() => {
-                    let code = |event: u8| event & 3 | (sp.limit & 3) << 2;
-                    self.click(inv, None, OUTSIDE, code(0), 5, &mut out);
-                    for &s in &sp.slots {
-                        self.click(inv, Some(s), s as i16, code(1), 5, &mut out);
-                    }
-                    self.click(inv, None, OUTSIDE, code(2), 5, &mut out);
-                }
-                _ if inv.cursor.is_some() => {
-                    if button == PICK_BUTTON {
-                        self.click(inv, slot, id, button, 3, &mut out);
-                    } else {
-                        let shift = id != OUTSIDE && mods.shift;
-                        if shift {
-                            self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
-                        }
-                        self.click(inv, slot, id, button, if shift { 1 } else { 0 }, &mut out);
-                    }
-                }
-                _ => {}
-            }
+            self.release(inv, slot, id, button, mods, &mut out);
         }
         if inv.cursor.is_none() {
             self.last_click = None;
         }
         self.split = None;
         out
+    }
+
+    /// The release of a double click: collect into the cursor, or with shift move every
+    /// stack like the shift-clicked one out of that inventory part.
+    fn double_click_up(
+        &mut self,
+        inv: &mut Inventory,
+        s: usize,
+        id: i16,
+        button: u8,
+        mods: Mods,
+        out: &mut Vec<Request>,
+    ) {
+        if !mods.shift {
+            self.click(inv, Some(s), id, button, 6, out);
+        } else if let Some(shifted) = self.shift_clicked.clone() {
+            let targets: Vec<usize> = (0..self.slots().len())
+                .filter(|&j| {
+                    self.same_inventory(inv, j, s)
+                        && self
+                            .stack(inv, j)
+                            .as_ref()
+                            .is_some_and(|st| inv::fits(Some(st), &shifted, true))
+                })
+                .collect();
+            for j in targets {
+                self.click(inv, Some(j), j as i16, button, 1, out);
+            }
+        }
+        self.double_click = false;
+        self.last_click = None;
+    }
+
+    /// A plain release: finish a drag split, or click with the stack held since the press.
+    fn release(
+        &mut self,
+        inv: &mut Inventory,
+        slot: Option<usize>,
+        id: i16,
+        button: u8,
+        mods: Mods,
+        out: &mut Vec<Request>,
+    ) {
+        if self.split.as_ref().is_some_and(|sp| sp.button != button) {
+            self.split = None;
+            self.ignore_up = true;
+            return;
+        }
+        if self.ignore_up {
+            self.ignore_up = false;
+            return;
+        }
+        match self.split.take() {
+            Some(sp) if !sp.slots.is_empty() => {
+                let code = |event: u8| event & 3 | (sp.limit & 3) << 2;
+                self.click(inv, None, OUTSIDE, code(0), 5, out);
+                for &s in &sp.slots {
+                    self.click(inv, Some(s), s as i16, code(1), 5, out);
+                }
+                self.click(inv, None, OUTSIDE, code(2), 5, out);
+            }
+            _ if inv.cursor.is_none() => {}
+            _ if button == PICK_BUTTON => self.click(inv, slot, id, button, 3, out),
+            _ => {
+                let shift = id != OUTSIDE && mods.shift;
+                if shift {
+                    self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
+                }
+                self.click(inv, slot, id, button, if shift { 1 } else { 0 }, out);
+            }
+        }
     }
 
     /// Whether two screen slots belong to the same `IInventory` (shift double click).
@@ -499,18 +531,7 @@ impl ContainerScreen {
             None => self.draw_foreground(c, inv),
         }
         if let Some(cursor) = &inv.cursor {
-            let mut shown = cursor.clone();
-            let mut text = None;
-            if let Some(sp) = self.split.as_ref().filter(|sp| sp.slots.len() > 1) {
-                let left = self.remnant(inv, cursor, sp);
-                shown.count = left as i8;
-                if left == 0 {
-                    text = Some(format!("{YELLOW}0"));
-                }
-            }
-            let (x, y) = (mx - l - 8, my - t - 8);
-            icons.draw(c, &shown, x, y);
-            icons.overlay(c, &shown, x, y, text.as_deref());
+            self.draw_cursor(c, inv, icons, cursor, mx - l - 8, my - t - 8);
         }
         c.pop();
         if let Some(cr) = &self.creative {
@@ -519,14 +540,43 @@ impl ContainerScreen {
             }
         }
         if inv.cursor.is_none() {
-            if let Some(stack) = self.hovered.and_then(|h| self.stack(inv, h).as_ref()) {
-                let mut lines = tooltip::lines(stack, advanced_tooltips);
-                if let Some(cr) = &self.creative {
-                    cr.extend_tooltip(stack, &mut lines);
-                }
-                tooltip::draw(c, &lines, mx, my, self.width, self.height);
+            self.draw_tooltip(c, inv, mx, my, advanced_tooltips);
+        }
+    }
+
+    /// The cursor stack, less what a drag split has painted into slots.
+    fn draw_cursor(
+        &self,
+        c: &mut dyn Canvas,
+        inv: &Inventory,
+        icons: &Icons,
+        cursor: &ItemStack,
+        x: i32,
+        y: i32,
+    ) {
+        let mut shown = cursor.clone();
+        let mut text = None;
+        if let Some(sp) = self.split.as_ref().filter(|sp| sp.slots.len() > 1) {
+            let left = self.remnant(inv, cursor, sp);
+            shown.count = left as i8;
+            if left == 0 {
+                text = Some(format!("{YELLOW}0"));
             }
         }
+        icons.draw(c, &shown, x, y);
+        icons.overlay(c, &shown, x, y, text.as_deref());
+    }
+
+    /// `renderToolTip` of the hovered stack.
+    fn draw_tooltip(&self, c: &mut dyn Canvas, inv: &Inventory, mx: i32, my: i32, advanced: bool) {
+        let Some(stack) = self.hovered.and_then(|h| self.stack(inv, h).as_ref()) else {
+            return;
+        };
+        let mut lines = tooltip::lines(stack, advanced);
+        if let Some(cr) = &self.creative {
+            cr.extend_tooltip(stack, &mut lines);
+        }
+        tooltip::draw(c, &lines, mx, my, self.width, self.height);
     }
 
     /// `updateDragSplitting`: what stays on the cursor after the painted slots fill.
@@ -545,6 +595,36 @@ impl ContainerScreen {
         left
     }
 
+    /// The stack a painted slot shows during a drag split, with the yellow cap text when
+    /// the share is cut to the stack or slot limit.
+    fn drag_preview(
+        &self,
+        inv: &Inventory,
+        i: usize,
+        shown: Option<&ItemStack>,
+        cursor: &ItemStack,
+        slots: usize,
+        limit: u8,
+    ) -> Option<(ItemStack, Option<String>)> {
+        if !inv::fits(shown, cursor, true) || !self.can_drag_into(i) {
+            return None;
+        }
+        let had = shown.map_or(0, |s| i32::from(s.count));
+        let mut n = inv::drag_share(limit, cursor, slots) + had;
+        let mut text = None;
+        for cap in [inv::max_stack(cursor), self.limit(inv, i, cursor)] {
+            if n > cap {
+                text = Some(format!("{YELLOW}{cap}"));
+                n = cap;
+            }
+        }
+        let stack = ItemStack {
+            count: n as i8,
+            ..cursor.clone()
+        };
+        Some((stack, text))
+    }
+
     /// `GuiContainer.drawSlot`, in window coordinates.
     fn draw_slot(&self, c: &mut dyn Canvas, inv: &Inventory, icons: &Icons, i: usize) {
         let (x, y) = self.slots()[i];
@@ -556,49 +636,28 @@ impl ContainerScreen {
                 if sp.slots.len() == 1 {
                     return;
                 }
-                if inv::fits(shown.as_ref(), cursor, true) && self.can_drag_into(i) {
-                    let had = shown.as_ref().map_or(0, |s| i32::from(s.count));
-                    let mut n = inv::drag_share(sp.limit, cursor, sp.slots.len()) + had;
-                    for cap in [inv::max_stack(cursor), self.limit(inv, i, cursor)] {
-                        if n > cap {
-                            text = Some(format!("{YELLOW}{cap}"));
-                            n = cap;
-                        }
-                    }
-                    shown = Some(ItemStack {
-                        count: n as i8,
-                        ..cursor.clone()
-                    });
-                    preview = true;
+                let p = self.drag_preview(inv, i, shown.as_ref(), cursor, sp.slots.len(), sp.limit);
+                if let Some((stack, cap)) = p {
+                    (shown, text, preview) = (Some(stack), cap, true);
                 }
             }
         }
-        match &shown {
-            None => {
-                let empty = match &self.creative {
-                    Some(cr) => cr.empty_icon(i),
-                    None => layout::empty_slot_icon(inv.kind(), i),
-                };
-                if let Some(tex) = empty {
-                    c.blit(
-                        tex,
-                        x as f32,
-                        y as f32,
-                        16.0,
-                        16.0,
-                        [0.0, 0.0, 1.0, 1.0],
-                        0xFFFF_FFFF,
-                    );
-                }
+        let Some(s) = &shown else {
+            let empty = match &self.creative {
+                Some(cr) => cr.empty_icon(i),
+                None => layout::empty_slot_icon(inv.kind(), i),
+            };
+            if let Some(tex) = empty {
+                let uv = [0.0, 0.0, 1.0, 1.0];
+                c.blit(tex, x as f32, y as f32, 16.0, 16.0, uv, 0xFFFF_FFFF);
             }
-            Some(s) => {
-                if preview {
-                    c.fill(x, y, x + 16, y + 16, HIGHLIGHT);
-                }
-                icons.draw(c, s, x, y);
-                icons.overlay(c, s, x, y, text.as_deref());
-            }
+            return;
+        };
+        if preview {
+            c.fill(x, y, x + 16, y + 16, HIGHLIGHT);
         }
+        icons.draw(c, s, x, y);
+        icons.overlay(c, s, x, y, text.as_deref());
     }
 
     /// `drawGuiContainerBackgroundLayer` of each survival screen.

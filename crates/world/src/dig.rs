@@ -2,7 +2,8 @@
 //! machine of `PlayerControllerMP` and `Minecraft.clickMouse`/`sendClickBlockToController`.
 //!
 //! Not ported yet: held tools and enchantments (the client has no inventory, so the hand is
-//! always empty), potion effects, water, entity targets, adventure mode and the world border.
+//! always empty), potion effects, water, entity targets, `CanDestroy` tags of adventure mode
+//! (an empty hand never digs there; the swing is kept) and the world border.
 //! The break speed of every block is checked against the real 1.8.9 jar through `oracle`.
 
 use crate::{cos, sin};

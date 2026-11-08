@@ -2,4 +2,4 @@
 
 Owner: fc-input
 
-Keyboard, mouse look, chat input per vanilla 1.8.9.
+Keyboard, mouse look, left button (attack state per tick), chat input per vanilla 1.8.9.

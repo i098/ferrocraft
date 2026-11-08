@@ -9,8 +9,11 @@ use std::sync::LazyLock;
 const W: usize = 18;
 
 /// `(light_opacity, emission)` per block state.
-static PROPS: LazyLock<Vec<(u8, u8)>> =
-    LazyLock::new(|| (0..4096u16).map(|s| (light_opacity(s), emission(s))).collect());
+static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
+    (0..4096u16)
+        .map(|s| (light_opacity(s), emission(s)))
+        .collect()
+});
 
 pub struct Light {
     /// `sky << 4 | block` per cell, `x` and `z` in `-1..=16`.
@@ -79,7 +82,11 @@ impl Light {
         for y in 0..HEIGHT {
             for z in -1..=16 {
                 for x in -1..=16 {
-                    let (sx, sz) = if loaded(x, z) { (x, z) } else { (x.clamp(0, 15), z.clamp(0, 15)) };
+                    let (sx, sz) = if loaded(x, z) {
+                        (x, z)
+                    } else {
+                        (x.clamp(0, 15), z.clamp(0, 15))
+                    };
                     let from = idx(sx, y, sz);
                     cells[idx(x, y, z)] = sky[from] << 4 | block[from];
                 }

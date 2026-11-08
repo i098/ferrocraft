@@ -75,7 +75,14 @@ impl Neighborhood<'_> {
 }
 
 /// Face directions in `UP, DOWN, NORTH, SOUTH, WEST, EAST` order.
-const DIRS: [[i32; 3]; 6] = [[0, 1, 0], [0, -1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+const DIRS: [[i32; 3]; 6] = [
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+    [0, 0, 1],
+    [-1, 0, 0],
+    [1, 0, 0],
+];
 /// Vanilla per-face brightness.
 const SHADE: [f32; 6] = [1.0, 0.5, 0.8, 0.8, 0.6, 0.6];
 /// Corners of each face, counter-clockwise seen from outside.
@@ -198,7 +205,11 @@ impl Mesher<'_> {
         let t = self.target(pass);
         let base = t.vertices.len() as u32;
         t.vertices.extend_from_slice(&v);
-        let idx: [u32; 6] = if flip { [1, 2, 3, 1, 3, 0] } else { [0, 1, 2, 0, 2, 3] };
+        let idx: [u32; 6] = if flip {
+            [1, 2, 3, 1, 3, 0]
+        } else {
+            [0, 1, 2, 0, 2, 3]
+        };
         t.indices.extend(idx.map(|i| base + i));
     }
 
@@ -238,7 +249,11 @@ impl Mesher<'_> {
                 ao[i] = a;
                 let k = SHADE[f] * a;
                 verts[i] = Vertex {
-                    pos: [at[0] as f32 + c[0], at[1] as f32 + c[1], at[2] as f32 + c[2]],
+                    pos: [
+                        at[0] as f32 + c[0],
+                        at[1] as f32 + c[1],
+                        at[2] as f32 + c[2],
+                    ],
                     uv: self.atlas.uv(tex, face_uv(f, *c)),
                     color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
                     light,
@@ -275,7 +290,11 @@ impl Mesher<'_> {
         };
         let (s1, a1) = sample(off(1, 0));
         let (s2, a2) = sample(off(0, 1));
-        let (sc, ac) = if a1 < 1.0 && a2 < 1.0 { (s1, 0.2) } else { sample(off(1, 1)) };
+        let (sc, ac) = if a1 < 1.0 && a2 < 1.0 {
+            (s1, 0.2)
+        } else {
+            sample(off(1, 1))
+        };
         let light = [0, 1].map(|i| (base[i] + s1[i] + s2[i] + sc[i]) / 4.0);
         (light, (1.0 + a1 + a2 + ac) / 4.0)
     }
@@ -309,7 +328,10 @@ impl Mesher<'_> {
             }
             1.0 - f / n
         };
-        let h = [[corner_h(0, 0), corner_h(0, 1)], [corner_h(1, 0), corner_h(1, 1)]];
+        let h = [
+            [corner_h(0, 0), corner_h(0, 1)],
+            [corner_h(1, 0), corner_h(1, 1)],
+        ];
         let own = self.light_at(at, [0; 3]);
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
@@ -327,7 +349,11 @@ impl Mesher<'_> {
             }
             let mut verts = [Vertex::zeroed(); 4];
             for (i, c) in CORNERS[f].iter().enumerate() {
-                let y = if c[1] > 0.5 { h[c[0] as usize][c[2] as usize] } else { 0.0 };
+                let y = if c[1] > 0.5 {
+                    h[c[0] as usize][c[2] as usize]
+                } else {
+                    0.0
+                };
                 let p = [c[0], y, c[2]];
                 let mut uv = face_uv(f, p);
                 if f >= NORTH {
@@ -337,7 +363,11 @@ impl Mesher<'_> {
                 }
                 let k = SHADE[f];
                 verts[i] = Vertex {
-                    pos: [at[0] as f32 + p[0], at[1] as f32 + p[1], at[2] as f32 + p[2]],
+                    pos: [
+                        at[0] as f32 + p[0],
+                        at[1] as f32 + p[1],
+                        at[2] as f32 + p[2],
+                    ],
                     uv: self.atlas.uv(l.tex[f], uv),
                     color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
                     light,
@@ -356,14 +386,22 @@ impl Mesher<'_> {
         }
         let rgb = self.base_color(l, tint);
         let light = self.light_at(at, [0; 3]);
-        let (wx, wz) = (self.hood.origin.0 * 16 + at[0], self.hood.origin.1 * 16 + at[2]);
+        let (wx, wz) = (
+            self.hood.origin.0 * 16 + at[0],
+            self.hood.origin.1 * 16 + at[2],
+        );
         let (ox, oz) = if matches!(id, 31 | 32 | 37 | 38 | 175) {
             plant_offset(wx, at[1], wz)
         } else {
             (0.0, 0.0)
         };
         let planes: &[([f32; 2], [f32; 2])] = if matches!(id, 59 | 141 | 142) {
-            &[([0.25, 0.0], [0.25, 1.0]), ([0.75, 0.0], [0.75, 1.0]), ([0.0, 0.25], [1.0, 0.25]), ([0.0, 0.75], [1.0, 0.75])]
+            &[
+                ([0.25, 0.0], [0.25, 1.0]),
+                ([0.75, 0.0], [0.75, 1.0]),
+                ([0.0, 0.25], [1.0, 0.25]),
+                ([0.0, 0.75], [1.0, 0.75]),
+            ]
         } else {
             &[([0.05, 0.05], [0.95, 0.95]), ([0.05, 0.95], [0.95, 0.05])]
         };
@@ -371,10 +409,19 @@ impl Mesher<'_> {
             for (p, q) in [(a, b), (b, a)] {
                 // Both windings so the plane shows from either side.
                 let mut verts = [Vertex::zeroed(); 4];
-                let corners = [(p, 0.0, [0.0, 1.0]), (q, 0.0, [1.0, 1.0]), (q, 1.0, [1.0, 0.0]), (p, 1.0, [0.0, 0.0])];
+                let corners = [
+                    (p, 0.0, [0.0, 1.0]),
+                    (q, 0.0, [1.0, 1.0]),
+                    (q, 1.0, [1.0, 0.0]),
+                    (p, 1.0, [0.0, 0.0]),
+                ];
                 for (v, (xz, y, uv)) in verts.iter_mut().zip(corners) {
                     *v = Vertex {
-                        pos: [at[0] as f32 + xz[0] + ox, at[1] as f32 + y, at[2] as f32 + xz[1] + oz],
+                        pos: [
+                            at[0] as f32 + xz[0] + ox,
+                            at[1] as f32 + y,
+                            at[2] as f32 + xz[1] + oz,
+                        ],
                         uv: self.atlas.uv(tex, uv),
                         color: [rgb[0], rgb[1], rgb[2], 1.0],
                         light,
@@ -418,7 +465,11 @@ impl Mesher<'_> {
                 }
                 let k = SHADE[f];
                 verts[i] = Vertex {
-                    pos: [at[0] as f32 + p[0], at[1] as f32 + p[1], at[2] as f32 + p[2]],
+                    pos: [
+                        at[0] as f32 + p[0],
+                        at[1] as f32 + p[1],
+                        at[2] as f32 + p[2],
+                    ],
                     uv: self.atlas.uv(b.tex[f], uv),
                     color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
                     light,
@@ -432,7 +483,10 @@ impl Mesher<'_> {
 /// Vanilla `Block.getOffset` for the XZ offset type: a stable pseudo-random shift of up to a quarter block.
 fn plant_offset(x: i32, y: i32, z: i32) -> (f32, f32) {
     let mut i = (x as i64).wrapping_mul(3129871) ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
-    i = i.wrapping_mul(i).wrapping_mul(42317861).wrapping_add(i.wrapping_mul(11));
+    i = i
+        .wrapping_mul(i)
+        .wrapping_mul(42317861)
+        .wrapping_add(i.wrapping_mul(11));
     let f = |shift: u32| ((i >> shift & 15) as f32 / 15.0 - 0.5) * 0.5;
     (f(16), f(24))
 }
@@ -474,7 +528,13 @@ mod tests {
 
     #[test]
     fn adjacent_blocks_hide_shared_faces() {
-        let c = flat(|x, y, z| if y == 70 && z == 4 && (x == 4 || x == 5) { 1 << 4 } else { 0 });
+        let c = flat(|x, y, z| {
+            if y == 70 && z == 4 && (x == 4 || x == 5) {
+                1 << 4
+            } else {
+                0
+            }
+        });
         assert_eq!(mesh(&c, [None; 4]).opaque.vertices.len(), 10 * 4);
     }
 
@@ -489,7 +549,13 @@ mod tests {
 
     #[test]
     fn water_next_to_water_is_culled_and_goes_to_water_mesh() {
-        let c = flat(|x, y, z| if y == 60 && z == 4 && (x == 4 || x == 5) { 9 << 4 } else { 0 });
+        let c = flat(|x, y, z| {
+            if y == 60 && z == 4 && (x == 4 || x == 5) {
+                9 << 4
+            } else {
+                0
+            }
+        });
         let m = mesh(&c, [None; 4]);
         assert!(m.opaque.is_empty());
         assert_eq!(m.water.vertices.len(), 10 * 4);
@@ -500,9 +566,19 @@ mod tests {
 
     #[test]
     fn water_under_water_is_full_height() {
-        let c = flat(|x, y, z| if (x, z) == (4, 4) && (59..=60).contains(&y) { 9 << 4 } else { 0 });
+        let c = flat(|x, y, z| {
+            if (x, z) == (4, 4) && (59..=60).contains(&y) {
+                9 << 4
+            } else {
+                0
+            }
+        });
         let m = mesh(&c, [None; 4]);
-        assert!(m.water.vertices.iter().any(|v| (v.pos[1] - 60.698).abs() < 1e-3));
+        assert!(m
+            .water
+            .vertices
+            .iter()
+            .any(|v| (v.pos[1] - 60.698).abs() < 1e-3));
         assert!(m.water.vertices.iter().all(|v| v.pos[1] <= 60.9));
         assert!(m.water.vertices.iter().any(|v| v.pos[1] == 60.0));
     }

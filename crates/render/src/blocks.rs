@@ -110,7 +110,11 @@ pub fn tint_color(t: Tint) -> [f32; 3] {
         // BlockRedstoneWire.colorMultiplier: power 0 is dark red, 15 bright red.
         Tint::Redstone(p) => {
             let f = p as f32 / 15.0;
-            [f * 0.6 + if p > 0 { 0.4 } else { 0.3 }, (f * f * 0.7 - 0.5).clamp(0.0, 1.0), (f * f * 0.6 - 0.7).clamp(0.0, 1.0)]
+            [
+                f * 0.6 + if p > 0 { 0.4 } else { 0.3 },
+                (f * f * 0.7 - 0.5).clamp(0.0, 1.0),
+                (f * f * 0.6 - 0.7).clamp(0.0, 1.0),
+            ]
         }
     }
 }
@@ -133,14 +137,26 @@ fn cube3(color: u32, top: &'static str, bottom: &'static str, side: &'static str
 }
 
 /// Cube whose horizontal-facing side `front` (0 south, 1 west, 2 north, 3 east) uses its own texture.
-fn faced(color: u32, top: &'static str, side: &'static str, front: &'static str, face: usize) -> Look {
+fn faced(
+    color: u32,
+    top: &'static str,
+    side: &'static str,
+    front: &'static str,
+    face: usize,
+) -> Look {
     let mut l = cube3(color, top, top, side);
     l.tex[face] = front;
     l
 }
 
 /// Furnace-like block: meta 2 north, 3 south, 4 west, 5 east.
-fn furnace_like(meta: u16, color: u32, top: &'static str, side: &'static str, front: &'static str) -> Look {
+fn furnace_like(
+    meta: u16,
+    color: u32,
+    top: &'static str,
+    side: &'static str,
+    front: &'static str,
+) -> Look {
     let face = match meta {
         2 => NORTH,
         4 => WEST,
@@ -200,7 +216,11 @@ fn slab_tex(meta: u16) -> (&'static str, &'static str, &'static str) {
         4 => ("brick", "brick", "brick"),
         5 => ("stonebrick", "stonebrick", "stonebrick"),
         6 => ("nether_brick", "nether_brick", "nether_brick"),
-        _ => ("quartz_block_top", "quartz_block_bottom", "quartz_block_side"),
+        _ => (
+            "quartz_block_top",
+            "quartz_block_bottom",
+            "quartz_block_side",
+        ),
     }
 }
 
@@ -274,12 +294,41 @@ pub fn look(state: u16) -> Look {
         5 | 125 => cube(0x9f8150, PLANKS[meta as usize % 6]),
         6 => cross(
             0x4a8a30,
-            ["sapling_oak", "sapling_spruce", "sapling_birch", "sapling_jungle", "sapling_acacia", "sapling_roofed_oak"][(meta as usize & 7) % 6],
+            [
+                "sapling_oak",
+                "sapling_spruce",
+                "sapling_birch",
+                "sapling_jungle",
+                "sapling_acacia",
+                "sapling_roofed_oak",
+            ][(meta as usize & 7) % 6],
             Tint::None,
         ),
         7 => cube(0x333333, "bedrock"),
-        8 | 9 => mk(Kind::Water, 0x2f5bd6, ["water_still", "water_still", "water_flow", "water_flow", "water_flow", "water_flow"]),
-        10 | 11 => mk(Kind::Lava, 0xe8650c, ["lava_still", "lava_still", "lava_flow", "lava_flow", "lava_flow", "lava_flow"]),
+        8 | 9 => mk(
+            Kind::Water,
+            0x2f5bd6,
+            [
+                "water_still",
+                "water_still",
+                "water_flow",
+                "water_flow",
+                "water_flow",
+                "water_flow",
+            ],
+        ),
+        10 | 11 => mk(
+            Kind::Lava,
+            0xe8650c,
+            [
+                "lava_still",
+                "lava_still",
+                "lava_flow",
+                "lava_flow",
+                "lava_flow",
+                "lava_flow",
+            ],
+        ),
         12 => cube(0xdbd3a0, if meta == 1 { "red_sand" } else { "sand" }),
         13 => cube(0x857f7e, "gravel"),
         14 => cube(0x8f8b79, "gold_ore"),
@@ -291,13 +340,53 @@ pub fn look(state: u16) -> Look {
         20 => cutout(0xc0e8ee, "glass"),
         21 => cube(0x6b7488, "lapis_ore"),
         22 => cube(0x2742a0, "lapis_block"),
-        23 => furnace_like(meta, 0x6e6e6e, "furnace_top", "furnace_side", "dispenser_front_horizontal"),
-        24 => cube3(0xdbd3a0, "sandstone_top", "sandstone_bottom", ["sandstone_normal", "sandstone_carved", "sandstone_smooth"][(meta as usize).min(2)]),
+        23 => furnace_like(
+            meta,
+            0x6e6e6e,
+            "furnace_top",
+            "furnace_side",
+            "dispenser_front_horizontal",
+        ),
+        24 => cube3(
+            0xdbd3a0,
+            "sandstone_top",
+            "sandstone_bottom",
+            ["sandstone_normal", "sandstone_carved", "sandstone_smooth"][(meta as usize).min(2)],
+        ),
         25 => cube3(0x6d5636, "noteblock", "noteblock", "noteblock"),
-        26 => shape(0xa02a2a, ["bed_feet_top", "planks_oak", "bed_feet_side", "bed_feet_side", "bed_feet_side", "bed_feet_side"]),
-        27 => shape(0xa89061, [if meta & 8 != 0 { "rail_golden_powered" } else { "rail_golden" }; 6]),
-        28 => shape(0x80705a, [if meta & 8 != 0 { "rail_detector_powered" } else { "rail_detector" }; 6]),
-        29 | 33 => cube3(0x9a8260, "piston_top_normal", "piston_bottom", "piston_side"),
+        26 => shape(
+            0xa02a2a,
+            [
+                "bed_feet_top",
+                "planks_oak",
+                "bed_feet_side",
+                "bed_feet_side",
+                "bed_feet_side",
+                "bed_feet_side",
+            ],
+        ),
+        27 => shape(
+            0xa89061,
+            [if meta & 8 != 0 {
+                "rail_golden_powered"
+            } else {
+                "rail_golden"
+            }; 6],
+        ),
+        28 => shape(
+            0x80705a,
+            [if meta & 8 != 0 {
+                "rail_detector_powered"
+            } else {
+                "rail_detector"
+            }; 6],
+        ),
+        29 | 33 => cube3(
+            0x9a8260,
+            "piston_top_normal",
+            "piston_bottom",
+            "piston_side",
+        ),
         30 => cross(0xe0e0e0, "web", Tint::None),
         31 => match meta {
             0 => cross(0x4a8a30, "deadbush", Tint::None),
@@ -329,12 +418,24 @@ pub fn look(state: u16) -> Look {
         42 => cube(0xdddddd, "iron_block"),
         43 => {
             let (t, b, s) = slab_tex(meta);
-            if meta == 8 { cube(0xa8a8a8, "stone_slab_top") } else { cube3(0xa8a8a8, t, b, s) }
+            if meta == 8 {
+                cube(0xa8a8a8, "stone_slab_top")
+            } else {
+                cube3(0xa8a8a8, t, b, s)
+            }
         }
         44 | 126 | 182 => {
             let (t, b, s) = match id {
-                126 => (PLANKS[(meta as usize & 7) % 6], PLANKS[(meta as usize & 7) % 6], PLANKS[(meta as usize & 7) % 6]),
-                182 => ("red_sandstone_top", "red_sandstone_bottom", "red_sandstone_normal"),
+                126 => (
+                    PLANKS[(meta as usize & 7) % 6],
+                    PLANKS[(meta as usize & 7) % 6],
+                    PLANKS[(meta as usize & 7) % 6],
+                ),
+                182 => (
+                    "red_sandstone_top",
+                    "red_sandstone_bottom",
+                    "red_sandstone_normal",
+                ),
                 _ => slab_tex(meta),
             };
             shape(0xa8a8a8, [t, b, s, s, s, s])
@@ -347,7 +448,9 @@ pub fn look(state: u16) -> Look {
         50 => shape(0xf0c040, ["torch_on"; 6]),
         51 => cross(0xe06010, "fire_layer_0", Tint::None),
         52 => cutout(0x1a2a40, "mob_spawner"),
-        53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 => shape(0x9f8150, stair_tex(id)),
+        53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 => {
+            shape(0x9f8150, stair_tex(id))
+        }
         54 | 146 => shape(0x8a5a2a, ["planks_oak"; 6]),
         55 => Look {
             tint: Tint::Redstone(meta as u8),
@@ -355,21 +458,73 @@ pub fn look(state: u16) -> Look {
         },
         56 => cube(0x8a9a9d, "diamond_ore"),
         57 => cube(0x62ece0, "diamond_block"),
-        58 => cube3(0x7a5a33, "crafting_table_top", "planks_oak", "crafting_table_side"),
-        59 => cross(0x80a030, ["wheat_stage_0", "wheat_stage_1", "wheat_stage_2", "wheat_stage_3", "wheat_stage_4", "wheat_stage_5", "wheat_stage_6", "wheat_stage_7"][meta as usize & 7], Tint::None),
-        60 => shape(0x6b4a2a, [if meta > 0 { "farmland_wet" } else { "farmland_dry" }, "dirt", "dirt", "dirt", "dirt", "dirt"]),
-        61 | 62 => furnace_like(meta, 0x6e6e6e, "furnace_top", "furnace_side", if id == 62 { "furnace_front_on" } else { "furnace_front_off" }),
-        64 | 71 | 193..=197 => shape(0x9f8150, [match id {
-            64 => "door_wood_lower",
-            71 => "door_iron_lower",
-            193 => "door_spruce_lower",
-            194 => "door_birch_lower",
-            195 => "door_jungle_lower",
-            196 => "door_acacia_lower",
-            _ => "door_dark_oak_lower",
-        }; 6]),
+        58 => cube3(
+            0x7a5a33,
+            "crafting_table_top",
+            "planks_oak",
+            "crafting_table_side",
+        ),
+        59 => cross(
+            0x80a030,
+            [
+                "wheat_stage_0",
+                "wheat_stage_1",
+                "wheat_stage_2",
+                "wheat_stage_3",
+                "wheat_stage_4",
+                "wheat_stage_5",
+                "wheat_stage_6",
+                "wheat_stage_7",
+            ][meta as usize & 7],
+            Tint::None,
+        ),
+        60 => shape(
+            0x6b4a2a,
+            [
+                if meta > 0 {
+                    "farmland_wet"
+                } else {
+                    "farmland_dry"
+                },
+                "dirt",
+                "dirt",
+                "dirt",
+                "dirt",
+                "dirt",
+            ],
+        ),
+        61 | 62 => furnace_like(
+            meta,
+            0x6e6e6e,
+            "furnace_top",
+            "furnace_side",
+            if id == 62 {
+                "furnace_front_on"
+            } else {
+                "furnace_front_off"
+            },
+        ),
+        64 | 71 | 193..=197 => shape(
+            0x9f8150,
+            [match id {
+                64 => "door_wood_lower",
+                71 => "door_iron_lower",
+                193 => "door_spruce_lower",
+                194 => "door_birch_lower",
+                195 => "door_jungle_lower",
+                196 => "door_acacia_lower",
+                _ => "door_dark_oak_lower",
+            }; 6],
+        ),
         65 => shape(0x9a7a40, ["ladder"; 6]),
-        66 => shape(0x80705a, [if meta >= 6 { "rail_normal_turned" } else { "rail_normal" }; 6]),
+        66 => shape(
+            0x80705a,
+            [if meta >= 6 {
+                "rail_normal_turned"
+            } else {
+                "rail_normal"
+            }; 6],
+        ),
         70 => shape(0x7d7d7d, ["stone"; 6]),
         72 => shape(0x9f8150, ["planks_oak"; 6]),
         73 => cube(0x8a6e6e, "redstone_ore"),
@@ -379,23 +534,86 @@ pub fn look(state: u16) -> Look {
         78 => shape(0xf5fafa, ["snow"; 6]),
         79 => cutout(0x9cc6ff, "ice"),
         80 => cube(0xf5fafa, "snow"),
-        81 => shape(0x0d6a1c, ["cactus_top", "cactus_bottom", "cactus_side", "cactus_side", "cactus_side", "cactus_side"]),
+        81 => shape(
+            0x0d6a1c,
+            [
+                "cactus_top",
+                "cactus_bottom",
+                "cactus_side",
+                "cactus_side",
+                "cactus_side",
+                "cactus_side",
+            ],
+        ),
         82 => cube(0xa0a6b3, "clay"),
         83 => cross(0x80b060, "reeds", Tint::Grass),
         84 => cube3(0x6d5636, "jukebox_top", "jukebox_side", "jukebox_side"),
         85 | 113 | 188..=192 => shape(0x9f8150, stair_tex(id)),
-        86 => faced(0xc77a1a, "pumpkin_top", "pumpkin_side", "pumpkin_face_off", pumpkin_front(meta)),
+        86 => faced(
+            0xc77a1a,
+            "pumpkin_top",
+            "pumpkin_side",
+            "pumpkin_face_off",
+            pumpkin_front(meta),
+        ),
         87 => cube(0x6f3636, "netherrack"),
         88 => cube(0x54402f, "soul_sand"),
         89 => cube(0xf0d08a, "glowstone"),
-        91 => faced(0xc77a1a, "pumpkin_top", "pumpkin_side", "pumpkin_face_on", pumpkin_front(meta)),
-        92 => shape(0xf0e0e0, ["cake_top", "cake_bottom", "cake_side", "cake_side", "cake_side", "cake_side"]),
-        93 | 94 => shape(0x909090, [if id == 94 { "repeater_on" } else { "repeater_off" }; 6]),
+        91 => faced(
+            0xc77a1a,
+            "pumpkin_top",
+            "pumpkin_side",
+            "pumpkin_face_on",
+            pumpkin_front(meta),
+        ),
+        92 => shape(
+            0xf0e0e0,
+            [
+                "cake_top",
+                "cake_bottom",
+                "cake_side",
+                "cake_side",
+                "cake_side",
+                "cake_side",
+            ],
+        ),
+        93 | 94 => shape(
+            0x909090,
+            [if id == 94 {
+                "repeater_on"
+            } else {
+                "repeater_off"
+            }; 6],
+        ),
         95 => cutout(0xc0e8ee, GLASS[meta as usize]),
-        96 | 167 => shape(0x9f8150, [if id == 96 { "trapdoor" } else { "iron_trapdoor" }; 6]),
+        96 | 167 => shape(
+            0x9f8150,
+            [if id == 96 {
+                "trapdoor"
+            } else {
+                "iron_trapdoor"
+            }; 6],
+        ),
         97 => cube(0x7d7d7d, "stone"),
-        98 => cube(0x7b7b7b, ["stonebrick", "stonebrick_mossy", "stonebrick_cracked", "stonebrick_carved"][meta as usize & 3]),
-        99 | 100 => cube(0x967a64, if meta == 0 { "mushroom_block_inside" } else if id == 99 { "mushroom_block_skin_brown" } else { "mushroom_block_skin_red" }),
+        98 => cube(
+            0x7b7b7b,
+            [
+                "stonebrick",
+                "stonebrick_mossy",
+                "stonebrick_cracked",
+                "stonebrick_carved",
+            ][meta as usize & 3],
+        ),
+        99 | 100 => cube(
+            0x967a64,
+            if meta == 0 {
+                "mushroom_block_inside"
+            } else if id == 99 {
+                "mushroom_block_skin_brown"
+            } else {
+                "mushroom_block_skin_red"
+            },
+        ),
         101 => shape(0xa0a0a0, ["iron_bars"; 6]),
         102 => shape(0xc0e8ee, ["glass"; 6]),
         103 => cube3(0x8aa030, "melon_top", "melon_top", "melon_side"),
@@ -411,9 +629,38 @@ pub fn look(state: u16) -> Look {
             ..shape(0x208030, ["waterlily"; 6])
         },
         112 => cube(0x2d1519, "nether_brick"),
-        115 => cross(0x7a1a20, ["nether_wart_stage_0", "nether_wart_stage_1", "nether_wart_stage_1", "nether_wart_stage_2"][meta as usize & 3], Tint::None),
-        116 => shape(0x7a2030, ["enchanting_table_top", "enchanting_table_bottom", "enchanting_table_side", "enchanting_table_side", "enchanting_table_side", "enchanting_table_side"]),
-        120 => shape(0x7a8a60, ["endframe_top", "end_stone", "endframe_side", "endframe_side", "endframe_side", "endframe_side"]),
+        115 => cross(
+            0x7a1a20,
+            [
+                "nether_wart_stage_0",
+                "nether_wart_stage_1",
+                "nether_wart_stage_1",
+                "nether_wart_stage_2",
+            ][meta as usize & 3],
+            Tint::None,
+        ),
+        116 => shape(
+            0x7a2030,
+            [
+                "enchanting_table_top",
+                "enchanting_table_bottom",
+                "enchanting_table_side",
+                "enchanting_table_side",
+                "enchanting_table_side",
+                "enchanting_table_side",
+            ],
+        ),
+        120 => shape(
+            0x7a8a60,
+            [
+                "endframe_top",
+                "end_stone",
+                "endframe_side",
+                "endframe_side",
+                "endframe_side",
+                "endframe_side",
+            ],
+        ),
         121 => cube(0xe0e0a0, "end_stone"),
         123 => cube(0x6a4a2a, "redstone_lamp_off"),
         124 => cube(0xf0d08a, "redstone_lamp_on"),
@@ -421,32 +668,148 @@ pub fn look(state: u16) -> Look {
         130 => shape(0x1a1a2a, ["obsidian"; 6]),
         133 => cube(0x2fc15a, "emerald_block"),
         137 => cube(0xc08040, "command_block"),
-        139 => shape(0x7a7a7a, if meta == 1 { ["cobblestone_mossy"; 6] } else { ["cobblestone"; 6] }),
+        139 => shape(
+            0x7a7a7a,
+            if meta == 1 {
+                ["cobblestone_mossy"; 6]
+            } else {
+                ["cobblestone"; 6]
+            },
+        ),
         140 => shape(0x7a3a2a, ["flower_pot"; 6]),
-        141 => cross(0x80a030, ["carrots_stage_0", "carrots_stage_0", "carrots_stage_1", "carrots_stage_1", "carrots_stage_2", "carrots_stage_2", "carrots_stage_2", "carrots_stage_3"][meta as usize & 7], Tint::None),
-        142 => cross(0x80a030, ["potatoes_stage_0", "potatoes_stage_0", "potatoes_stage_1", "potatoes_stage_1", "potatoes_stage_2", "potatoes_stage_2", "potatoes_stage_2", "potatoes_stage_3"][meta as usize & 7], Tint::None),
-        151 => shape(0x9f8150, ["daylight_detector_top", "daylight_detector_side", "daylight_detector_side", "daylight_detector_side", "daylight_detector_side", "daylight_detector_side"]),
+        141 => cross(
+            0x80a030,
+            [
+                "carrots_stage_0",
+                "carrots_stage_0",
+                "carrots_stage_1",
+                "carrots_stage_1",
+                "carrots_stage_2",
+                "carrots_stage_2",
+                "carrots_stage_2",
+                "carrots_stage_3",
+            ][meta as usize & 7],
+            Tint::None,
+        ),
+        142 => cross(
+            0x80a030,
+            [
+                "potatoes_stage_0",
+                "potatoes_stage_0",
+                "potatoes_stage_1",
+                "potatoes_stage_1",
+                "potatoes_stage_2",
+                "potatoes_stage_2",
+                "potatoes_stage_2",
+                "potatoes_stage_3",
+            ][meta as usize & 7],
+            Tint::None,
+        ),
+        151 => shape(
+            0x9f8150,
+            [
+                "daylight_detector_top",
+                "daylight_detector_side",
+                "daylight_detector_side",
+                "daylight_detector_side",
+                "daylight_detector_side",
+                "daylight_detector_side",
+            ],
+        ),
         152 => cube(0xaa1010, "redstone_block"),
         153 => cube(0x7a4a4a, "quartz_ore"),
         155 => match meta {
-            1 => cube3(0xe8e2d8, "quartz_block_chiseled_top", "quartz_block_chiseled_top", "quartz_block_chiseled"),
-            2 => cube3(0xe8e2d8, "quartz_block_lines_top", "quartz_block_lines_top", "quartz_block_lines"),
-            3 => mk(Kind::Opaque, 0xe8e2d8, ["quartz_block_lines", "quartz_block_lines", "quartz_block_lines", "quartz_block_lines", "quartz_block_lines_top", "quartz_block_lines_top"]),
-            4 => mk(Kind::Opaque, 0xe8e2d8, ["quartz_block_lines", "quartz_block_lines", "quartz_block_lines_top", "quartz_block_lines_top", "quartz_block_lines", "quartz_block_lines"]),
-            _ => cube3(0xe8e2d8, "quartz_block_top", "quartz_block_bottom", "quartz_block_side"),
+            1 => cube3(
+                0xe8e2d8,
+                "quartz_block_chiseled_top",
+                "quartz_block_chiseled_top",
+                "quartz_block_chiseled",
+            ),
+            2 => cube3(
+                0xe8e2d8,
+                "quartz_block_lines_top",
+                "quartz_block_lines_top",
+                "quartz_block_lines",
+            ),
+            3 => mk(
+                Kind::Opaque,
+                0xe8e2d8,
+                [
+                    "quartz_block_lines",
+                    "quartz_block_lines",
+                    "quartz_block_lines",
+                    "quartz_block_lines",
+                    "quartz_block_lines_top",
+                    "quartz_block_lines_top",
+                ],
+            ),
+            4 => mk(
+                Kind::Opaque,
+                0xe8e2d8,
+                [
+                    "quartz_block_lines",
+                    "quartz_block_lines",
+                    "quartz_block_lines_top",
+                    "quartz_block_lines_top",
+                    "quartz_block_lines",
+                    "quartz_block_lines",
+                ],
+            ),
+            _ => cube3(
+                0xe8e2d8,
+                "quartz_block_top",
+                "quartz_block_bottom",
+                "quartz_block_side",
+            ),
         },
-        158 => furnace_like(meta, 0x6e6e6e, "furnace_top", "furnace_side", "dropper_front_horizontal"),
+        158 => furnace_like(
+            meta,
+            0x6e6e6e,
+            "furnace_top",
+            "furnace_side",
+            "dropper_front_horizontal",
+        ),
         159 => cube(0x965e43, CLAY[meta as usize]),
         160 => shape(0xc0e8ee, [GLASS[meta as usize]; 6]),
         161 => leaves(meta, true),
         162 => log(meta, true),
         165 => cutout(0x80c070, "slime"),
-        168 => cube(0x5a9a8a, ["prismarine_rough", "prismarine_bricks", "prismarine_dark", "prismarine_rough"][meta as usize & 3]),
+        168 => cube(
+            0x5a9a8a,
+            [
+                "prismarine_rough",
+                "prismarine_bricks",
+                "prismarine_dark",
+                "prismarine_rough",
+            ][meta as usize & 3],
+        ),
         169 => cube(0xc0e8e0, "sea_lantern"),
         170 => match meta >> 2 & 3 {
             0 => cube3(0xc0a020, "hay_block_top", "hay_block_top", "hay_block_side"),
-            1 => mk(Kind::Opaque, 0xc0a020, ["hay_block_side", "hay_block_side", "hay_block_side", "hay_block_side", "hay_block_top", "hay_block_top"]),
-            _ => mk(Kind::Opaque, 0xc0a020, ["hay_block_side", "hay_block_side", "hay_block_top", "hay_block_top", "hay_block_side", "hay_block_side"]),
+            1 => mk(
+                Kind::Opaque,
+                0xc0a020,
+                [
+                    "hay_block_side",
+                    "hay_block_side",
+                    "hay_block_side",
+                    "hay_block_side",
+                    "hay_block_top",
+                    "hay_block_top",
+                ],
+            ),
+            _ => mk(
+                Kind::Opaque,
+                0xc0a020,
+                [
+                    "hay_block_side",
+                    "hay_block_side",
+                    "hay_block_top",
+                    "hay_block_top",
+                    "hay_block_side",
+                    "hay_block_side",
+                ],
+            ),
         },
         171 => shape(0xe0e0e0, [WOOL[meta as usize]; 6]),
         172 => cube(0x965e43, "hardened_clay"),
@@ -460,8 +823,22 @@ pub fn look(state: u16) -> Look {
             4 => cross(0xd02020, "double_plant_rose_bottom", Tint::None),
             _ => cross(0xf0c0d0, "double_plant_paeonia_bottom", Tint::None),
         },
-        179 => cube3(0xa85a2a, "red_sandstone_top", "red_sandstone_bottom", ["red_sandstone_normal", "red_sandstone_carved", "red_sandstone_smooth"][(meta as usize).min(2)]),
-        181 => cube3(0xa85a2a, "red_sandstone_top", "red_sandstone_bottom", "red_sandstone_normal"),
+        179 => cube3(
+            0xa85a2a,
+            "red_sandstone_top",
+            "red_sandstone_bottom",
+            [
+                "red_sandstone_normal",
+                "red_sandstone_carved",
+                "red_sandstone_smooth",
+            ][(meta as usize).min(2)],
+        ),
+        181 => cube3(
+            0xa85a2a,
+            "red_sandstone_top",
+            "red_sandstone_bottom",
+            "red_sandstone_normal",
+        ),
         _ => mk(Kind::Skip, 0, ["stone"; 6]),
     }
 }
@@ -496,11 +873,82 @@ fn pumpkin_front(meta: u16) -> usize {
 pub fn light_opacity(state: u16) -> u8 {
     let id = state >> 4;
     match id {
-        0 | 20 | 95 | 102 | 160 | 101 | 6 | 31 | 32 | 37..=40 | 50 | 51 | 55 | 59 | 65 | 66 | 75 | 76 | 83 | 175 | 27 | 28 | 157 | 141 | 142 | 104 | 105 | 115 | 111 | 78 | 171 | 70 | 72 | 85 | 113 | 139 | 188..=192 | 107 | 183..=187 | 81 | 64 | 71 | 193..=197 | 96 | 167 | 140 | 151 | 116 | 92 | 93 | 94 | 106 | 130 | 120 | 26 | 54 | 146 | 165 => 0,
+        0
+        | 20
+        | 95
+        | 102
+        | 160
+        | 101
+        | 6
+        | 31
+        | 32
+        | 37..=40
+        | 50
+        | 51
+        | 55
+        | 59
+        | 65
+        | 66
+        | 75
+        | 76
+        | 83
+        | 175
+        | 27
+        | 28
+        | 157
+        | 141
+        | 142
+        | 104
+        | 105
+        | 115
+        | 111
+        | 78
+        | 171
+        | 70
+        | 72
+        | 85
+        | 113
+        | 139
+        | 188..=192
+        | 107
+        | 183..=187
+        | 81
+        | 64
+        | 71
+        | 193..=197
+        | 96
+        | 167
+        | 140
+        | 151
+        | 116
+        | 92
+        | 93
+        | 94
+        | 106
+        | 130
+        | 120
+        | 26
+        | 54
+        | 146
+        | 165 => 0,
         18 | 161 | 30 => 1,
         8 | 9 | 79 | 174 => 3,
         10 | 11 => 255,
-        44 | 126 | 182 | 53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 | 60 => 255,
+        44
+        | 126
+        | 182
+        | 53
+        | 67
+        | 108
+        | 109
+        | 114
+        | 128
+        | 134..=136
+        | 156
+        | 163
+        | 164
+        | 180
+        | 60 => 255,
         _ => 255,
     }
     .min(15)
@@ -523,7 +971,8 @@ pub fn emission(state: u16) -> u8 {
 
 /// `look` for every block state, computed once; the mesher calls it for each block of a chunk.
 pub fn cached(state: u16) -> &'static Look {
-    static TABLE: std::sync::LazyLock<Vec<Look>> = std::sync::LazyLock::new(|| (0..4096u16).map(look).collect());
+    static TABLE: std::sync::LazyLock<Vec<Look>> =
+        std::sync::LazyLock::new(|| (0..4096u16).map(look).collect());
     &TABLE[state as usize & 4095]
 }
 
@@ -550,7 +999,27 @@ pub fn texture_names() -> Vec<&'static str> {
         .map(look)
         .filter(|l| l.kind != Kind::Skip)
         .flat_map(|l| l.tex)
-        .chain(["grass_side_overlay", "grass_side_snowed", "door_wood_upper", "door_iron_upper", "door_spruce_upper", "door_birch_upper", "door_jungle_upper", "door_acacia_upper", "door_dark_oak_upper", "glass_pane_top", "vine", "double_plant_sunflower_top", "double_plant_syringa_top", "double_plant_grass_top", "double_plant_fern_top", "double_plant_rose_top", "double_plant_paeonia_top", "double_plant_sunflower_front", "double_plant_sunflower_back"])
+        .chain([
+            "grass_side_overlay",
+            "grass_side_snowed",
+            "door_wood_upper",
+            "door_iron_upper",
+            "door_spruce_upper",
+            "door_birch_upper",
+            "door_jungle_upper",
+            "door_acacia_upper",
+            "door_dark_oak_upper",
+            "glass_pane_top",
+            "vine",
+            "double_plant_sunflower_top",
+            "double_plant_syringa_top",
+            "double_plant_grass_top",
+            "double_plant_fern_top",
+            "double_plant_rose_top",
+            "double_plant_paeonia_top",
+            "double_plant_sunflower_front",
+            "double_plant_sunflower_back",
+        ])
         .collect();
     names.extend(PANE_TOP);
     names.sort_unstable();
@@ -565,7 +1034,10 @@ mod tests {
     #[test]
     fn colored_blocks_pick_texture_by_meta() {
         assert_eq!(look(35 << 4 | 14).tex[UP], "wool_colored_red");
-        assert_eq!(look(159 << 4 | 3).tex[UP], "hardened_clay_stained_light_blue");
+        assert_eq!(
+            look(159 << 4 | 3).tex[UP],
+            "hardened_clay_stained_light_blue"
+        );
     }
 
     #[test]

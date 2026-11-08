@@ -59,12 +59,20 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
     let mut out = Vec::new();
     match id {
         44 | 126 | 182 => {
-            let (lo, hi) = if meta & 8 != 0 { (8.0, 16.0) } else { (0.0, 8.0) };
+            let (lo, hi) = if meta & 8 != 0 {
+                (8.0, 16.0)
+            } else {
+                (0.0, 8.0)
+            };
             out.push(px([0.0, lo, 0.0], [16.0, hi, 16.0], t));
         }
         53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 => {
             let top = meta & 4 != 0;
-            let (slab, step) = if top { ((8.0, 16.0), (0.0, 8.0)) } else { ((0.0, 8.0), (8.0, 16.0)) };
+            let (slab, step) = if top {
+                ((8.0, 16.0), (0.0, 8.0))
+            } else {
+                ((0.0, 8.0), (8.0, 16.0))
+            };
             out.push(px([0.0, slab.0, 0.0], [16.0, slab.1, 16.0], t));
             let (x, z) = match meta & 3 {
                 0 => ((8.0, 16.0), (0.0, 16.0)),
@@ -129,7 +137,13 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             }
         }
         101 | 102 | 160 => {
-            let top = if id == 101 { "iron_bars" } else if id == 102 { "glass_pane_top" } else { crate::blocks::pane_top(meta) };
+            let top = if id == 101 {
+                "iron_bars"
+            } else if id == 102 {
+                "glass_pane_top"
+            } else {
+                crate::blocks::pane_top(meta)
+            };
             let mut post = px([7.0, 0.0, 7.0], [9.0, 16.0, 9.0], t);
             post.tex[UP] = top;
             post.tex[DOWN] = top;
@@ -214,7 +228,11 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             out.push(bx);
         }
         70 | 72 => out.push(px([1.0, 0.0, 1.0], [15.0, 1.0, 15.0], t)),
-        78 => out.push(px([0.0, 0.0, 0.0], [16.0, ((meta & 7) as f32 + 1.0) * 2.0, 16.0], t)),
+        78 => out.push(px(
+            [0.0, 0.0, 0.0],
+            [16.0, ((meta & 7) as f32 + 1.0) * 2.0, 16.0],
+            t,
+        )),
         81 => {
             let mut a = px([0.0, 0.0, 1.0], [16.0, 16.0, 15.0], t);
             a.mask = bit(WEST) | bit(EAST);
@@ -227,7 +245,11 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             }
             out.extend([a, b, c]);
         }
-        92 => out.push(px([1.0 + 2.0 * (meta.min(6) as f32), 0.0, 1.0], [15.0, 8.0, 15.0], t)),
+        92 => out.push(px(
+            [1.0 + 2.0 * (meta.min(6) as f32), 0.0, 1.0],
+            [15.0, 8.0, 15.0],
+            t,
+        )),
         93 | 94 => out.push(px([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], t)),
         96 | 167 => {
             let (a, b) = if meta & 4 != 0 {
@@ -285,7 +307,11 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
 fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], out: &mut Vec<Bx>) {
     let meta = state & 15;
     let upper = meta & 8 != 0;
-    let (low, high) = if upper { (nb(0, -1, 0), state) } else { (state, nb(0, 1, 0)) };
+    let (low, high) = if upper {
+        (nb(0, -1, 0), state)
+    } else {
+        (state, nb(0, 1, 0))
+    };
     let facing = low & 3;
     let open = low & 4 != 0;
     let hinge_right = high & 1 != 0;

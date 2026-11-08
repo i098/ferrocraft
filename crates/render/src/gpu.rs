@@ -408,7 +408,10 @@ impl Renderer {
                 })
         };
         Some(GpuMesh {
-            vertices: buf(bytemuck::cast_slice(&g.vertices), wgpu::BufferUsages::VERTEX),
+            vertices: buf(
+                bytemuck::cast_slice(&g.vertices),
+                wgpu::BufferUsages::VERTEX,
+            ),
             indices: buf(bytemuck::cast_slice(&g.indices), wgpu::BufferUsages::INDEX),
             count: g.indices.len() as u32,
         })
@@ -640,8 +643,26 @@ fn build_pipelines(
         })
     };
     let stride = std::mem::size_of::<Vertex>();
-    let opaque_pipe = pipe("vs_world", "fs_world", stride, &world_attrs, None, true, true, true);
-    let water_pipe = pipe("vs_world", "fs_world", stride, &world_attrs, alpha, false, true, false);
+    let opaque_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        None,
+        true,
+        true,
+        true,
+    );
+    let water_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     let hud_pipe = pipe(
         "vs_hud",
         "fs_hud",
@@ -652,10 +673,44 @@ fn build_pipelines(
         false,
         false,
     );
-    let sky_pipe = pipe("vs_world", "fs_sky", stride, &world_attrs, alpha, false, false, false);
-    let sky_add_pipe = pipe("vs_world", "fs_sky", stride, &world_attrs, additive, false, false, false);
-    let cloud_pipe = pipe("vs_world", "fs_sky", stride, &world_attrs, alpha, false, true, false);
-    [opaque_pipe, water_pipe, hud_pipe, sky_pipe, sky_add_pipe, cloud_pipe]
+    let sky_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        false,
+        false,
+    );
+    let sky_add_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        false,
+        false,
+    );
+    let cloud_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
+    [
+        opaque_pipe,
+        water_pipe,
+        hud_pipe,
+        sky_pipe,
+        sky_add_pipe,
+        cloud_pipe,
+    ]
 }
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

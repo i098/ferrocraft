@@ -294,7 +294,13 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
     );
     if eye[1] < 63.0 {
         solid.solid_quad(
-            [[-r, -16.0, -r], [r, -16.0, -r], [r, -16.0, r], [-r, -16.0, r]].map(|p| add(p, eye)),
+            [
+                [-r, -16.0, -r],
+                [r, -16.0, -r],
+                [r, -16.0, r],
+                [-r, -16.0, r],
+            ]
+            .map(|p| add(p, eye)),
             [0.0, 0.0, 0.0, 1.0],
         );
     }
@@ -318,7 +324,10 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
             .map(|l| {
                 let f6 = l as f32 * PI * 2.0 / 16.0;
                 let (f7, f8) = (f6.sin(), f6.cos());
-                (place([f7 * 120.0, f8 * 120.0, -f8 * 40.0 * a]), [col[0], col[1], col[2], 0.0])
+                (
+                    place([f7 * 120.0, f8 * 120.0, -f8 * 40.0 * a]),
+                    [col[0], col[1], col[2], 0.0],
+                )
             })
             .collect();
         blend.tri_fan((place([0.0, 100.0, 0.0]), col), &rim);
@@ -335,8 +344,16 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
     additive.quad([
         (sky_rot([-sun, 100.0, -sun]), env_uv(0.0, SUN_Y), white),
         (sky_rot([sun, 100.0, -sun]), env_uv(32.0, SUN_Y), white),
-        (sky_rot([sun, 100.0, sun]), env_uv(32.0, SUN_Y + 32.0), white),
-        (sky_rot([-sun, 100.0, sun]), env_uv(0.0, SUN_Y + 32.0), white),
+        (
+            sky_rot([sun, 100.0, sun]),
+            env_uv(32.0, SUN_Y + 32.0),
+            white,
+        ),
+        (
+            sky_rot([-sun, 100.0, sun]),
+            env_uv(0.0, SUN_Y + 32.0),
+            white,
+        ),
     ]);
     let k = env.moon_phase();
     let (col, row) = ((k % 4) as f32, (k / 4 % 2) as f32);
@@ -415,10 +432,18 @@ fn stars(g: &mut SkyGeometry, alpha: f32, place: impl Fn([f32; 3]) -> [f32; 3]) 
 }
 
 /// Fancy clouds: a 12x4x12 block box per opaque `clouds.png` texel around the camera.
-pub fn build_clouds(env: &Environment, s: &SkyState, eye: [f64; 3], texels: &[bool]) -> SkyGeometry {
+pub fn build_clouds(
+    env: &Environment,
+    s: &SkyState,
+    eye: [f64; 3],
+    texels: &[bool],
+) -> SkyGeometry {
     let mut g = SkyGeometry::default();
     let shift = (env.ticks as f64 + env.partial as f64) * 0.03;
-    let (tx0, tz0) = (((eye[0] + shift) / 12.0).floor() as i64, (eye[2] / 12.0 + 0.33).floor() as i64);
+    let (tx0, tz0) = (
+        ((eye[0] + shift) / 12.0).floor() as i64,
+        (eye[2] / 12.0 + 0.33).floor() as i64,
+    );
     let at = |tx: i64, tz: i64| texels[((tz.rem_euclid(256)) * 256 + tx.rem_euclid(256)) as usize];
     let (y0, y1) = (128.0f32 + 0.33, 128.0f32 + 0.33 + 4.0);
     let shade = [1.0, 0.7, 0.8, 0.8, 0.9, 0.9];
@@ -433,12 +458,30 @@ pub fn build_clouds(env: &Environment, s: &SkyState, eye: [f64; 3], texels: &[bo
             let (x1, z1) = (x0 + 12.0, z0 + 12.0);
             // Faces in `UP, DOWN, NORTH, SOUTH, WEST, EAST` order; a face is dropped next to another cloud texel.
             let faces: [(bool, [[f32; 3]; 4]); 6] = [
-                (true, [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),
-                (true, [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]]),
-                (!at(tx, tz - 1), [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),
-                (!at(tx, tz + 1), [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),
-                (!at(tx - 1, tz), [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),
-                (!at(tx + 1, tz), [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),
+                (
+                    true,
+                    [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+                ),
+                (
+                    true,
+                    [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
+                ),
+                (
+                    !at(tx, tz - 1),
+                    [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
+                ),
+                (
+                    !at(tx, tz + 1),
+                    [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+                ),
+                (
+                    !at(tx - 1, tz),
+                    [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+                ),
+                (
+                    !at(tx + 1, tz),
+                    [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]],
+                ),
             ];
             for (f, (draw, corners)) in faces.iter().enumerate() {
                 if *draw {
@@ -462,7 +505,10 @@ mod tests {
         assert!((celestial_angle(18000, 0.0) - 0.5).abs() < 1e-6, "midnight");
         // Sunrise (tick 0) is a little before 0.75 on the eased curve.
         let sunrise = celestial_angle(0, 0.0);
-        assert!((0.75..0.8).contains(&sunrise) || (0.95..1.0).contains(&sunrise), "{sunrise}");
+        assert!(
+            (0.75..0.8).contains(&sunrise) || (0.95..1.0).contains(&sunrise),
+            "{sunrise}"
+        );
     }
 
     #[test]

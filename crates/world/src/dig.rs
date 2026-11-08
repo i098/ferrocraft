@@ -64,21 +64,32 @@ pub fn relative_hardness(id: u16, on_ground: bool) -> f32 {
 }
 
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
-/// `None` when the block ray passes through (air, water, lava, fire). Doors read their other
-/// half; the other neighbour-dependent blocks (stairs, fences, walls, gates, panes, chests,
-/// vines) are full cubes here.
+/// `None` when the block ray passes through (air, water, lava, fire). Doors, chests, fences,
+/// panes and walls read their neighbours; stairs, which vanilla traces as several boxes, are
+/// full cubes here.
 pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     let state = at(pos);
-    if !matches!(state >> 4, 64 | 71 | 193..=197) {
-        return state_box(state);
-    }
+    let id = state >> 4;
     let [x, y, z] = pos;
+    // north (z-1), south (z+1), west (x-1), east (x+1)
+    let near = || [[x, y, z - 1], [x, y, z + 1], [x - 1, y, z], [x + 1, y, z]].map(|p| at(p) >> 4);
+    Some(match id {
+        64 | 71 | 193..=197 => door_at(at, pos, state),
+        54 | 146 => chest_box(near().map(|n| n == id)),
+        85 | 113 | 188..=192 => fence_box(near().map(|n| fence_connects(id, n))),
+        102 | 160 => pane_box(near().map(|n| opaque_cube(n) || matches!(n, 20 | 95 | 102 | 160))),
+        139 => wall_box(near().map(|n| n == 139 || is_gate(n) || opaque_cube(n))),
+        _ => return state_box(state),
+    })
+}
+
+fn door_at(at: &dyn Fn([i32; 3]) -> u16, [x, y, z]: [i32; 3], state: u16) -> [f64; 6] {
     let (lower, upper) = if state & 8 != 0 {
         (at([x, y - 1, z]), state)
     } else {
         (state, at([x, y + 1, z]))
     };
-    Some(door_box(lower & 3, lower & 4 != 0, upper & 1 != 0))
+    door_box(lower & 3, lower & 4 != 0, upper & 1 != 0)
 }
 
 /// `BlockDoor.setBoundBasedOnMeta`: a door leaf is 3/16 thick. Facing picks one of four leaf
@@ -99,6 +110,125 @@ fn door_box(facing: u16, open: bool, hinge_right: bool) -> [f64; 6] {
     leaves[usize::from((facing + turn) % 4)]
 }
 
+fn is_gate(id: u16) -> bool {
+    matches!(id, 107 | 183..=187)
+}
+
+/// Full opaque cubes: `material.isOpaque() && isFullCube()`.
+fn opaque_cube(id: u16) -> bool {
+    matches!(
+        id,
+        1..=5 | 7 | 12 | 13 | 14..=17 | 19 | 21..=25 | 35 | 41..=43 | 45 | 47..=49 | 56..=58
+            | 61 | 62 | 73 | 74 | 80 | 82 | 84 | 87 | 88 | 97..=100 | 103 | 110 | 112
+            | 121 | 123 | 124 | 125 | 129 | 133 | 137 | 152 | 153 | 155 | 158 | 159 | 162
+            | 168 | 170 | 172 | 173 | 179 | 181
+    )
+}
+
+/// `BlockFence.canConnectTo`: its own kind of fence, any gate or an opaque cube.
+fn fence_connects(id: u16, neighbour: u16) -> bool {
+    let wood = |n| matches!(n, 85 | 188..=192);
+    let same = if id == 113 {
+        neighbour == 113
+    } else {
+        wood(neighbour)
+    };
+    same || is_gate(neighbour) || opaque_cube(neighbour)
+}
+
+/// `BlockChest.setBlockBoundsBasedOnState`: a chest next to a chest of its kind reaches the
+/// shared edge. `joined` is north, south, west, east.
+fn chest_box(joined: [bool; 4]) -> [f64; 6] {
+    let [n, s, w, e] = joined;
+    [
+        if w { 0.0 } else { 0.0625 },
+        0.0,
+        if n { 0.0 } else { 0.0625 },
+        if e { 1.0 } else { 0.9375 },
+        0.875,
+        if s { 1.0 } else { 0.9375 },
+    ]
+}
+
+/// `BlockFence.setBlockBoundsBasedOnState`: a post that reaches the edge of every joined side.
+fn fence_box(joined: [bool; 4]) -> [f64; 6] {
+    let [n, s, w, e] = joined;
+    [
+        if w { 0.0 } else { 0.375 },
+        0.0,
+        if n { 0.0 } else { 0.375 },
+        if e { 1.0 } else { 0.625 },
+        1.0,
+        if s { 1.0 } else { 0.625 },
+    ]
+}
+
+/// `BlockPane.setBlockBoundsBasedOnState`: a thin post; a straight or lone pane spans the cell.
+fn pane_box(joined: [bool; 4]) -> [f64; 6] {
+    let [n, s, w, e] = joined;
+    let any = n || s || w || e;
+    let (x0, x1) = pane_span(w, e, any);
+    let (z0, z1) = pane_span(n, s, any);
+    [x0, 0.0, z0, x1, 1.0, z1]
+}
+
+fn pane_span(low: bool, high: bool, any: bool) -> (f64, f64) {
+    match (low, high) {
+        (true, false) => (0.0, 0.5625),
+        (false, true) => (0.4375, 1.0),
+        (false, false) if any => (0.4375, 0.5625),
+        _ => (0.0, 1.0),
+    }
+}
+
+/// `BlockWall.setBlockBoundsBasedOnState`: a post, lower and slimmer on a straight run.
+fn wall_box(joined: [bool; 4]) -> [f64; 6] {
+    let [n, s, w, e] = joined;
+    let (mut x0, mut x1, mut z0, mut z1, mut top) = (0.25, 0.75, 0.25, 0.75, 1.0);
+    if n {
+        z0 = 0.0;
+    }
+    if s {
+        z1 = 1.0;
+    }
+    if w {
+        x0 = 0.0;
+    }
+    if e {
+        x1 = 1.0;
+    }
+    if n && s && !w && !e {
+        (top, x0, x1) = (0.8125, 0.3125, 0.6875);
+    } else if w && e && !n && !s {
+        (top, z0, z1) = (0.8125, 0.3125, 0.6875);
+    }
+    [x0, 0.0, z0, x1, top, z1]
+}
+
+/// `BlockVine.setBlockBoundsBasedOnState`: a 1/16 slab on each side the vine clings to, or a
+/// slab under the block above when it clings to none.
+fn vine_box(meta: u16) -> [f64; 6] {
+    let slabs = [
+        (1, [0.0, 0.0, 0.9375, 1.0, 1.0, 1.0]),
+        (2, [0.0, 0.0, 0.0, 0.0625, 1.0, 1.0]),
+        (4, [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625]),
+        (8, [0.9375, 0.0, 0.0, 1.0, 1.0, 1.0]),
+    ];
+    let mut sides = slabs.iter().filter(|(bit, _)| meta & bit != 0).map(|s| s.1);
+    let Some(first) = sides.next() else {
+        return [0.0, 0.9375, 0.0, 1.0, 1.0, 1.0];
+    };
+    sides.fold(first, |a, b| {
+        std::array::from_fn(|i| {
+            if i < 3 {
+                a[i].min(b[i])
+            } else {
+                a[i].max(b[i])
+            }
+        })
+    })
+}
+
 fn state_box(state: u16) -> Option<[f64; 6]> {
     let (id, meta) = (state >> 4, state & 15);
     if matches!(id, 0 | 8..=11 | 51) {
@@ -109,6 +239,7 @@ fn state_box(state: u16) -> Option<[f64; 6]> {
         mounted_box(id, meta)
             .or_else(|| flat_box(id, meta))
             .or_else(|| standing_box(id))
+            .or_else(|| crop_box(id, meta))
             .unwrap_or(full),
     )
 }
@@ -122,6 +253,8 @@ fn mounted_box(id: u16, meta: u16) -> Option<[f64; 6]> {
         69 => lever_box(meta & 7),
         77 | 143 => button_box(meta),
         96 | 167 => trapdoor_box(meta),
+        107 | 183..=187 => gate_box(meta),
+        106 => vine_box(meta),
         _ => return None,
     })
 }
@@ -239,6 +372,30 @@ fn fixed_height(id: u16) -> Option<f64> {
     })
 }
 
+fn gate_box(meta: u16) -> [f64; 6] {
+    if meta & 1 == 0 {
+        [0.0, 0.0, 0.375, 1.0, 1.0, 0.625]
+    } else {
+        [0.375, 0.0, 0.0, 0.625, 1.0, 1.0]
+    }
+}
+
+/// Crops and nether wart are 1/4 high; stems grow from 2/16 to 16/16 with their age.
+fn crop_box(id: u16, meta: u16) -> Option<[f64; 6]> {
+    Some(match id {
+        59 | 115 | 141 | 142 => [0.0, 0.0, 0.0, 1.0, 0.25, 1.0],
+        104 | 105 => [
+            0.375,
+            0.0,
+            0.375,
+            0.625,
+            f64::from((meta & 7) * 2 + 2) / 16.0,
+            0.625,
+        ],
+        _ => return None,
+    })
+}
+
 /// Plants and posts that stand in the middle of their cell.
 fn standing_box(id: u16) -> Option<[f64; 6]> {
     Some(match id {
@@ -249,6 +406,7 @@ fn standing_box(id: u16) -> Option<[f64; 6]> {
         81 => [0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375],
         83 => [0.125, 0.0, 0.125, 0.875, 1.0, 0.875],
         140 => [0.3125, 0.0, 0.3125, 0.6875, 0.375, 0.6875],
+        130 => [0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375],
         _ => return None,
     })
 }
@@ -824,5 +982,44 @@ mod tests {
         assert_eq!(raycast(&door, [0.8, 64.5, 0.5], 0.0, 0.0, 4.5), None);
         let hit = raycast(&door, [0.1, 65.5, 0.5], 0.0, 0.0, 4.5);
         assert_eq!(hit.map(|h| (h.pos, h.face)), Some(([0, 65, 2], 2)));
+    }
+
+    #[test]
+    fn ray_passes_over_a_young_crop() {
+        // Wheat (59) is 1/4 high: a level ray at y 64.5 passes over it, one at 64.1 hits it.
+        let wheat = |p: [i32; 3]| if p == [0, 64, 2] { 59 << 4 } else { 0 };
+        assert_eq!(raycast(&wheat, [0.5, 64.5, 0.5], 0.0, 0.0, 4.5), None);
+        assert!(raycast(&wheat, [0.5, 64.1, 0.5], 0.0, 0.0, 4.5).is_some());
+    }
+
+    #[test]
+    fn fence_reaches_its_joined_side_and_a_lone_pane_spans_the_cell() {
+        // A ray along +z at x 0.9 passes a lone fence post (x 0.375..0.625) but hits one joined to stone on the east.
+        let lone = |p: [i32; 3]| if p == [0, 64, 2] { 85 << 4 } else { 0 };
+        assert_eq!(raycast(&lone, [0.9, 64.5, 0.5], 0.0, 0.0, 4.5), None);
+        let joined = |p: [i32; 3]| match p {
+            [0, 64, 2] => 85 << 4,
+            [1, 64, 2] => STONE,
+            _ => 0,
+        };
+        let hit = raycast(&joined, [0.9, 64.5, 0.5], 0.0, 0.0, 4.5);
+        assert_eq!(hit.map(|h| h.pos), Some([0, 64, 2]));
+        // A lone glass pane (102) spans its whole cell, like a straight one.
+        let pane = |p: [i32; 3]| if p == [0, 64, 2] { 102 << 4 } else { 0 };
+        assert!(raycast(&pane, [0.9, 64.5, 0.5], 0.0, 0.0, 4.5).is_some());
+    }
+
+    #[test]
+    fn chest_stretches_toward_a_chest_next_to_it() {
+        // West neighbour chest: the box starts at x 0 instead of 0.0625.
+        let at_edge = [0.03, 64.5, 0.5];
+        let single = |p: [i32; 3]| if p == [0, 64, 2] { 54 << 4 } else { 0 };
+        assert_eq!(raycast(&single, at_edge, 0.0, 0.0, 4.5), None);
+        let double = |p: [i32; 3]| match p {
+            [0, 64, 2] | [-1, 64, 2] => 54 << 4,
+            _ => 0,
+        };
+        let hit = raycast(&double, at_edge, 0.0, 0.0, 4.5);
+        assert_eq!(hit.map(|h| h.pos), Some([0, 64, 2]));
     }
 }

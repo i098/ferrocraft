@@ -2,8 +2,8 @@
 
 use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
+use ferrocraft_net_client::Session;
 use input_audio::InputState;
-use net_client::Session;
 use render::{Camera, Hud, Renderer};
 use std::path::Path;
 use std::sync::Arc;
@@ -70,18 +70,29 @@ impl App {
             self.next_tick += TICK;
             ran += 1;
             if let Some(line) = self.input.take_chat_submit() {
-                self.session.send_chat(&line);
+                let r = self.session.send_chat(&line);
+                self.send_result(r);
             }
             let (dx, dy) = self.input.take_look_delta();
             self.game.tick(self.input.movement());
             if let Some(p) = &self.game.player {
                 let [x, y, z] = p.pos;
-                self.session
-                    .send_position_look(x, y, z, p.yaw, self.game.pitch, p.on_ground);
+                let r =
+                    self.session
+                        .send_position_look(x, y, z, p.yaw, self.game.pitch, p.on_ground);
+                self.send_result(r);
             }
         }
         if ran == MAX_TICKS_PER_FRAME {
             self.next_tick = now + TICK;
+        }
+    }
+
+    fn send_result(&mut self, r: std::io::Result<()>) {
+        if let Err(e) = r {
+            self.game
+                .disconnected
+                .get_or_insert(format!("send failed: {e}"));
         }
     }
 

@@ -1,6 +1,6 @@
 //! Window-free game state: chunks, the local player and the 20 TPS step.
 
-use net_client::NetEvent;
+use ferrocraft_net_client::NetEvent;
 use world::chunk::ChunkStore;
 use world::{Block, Input, Player, World};
 
@@ -101,8 +101,8 @@ impl Game {
                 Some(Effect::Remove(x, z))
             }
             NetEvent::BlockChange { x, y, z, state } => {
-                let chunk = self.store.get_mut(x >> 4, z >> 4)?;
-                chunk.set_block((x & 15) as usize, y as usize, (z & 15) as usize, state);
+                self.store.get(x >> 4, z >> 4)?;
+                self.store.set_block(x, y, z, state);
                 Some(Effect::Upload(x >> 4, z >> 4))
             }
             NetEvent::PlayerPosLook {

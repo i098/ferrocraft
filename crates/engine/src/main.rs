@@ -15,7 +15,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let session = match net_client::Session::connect(&args.server, &args.username) {
+    let session = match ferrocraft_net_client::Session::connect(&args.server, &args.username) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("ferrocraft-engine: cannot join {}: {e}", args.server);

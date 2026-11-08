@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 world = { path = "../world" }
-net-client = { path = "../net-client" }
+ferrocraft-net-client = { path = "../net-client" }
 render = { path = "../render" }
 input-audio = { path = "../input-audio" }
 winit = "0.30"

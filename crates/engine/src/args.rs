@@ -42,9 +42,20 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
     };
     Ok(Args {
         username,
-        assets_dir,
+        assets_dir: assets_dir.map(resolve_assets),
         server,
     })
+}
+
+/// Launchers pass `<minecraft-dir>/assets`, which holds hashed objects, not the textures and
+/// font. The renderer reads those from the vanilla client jar next to it, so prefer that jar.
+fn resolve_assets(dir: PathBuf) -> PathBuf {
+    let jar = dir.join("../versions/1.8.9/1.8.9.jar");
+    if jar.is_file() {
+        jar
+    } else {
+        dir
+    }
 }
 
 #[cfg(test)]
@@ -64,6 +75,17 @@ mod tests {
         .unwrap();
         assert_eq!(a.username, "Bob");
         assert_eq!(a.assets_dir, Some(PathBuf::from("/a")));
+        let mc = std::env::temp_dir().join(format!("fc-args-{}", std::process::id()));
+        std::fs::create_dir_all(mc.join("assets")).unwrap();
+        std::fs::create_dir_all(mc.join("versions/1.8.9")).unwrap();
+        std::fs::write(mc.join("versions/1.8.9/1.8.9.jar"), b"").unwrap();
+        let flag = format!("--assetsDir {}", mc.join("assets").display());
+        let a = parse(&v(&flag), None).unwrap();
+        assert!(a
+            .assets_dir
+            .unwrap()
+            .ends_with("assets/../versions/1.8.9/1.8.9.jar"));
+        std::fs::remove_dir_all(mc).unwrap();
         assert_eq!(a.server, DEFAULT_SERVER);
         assert_eq!(
             parse(&v("--server mc.local"), None).unwrap().server,

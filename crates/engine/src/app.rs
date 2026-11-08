@@ -26,6 +26,8 @@ pub struct App {
     renderer: Option<Renderer>,
     next_tick: Instant,
     grabbed: bool,
+    /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
+    deadline: Option<Instant>,
 }
 
 impl App {
@@ -39,6 +41,10 @@ impl App {
             renderer: None,
             next_tick: Instant::now(),
             grabbed: false,
+            deadline: std::env::var("FERROCRAFT_WINDOW_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|s| Instant::now() + Duration::from_secs(s)),
         }
     }
 
@@ -191,7 +197,7 @@ impl ApplicationHandler for App {
         self.pump_network();
         self.run_ticks();
         self.sync_cursor();
-        if self.game.disconnected.is_some() {
+        if self.game.disconnected.is_some() || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();
         }
         if let Some(w) = &self.window {

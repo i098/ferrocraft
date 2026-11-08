@@ -8,11 +8,5 @@ publish = false
 name = "ferrocraft-launcher"
 path = "src/main.rs"
 
-[[bin]]
-name = "ferrocraft-engine-window"
-path = "src/bin/engine_window.rs"
-
 [dependencies]
 serde_json = "1"
-winit = "0.30"
-raw-window-handle = "0.6"

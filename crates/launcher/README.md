@@ -8,7 +8,7 @@ Drop-in install for the official launcher (and any launcher that reads a version
   - `versions/ferrocraft-1.8.9/ferrocraft-1.8.9.json` (`inheritsFrom` `1.8.9`, `mainClass` `net.ferrocraft.boot.Main`)
   - `libraries/net/ferrocraft/boot/0.1.0/boot-0.1.0.jar` (listed before the vanilla jar on the classpath)
   - `ferrocraft/ferrocraft-engine` (the Rust engine binary; `ferrocraft-engine.exe` when the source file is `.exe`). The boot jar finds it from its own location under `<minecraft-dir>/libraries`, not from `--gameDir`.
-- `ferrocraft-engine-window` is a stand-in engine that opens a window. The `engine` crate replaces it later.
+- The engine is the `ferrocraft-engine` binary of `crates/engine`. The smoke test starts the local offline server in `harness/testserver`.
 - `smoke/run.sh` is the end-to-end proof: it runs the version with portablemc (offline, no sign-in) under Xvfb.
 
 Java sources live in `java/launcher`.

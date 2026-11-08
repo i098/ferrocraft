@@ -20,7 +20,7 @@ pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 /// or blends (plants, doors, panes, water) is not.
 pub fn is_solid(state: u16) -> bool {
     matches!(
-        blocks::look(state >> 4).kind,
+        blocks::look(state).kind,
         blocks::Kind::Opaque | blocks::Kind::Cutout
     )
 }

@@ -1,18 +1,19 @@
 //! Window-free game state: chunks, the local player and the 20 TPS step.
 
-use ferrocraft_net_client::NetEvent;
+use ferrocraft_net_client::{NetEvent, Styled};
 use world::chunk::ChunkStore;
 use world::{Block, Input, Player, World};
 
 pub const EYE_HEIGHT: f64 = 1.62;
-const CHAT_LINES: usize = 10;
 
-/// Chunk changes that the renderer must mirror.
+/// Changes that the renderer or the HUD must mirror.
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Upload(i32, i32),
     Remove(i32, i32),
     Clear,
+    Chat(Vec<Styled>),
+    ActionBar(String),
 }
 
 /// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
@@ -42,7 +43,6 @@ pub struct Game {
     /// Set by S08 until the engine has echoed the new pose to the server.
     pub teleported: bool,
     pub pitch: f32,
-    pub chat: Vec<String>,
     pub disconnected: Option<String>,
 }
 
@@ -54,7 +54,6 @@ impl Game {
             prev_pos: [0.0; 3],
             teleported: false,
             pitch: 0.0,
-            chat: Vec::new(),
             disconnected: None,
         }
     }
@@ -91,12 +90,8 @@ impl Game {
                 self.teleport([x, y, z], yaw, pitch, flags);
                 None
             }
-            NetEvent::Chat(m) => {
-                self.chat.push(m);
-                let extra = self.chat.len().saturating_sub(CHAT_LINES);
-                self.chat.drain(..extra);
-                None
-            }
+            NetEvent::Chat(m) => Some(Effect::Chat(m)),
+            NetEvent::ActionBar(m) => Some(Effect::ActionBar(m)),
             NetEvent::Disconnect(r) => {
                 self.disconnected = Some(r);
                 None
@@ -246,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn block_change_in_unloaded_chunk_is_dropped_and_chat_is_capped() {
+    fn block_change_in_unloaded_chunk_is_dropped() {
         let mut g = Game::new();
         assert_eq!(
             g.apply(NetEvent::BlockChange {
@@ -257,11 +252,6 @@ mod tests {
             }),
             None
         );
-        for i in 0..15 {
-            g.apply(NetEvent::Chat(i.to_string()));
-        }
-        assert_eq!(g.chat.len(), CHAT_LINES);
-        assert_eq!(g.chat[0], "5");
     }
 
     #[test]

@@ -17,7 +17,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use chat::plain_text;
+pub use chat::{formatted_text, plain_text, styled, Styled};
 pub use world::chunk::Chunk;
 
 /// What the server told the client, in packet order.
@@ -45,8 +45,10 @@ pub enum NetEvent {
     },
     /// Respawn or dimension change: every loaded chunk is gone.
     Respawn,
-    /// Plain text of a chat message (the action bar is dropped).
-    Chat(String),
+    /// A chat message (positions 0 and 1) as styled runs.
+    Chat(Vec<Styled>),
+    /// An action bar message (position 2): the component's unformatted text.
+    ActionBar(String),
     /// The server kicked the client or the connection ended. Always the last event.
     Disconnect(String),
 }

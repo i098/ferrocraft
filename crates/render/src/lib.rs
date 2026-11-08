@@ -1,4 +1,7 @@
-//! wgpu renderer for the 1.8.9 client: face-culled chunk meshes, sky color, crosshair, chat and debug text.
+//! wgpu renderer for the 1.8.9 client: face-culled chunk meshes, sky color and a 2D overlay of
+//! textured quads that the `gui` crate lays out.
+
+use std::borrow::Cow;
 
 mod assets;
 mod blocks;
@@ -8,11 +11,10 @@ mod mesh;
 mod particles;
 mod shapes;
 mod sky;
-mod text;
 
 pub use sky::Environment;
 
-pub use assets::encode_png;
+pub use assets::{encode_png, Font};
 pub use gpu::Renderer;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 
@@ -45,14 +47,32 @@ impl Default for Camera {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Hud {
-    /// Chat lines, oldest first; `§` color codes are honored.
-    pub chat: Vec<String>,
-    /// `Some` while the chat box is open.
-    pub chat_input: Option<String>,
-    pub crosshair: bool,
-    pub debug: Vec<String>,
+/// How a [`Quad`] mixes with the pixels under it: the vanilla `blendFunc` pairs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Blend {
+    /// 770, 771: source alpha over the destination.
+    #[default]
+    Alpha,
+    /// 775, 769: inverts the destination (the crosshair).
+    Invert,
+    /// 0, 769: darkens the destination by the source color (the vignette).
+    Darken,
+    /// 768, 1: adds the source color (the enchantment glint).
+    Add,
+}
+
+/// One textured quad in window pixels, origin top-left. Corners run top-left, top-right,
+/// bottom-right, bottom-left, so a transformed (rotated, sheared) rectangle stays one quad.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Quad {
+    /// Path under `assets/minecraft/`, such as `textures/gui/icons.png`; `""` is solid white.
+    pub tex: Cow<'static, str>,
+    pub blend: Blend,
+    pub pos: [[f32; 2]; 4],
+    /// Texture coordinates in `0..=1`.
+    pub uv: [[f32; 2]; 4],
+    /// ARGB tint of each corner (`drawGradientRect` uses two).
+    pub color: [u32; 4],
 }
 
 /// One 16x16 column of blocks as the renderer reads it.

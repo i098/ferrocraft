@@ -1,6 +1,6 @@
 //! Meshes a synthetic terrain chunk, renders it offscreen and writes a PNG (`RENDER_PNG` overrides the path).
 
-use render::{encode_png, Camera, ChunkBlocks, Hud, Renderer};
+use render::{encode_png, Camera, ChunkBlocks, Renderer};
 
 struct Synthetic(i32, i32);
 
@@ -41,19 +41,7 @@ fn renders_synthetic_chunks_to_png() {
         pitch: 25.0,
         fov_deg: 70.0,
     };
-    let hud = Hud {
-        crosshair: true,
-        chat: vec![
-            "<Steve> hello world".into(),
-            "§eAlex joined the game".into(),
-        ],
-        chat_input: Some("/say hi".into()),
-        debug: vec![
-            "Minecraft 1.8.9 (ferrocraft)".into(),
-            "XYZ: 8.000 / 68.000 / -4.000".into(),
-        ],
-    };
-    let (w, h, rgba) = r.render_to_rgba(&cam, &hud);
+    let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
 
     let px = |x: u32, y: u32| &rgba[((y * w + x) * 4) as usize..][..4];
     assert_ne!(

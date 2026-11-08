@@ -167,7 +167,7 @@ impl Atlas {
     }
 }
 
-fn missing_tile() -> Image {
+pub(crate) fn missing_tile() -> Image {
     let rgba = (0..TILE * TILE)
         .flat_map(|i| {
             if (i % TILE / 8 + i / TILE / 8).is_multiple_of(2) {
@@ -218,43 +218,38 @@ fn bake_overlay(base: &mut Image, over: &Image, tint: [f32; 3]) {
     }
 }
 
-/// `ascii.png`: 16x16 glyph cells of 8x8 texels with per-glyph widths.
+/// Vanilla `FontRenderer` metrics: `charWidth` of the 256 `ascii.png` glyphs and the
+/// `glyph_sizes.bin` table of the unicode pages (high nibble first column, low nibble last).
 pub struct Font {
-    pub image: Image,
-    /// Pixel width of the glyph bitmap (last used column + 1).
-    glyph: [u8; 256],
+    pub ascii: [u8; 256],
+    pub unicode: Vec<u8>,
 }
 
 impl Font {
     pub fn load(source: &mut AssetSource) -> Option<Font> {
         let image = decode_png(&source.read("assets/minecraft/textures/font/ascii.png")?)?;
-        if image.width % 16 != 0 || image.width != image.height {
+        if image.width % 16 != 0 || image.height % 16 != 0 {
             return None;
         }
-        let cell = image.width / 16;
-        let mut glyph = [0u8; 256];
-        for (c, g) in glyph.iter_mut().enumerate() {
-            let (gx, gy) = ((c % 16) * cell, (c / 16) * cell);
-            let used = (0..cell).rev().find(|&x| {
-                (0..cell).any(|y| image.rgba[((gy + y) * image.width + gx + x) * 4 + 3] != 0)
+        let (cell_w, cell_h) = (image.width / 16, image.height / 16);
+        let f = 8.0 / cell_w as f64;
+        let mut ascii = [0u8; 256];
+        for (c, w) in ascii.iter_mut().enumerate() {
+            if c == 32 {
+                *w = 4;
+                continue;
+            }
+            let (gx, gy) = ((c % 16) * cell_w, (c / 16) * cell_h);
+            let used = (0..cell_w).rev().find(|&x| {
+                (0..cell_h).any(|y| image.rgba[((gy + y) * image.width + gx + x) * 4 + 3] != 0)
             });
-            // Scale the used width back to the 8-texel grid the vanilla advance is defined in.
-            *g = used.map_or(0, |x| ((x + 1) * 8).div_ceil(cell) as u8);
+            let columns = used.map_or(0, |x| x + 1);
+            *w = ((0.5 + columns as f64 * f) as u8) + 1;
         }
-        Some(Font { image, glyph })
-    }
-
-    /// Glyph bitmap width in 8-texel units.
-    pub fn glyph_width(&self, c: u8) -> u32 {
-        self.glyph[c as usize] as u32
-    }
-
-    /// Vanilla `FontRenderer` advance: glyph width + 1, and 4 for the space.
-    pub fn advance(&self, c: u8) -> u32 {
-        if c == b' ' {
-            4
-        } else {
-            self.glyph[c as usize] as u32 + 1
-        }
+        let mut unicode = source
+            .read("assets/minecraft/font/glyph_sizes.bin")
+            .unwrap_or_default();
+        unicode.resize(65536, 0);
+        Some(Font { ascii, unicode })
     }
 }

@@ -5,6 +5,7 @@ Owner: fc-engine
 The `ferrocraft-engine` binary: the game loop of the Ferrocraft 1.8.9 client.
 It joins a server with `net-client`, keeps the chunks in `world::chunk::ChunkStore`,
 runs `world::Player` physics at 20 TPS, sends the position back, and draws with `render`.
+The HUD comes from `gui`. The `input-audio` actions drive it: F1 hides it, F3 shows the debug screen, and the hotbar keys and the mouse wheel select the slot.
 Input and chat come from `input-audio`.
 
 Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`.

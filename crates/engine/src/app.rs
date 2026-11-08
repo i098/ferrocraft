@@ -13,6 +13,7 @@ use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{CursorGrabMode, Window, WindowId};
 use world::chunk::Chunk;
+use world::dig::Action;
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
@@ -127,11 +128,32 @@ impl App {
                 let r = self.session.send_chat(&line);
                 self.send_result(r);
             }
+            self.dig();
             self.game.tick(self.input.movement());
             self.send_pose();
         }
         if ran == MAX_TICKS_PER_FRAME {
             self.next_tick = now + TICK;
+        }
+    }
+
+    /// One tick of block breaking: send its packets and mirror the local removal.
+    fn dig(&mut self) {
+        let attack = self.input.take_attack();
+        let (actions, effects) = self.game.dig_tick(attack);
+        for action in actions {
+            let sent = match action {
+                Action::Dig { status, pos, face } => self.session.send_dig(status as u8, pos, face),
+                Action::Swing => self.session.send_swing(),
+            };
+            self.send_result(sent);
+        }
+        for effect in effects {
+            if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {
+                if let Some(c) = self.game.store.get(x, z) {
+                    r.upload_chunk(&View(c));
+                }
+            }
         }
     }
 
@@ -211,6 +233,7 @@ impl App {
                 format!("chunks: {}", self.game.store.len()),
             ],
         };
+        r.set_selection(self.game.selection(cam.pos));
         r.render(&cam, &hud);
     }
 }

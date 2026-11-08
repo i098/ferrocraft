@@ -9,6 +9,15 @@ mod text;
 pub use assets::encode_png;
 pub use gpu::Renderer;
 
+/// Whether a block state is drawn as a full cube (lava included); everything the mesher skips
+/// or blends (plants, doors, panes, water) is not.
+pub fn is_solid(state: u16) -> bool {
+    matches!(
+        blocks::look(state >> 4).kind,
+        blocks::Kind::Opaque | blocks::Kind::Cutout
+    )
+}
+
 /// Camera at the eye position; yaw and pitch are vanilla degrees (yaw 0 looks toward +z, pitch > 0 looks down).
 #[derive(Clone, Copy, Debug)]
 pub struct Camera {

@@ -116,6 +116,11 @@ impl Renderer {
         let mut source = assets.and_then(AssetSource::open);
         let atlas = source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets);
         let font = source.as_mut().and_then(Font::load);
+        if font.is_none() {
+            eprintln!(
+                "ferrocraft-render: no textures/font/ascii.png in {assets:?}; text is not drawn"
+            );
+        }
 
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -239,6 +244,11 @@ impl Renderer {
         self.blocks.remove(&(x, z));
         self.meshes.remove(&(x, z));
         self.remesh_neighbors((x, z));
+    }
+
+    pub fn clear_chunks(&mut self) {
+        self.blocks.clear();
+        self.meshes.clear();
     }
 
     /// Apply a single block change at world coordinates.

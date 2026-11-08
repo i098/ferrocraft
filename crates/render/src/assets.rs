@@ -123,15 +123,17 @@ impl Atlas {
                 rgba: vec![255; 4],
             },
         );
+        let mut loaded = 0;
         for (i, name) in names.iter().enumerate() {
             let cell = i + 1;
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
-            let image = source
-                .read(&path)
-                .and_then(|b| decode_png(&b))
-                .unwrap_or_else(missing_tile);
-            blit(&mut rgba, w, cell, &image);
+            let image = source.read(&path).and_then(|b| decode_png(&b));
+            loaded += usize::from(image.is_some());
+            blit(&mut rgba, w, cell, &image.unwrap_or_else(missing_tile));
             cells.insert(*name, cell as u32);
+        }
+        if loaded == 0 {
+            eprintln!("ferrocraft-render: no block textures found; blocks use the missing tile");
         }
         Atlas {
             textured: true,

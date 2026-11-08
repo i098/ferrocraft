@@ -7,5 +7,6 @@ It joins a server with `net-client`, keeps the chunks in `world::chunk::ChunkSto
 runs `world::Player` physics at 20 TPS, sends the position back, and draws with `render`.
 Input and chat come from `input-audio`.
 
-Launch arguments: `--username`, `--assetsDir`, `--server`, `--port`.
+Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`.
+The renderer reads textures and the font from `versions/1.8.9/1.8.9.jar` (or `versions/<--version>/<--version>.jar`) under the assets dir's parent, `--gameDir` or its parent. It logs a warning when no font is found.
 The `FERROCRAFT_SERVER` variable is the fallback server. The default is `127.0.0.1:25565`.

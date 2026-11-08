@@ -140,6 +140,10 @@ impl ChunkStore {
         self.chunks.remove(&(x, z))
     }
 
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+    }
+
     pub fn get(&self, x: i32, z: i32) -> Option<&Chunk> {
         self.chunks.get(&(x, z))
     }

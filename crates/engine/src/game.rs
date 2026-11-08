@@ -12,52 +12,17 @@ const CHAT_LINES: usize = 10;
 pub enum Effect {
     Upload(i32, i32),
     Remove(i32, i32),
+    Clear,
 }
 
-/// A 1.8 block state id as a physics block. Plants, rails, torches and the like have no
-/// collision box; every other block is a full cube (slabs and stairs are not modelled yet).
+/// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
+/// collision is invisible. Water and lava are not solid; slabs and stairs are not modelled yet.
 fn physics_block(state: u16) -> Block {
     match state >> 4 {
-        0
-        | 6
-        | 8..=11
-        | 27
-        | 28
-        | 31
-        | 32
-        | 37
-        | 38
-        | 39
-        | 40
-        | 50
-        | 51
-        | 55
-        | 59
-        | 63
-        | 65
-        | 66
-        | 68
-        | 69
-        | 70
-        | 72
-        | 75
-        | 76
-        | 77
-        | 78
-        | 83
-        | 90
-        | 104
-        | 105
-        | 106
-        | 115
-        | 131
-        | 132
-        | 141
-        | 142
-        | 143
-        | 175 => Block::Air,
+        8..=11 => Block::Air,
         79 | 174 | 212 => Block::Ice,
-        _ => Block::Stone,
+        _ if render::is_solid(state) => Block::Stone,
+        _ => Block::Air,
     }
 }
 
@@ -91,6 +56,10 @@ impl Game {
     pub fn apply(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
             NetEvent::JoinGame { .. } => None,
+            NetEvent::Respawn => {
+                self.store.clear();
+                Some(Effect::Clear)
+            }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
                 self.store.insert(c);
@@ -259,5 +228,26 @@ mod tests {
         }
         assert_eq!(g.chat.len(), CHAT_LINES);
         assert_eq!(g.chat[0], "5");
+    }
+
+    #[test]
+    fn only_drawn_cubes_collide_and_respawn_drops_chunks() {
+        // stone, oak door, glass pane, carpet, snow layer, water, lava, ice
+        let solid = [1, 64, 102, 171, 78, 8, 10, 79].map(|id| physics_block(id << 4));
+        let want = [
+            Block::Stone,
+            Block::Air,
+            Block::Air,
+            Block::Air,
+            Block::Air,
+            Block::Air,
+            Block::Air,
+            Block::Ice,
+        ];
+        assert!(solid.iter().zip(&want).all(|(a, b)| a == b));
+        let mut g = Game::new();
+        g.apply(NetEvent::Chunk(floor_chunk()));
+        assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
+        assert!(g.store.is_empty());
     }
 }

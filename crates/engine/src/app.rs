@@ -5,6 +5,7 @@ use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
 use input_audio::InputState;
 use render::{Camera, ChunkBlocks, Hud, Renderer};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -52,19 +53,35 @@ impl App {
         self.game.disconnected.as_deref()
     }
 
+    /// Mirror chunk changes into the renderer once per chunk per poll: a burst of block
+    /// changes would otherwise copy and remesh the same chunk once per block.
     fn pump_network(&mut self) {
+        let mut clear = false;
+        let mut dirty = HashMap::new();
         for ev in self.session.poll() {
-            let effect = self.game.apply(ev);
-            let (Some(r), Some(effect)) = (&mut self.renderer, effect) else {
-                continue;
-            };
+            match self.game.apply(ev) {
+                Some(Effect::Clear) => {
+                    clear = true;
+                    dirty.clear();
+                }
+                Some(e @ (Effect::Upload(x, z) | Effect::Remove(x, z))) => {
+                    dirty.insert((x, z), e);
+                }
+                None => {}
+            }
+        }
+        let Some(r) = &mut self.renderer else { return };
+        if clear {
+            r.clear_chunks();
+        }
+        for ((x, z), effect) in dirty {
             match effect {
-                Effect::Upload(x, z) => {
+                Effect::Upload(..) => {
                     if let Some(c) = self.game.store.get(x, z) {
                         r.upload_chunk(&View(c));
                     }
                 }
-                Effect::Remove(x, z) => r.remove_chunk(x, z),
+                _ => r.remove_chunk(x, z),
             }
         }
     }

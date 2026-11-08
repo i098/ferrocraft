@@ -9,13 +9,14 @@ use std::sync::{Arc, Mutex};
 use world::chunk::Chunk;
 
 pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>) {
+    let mut dimension = 0;
     let end = loop {
         let packet = match reader.recv_or_skip::<cb::Packet>() {
             Ok(Some(p)) => p,
             Ok(None) => continue,
             Err(e) => break format!("connection closed: {e}"),
         };
-        match handle(packet, &mut reader, &writer) {
+        match handle(packet, &mut reader, &writer, &mut dimension) {
             Ok(events) => {
                 let kicked = events.iter().any(|e| matches!(e, NetEvent::Disconnect(_)));
                 let mut open = true;
@@ -39,6 +40,7 @@ fn handle(
     packet: cb::Packet,
     reader: &mut Reader,
     writer: &Mutex<Writer>,
+    dimension: &mut i32,
 ) -> io::Result<Vec<NetEvent>> {
     Ok(match packet {
         cb::Packet::KeepAlive(k) => {
@@ -53,7 +55,12 @@ fn handle(
                 .set_compression(c.threshold.0);
             vec![]
         }
+        cb::Packet::Respawn(r) => {
+            *dimension = r.dimension;
+            vec![NetEvent::Respawn]
+        }
         cb::Packet::JoinGame(j) => {
+            *dimension = i32::from(j.dimension);
             // Only now is the server surely in the play state; earlier play packets get "Bad packet id".
             let settings = sb::ClientSettings {
                 locale: "en_US".into(),
@@ -87,7 +94,7 @@ fn handle(
             b.block_id.0,
         )],
         cb::Packet::MultiBlockChange(m) => multi_block_change(&m),
-        cb::Packet::ChunkData(c) => chunk_data(&c)?,
+        cb::Packet::ChunkData(c) => chunk_data(&c, *dimension == 0)?,
         cb::Packet::MapChunkBulk(b) => chunk_bulk(&b)?,
         _ => vec![],
     })
@@ -120,13 +127,13 @@ fn decode_err(e: world::chunk::Truncated) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e.to_string())
 }
 
-fn chunk_data(c: &cb::ChunkData) -> io::Result<Vec<NetEvent>> {
+fn chunk_data(c: &cb::ChunkData, sky_light: bool) -> io::Result<Vec<NetEvent>> {
     if c.continuous && c.bitmask == 0 {
         return Ok(vec![NetEvent::UnloadChunk(c.x, c.z)]);
     }
-    // Overworld sky light; a partial update (`!continuous`) has no biomes.
-    let (chunk, _) =
-        Chunk::decode(c.x, c.z, c.bitmask, &c.data.0, true, c.continuous).map_err(decode_err)?;
+    // A partial update (`!continuous`) has no biomes.
+    let (chunk, _) = Chunk::decode(c.x, c.z, c.bitmask, &c.data.0, sky_light, c.continuous)
+        .map_err(decode_err)?;
     if c.continuous {
         return Ok(vec![NetEvent::Chunk(chunk)]);
     }

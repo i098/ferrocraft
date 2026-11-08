@@ -43,6 +43,8 @@ pub enum NetEvent {
         pitch: f32,
         flags: u8,
     },
+    /// Respawn or dimension change: every loaded chunk is gone.
+    Respawn,
     /// Plain text of a chat message (the action bar is dropped).
     Chat(String),
     /// The server kicked the client or the connection ended. Always the last event.

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "ferrocraft",
+  "version": "0.1.0",
+  "name": "Ferrocraft",
+  "description": "Starts the Ferrocraft engine instead of the vanilla 1.8.9 client.",
+  "environment": "client",
+  "entrypoints": {
+    "preLaunch": ["net.ferrocraft.fabric.PreLaunch"]
+  },
+  "depends": {
+    "fabricloader": "*",
+    "minecraft": "1.8.9"
+  }
+}

@@ -365,7 +365,11 @@ impl Inventory {
             }
             3 => self.creative_pick(slot_id),
             4 => self.drop_click(slot_id, button),
-            6 if slot_id >= 0 => self.collect(slot_id as usize, button),
+            6 => {
+                if let Some(i) = self.window_slot(slot_id) {
+                    self.collect(i, button);
+                }
+            }
             _ => {}
         }
         None
@@ -373,20 +377,25 @@ impl Inventory {
 
     /// Mode 3 (middle click) in creative: a full stack of the slot's item on the cursor.
     fn creative_pick(&mut self, slot_id: i32) {
-        if !self.creative || self.cursor.is_some() || slot_id < 0 {
+        let Some(i) = self.window_slot(slot_id) else {
+            return;
+        };
+        if !self.creative || self.cursor.is_some() {
             return;
         }
-        if let Some(s) = self.slot(slot_id as usize) {
+        if let Some(s) = self.slot(i) {
             self.cursor = Some(with_count(s, max_stack(s)));
         }
     }
 
     /// Mode 4 (drop key): button 0 drops one item of the slot, button 1 the whole stack.
     fn drop_click(&mut self, slot_id: i32, button: i32) {
-        if self.cursor.is_some() || slot_id < 0 {
+        let Some(i) = self.window_slot(slot_id) else {
+            return;
+        };
+        if self.cursor.is_some() {
             return;
         }
-        let i = slot_id as usize;
         if let Some(n) = self.slot(i).as_ref().map(|s| i32::from(s.count)) {
             take(self.slot_mut(i), if button == 0 { 1 } else { n });
             self.on_take(i);

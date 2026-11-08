@@ -8,6 +8,7 @@
 
 pub mod chunk;
 pub mod entities;
+pub mod inventory;
 
 use std::sync::LazyLock;
 

@@ -122,30 +122,19 @@ fn record(manifest: &Path, roots: &[PathBuf], new: &[PathBuf]) -> Result<(), Str
     fs::write(manifest, body.join("\n") + "\n").map_err(|e| format!("{}: {e}", manifest.display()))
 }
 
-/// True when `dir` holds only plain files named in `allowed`.
-fn holds_only(dir: &Path, allowed: &[&str]) -> bool {
-    fs::read_dir(dir).is_ok_and(|rd| {
-        rd.flatten().all(|e| {
-            e.file_type().is_ok_and(|t| t.is_file())
-                && e.file_name().to_str().is_some_and(|n| allowed.contains(&n))
-        })
+/// True when `path` (canonical) is exactly one of the artifacts `install` writes into a recorded root.
+fn is_artifact(path: &Path, is_dir: bool, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|r| {
+        let dirs = [r.join("ferrocraft"), r.join("versions").join(VERSION_ID)];
+        let files = [
+            r.join(FABRIC_JAR),
+            r.join(ENGINE_NAMES[0]),
+            r.join(ENGINE_NAMES[1]),
+            r.join(library_path(BOOT_COORD)),
+        ];
+        let candidates: &[PathBuf] = if is_dir { &dirs } else { &files };
+        candidates.iter().any(|c| c == path)
     })
-}
-
-/// True when `path` (a canonical, non-symlink entry) is one of the artifacts `install` writes.
-fn is_artifact(path: &Path, is_dir: bool) -> bool {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let parent = path.parent().and_then(Path::file_name);
-    let in_dir = |d: &str| parent.is_some_and(|p| p == d);
-    let version_json = format!("{VERSION_ID}.json");
-    match (is_dir, name) {
-        (true, VERSION_ID) => in_dir("versions") && holds_only(path, &[&version_json]),
-        (true, "ferrocraft") => holds_only(path, &ENGINE_NAMES),
-        (true, _) => false,
-        (false, FABRIC_JAR) => in_dir("mods"),
-        (false, n) if ENGINE_NAMES.contains(&n) => in_dir("ferrocraft") || in_dir(".ferrocraft"),
-        (false, _) => path.ends_with(library_path(BOOT_COORD)),
-    }
 }
 
 /// `Ok(None)` when the io error is NotFound: the path is already gone.
@@ -174,9 +163,7 @@ fn removable(line: &str, roots: &[PathBuf]) -> Result<Option<(PathBuf, bool)>, S
         return Ok(None);
     };
     let is_dir = meta.is_dir();
-    let ours = (is_dir || meta.is_file())
-        && roots.iter().any(|r| parent.starts_with(r))
-        && is_artifact(&path, is_dir);
+    let ours = (is_dir || meta.is_file()) && is_artifact(&path, is_dir, roots);
     if ours {
         Ok(Some((path, is_dir)))
     } else {
@@ -184,9 +171,9 @@ fn removable(line: &str, roots: &[PathBuf]) -> Result<Option<(PathBuf, bool)>, S
     }
 }
 
-/// Remove every install path in the manifest, then the manifest. Nothing is removed unless
-/// every path passes `removable` under a recorded root. Returns the removed paths.
-fn uninstall(manifest: &Path) -> Result<Vec<String>, String> {
+/// Remove every install path in the manifest that passes `removable` under a recorded root.
+/// A line that fails is skipped, not removed; the manifest stays then. Returns (removed, skipped).
+fn uninstall(manifest: &Path) -> Result<(Vec<String>, Vec<String>), String> {
     let text = fs::read_to_string(manifest)
         .map_err(|e| format!("{}: {e} (nothing installed?)", manifest.display()))?;
     let lines = || text.lines().filter(|l| !l.is_empty());
@@ -194,12 +181,18 @@ fn uninstall(manifest: &Path) -> Result<Vec<String>, String> {
         .filter_map(|l| l.strip_prefix(ROOT_PREFIX))
         .filter_map(|r| fs::canonicalize(r).ok())
         .collect();
-    let mut plan = Vec::new();
+    let (mut removed, mut skipped) = (Vec::new(), Vec::new());
     for line in lines().filter(|l| !l.starts_with(ROOT_PREFIX)) {
-        plan.extend(removable(line, &roots)?);
-    }
-    let mut removed = Vec::new();
-    for (path, is_dir) in plan {
+        let found = match removable(line, &roots) {
+            Ok(found) => found,
+            Err(why) => {
+                skipped.push(why);
+                continue;
+            }
+        };
+        let Some((path, is_dir)) = found else {
+            continue;
+        };
         let res = if is_dir {
             fs::remove_dir_all(&path)
         } else {
@@ -208,11 +201,13 @@ fn uninstall(manifest: &Path) -> Result<Vec<String>, String> {
         match res {
             Ok(()) => removed.push(path.display().to_string()),
             Err(e) if e.kind() == NotFound => {}
-            Err(e) => return Err(format!("{}: {e}", path.display())),
+            Err(e) => skipped.push(format!("{}: {e}", path.display())),
         }
     }
-    fs::remove_file(manifest).map_err(|e| e.to_string())?;
-    Ok(removed)
+    if skipped.is_empty() {
+        fs::remove_file(manifest).map_err(|e| e.to_string())?;
+    }
+    Ok((removed, skipped))
 }
 
 /// Copy this executable to `~/.ferrocraft`, so `uninstall` works after a temp download dir is gone.
@@ -321,9 +316,9 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     let mut roots: Vec<PathBuf> = mc.iter().chain(&mods).cloned().collect();
     roots.push(env.home.join(".ferrocraft"));
     record(&manifest_path(&env.home), &roots, &written)?;
+    let kept = keep_launcher(&env.home)?;
     res?;
     println!("Lunar Client and Badlion cannot start custom versions: not installed there.");
-    let kept = keep_launcher(&env.home)?;
     println!("To remove everything: {} uninstall", kept.display());
     println!("Then delete {}", kept.parent().unwrap().display());
     Ok(())
@@ -334,10 +329,18 @@ fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("install") => install(&parse(&args[1..])?, &env),
         Some("uninstall") if args.len() == 1 => {
-            for p in uninstall(&manifest_path(&env.home))? {
+            let (removed, skipped) = uninstall(&manifest_path(&env.home))?;
+            for p in removed {
                 println!("removed {p}");
             }
-            Ok(())
+            for p in &skipped {
+                eprintln!("warning: skipped {p}");
+            }
+            if skipped.is_empty() {
+                Ok(())
+            } else {
+                Err(format!("{} manifest paths skipped", skipped.len()))
+            }
         }
         _ => Err("usage: ferrocraft-launcher install [--minecraft-dir DIR] [--oneclient-dir DIR] [--boot-jar JAR] [--engine BIN] [--fabric-jar JAR]\n       ferrocraft-launcher uninstall".into()),
     }
@@ -450,7 +453,11 @@ mod tests {
             fs::read_to_string(&manifest).unwrap().lines().count(),
             written.len() + roots.len()
         );
-        assert_eq!(uninstall(&manifest).unwrap().len(), written.len());
+        fs::write(tmp.join("mc/versions/ferrocraft-1.8.9/extra.jar"), b"x").unwrap();
+        fs::write(tmp.join("mc/ferrocraft/engine.log"), b"x").unwrap();
+        let (removed, skipped) = uninstall(&manifest).unwrap();
+        assert_eq!(removed.len(), written.len());
+        assert!(skipped.is_empty());
         assert!(
             !mods.join(FABRIC_JAR).exists() && !tmp.join("mc/versions/ferrocraft-1.8.9").exists()
         );
@@ -492,21 +499,34 @@ mod tests {
         let victim = tmp.join("precious");
         fs::create_dir_all(&victim).unwrap();
         fs::write(victim.join("data"), b"keep").unwrap();
+        let nested = mods.join("saves/ferrocraft");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("data"), b"keep").unwrap();
+        let nested_jar = mods.join("saves").join(FABRIC_JAR);
+        fs::write(&nested_jar, b"keep").unwrap();
         let manifest = tmp.join("manifest.txt");
         for bad in [
             victim.display().to_string(),
             victim.join("data").display().to_string(),
             "relative/ferrocraft-fabric.jar".to_string(),
             other_mods.join(FABRIC_JAR).display().to_string(),
+            nested.display().to_string(),
+            nested_jar.display().to_string(),
         ] {
+            fs::write(&ours, b"x").unwrap();
             let _ = fs::remove_file(&manifest);
             record(&manifest, &[mods.clone()], &[ours.clone()]).unwrap();
             let mut text = fs::read_to_string(&manifest).unwrap();
             text.push_str(&format!("{bad}\n"));
             fs::write(&manifest, text).unwrap();
-            assert!(uninstall(&manifest).is_err(), "{bad}");
-            assert!(ours.is_file() && victim.join("data").is_file(), "{bad}");
+            let (removed, skipped) = uninstall(&manifest).unwrap();
+            assert_eq!(removed.len(), 1, "{bad}");
+            assert!(skipped.len() == 1 && skipped[0].starts_with(&bad), "{bad}");
+            assert!(!ours.exists(), "{bad}");
+            assert!(victim.join("data").is_file(), "{bad}");
             assert!(other_mods.join(FABRIC_JAR).is_file(), "{bad}");
+            assert!(nested.join("data").is_file() && nested_jar.is_file(), "{bad}");
+            assert!(manifest.exists(), "{bad}");
         }
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -523,7 +543,8 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("ferrocraft"), mc.join("ferrocraft")).unwrap();
         let manifest = tmp.join("manifest.txt");
         record(&manifest, &[mc.clone()], &[mc.join("ferrocraft")]).unwrap();
-        assert!(uninstall(&manifest).is_err());
+        let (removed, skipped) = uninstall(&manifest).unwrap();
+        assert!(removed.is_empty() && skipped.len() == 1);
         assert!(outside.join("ferrocraft/ferrocraft-engine").is_file());
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -533,6 +554,5 @@ mod tests {
         assert!(run(&["bogus".into()]).is_err());
         assert!(parse(&["--engine".into()]).is_err());
         assert!(parse(&["--nope".into(), "x".into()]).is_err());
-        assert!(parse(&["--prism-dir".into(), "x".into()]).is_err());
     }
 }

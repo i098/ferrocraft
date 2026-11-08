@@ -37,46 +37,19 @@ impl Env {
     }
 }
 
-/// A launcher whose instances are dirs under `<root>/<sub>/`, each with json metadata.
-pub struct Layout {
-    pub roots: Vec<PathBuf>,
-    pub sub: &'static str,
-    /// Where the mods dir sits inside an instance; the first existing one wins, else the first.
-    pub mods: &'static [&'static str],
-}
-
 /// OneClient data dir names are not documented; `--oneclient-dir` overrides them.
-pub fn oneclient(env: &Env, root: Option<PathBuf>) -> Layout {
+pub fn oneclient_roots(env: &Env, root: Option<PathBuf>) -> Vec<PathBuf> {
     let names = ["OneClient", "oneclient", "OneLauncher", "onelauncher"];
-    Layout {
-        roots: root.map_or_else(
-            || names.iter().map(|n| env.data.join(n)).collect(),
-            |r| vec![r],
-        ),
-        sub: "clusters",
-        mods: &["mods"],
-    }
+    root.map_or_else(
+        || names.iter().map(|n| env.data.join(n)).collect(),
+        |r| vec![r],
+    )
 }
 
-pub fn prism(env: &Env, root: Option<PathBuf>) -> Layout {
-    let names = ["PrismLauncher", "PolyMC", "multimc", "MultiMC"];
-    let flatpak = env
-        .home
-        .join(".var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher");
-    Layout {
-        roots: root.map_or_else(
-            || {
-                names
-                    .iter()
-                    .map(|n| env.data.join(n))
-                    .chain([flatpak])
-                    .collect()
-            },
-            |r| vec![r],
-        ),
-        sub: "instances",
-        mods: &[".minecraft/mods", "minecraft/mods"],
-    }
+/// True when `text` has `1.8.9` as a whole version token (`11.8.9`, `1.8.90` do not count).
+fn has_189(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_digit() && c != '.')
+        .any(|t| t.trim_matches('.') == "1.8.9")
 }
 
 /// An instance is a 1.8.9 Fabric one when its name or json files mention both.
@@ -88,31 +61,25 @@ fn is_fabric_189(dir: &Path) -> bool {
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let p = entry.path();
         if p.extension().is_some_and(|e| e == "json") {
+            text.push(' ');
             text.push_str(&fs::read_to_string(&p).unwrap_or_default());
         }
     }
-    let text = text.to_lowercase();
-    text.contains("1.8.9") && text.contains("fabric")
+    has_189(&text) && text.to_lowercase().contains("fabric")
 }
 
-/// Mods dir of every 1.8.9 Fabric instance of the launcher.
-pub fn fabric_mods_dirs(layout: &Layout) -> Vec<PathBuf> {
+/// Mods dir of every 1.8.9 Fabric cluster under the OneClient data dirs `roots`.
+pub fn fabric_mods_dirs(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for root in &layout.roots {
-        for entry in fs::read_dir(root.join(layout.sub))
+    for root in roots {
+        for entry in fs::read_dir(root.join("clusters"))
             .into_iter()
             .flatten()
             .flatten()
         {
             let inst = entry.path();
             if inst.is_dir() && is_fabric_189(&inst) {
-                let mods = layout
-                    .mods
-                    .iter()
-                    .map(|m| inst.join(m))
-                    .find(|p| p.is_dir())
-                    .unwrap_or_else(|| inst.join(layout.mods[0]));
-                out.push(mods);
+                out.push(inst.join("mods"));
             }
         }
     }
@@ -138,39 +105,23 @@ mod tests {
             ("a", r#"{"mc":"1.8.9","loader":"Fabric"}"#),
             ("b", r#"{"mc":"1.8.9","loader":"forge"}"#),
             ("c", r#"{"mc":"1.21","loader":"fabric"}"#),
+            ("d", r#"{"mc":"1.21","loader":"fabric","mod":"11.8.9"}"#),
+            ("e", r#"{"mc":"1.21","loader":"fabric","mod":"0.1.8.9"}"#),
+            ("f", r#"{"mc":"1.21","loader":"fabric","mod":"1.8.90"}"#),
             ("1.8.9-fabric", "{}"),
         ] {
             fs::create_dir_all(c.join(name)).unwrap();
             fs::write(c.join(name).join("cluster.json"), json).unwrap();
         }
-        let env = Env {
-            home: root.clone(),
-            data: root.clone(),
-        };
-        let mut got = fabric_mods_dirs(&oneclient(&env, Some(root.clone())));
+        let mut got = fabric_mods_dirs(&oneclient_roots(
+            &Env {
+                home: root.clone(),
+                data: root.clone(),
+            },
+            Some(root.clone()),
+        ));
         got.sort();
         assert_eq!(got, [c.join("1.8.9-fabric/mods"), c.join("a/mods")]);
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn prism_uses_existing_mods_dir() {
-        let root = tmp("prism");
-        let inst = root.join("instances/x");
-        fs::create_dir_all(inst.join("minecraft/mods")).unwrap();
-        fs::write(
-            inst.join("mmc-pack.json"),
-            r#"{"uid":"net.fabricmc.fabric-loader","v":"1.8.9"}"#,
-        )
-        .unwrap();
-        let env = Env {
-            home: root.clone(),
-            data: root.clone(),
-        };
-        assert_eq!(
-            fabric_mods_dirs(&prism(&env, Some(root.clone()))),
-            [inst.join("minecraft/mods")]
-        );
         fs::remove_dir_all(&root).unwrap();
     }
 }

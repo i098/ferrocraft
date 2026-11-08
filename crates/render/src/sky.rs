@@ -228,7 +228,7 @@ pub struct SkyGeometry {
 }
 
 impl SkyGeometry {
-    fn quad(&mut self, v: [([f32; 3], [f32; 2], [f32; 4]); 4]) {
+    pub(crate) fn quad(&mut self, v: [([f32; 3], [f32; 2], [f32; 4]); 4]) {
         let base = self.vertices.len() as u32;
         for (pos, uv, color) in v {
             self.vertices.push(Vertex {

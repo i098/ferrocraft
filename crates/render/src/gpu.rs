@@ -1,9 +1,11 @@
 //! wgpu device, pipelines and frame rendering.
 
-use crate::assets::{AssetSource, Atlas, Font};
+use crate::assets::{decode_png, AssetSource, Atlas, Font};
+use crate::hand::{self, Hand};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
 use crate::text::{layout, HudVertex};
+use crate::weather::{build_rain, precipitation_height};
 use crate::{Camera, ChunkBlocks, Hud};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -12,6 +14,8 @@ use wgpu::util::DeviceExt;
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const CLEAR_COLOR: [f64; 3] = [0.0; 3];
+/// Eye height of the standing player; rain is centred on the feet.
+const EYE_HEIGHT: f64 = 1.62;
 const OFFSCREEN: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 #[repr(C)]
@@ -61,6 +65,14 @@ pub struct Renderer {
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     hud_pipe: wgpu::RenderPipeline,
+    hand_pipe: wgpu::RenderPipeline,
+    hand_globals: wgpu::Buffer,
+    hand_atlas_group: wgpu::BindGroup,
+    /// Player skin and its height in pixels; `None` without assets.
+    hand_skin: Option<(wgpu::BindGroup, u32)>,
+    rain_group: Option<wgpu::BindGroup>,
+    hand: Option<Hand>,
+    held_mesh: Option<(u16, crate::mesh::MeshData)>,
     sky_pipe: wgpu::RenderPipeline,
     sky_add_pipe: wgpu::RenderPipeline,
     cloud_pipe: wgpu::RenderPipeline,
@@ -140,6 +152,20 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let hand_globals = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hand globals"),
+            size: std::mem::size_of::<Globals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut load_png = |name: &str| {
+            source
+                .as_mut()
+                .and_then(|s| s.read(&format!("assets/minecraft/textures/{name}.png")))
+                .and_then(|b| decode_png(&b))
+        };
+        let rain_img = load_png("environment/rain");
+        let skin_img = load_png("entity/steve");
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
         let (fw, fh, frgba) = font_texture(font.as_ref());
         let font_view = upload_texture(&device, &queue, fw, fh, &frgba);
@@ -174,31 +200,65 @@ impl Renderer {
                 ),
             ],
         });
-        let group = |view: &wgpu::TextureView| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &layout_bg,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: globals.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            })
-        };
+        // Rain scrolls its v coordinate far outside 0..1.
+        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            ..Default::default()
+        });
+        let group_with =
+            |buffer: &wgpu::Buffer, view: &wgpu::TextureView, sampler: &wgpu::Sampler| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &layout_bg,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ],
+                })
+            };
+        let group = |view: &wgpu::TextureView| group_with(&globals, view, &sampler);
         let world_group = group(&atlas_view);
         let hud_group = group(&font_view);
         let env_group = group(&env_view);
 
-        let [opaque_pipe, water_pipe, hud_pipe, sky_pipe, sky_add_pipe, cloud_pipe] =
+        let hand_atlas_group = group_with(&hand_globals, &atlas_view, &sampler);
+        let hand_skin = skin_img.map(|img| {
+            let view = upload_texture(
+                &device,
+                &queue,
+                img.width as u32,
+                img.height as u32,
+                &img.rgba,
+            );
+            (
+                group_with(&hand_globals, &view, &sampler),
+                img.height as u32,
+            )
+        });
+        let rain_group = rain_img.map(|img| {
+            let view = upload_texture(
+                &device,
+                &queue,
+                img.width as u32,
+                img.height as u32,
+                &img.rgba,
+            );
+            group_with(&globals, &view, &repeat_sampler)
+        });
+
+        let [opaque_pipe, water_pipe, hud_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe] =
             build_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
@@ -215,6 +275,13 @@ impl Renderer {
             opaque_pipe,
             water_pipe,
             hud_pipe,
+            hand_pipe,
+            hand_globals,
+            hand_atlas_group,
+            hand_skin,
+            rain_group,
+            hand: None,
+            held_mesh: None,
             sky_pipe,
             sky_add_pipe,
             cloud_pipe,
@@ -395,6 +462,35 @@ impl Renderer {
         self.environment = environment;
     }
 
+    /// First-person hand for the next frames; `None` hides it (F1, third person).
+    pub fn set_hand(&mut self, hand: Option<Hand>) {
+        self.hand = hand;
+    }
+
+    /// Highest block that stops rain in a loaded column, as `World.getPrecipitationHeight`.
+    fn rain_top(&self, x: i32, z: i32) -> Option<i32> {
+        let blocks = self.blocks.get(&(x >> 4, z >> 4))?;
+        Some(precipitation_height(
+            blocks,
+            x.rem_euclid(16) as usize,
+            z.rem_euclid(16) as usize,
+        ))
+    }
+
+    /// Hand geometry for this frame, if a hand is shown and its texture exists.
+    fn hand_draw(&mut self) -> Option<(hand::Draw, bool)> {
+        let hand = self.hand?;
+        let Some(state) = hand.held else {
+            let (_, height) = self.hand_skin.as_ref()?;
+            return Some((hand::arm(&hand, *height), true));
+        };
+        if self.held_mesh.as_ref().map(|m| m.0) != Some(state) {
+            self.held_mesh = Some((state, hand::held_mesh(state, &self.atlas)));
+        }
+        let mesh = &self.held_mesh.as_ref()?.1;
+        Some((hand::block(&hand, mesh), false))
+    }
+
     fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
         if g.indices.is_empty() {
             return None;
@@ -441,6 +537,40 @@ impl Renderer {
             .has_clouds
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
+
+        let rain = self
+            .rain_group
+            .as_ref()
+            .map(|_| {
+                let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
+                build_rain(&env, feet, |x, z| self.rain_top(x, z))
+            })
+            .and_then(|g| self.upload_geometry(&g));
+        let hand = self.hand_draw().map(|(mut draw, skin)| {
+            // The open-sky test: a block above the eye keeps the hand dark.
+            let eye = [cam.pos[0].floor() as i32, cam.pos[2].floor() as i32];
+            let covered = self
+                .rain_top(eye[0], eye[1])
+                .is_some_and(|top| top as f64 > cam.pos[1]);
+            let light = if covered { [0.0, 0.0] } else { [1.0, 0.0] };
+            for v in &mut draw.vertices {
+                v.light = light;
+            }
+            let globals = Globals {
+                view_proj: mul(projection(cam.fov_deg, w as f32 / h as f32), draw.model),
+                eye: [0.0; 4],
+                fog_color: globals.fog_color,
+                fog: [1.0e6, 2.0e6, sky.sun_brightness, 1.5],
+                screen: globals.screen,
+            };
+            self.queue
+                .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
+            let geometry = SkyGeometry {
+                vertices: draw.vertices,
+                indices: draw.indices,
+            };
+            (self.upload_geometry(&geometry), skin)
+        });
 
         let verts = layout(hud, self.font.as_ref(), w, h);
         let hud_buf = (!verts.is_empty()).then(|| {
@@ -502,6 +632,44 @@ impl Renderer {
             if let Some(m) = &clouds {
                 pass.set_bind_group(0, &self.env_group, &[]);
                 pass.set_pipeline(&self.cloud_pipe);
+                draw_mesh(&mut pass, m);
+            }
+            if let (Some(m), Some(group)) = (&rain, &self.rain_group) {
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.water_pipe);
+                draw_mesh(&mut pass, m);
+            }
+        }
+        {
+            // Vanilla draws the hand on a cleared depth buffer, then the GUI.
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            if let Some((Some(m), skin)) = &hand {
+                let group = match (&self.hand_skin, skin) {
+                    (Some((g, _)), true) => g,
+                    _ => &self.hand_atlas_group,
+                };
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.hand_pipe);
                 draw_mesh(&mut pass, m);
             }
             if let Some(buf) = &hud_buf {
@@ -567,7 +735,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 6] {
+) -> [wgpu::RenderPipeline; 7] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -703,6 +871,17 @@ fn build_pipelines(
         true,
         false,
     );
+    // The hand draws opaque on a fresh depth buffer; its quads have no fixed winding.
+    let hand_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        None,
+        true,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -710,6 +889,7 @@ fn build_pipelines(
         sky_pipe,
         sky_add_pipe,
         cloud_pipe,
+        hand_pipe,
     ]
 }
 
@@ -853,15 +1033,18 @@ fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
         [right[2], up[2], -fwd[2], 0.0],
         [-dot(right, eye), -dot(up, eye), dot(fwd, eye), 1.0],
     ];
+    mul(projection(cam.fov_deg, aspect), view)
+}
+
+fn projection(fov_deg: f32, aspect: f32) -> [[f32; 4]; 4] {
     let (near, far) = (0.05f32, 1024.0f32);
-    let f = 1.0 / (cam.fov_deg.to_radians() / 2.0).tan();
-    let proj = [
+    let f = 1.0 / (fov_deg.to_radians() / 2.0).tan();
+    [
         [f / aspect, 0.0, 0.0, 0.0],
         [0.0, f, 0.0, 0.0],
         [0.0, 0.0, far / (near - far), -1.0],
         [0.0, 0.0, near * far / (near - far), 0.0],
-    ];
-    mul(proj, view)
+    ]
 }
 
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {

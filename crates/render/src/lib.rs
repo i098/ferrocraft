@@ -3,13 +3,16 @@
 mod assets;
 mod blocks;
 mod gpu;
+mod hand;
 mod light;
 mod mesh;
 mod particles;
 mod shapes;
 mod sky;
 mod text;
+mod weather;
 
+pub use hand::Hand;
 pub use sky::Environment;
 
 pub use assets::encode_png;

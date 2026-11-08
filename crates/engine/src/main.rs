@@ -3,6 +3,8 @@
 mod app;
 mod args;
 mod game;
+mod swing;
+mod weather;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 

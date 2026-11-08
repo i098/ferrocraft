@@ -4,7 +4,7 @@ use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
 use input_audio::{apply_cursor_grab, Action, InputState};
-use render::{Camera, ChunkBlocks, Hud, Renderer};
+use render::{Camera, ChunkBlocks, Environment, Hand, Hud, Renderer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +16,8 @@ use world::chunk::Chunk;
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
+/// Matches the view distance sent in Client Settings.
+const RENDER_DISTANCE: u32 = 8;
 const MAX_TICKS_PER_FRAME: u32 = 10;
 
 pub struct App {
@@ -139,6 +141,7 @@ impl App {
     fn handle_actions(&mut self) {
         for action in self.input.take_actions() {
             match action {
+                Action::Attack => self.game.swing.start(),
                 Action::ToggleDebug => self.show_debug = !self.show_debug,
                 Action::ToggleHud => self.hide_hud = !self.hide_hud,
                 Action::ToggleFullscreen => {
@@ -200,6 +203,20 @@ impl App {
                 Vec::new()
             },
         };
+        let (rain, thunder) = self.game.weather.strengths(frac as f32);
+        r.set_environment(Environment {
+            world_time: self.game.world_time,
+            ticks: self.game.ticks,
+            partial: frac as f32,
+            rain,
+            thunder,
+            render_distance_chunks: RENDER_DISTANCE,
+        });
+        r.set_hand((!self.hide_hud).then(|| Hand {
+            held: None,
+            swing: self.game.swing.progress(frac as f32),
+            lowered: 0.0,
+        }));
         r.render(&cam, &hud);
     }
 }

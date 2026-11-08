@@ -38,29 +38,30 @@ pub enum Kind {
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        Some(match id {
-            0 | 2 => Kind::Explode,
-            1 => Kind::LargeExplode,
-            4 => Kind::Bubble,
-            5 | 6 => Kind::Splash,
-            9 => Kind::Crit,
-            10 => Kind::MagicCrit,
-            11 => Kind::Smoke,
-            12 => Kind::LargeSmoke,
-            13..=17 => Kind::Spell,
-            20 => Kind::AngryVillager,
-            21 => Kind::HappyVillager,
-            23 => Kind::Note,
-            24 => Kind::Portal,
-            26 => Kind::Flame,
-            27 => Kind::Lava,
-            29 => Kind::Cloud,
-            30 => Kind::RedDust,
-            34 => Kind::Heart,
-            37 | 38 => Kind::BlockCrack,
-            39 => Kind::Droplet,
-            _ => return None,
-        })
+        const IDS: [(i32, i32, Kind); 21] = [
+            (0, 0, Kind::Explode),
+            (2, 2, Kind::Explode),
+            (1, 1, Kind::LargeExplode),
+            (4, 4, Kind::Bubble),
+            (5, 6, Kind::Splash),
+            (9, 9, Kind::Crit),
+            (10, 10, Kind::MagicCrit),
+            (11, 11, Kind::Smoke),
+            (12, 12, Kind::LargeSmoke),
+            (13, 17, Kind::Spell),
+            (20, 20, Kind::AngryVillager),
+            (21, 21, Kind::HappyVillager),
+            (23, 23, Kind::Note),
+            (24, 24, Kind::Portal),
+            (26, 26, Kind::Flame),
+            (27, 27, Kind::Lava),
+            (29, 29, Kind::Cloud),
+            (30, 30, Kind::RedDust),
+            (34, 34, Kind::Heart),
+            (37, 38, Kind::BlockCrack),
+            (39, 39, Kind::Droplet),
+        ];
+        IDS.iter().find(|(lo, hi, _)| (*lo..=*hi).contains(&id)).map(|e| e.2)
     }
 }
 
@@ -171,6 +172,17 @@ impl Particles {
 
     /// One particle of `kind` with `motion` (already scaled by the packet speed).
     pub fn spawn(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3], data: i32) {
+        let made = self
+            .spawn_motion(kind, pos, motion, data)
+            .or_else(|| self.spawn_timed(kind, pos, motion))
+            .or_else(|| self.spawn_icon(kind, pos, motion));
+        if let Some(mut p) = made {
+            p.prev = p.pos;
+            self.push(p);
+        }
+    }
+
+    fn spawn_motion(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3], data: i32) -> Option<Particle> {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
         match kind {
@@ -201,23 +213,15 @@ impl Particles {
                 let g = (self.rand() * 0.3 + 0.7) as f32;
                 p.color = [g; 3];
             }
-            Kind::Crit | Kind::MagicCrit => {
-                p = self.base(pos, [0.0; 3], sheet(65, false));
-                p.vel = [motion[0] * 0.4, motion[1] * 0.4 + 0.2, motion[2] * 0.4];
-                p.max_age = 20;
-                p.drag = 0.7;
-                p.gravity = 0.5;
-                if kind == Kind::MagicCrit {
-                    p.color = [0.3, 0.8, 1.0];
-                }
-            }
-            Kind::Flame => {
-                p = self.base(pos, [0.0; 3], sheet(48, false));
-                p.vel = motion;
-                p.max_age = 8 + (self.rand() * 8.0) as u32;
-                p.drag = 0.96;
-                p.scale *= 0.5;
-            }
+            _ => return None,
+        }
+        Some(p)
+    }
+
+    fn spawn_timed(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
+        let sheet = |base, anim| Sprite::Sheet { base, anim };
+        let mut p;
+        match kind {
             Kind::Lava => {
                 p = self.base(pos, [0.0; 3], sheet(49, false));
                 p.vel = [0.0, 0.0, 0.0];
@@ -251,6 +255,32 @@ impl Particles {
                 p.max_age = (40.0 / (self.rand() * 0.8 + 0.2)) as u32;
                 p.gravity = -0.2;
             }
+            _ => return None,
+        }
+        Some(p)
+    }
+
+    fn spawn_icon(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
+        let sheet = |base, anim| Sprite::Sheet { base, anim };
+        let mut p;
+        match kind {
+            Kind::Crit | Kind::MagicCrit => {
+                p = self.base(pos, [0.0; 3], sheet(65, false));
+                p.vel = [motion[0] * 0.4, motion[1] * 0.4 + 0.2, motion[2] * 0.4];
+                p.max_age = 20;
+                p.drag = 0.7;
+                p.gravity = 0.5;
+                if kind == Kind::MagicCrit {
+                    p.color = [0.3, 0.8, 1.0];
+                }
+            }
+            Kind::Flame => {
+                p = self.base(pos, [0.0; 3], sheet(48, false));
+                p.vel = motion;
+                p.max_age = 8 + (self.rand() * 8.0) as u32;
+                p.drag = 0.96;
+                p.scale *= 0.5;
+            }
             Kind::Heart | Kind::HappyVillager | Kind::AngryVillager => {
                 let tile = match kind {
                     Kind::Heart => 80,
@@ -276,9 +306,9 @@ impl Particles {
                 p.max_age = (4.0 / (self.rand() * 0.9 + 0.1)) as u32 + 40;
                 p.drag = 1.0;
             }
+            _ => return None,
         }
-        p.prev = p.pos;
-        self.push(p);
+        Some(p)
     }
 
     /// Particle 0x2A: `count == 0` spawns one particle moving by `offset * speed`; otherwise `count`
@@ -398,31 +428,38 @@ impl Particles {
         for p in &self.list {
             let t = f64::from(partial);
             let c = [0, 1, 2].map(|i| (p.prev[i] + (p.pos[i] - p.prev[i]) * t - cam_pos[i]) as f32);
-            let half = 0.1 * p.scale;
-            let (target, uv) = match p.sprite {
-                Sprite::Block { state, jitter } => {
-                    let name = crate::blocks::look(state >> 4).side;
-                    let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
-                    let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
-                    (&mut out.block, [a, b])
-                }
-                Sprite::Sheet { base, anim } => {
-                    let tile = if anim {
-                        base + 7u32.saturating_sub(p.age * 8 / p.max_age.max(1))
-                    } else {
-                        base
-                    };
-                    let (u, v) = ((tile % 16) as f32 / 16.0, (tile / 16) as f32 / 16.0);
-                    (&mut out.sheet, [[u, v], [u + 1.0 / 16.0, v + 1.0 / 16.0]])
-                }
-            };
-            let color = [p.color[0], p.color[1], p.color[2], p.alpha];
-            for (dx, dy, u, v) in [(-1.0, -1.0, 0, 1), (1.0, -1.0, 1, 1), (1.0, 1.0, 1, 0), (-1.0, 1.0, 0, 0)] {
-                let pos = [0, 1, 2].map(|i| c[i] + (right[i] * dx + up[i] * dy) * half);
-                target.push(Vertex { pos, uv: [uv[u][0], uv[v][1]], color });
-            }
+            let (is_block, uv) = sprite_uv(p, atlas);
+            let target = if is_block { &mut out.block } else { &mut out.sheet };
+            push_quad(target, p, c, uv, right, up);
         }
         out
+    }
+}
+
+/// Whether the sprite samples the block atlas, and its two corner uvs.
+fn sprite_uv(p: &Particle, atlas: &Atlas) -> (bool, [[f32; 2]; 2]) {
+    match p.sprite {
+        Sprite::Block { state, jitter } => {
+            let name = crate::blocks::look(state >> 4).side;
+            let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
+            let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
+            (true, [a, b])
+        }
+        Sprite::Sheet { base, anim } => {
+            let frame = 7u32.saturating_sub(p.age * 8 / p.max_age.max(1));
+            let tile = base + if anim { frame } else { 0 };
+            let (u, v) = ((tile % 16) as f32 / 16.0, (tile / 16) as f32 / 16.0);
+            (false, [[u, v], [u + 1.0 / 16.0, v + 1.0 / 16.0]])
+        }
+    }
+}
+
+fn push_quad(target: &mut Vec<Vertex>, p: &Particle, c: [f32; 3], uv: [[f32; 2]; 2], right: [f32; 3], up: [f32; 3]) {
+    let half = 0.1 * p.scale;
+    let color = [p.color[0], p.color[1], p.color[2], p.alpha];
+    for (dx, dy, u, v) in [(-1.0, -1.0, 0, 1), (1.0, -1.0, 1, 1), (1.0, 1.0, 1, 0), (-1.0, 1.0, 0, 0)] {
+        let pos = [0, 1, 2].map(|i| c[i] + (right[i] * dx + up[i] * dy) * half);
+        target.push(Vertex { pos, uv: [uv[u][0], uv[v][1]], color });
     }
 }
 

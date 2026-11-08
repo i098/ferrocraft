@@ -4,6 +4,7 @@
 pub mod chat;
 pub mod debug;
 pub mod hud;
+pub mod inventory;
 pub mod screens;
 pub mod toolkit;
 

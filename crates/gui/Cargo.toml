@@ -9,3 +9,5 @@ description = "Vanilla 1.8.9 GUI toolkit (Gui, FontRenderer, ScaledResolution, w
 [dependencies]
 render = { path = "../render" }
 ferrocraft-net-client = { path = "../net-client" }
+world = { path = "../world" }
+serde_json = "1"

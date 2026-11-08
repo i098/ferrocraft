@@ -11,6 +11,7 @@ The Rust process owns the game and every subsystem that matters for play.
 
 - `crates/engine` - game loop, ECS, tick scheduling (core).
 - `crates/protocol` - 1.8.9 protocol 47 codec and packets.
+- `crates/net-client` - 1.8.9 client session: offline login, keepalive, play events.
 - `crates/world` - chunks, blocks, entities, physics (vanilla ports).
 - `crates/render` - wgpu renderer with GUI, font and overlay draw targets.
 - `crates/input-audio` - input and audio.

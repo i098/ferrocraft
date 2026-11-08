@@ -1,6 +1,7 @@
 //! Input state: vanilla 1.8.9 key bindings, mouse look, mouse buttons, wheel, chat entry.
 mod actions;
 mod keys;
+pub mod sound;
 
 pub use actions::{scroll_slot, Action, DebugCombo};
 pub use keys::{control_from_lwjgl, lwjgl_from_control, Bind, Control, KeyBindings};

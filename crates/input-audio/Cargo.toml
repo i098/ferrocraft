@@ -7,5 +7,7 @@ publish.workspace = true
 description = "Keyboard and mouse input state for the Ferrocraft engine (vanilla 1.8.9 default keys, chat mode)"
 
 [dependencies]
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "vorbis"] }
+serde_json = "1.0.154"
 winit = "0.30"
 world = { path = "../world" }

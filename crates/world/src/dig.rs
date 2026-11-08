@@ -63,25 +63,193 @@ pub fn relative_hardness(id: u16, on_ground: bool) -> f32 {
     speed / h / if requires_tool(id) { 100.0 } else { 30.0 }
 }
 
-/// Selectable box of a block state relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or `None`
-/// when the block ray passes through (air, water, lava). Boxes that depend on neighbours
-/// (stairs, fences, doors, panes, crops and so on) are full cubes here.
-pub fn selection_box(state: u16) -> Option<[f64; 6]> {
-    let meta = state & 15;
-    Some(match state >> 4 {
-        0 | 8..=11 => return None,
+/// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
+/// `None` when the block ray passes through (air, water, lava, fire). Doors read their other
+/// half; the other neighbour-dependent blocks (stairs, fences, walls, gates, panes, chests,
+/// vines) are full cubes here.
+pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64; 6]> {
+    let state = at(pos);
+    if !matches!(state >> 4, 64 | 71 | 193..=197) {
+        return state_box(state);
+    }
+    let [x, y, z] = pos;
+    let (lower, upper) = if state & 8 != 0 {
+        (at([x, y - 1, z]), state)
+    } else {
+        (state, at([x, y + 1, z]))
+    };
+    Some(door_box(lower & 3, lower & 4 != 0, upper & 1 != 0))
+}
+
+/// `BlockDoor.setBoundBasedOnMeta`: a door leaf is 3/16 thick. Facing picks one of four leaf
+/// positions; opening turns it a quarter one way, or three the other when hinged right.
+fn door_box(facing: u16, open: bool, hinge_right: bool) -> [f64; 6] {
+    const T: f64 = 0.1875;
+    let leaves = [
+        [0.0, 0.0, 0.0, T, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, T],
+        [1.0 - T, 0.0, 0.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 1.0 - T, 1.0, 1.0, 1.0],
+    ];
+    let turn = if open {
+        1 + 2 * u16::from(hinge_right)
+    } else {
+        0
+    };
+    leaves[usize::from((facing + turn) % 4)]
+}
+
+fn state_box(state: u16) -> Option<[f64; 6]> {
+    let (id, meta) = (state >> 4, state & 15);
+    if matches!(id, 0 | 8..=11 | 51) {
+        return None;
+    }
+    let full = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    Some(
+        mounted_box(id, meta)
+            .or_else(|| flat_box(id, meta))
+            .or_else(|| standing_box(id))
+            .unwrap_or(full),
+    )
+}
+
+/// Blocks attached to a side or face of the neighbour.
+fn mounted_box(id: u16, meta: u16) -> Option<[f64; 6]> {
+    Some(match id {
+        50 | 75 | 76 => torch_box(meta),
+        65 => ladder_box(meta),
+        68 => wall_sign_box(meta),
+        69 => lever_box(meta & 7),
+        77 | 143 => button_box(meta),
+        96 | 167 => trapdoor_box(meta),
+        _ => return None,
+    })
+}
+
+fn torch_box(meta: u16) -> [f64; 6] {
+    match meta {
+        1 => [0.0, 0.2, 0.35, 0.3, 0.8, 0.65],
+        2 => [0.7, 0.2, 0.35, 1.0, 0.8, 0.65],
+        3 => [0.35, 0.2, 0.0, 0.65, 0.8, 0.3],
+        4 => [0.35, 0.2, 0.7, 0.65, 0.8, 1.0],
+        _ => [0.4, 0.0, 0.4, 0.6, 0.6, 0.6],
+    }
+}
+
+fn ladder_box(meta: u16) -> [f64; 6] {
+    match meta {
+        2 => [0.0, 0.0, 0.875, 1.0, 1.0, 1.0],
+        3 => [0.0, 0.0, 0.0, 1.0, 1.0, 0.125],
+        4 => [0.875, 0.0, 0.0, 1.0, 1.0, 1.0],
+        _ => [0.0, 0.0, 0.0, 0.125, 1.0, 1.0],
+    }
+}
+
+fn wall_sign_box(meta: u16) -> [f64; 6] {
+    match meta {
+        2 => [0.0, 0.28125, 0.875, 1.0, 0.78125, 1.0],
+        3 => [0.0, 0.28125, 0.0, 1.0, 0.78125, 0.125],
+        4 => [0.875, 0.28125, 0.0, 1.0, 0.78125, 1.0],
+        _ => [0.0, 0.28125, 0.0, 0.125, 0.78125, 1.0],
+    }
+}
+
+fn lever_box(facing: u16) -> [f64; 6] {
+    match facing {
+        1 => [0.0, 0.2, 0.3125, 0.375, 0.8, 0.6875],
+        2 => [0.625, 0.2, 0.3125, 1.0, 0.8, 0.6875],
+        3 => [0.3125, 0.2, 0.0, 0.6875, 0.8, 0.375],
+        4 => [0.3125, 0.2, 0.625, 0.6875, 0.8, 1.0],
+        5 | 6 => [0.25, 0.0, 0.25, 0.75, 0.6, 0.75],
+        _ => [0.25, 0.4, 0.25, 0.75, 1.0, 0.75],
+    }
+}
+
+fn button_box(meta: u16) -> [f64; 6] {
+    let t = if meta & 8 != 0 { 0.0625 } else { 0.125 };
+    match meta & 7 {
+        1 => [0.0, 0.375, 0.3125, t, 0.625, 0.6875],
+        2 => [1.0 - t, 0.375, 0.3125, 1.0, 0.625, 0.6875],
+        3 => [0.3125, 0.375, 0.0, 0.6875, 0.625, t],
+        4 => [0.3125, 0.375, 1.0 - t, 0.6875, 0.625, 1.0],
+        5 => [0.3125, 0.0, 0.375, 0.6875, t, 0.625],
+        _ => [0.3125, 1.0 - t, 0.375, 0.6875, 1.0, 0.625],
+    }
+}
+
+fn trapdoor_box(meta: u16) -> [f64; 6] {
+    let open = [
+        [0.0, 0.0, 0.8125, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.1875],
+        [0.8125, 0.0, 0.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.1875, 1.0, 1.0],
+    ];
+    if meta & 4 != 0 {
+        open[usize::from(meta & 3)]
+    } else if meta & 8 != 0 {
+        [0.0, 0.8125, 0.0, 1.0, 1.0, 1.0]
+    } else {
+        [0.0, 0.0, 0.0, 1.0, 0.1875, 1.0]
+    }
+}
+
+/// Blocks lying flat on the ground or filling only part of the height.
+fn flat_box(id: u16, meta: u16) -> Option<[f64; 6]> {
+    let top = |h: f64| [0.0, 0.0, 0.0, 1.0, h, 1.0];
+    let inset = |x: f64, h: f64| [x, 0.0, x, 1.0 - x, h, 1.0 - x];
+    Some(match id {
+        27 | 28 | 66 | 157 => top(rail_height(meta & 7)),
+        44 | 126 | 182 if meta & 8 != 0 => [0.0, 0.5, 0.0, 1.0, 1.0, 1.0],
+        44 | 126 | 182 => top(0.5),
+        70 | 72 | 147 | 148 => inset(0.0625, if meta > 0 { 0.03125 } else { 0.0625 }),
+        78 => top(f64::from((meta & 7) + 1) / 8.0),
+        92 => [
+            f64::from(1 + 2 * meta) / 16.0,
+            0.0,
+            0.0625,
+            0.9375,
+            0.5,
+            0.9375,
+        ],
+        111 => inset(0.0625, 0.015625),
+        _ => return fixed_height(id).map(top),
+    })
+}
+
+/// Rails rise to 5/8 on a slope and lie 1/8 high on the flat.
+fn rail_height(shape: u16) -> f64 {
+    if (2..=5).contains(&shape) {
+        0.625
+    } else {
+        0.125
+    }
+}
+
+/// Height of the blocks that fill their cell floor to a height fixed by their id.
+fn fixed_height(id: u16) -> Option<f64> {
+    Some(match id {
+        26 => 0.5625,
+        60 => 0.9375,
+        93 | 94 | 149 | 150 => 0.125,
+        116 => 0.75,
+        120 => 0.8125,
+        151 | 178 => 0.375,
+        171 => 0.0625,
+        _ => return None,
+    })
+}
+
+/// Plants and posts that stand in the middle of their cell.
+fn standing_box(id: u16) -> Option<[f64; 6]> {
+    Some(match id {
         6 | 31 | 32 => [0.1, 0.0, 0.1, 0.9, 0.8, 0.9],
         37 | 38 => [0.3, 0.0, 0.3, 0.7, 0.6, 0.7],
         39 | 40 => [0.3, 0.0, 0.3, 0.7, 0.4, 0.7],
-        44 | 126 | 182 if meta & 8 != 0 => [0.0, 0.5, 0.0, 1.0, 1.0, 1.0],
-        44 | 126 | 182 => [0.0, 0.0, 0.0, 1.0, 0.5, 1.0],
-        60 => [0.0, 0.0, 0.0, 1.0, 0.9375, 1.0],
-        78 => [0.0, 0.0, 0.0, 1.0, f64::from((meta & 7) + 1) / 8.0, 1.0],
+        63 => [0.25, 0.0, 0.25, 0.75, 1.0, 0.75],
         81 => [0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375],
         83 => [0.125, 0.0, 0.125, 0.875, 1.0, 0.875],
-        111 => [0.0625, 0.0, 0.0625, 0.9375, 0.015625, 0.9375],
-        171 => [0.0, 0.0, 0.0, 1.0, 0.0625, 1.0],
-        _ => [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        140 => [0.3125, 0.0, 0.3125, 0.6875, 0.375, 0.6875],
+        _ => return None,
     })
 }
 
@@ -163,7 +331,7 @@ pub fn raycast(
         };
     }
     loop {
-        if let Some(b) = selection_box(state(cell)) {
+        if let Some(b) = selection_box(state, cell) {
             if let Some((t, face)) = enter_box(eye, dir, cell, b) {
                 if t <= reach {
                     return Some(Hit { pos: cell, face });
@@ -621,5 +789,40 @@ mod tests {
         let slab = |p: [i32; 3]| if p == [0, 64, 2] { 44 << 4 } else { 0 };
         assert_eq!(raycast(&slab, [0.5, 64.7, 0.5], 0.0, 0.0, 4.5), None);
         assert!(raycast(&slab, [0.5, 64.3, 0.5], 0.0, 0.0, 4.5).is_some());
+    }
+
+    #[test]
+    fn ray_passes_fire_and_the_empty_part_of_a_wall_torch() {
+        // Fire (51) is not collidable: the ray targets the stone under it, entering through the top.
+        let fire = |p: [i32; 3]| match p[1] {
+            64 => 51 << 4,
+            ..=63 => STONE,
+            _ => 0,
+        };
+        let hit = raycast(&fire, [0.5, 66.0, 0.5], 0.0, 90.0, 4.5);
+        assert_eq!(hit.map(|h| (h.pos, h.face)), Some(([0, 63, 0], 1)));
+        // A torch on the west wall of its cell (meta 1) fills x 0..0.3: a ray down x = 0.8 misses it.
+        let torch = |p: [i32; 3]| match p {
+            [0, 64, 0] => (50 << 4) | 1,
+            [0, ..=63, 0] => STONE,
+            _ => 0,
+        };
+        let hit = raycast(&torch, [0.8, 66.0, 0.5], 0.0, 90.0, 4.5);
+        assert_eq!(hit.map(|h| h.pos), Some([0, 63, 0]));
+        let hit = raycast(&torch, [0.15, 66.0, 0.5], 0.0, 90.0, 4.5);
+        assert_eq!(hit.map(|h| h.pos), Some([0, 64, 0]));
+    }
+
+    #[test]
+    fn door_leaf_is_thin_and_read_from_both_halves() {
+        // Closed door with facing 0: the leaf fills x 0..0.1875 of the cell.
+        let door = |p: [i32; 3]| match p {
+            [0, 64, 2] => 64 << 4,
+            [0, 65, 2] => (64 << 4) | 8,
+            _ => 0,
+        };
+        assert_eq!(raycast(&door, [0.8, 64.5, 0.5], 0.0, 0.0, 4.5), None);
+        let hit = raycast(&door, [0.1, 65.5, 0.5], 0.0, 0.0, 4.5);
+        assert_eq!(hit.map(|h| (h.pos, h.face)), Some(([0, 65, 2], 2)));
     }
 }

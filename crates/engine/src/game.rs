@@ -183,8 +183,8 @@ impl Game {
     /// World-space outline box of the targeted block, grown by 0.002 like vanilla.
     pub fn selection(&self, eye: [f64; 3]) -> Option<[f64; 6]> {
         let hit = self.target(eye)?;
-        let [x, y, z] = hit.pos;
-        let b = dig::selection_box(self.store.get_block(x, y, z))?;
+        let at = |p: [i32; 3]| self.store.get_block(p[0], p[1], p[2]);
+        let b = dig::selection_box(&at, hit.pos)?;
         let o = hit.pos.map(f64::from);
         let e = 0.002;
         Some([

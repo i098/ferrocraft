@@ -2,7 +2,7 @@
 # Build the Fabric mod jar. Usage: FABRIC_LOADER_JAR=path/to/fabric-loader.jar build.sh OUT.jar   (JDK 8+; targets Java 8)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-out=$(realpath -m "$1")
+case $1 in /*) out=$1;; *) out=$PWD/$1;; esac
 : "${FABRIC_LOADER_JAR:?set FABRIC_LOADER_JAR to a fabric-loader jar (compile-time API only)}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

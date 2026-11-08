@@ -6,6 +6,8 @@
 //! webs, sneaking, flying, potion effects, soul sand and slime, entity pushing.
 //! The differential tests check every tick against the real 1.8.9 jar through `oracle`.
 
+pub mod chunk;
+
 use std::sync::LazyLock;
 
 /// Block kinds that the differential harness can place.

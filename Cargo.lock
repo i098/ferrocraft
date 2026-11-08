@@ -393,6 +393,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrocraft-net-client"
+version = "0.1.0"
+dependencies = [
+ "ferrocraft-protocol",
+ "serde_json",
+ "world",
+]
+
+[[package]]
 name = "ferrocraft-protocol"
 version = "0.1.0"
 dependencies = [

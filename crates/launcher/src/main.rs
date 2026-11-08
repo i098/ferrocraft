@@ -38,7 +38,10 @@ fn install(mc: &Path, boot_jar: &Path, engine: &Path) -> Result<(), String> {
     }
     let vdir = mc.join("versions").join(VERSION_ID);
     let jar_dst = mc.join(library_path(BOOT_COORD));
-    let engine_name = if engine.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
+    let engine_name = if engine
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+    {
         "ferrocraft-engine.exe"
     } else {
         "ferrocraft-engine"
@@ -140,7 +143,10 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         fs::write(tmp.join("boot.jar"), b"jar").unwrap();
-        for (src, dst) in [("e.exe", "ferrocraft-engine.exe"), ("e.bin", "ferrocraft-engine")] {
+        for (src, dst) in [
+            ("e.exe", "ferrocraft-engine.exe"),
+            ("e.bin", "ferrocraft-engine"),
+        ] {
             fs::write(tmp.join(src), b"bin").unwrap();
             let mc = tmp.join(dst).with_extension("mc");
             install(&mc, &tmp.join("boot.jar"), &tmp.join(src)).unwrap();

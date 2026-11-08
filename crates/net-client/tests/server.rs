@@ -67,7 +67,8 @@ fn survival_start_then_finish_digging_removes_the_grass_below_spawn() {
     let mut s = Session::connect(&addr, "Ferro").expect("login");
     let mut log = Vec::new();
     wait_for(&mut s, &mut log, "join, position and chunks", |l| {
-        l.iter().any(|e| matches!(e, NetEvent::PlayerPosLook { .. }))
+        l.iter()
+            .any(|e| matches!(e, NetEvent::PlayerPosLook { .. }))
             && l.iter().filter(|e| matches!(e, NetEvent::Chunk(_))).count() >= 9
     });
     let (x, y, z) = log
@@ -86,7 +87,11 @@ fn survival_start_then_finish_digging_removes_the_grass_below_spawn() {
         )),
         _ => None,
     });
-    assert_eq!(below, Some(2 << 4), "the flat world has grass under the spawn");
+    assert_eq!(
+        below,
+        Some(2 << 4),
+        "the flat world has grass under the spawn"
+    );
 
     // Hand digging grass takes 18 ticks; the server accepts the finish after 14.
     s.send_swing().unwrap();
@@ -94,9 +99,9 @@ fn survival_start_then_finish_digging_removes_the_grass_below_spawn() {
     std::thread::sleep(Duration::from_secs(3));
     s.send_dig(2, pos, 1).unwrap();
     wait_for(&mut s, &mut log, "the server's air BlockChange", |l| {
-        l.iter().any(|e| {
-            matches!(e, NetEvent::BlockChange { x, y, z, state: 0 } if [*x, *y, *z] == pos)
-        })
+        l.iter().any(
+            |e| matches!(e, NetEvent::BlockChange { x, y, z, state: 0 } if [*x, *y, *z] == pos),
+        )
     });
     eprintln!("server confirmed: block {pos:?} is air");
 }

@@ -146,7 +146,13 @@ pub fn raycast(
     let dir = look_vector(yaw, pitch);
     let mut cell = eye.map(|v| v.floor() as i32);
     let step = dir.map(|d| if d < 0.0 { -1 } else { 1 });
-    let delta = dir.map(|d| if d == 0.0 { f64::INFINITY } else { (1.0 / d).abs() });
+    let delta = dir.map(|d| {
+        if d == 0.0 {
+            f64::INFINITY
+        } else {
+            (1.0 / d).abs()
+        }
+    });
     let mut t_max = [0.0; 3];
     for a in 0..3 {
         t_max[a] = if dir[a] == 0.0 {
@@ -417,7 +423,15 @@ mod tests {
                 ..held(false)
             };
             d.tick(&f, &mut w, &mut out);
-            if out.iter().any(|a| matches!(a, Action::Dig { status: Status::Stop, .. })) {
+            if out.iter().any(|a| {
+                matches!(
+                    a,
+                    Action::Dig {
+                        status: Status::Stop,
+                        ..
+                    }
+                )
+            }) {
                 return Some(n);
             }
         }
@@ -559,16 +573,31 @@ mod tests {
     fn ray_hits_the_first_block_face_within_reach() {
         // Straight down from 1.62 above the floor top: top face of the floor block.
         let hit = raycast(&cell_state, [0.5, 65.62, 0.5], 0.0, 90.0, 4.5);
-        assert_eq!(hit, Some(Hit { pos: [0, 63, 0], face: 1 }));
+        assert_eq!(
+            hit,
+            Some(Hit {
+                pos: [0, 63, 0],
+                face: 1
+            })
+        );
         // Yaw 0 looks toward +z: a wall at z = 4 is entered through its north face.
         let wall = |p: [i32; 3]| if p[2] == 4 { STONE } else { 0 };
         let hit = raycast(&wall, [0.5, 65.0, 0.5], 0.0, 0.0, 4.5);
-        assert_eq!(hit, Some(Hit { pos: [0, 65, 4], face: 2 }));
+        assert_eq!(
+            hit,
+            Some(Hit {
+                pos: [0, 65, 4],
+                face: 2
+            })
+        );
         // Reach 4.5 stops 3.5 blocks away from the wall face at z = 4 only when it is closer.
         assert_eq!(raycast(&wall, [0.5, 65.0, -1.0], 0.0, 0.0, 4.5), None);
         assert!(raycast(&wall, [0.5, 65.0, -1.0], 0.0, 0.0, 5.5).is_some());
         // Looking straight up at open sky hits nothing.
-        assert_eq!(raycast(&cell_state, [0.5, 65.62, 0.5], 0.0, -90.0, 4.5), None);
+        assert_eq!(
+            raycast(&cell_state, [0.5, 65.62, 0.5], 0.0, -90.0, 4.5),
+            None
+        );
     }
 
     #[test]

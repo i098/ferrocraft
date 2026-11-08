@@ -53,6 +53,8 @@ fn renders_synthetic_chunks_to_png() {
             "XYZ: 8.000 / 68.000 / -4.000".into(),
         ],
     };
+    // The block outline of the targeted block, like the one a dig target gets in game.
+    r.set_selection(Some([7.998, 62.998, 11.998, 9.002, 64.002, 13.002]));
     let (w, h, rgba) = r.render_to_rgba(&cam, &hud);
 
     let px = |x: u32, y: u32| &rgba[((y * w + x) * 4) as usize..][..4];

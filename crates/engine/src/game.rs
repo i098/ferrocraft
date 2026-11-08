@@ -416,7 +416,10 @@ mod dig_tests {
     fn survival_hold_digs_the_block_below_and_the_server_confirms() {
         let mut g = standing_on_grass(0);
         let below = [8, 63, 8];
-        assert_eq!(g.target([8.5, 65.62, 8.5]).map(|h| (h.pos, h.face)), Some((below, 1)));
+        assert_eq!(
+            g.target([8.5, 65.62, 8.5]).map(|h| (h.pos, h.face)),
+            Some((below, 1))
+        );
         let mut sent = vec![];
         let mut uploads = vec![];
         for tick in 0..40 {
@@ -430,13 +433,22 @@ mod dig_tests {
             uploads.extend(effects);
             g.tick(IDLE);
         }
-        let dig = |status| Action::Dig { status, pos: below, face: 1 };
+        let dig = |status| Action::Dig {
+            status,
+            pos: below,
+            face: 1,
+        };
         assert_eq!(sent[..2], [Action::Swing, dig(Status::Start)]);
         assert!(sent.contains(&dig(Status::Stop)));
         assert_eq!(g.store.get_block(8, 63, 8), 0);
         assert_eq!(uploads, [Effect::Upload(0, 0)]);
         // The server's BlockChange is the truth: it can put the block back.
-        let back = NetEvent::BlockChange { x: 8, y: 63, z: 8, state: 2 << 4 };
+        let back = NetEvent::BlockChange {
+            x: 8,
+            y: 63,
+            z: 8,
+            state: 2 << 4,
+        };
         assert_eq!(g.apply(back), Some(Effect::Upload(0, 0)));
         assert_eq!(g.store.get_block(8, 63, 8), 2 << 4);
     }
@@ -444,7 +456,11 @@ mod dig_tests {
     #[test]
     fn adventure_mode_cannot_dig() {
         let mut g = standing_on_grass(2);
-        let attack = Attack { held: true, presses: 1, grabbed: false };
+        let attack = Attack {
+            held: true,
+            presses: 1,
+            grabbed: false,
+        };
         assert_eq!(g.dig_tick(attack), (vec![], vec![]));
     }
 }

@@ -18,6 +18,32 @@ const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
 const MAX_TICKS_PER_FRAME: u32 = 10;
 
+/// Frame counter for the F3-style fps line.
+#[derive(Default)]
+struct FrameStats {
+    last: Option<Instant>,
+    frame_ms: f64,
+    window_start: Option<Instant>,
+    window_frames: u32,
+    fps: u32,
+}
+
+impl FrameStats {
+    fn frame(&mut self, now: Instant) {
+        if let Some(last) = self.last {
+            self.frame_ms = (now - last).as_secs_f64() * 1000.0;
+        }
+        self.last = Some(now);
+        let start = *self.window_start.get_or_insert(now);
+        self.window_frames += 1;
+        if now - start >= Duration::from_secs(1) {
+            self.fps = self.window_frames;
+            self.window_frames = 0;
+            self.window_start = Some(now);
+        }
+    }
+}
+
 pub struct App {
     args: Args,
     session: Session,
@@ -29,6 +55,7 @@ pub struct App {
     grabbed: bool,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
     deadline: Option<Instant>,
+    stats: FrameStats,
 }
 
 impl App {
@@ -42,6 +69,7 @@ impl App {
             renderer: None,
             next_tick: Instant::now(),
             grabbed: false,
+            stats: FrameStats::default(),
             deadline: std::env::var("FERROCRAFT_WINDOW_SECS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
@@ -141,6 +169,8 @@ impl App {
     }
 
     fn draw(&mut self) {
+        self.stats.frame(Instant::now());
+        let fps = format!("{} fps ({:.1} ms)", self.stats.fps, self.stats.frame_ms);
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let (Some(r), Some(p)) = (&mut self.renderer, &self.game.player) else {
@@ -156,7 +186,7 @@ impl App {
                         chat: self.game.chat.clone(),
                         chat_input: self.input.chat_input().map(String::from),
                         crosshair: false,
-                        debug: vec!["waiting for position".into()],
+                        debug: vec![fps, "waiting for position".into()],
                     },
                 );
             }
@@ -176,6 +206,7 @@ impl App {
             chat_input: self.input.chat_input().map(String::from),
             crosshair: true,
             debug: vec![
+                fps,
                 format!("XYZ: {:.3} / {:.5} / {:.3}", p.pos[0], p.pos[1], p.pos[2]),
                 format!("chunks: {}", self.game.store.len()),
             ],

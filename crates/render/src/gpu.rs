@@ -77,7 +77,12 @@ impl Renderer {
         // Colors are authored in display space like vanilla, so avoid an sRGB surface.
         config.format = config.format.remove_srgb_suffix();
         config.view_formats.clear();
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        // `FERROCRAFT_VSYNC=0` picks Immediate or Mailbox where the surface has them (vanilla: VSync off).
+        config.present_mode = if std::env::var("FERROCRAFT_VSYNC").is_ok_and(|v| v == "0") {
+            wgpu::PresentMode::AutoNoVsync
+        } else {
+            wgpu::PresentMode::AutoVsync
+        };
         surface.configure(&device, &config);
         let format = config.format;
         Self::build(

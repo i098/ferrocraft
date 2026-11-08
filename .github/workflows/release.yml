@@ -1,0 +1,85 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+  FABRIC_LOADER_URL: https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.16.10/fabric-loader-0.16.10.jar
+
+jobs:
+  jars:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+      - run: |
+          mkdir out
+          java/launcher/build.sh out/ferrocraft-boot.jar
+          curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
+          FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh out/ferrocraft-fabric.jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: out/*.jar
+
+  package:
+    needs: jars
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target ${{ matrix.target }} -p ferrocraft-engine -p ferrocraft-launcher
+      - uses: actions/download-artifact@v4
+        with:
+          name: jars
+          path: stage
+      - name: Package
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          bin=target/${{ matrix.target }}/release
+          cp "$bin/ferrocraft-engine$ext" "$bin/ferrocraft-launcher$ext" stage/
+          tar -czf "ferrocraft-${{ matrix.target }}.tar.gz" -C stage .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: ferrocraft-${{ matrix.target }}.tar.gz
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: assets
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" assets/*.tar.gz install.sh install.ps1 --generate-notes

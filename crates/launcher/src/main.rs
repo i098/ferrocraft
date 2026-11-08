@@ -315,9 +315,10 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     })();
     let mut roots: Vec<PathBuf> = mc.iter().chain(&mods).cloned().collect();
     roots.push(env.home.join(".ferrocraft"));
-    record(&manifest_path(&env.home), &roots, &written)?;
-    let kept = keep_launcher(&env.home)?;
+    let kept = record(&manifest_path(&env.home), &roots, &written)
+        .and_then(|()| keep_launcher(&env.home));
     res?;
+    let kept = kept?;
     println!("Lunar Client and Badlion cannot start custom versions: not installed there.");
     println!("To remove everything: {} uninstall", kept.display());
     println!("Then delete {}", kept.parent().unwrap().display());

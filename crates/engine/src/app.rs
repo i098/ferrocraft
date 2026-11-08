@@ -3,7 +3,7 @@
 use crate::args::Args;
 use crate::game::{Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
-use input_audio::InputState;
+use input_audio::{apply_cursor_grab, Action, InputState};
 use render::{Camera, ChunkBlocks, Hud, Renderer};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 use world::chunk::Chunk;
 
 const TICK: Duration = Duration::from_millis(50);
@@ -27,6 +27,8 @@ pub struct App {
     renderer: Option<Renderer>,
     next_tick: Instant,
     grabbed: bool,
+    show_debug: bool,
+    hide_hud: bool,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
     deadline: Option<Instant>,
 }
@@ -42,6 +44,8 @@ impl App {
             renderer: None,
             next_tick: Instant::now(),
             grabbed: false,
+            show_debug: false,
+            hide_hud: false,
             deadline: std::env::var("FERROCRAFT_WINDOW_SECS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
@@ -129,15 +133,23 @@ impl App {
             return;
         }
         let Some(w) = &self.window else { return };
-        if want {
-            let _ = w
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| w.set_cursor_grab(CursorGrabMode::Confined));
-        } else {
-            let _ = w.set_cursor_grab(CursorGrabMode::None);
+        self.grabbed = apply_cursor_grab(w, want);
+    }
+
+    fn handle_actions(&mut self) {
+        for action in self.input.take_actions() {
+            match action {
+                Action::ToggleDebug => self.show_debug = !self.show_debug,
+                Action::ToggleHud => self.hide_hud = !self.hide_hud,
+                Action::ToggleFullscreen => {
+                    if let Some(w) = &self.window {
+                        let on = w.fullscreen().is_none();
+                        w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+                    }
+                }
+                _ => {}
+            }
         }
-        w.set_cursor_visible(!want);
-        self.grabbed = want;
     }
 
     fn draw(&mut self) {
@@ -172,13 +184,21 @@ impl App {
             fov_deg: 70.0,
         };
         let hud = Hud {
-            chat: self.game.chat.clone(),
+            chat: if self.hide_hud {
+                Vec::new()
+            } else {
+                self.game.chat.clone()
+            },
             chat_input: self.input.chat_input().map(String::from),
-            crosshair: true,
-            debug: vec![
-                format!("XYZ: {:.3} / {:.5} / {:.3}", p.pos[0], p.pos[1], p.pos[2]),
-                format!("chunks: {}", self.game.store.len()),
-            ],
+            crosshair: !self.hide_hud,
+            debug: if self.show_debug && !self.hide_hud {
+                vec![
+                    format!("XYZ: {:.3} / {:.5} / {:.3}", p.pos[0], p.pos[1], p.pos[2]),
+                    format!("chunks: {}", self.game.store.len()),
+                ]
+            } else {
+                Vec::new()
+            },
         };
         r.render(&cam, &hud);
     }
@@ -195,6 +215,8 @@ impl ApplicationHandler for App {
             window.clone(),
             self.args.assets_dir.as_deref(),
         ));
+        // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
+        window.focus_window();
         self.window = Some(window);
     }
 
@@ -223,6 +245,7 @@ impl ApplicationHandler for App {
         let (dx, dy) = self.input.take_look_delta();
         self.game.look(dx, dy);
         self.run_ticks();
+        self.handle_actions();
         self.sync_cursor();
         if self.game.disconnected.is_some() || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();

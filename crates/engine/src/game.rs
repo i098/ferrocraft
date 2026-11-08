@@ -198,6 +198,29 @@ mod tests {
     }
 
     #[test]
+    fn look_clamps_pitch_to_vertical_and_accumulates_yaw() {
+        // Vanilla `Entity.setAngles` clamps pitch to [-90, 90].
+        let mut g = Game::new();
+        g.apply(NetEvent::PlayerPosLook {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+        });
+        g.look(30.0, 1000.0);
+        assert_eq!(g.pitch, 90.0);
+        g.look(0.0, 10.0);
+        assert_eq!(g.pitch, 90.0);
+        g.look(0.0, -1000.0);
+        assert_eq!(g.pitch, -90.0);
+        g.look(15.0, 45.0);
+        assert_eq!(g.pitch, -45.0);
+        assert_eq!(g.player.as_ref().unwrap().yaw, 45.0);
+    }
+
+    #[test]
     fn player_waits_for_chunk_then_lands_on_floor() {
         let mut g = Game::new();
         g.apply(NetEvent::PlayerPosLook {

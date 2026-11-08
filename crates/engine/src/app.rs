@@ -16,8 +16,6 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
 const MAX_TICKS_PER_FRAME: u32 = 10;
-/// Vanilla default mouse sensitivity 0.5: `(0.5 * 0.6 + 0.2)^3 * 8 * 0.15` degrees per pixel.
-const DEGREES_PER_PIXEL: f32 = 0.0393_216;
 
 pub struct App {
     args: Args,
@@ -36,7 +34,7 @@ impl App {
             args,
             session,
             game: Game::new(),
-            input: InputState::default(),
+            input: InputState::new(0.5),
             window: None,
             renderer: None,
             next_tick: Instant::now(),

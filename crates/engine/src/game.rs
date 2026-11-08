@@ -1,5 +1,7 @@
 //! Window-free game state: chunks, the local player and the 20 TPS step.
 
+use crate::swing::Swing;
+use crate::weather::Weather;
 use ferrocraft_net_client::{NetEvent, Styled};
 use world::chunk::ChunkStore;
 use world::entities::Entities;
@@ -50,6 +52,12 @@ pub struct Game {
     pub teleported: bool,
     pub pitch: f32,
     pub disconnected: Option<String>,
+    pub weather: Weather,
+    pub swing: Swing,
+    /// Time of day from Time Update; the packet sends a negative value while the cycle is frozen.
+    pub world_time: i64,
+    /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
+    pub ticks: u64,
 }
 
 impl Game {
@@ -64,6 +72,10 @@ impl Game {
             teleported: false,
             pitch: 0.0,
             disconnected: None,
+            weather: Weather::default(),
+            swing: Swing::default(),
+            world_time: 6000,
+            ticks: 0,
         }
     }
 
@@ -110,6 +122,14 @@ impl Game {
                 self.teleport([x, y, z], yaw, pitch, flags);
                 None
             }
+            NetEvent::TimeUpdate { time_of_day, .. } => {
+                self.world_time = time_of_day.abs();
+                None
+            }
+            NetEvent::GameState { reason, value } => {
+                self.weather.apply(reason, value);
+                None
+            }
             NetEvent::Chat(m) => Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => Some(Effect::ActionBar(m)),
             NetEvent::Disconnect(r) => {
@@ -151,6 +171,9 @@ impl Game {
     /// One 20 TPS step. The player stays frozen until the chunk under it has arrived, so
     /// it does not fall through the void while the world loads.
     pub fn tick(&mut self, input: Input) {
+        self.ticks += 1;
+        self.weather.tick();
+        self.swing.tick();
         self.entities.tick();
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;

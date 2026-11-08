@@ -87,6 +87,14 @@ fn handle(
         cb::Packet::ChatMessage(c) if c.position == 2 => {
             vec![NetEvent::ActionBar(chat::plain_text(&c.json))]
         }
+        cb::Packet::TimeUpdate(t) => vec![NetEvent::TimeUpdate {
+            world_age: t.world_age,
+            time_of_day: t.time_of_day,
+        }],
+        cb::Packet::ChangeGameState(g) => vec![NetEvent::GameState {
+            reason: g.reason,
+            value: g.value,
+        }],
         cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
         cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
         cb::Packet::BlockChange(b) => vec![block_change(

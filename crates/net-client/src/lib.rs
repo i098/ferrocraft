@@ -50,6 +50,16 @@ pub enum NetEvent {
     },
     /// Respawn or dimension change: every loaded chunk is gone.
     Respawn,
+    /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.
+    TimeUpdate {
+        world_age: i64,
+        time_of_day: i64,
+    },
+    /// Change Game State (0x2B): `reason` 1 starts rain, 2 stops it, 7 sets rain strength, 8 thunder strength.
+    GameState {
+        reason: u8,
+        value: f32,
+    },
     /// A chat message (positions 0 and 1) as styled runs.
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.

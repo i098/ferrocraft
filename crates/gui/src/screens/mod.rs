@@ -531,8 +531,10 @@ fn format_of(s: &str) -> String {
 /// `FontRenderer.listFormattedStringToWidth`: word wrap that carries `§` formats to the next line.
 pub fn wrap(m: &dyn Metrics, s: &str, max: i32) -> Vec<String> {
     let mut out = Vec::new();
+    // A real newline is a cut too, so the formats carry across it.
+    let mut carry = String::new();
     for line in s.split('\n') {
-        let mut rest = line.to_owned();
+        let mut rest = format!("{carry}{line}");
         loop {
             let cut = wrap_cut(m, &rest, max);
             if cut >= rest.len() {
@@ -545,6 +547,9 @@ pub fn wrap(m: &dyn Metrics, s: &str, max: i32) -> Vec<String> {
             out.push(head);
             rest = tail;
         }
+        carry = out
+            .last()
+            .map_or_else(String::new, |l: &String| format_of(l));
     }
     out
 }
@@ -1088,7 +1093,6 @@ pub struct ScrollList {
     pub top: i32,
     pub bottom: i32,
     pub slot_h: i32,
-    pub header: i32,
     /// `getListWidth`.
     pub row_w: i32,
     /// `getScrollBarX`.
@@ -1097,7 +1101,6 @@ pub struct ScrollList {
     /// `initialClickY`: -1 dragging none, -2 idle, >= 0 drag anchor.
     drag_y: i32,
     drag_factor: f32,
-    last_click: (i32, u64),
 }
 
 impl ScrollList {
@@ -1108,18 +1111,16 @@ impl ScrollList {
             top,
             bottom,
             slot_h,
-            header: 0,
             row_w: 220,
             bar_x: width / 2 + 124,
             scroll: 0.0,
             drag_y: -2,
             drag_factor: 1.0,
-            last_click: (-1, 0),
         }
     }
 
     fn content_h(&self, rows: usize) -> i32 {
-        rows as i32 * self.slot_h + self.header
+        rows as i32 * self.slot_h
     }
 
     /// `getMaxScroll`.
@@ -1145,7 +1146,7 @@ impl ScrollList {
 
     /// Top of row `i` on screen.
     pub fn row_y(&self, i: usize) -> i32 {
-        self.top + 4 - self.scroll as i32 + i as i32 * self.slot_h + self.header
+        self.top + 4 - self.scroll as i32 + i as i32 * self.slot_h
     }
 
     /// `getSlotIndexFromScreenCoords`.
@@ -1154,32 +1155,30 @@ impl ScrollList {
             self.width / 2 - self.row_w / 2,
             self.width / 2 + self.row_w / 2,
         );
-        let rel = y - self.top - self.header + self.scroll as i32 - 4;
+        let rel = y - self.top + self.scroll as i32 - 4;
         let i = rel / self.slot_h;
         (x < self.bar_x && x >= l && x <= r && i >= 0 && rel >= 0 && (i as usize) < rows)
             .then_some(i as usize)
     }
 
-    /// Left-button press: a row index, and whether it is a double click (`GuiSlot.handleMouseInput`).
-    pub fn press(&mut self, x: i32, y: i32, rows: usize, now_ms: u64) -> Option<(usize, bool)> {
+    /// Left-button press on the list: starts a scroll-bar or content drag (`GuiSlot.handleMouseInput`).
+    pub fn press(&mut self, x: i32, y: i32, rows: usize) {
         if y < self.top || y > self.bottom {
             self.drag_y = -2;
-            return None;
+            return;
         }
-        let hit = self.row_at(x, y, rows);
         if x >= self.bar_x && x <= self.bar_x + 6 {
             let max = self.max_scroll(rows).max(1);
             let span = self.bottom - self.top;
-            let knob = (span * span / self.content_h(rows).max(1)).clamp(32, span - 8);
+            // `MathHelper.clamp_int` never panics, even when the list is shorter than 40 units.
+            let knob = (span * span / self.content_h(rows).max(1))
+                .min(span - 8)
+                .max(32);
             self.drag_factor = -1.0 / ((span - knob) as f32 / max as f32);
         } else {
             self.drag_factor = 1.0;
         }
         self.drag_y = y;
-        let i = hit?;
-        let double = self.last_click.0 == i as i32 && now_ms - self.last_click.1 < 250;
-        self.last_click = (i as i32, now_ms);
-        Some((i, double))
     }
 
     /// Mouse held at `my` during a frame: drag-scrolls the list.
@@ -1255,7 +1254,7 @@ impl ScrollList {
         let max = self.max_scroll(rows);
         if max > 0 {
             let span = self.bottom - self.top;
-            let knob = (span * span / self.content_h(rows)).clamp(32, span - 8);
+            let knob = (span * span / self.content_h(rows)).min(span - 8).max(32);
             let y = (self.scroll as i32 * (span - knob) / max + self.top).max(self.top);
             let (x0, x1) = (self.bar_x, self.bar_x + 6);
             c.fill(x0, self.top, x1, self.bottom, 0xff000000);
@@ -1314,6 +1313,7 @@ impl Screen for YesNo {
             Button::new(0, w / 2 - 155, h / 6 + 96, 150, 20, self.yes.clone()),
             Button::new(1, w / 2 - 155 + 160, h / 6 + 96, 150, 20, self.no.clone()),
         ];
+        self.lines.clear();
         let enabled = self.delay <= 0;
         self.buttons.iter_mut().for_each(|b| b.enabled = enabled);
     }
@@ -1401,6 +1401,7 @@ mod tests {
         let lines = wrap(&Mono, "§cab cd ef", 30);
         assert_eq!(lines, vec!["§cab cd", "§cef"]);
         assert_eq!(wrap(&Mono, "abcdefgh", 24), vec!["abcd", "efgh"]);
+        assert_eq!(wrap(&Mono, "§6§lab\ncd", 100), vec!["§6§lab", "§6§lcd"]);
     }
 
     #[test]

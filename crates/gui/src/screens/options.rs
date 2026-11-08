@@ -132,12 +132,13 @@ pub enum Opt {
     ChatHeightUnfocused,
     MipmapLevels,
     BlockAlternatives,
+    ReducedDebugInfo,
     EntityShadows,
     RealmsNotifications,
 }
 
 impl Opt {
-    const ALL: [Opt; 31] = [
+    const ALL: [Opt; 32] = [
         Opt::InvertMouse,
         Opt::Sensitivity,
         Opt::Fov,
@@ -167,6 +168,7 @@ impl Opt {
         Opt::ChatHeightUnfocused,
         Opt::MipmapLevels,
         Opt::BlockAlternatives,
+        Opt::ReducedDebugInfo,
         Opt::EntityShadows,
         Opt::RealmsNotifications,
     ];
@@ -207,6 +209,7 @@ impl Opt {
             ChatHeightUnfocused => "options.chat.height.unfocused",
             MipmapLevels => "options.mipmapLevels",
             BlockAlternatives => "options.blockAlternatives",
+            ReducedDebugInfo => "options.reducedDebugInfo",
             EntityShadows => "options.entityShadows",
             RealmsNotifications => "options.realmsNotifications",
         }
@@ -243,6 +246,7 @@ impl Opt {
                 | Vbo
                 | Touchscreen
                 | BlockAlternatives
+                | ReducedDebugInfo
                 | EntityShadows
                 | RealmsNotifications
         )
@@ -696,6 +700,7 @@ impl Settings {
             Vbo => self.vbo,
             Touchscreen => self.touchscreen,
             BlockAlternatives => self.block_alternatives,
+            ReducedDebugInfo => self.reduced_debug_info,
             EntityShadows => self.entity_shadows,
             RealmsNotifications => self.realms_notifications,
             _ => false,
@@ -724,6 +729,7 @@ impl Settings {
             Vsync => self.vsync ^= true,
             Vbo => self.vbo ^= true,
             BlockAlternatives => self.block_alternatives ^= true,
+            ReducedDebugInfo => self.reduced_debug_info ^= true,
             EntityShadows => self.entity_shadows ^= true,
             RealmsNotifications => self.realms_notifications ^= true,
             _ => {}
@@ -1118,24 +1124,12 @@ impl Screen for OptionPage {
                     ChatHeightFocused,
                     ChatHeightUnfocused,
                     ChatWidth,
-                    // `REDUCED_DEBUG_INFO` sits here in vanilla.
+                    ReducedDebugInfo,
                 ];
                 for (i, o) in opts.iter().enumerate() {
                     let (x, y) = grid(ctx, i as i32, h / 6);
                     self.buttons.push(opt_button(*o, x, y, ctx));
                 }
-                let (x, y) = grid(ctx, opts.len() as i32, h / 6);
-                let label = format!(
-                    "{}: {}",
-                    ctx.tr("options.reducedDebugInfo"),
-                    ctx.tr(if ctx.settings.reduced_debug_info {
-                        "options.on"
-                    } else {
-                        "options.off"
-                    })
-                );
-                self.buttons
-                    .push(Button::new(REDUCED_DEBUG, x, y, 150, 20, label));
                 self.buttons.push(Button::wide(
                     DONE,
                     w / 2 - 100,
@@ -1220,20 +1214,6 @@ impl Screen for OptionPage {
                 ctx.save_settings();
                 return self.back();
             }
-            REDUCED_DEBUG => {
-                ctx.settings.reduced_debug_info ^= true;
-                ctx.save_settings();
-                let b = super::button(&mut self.buttons, id);
-                b.label = format!(
-                    "{}: {}",
-                    ctx.tr("options.reducedDebugInfo"),
-                    ctx.tr(if ctx.settings.reduced_debug_info {
-                        "options.on"
-                    } else {
-                        "options.off"
-                    })
-                );
-            }
             _ if (SKIN_PART..SKIN_PART + 7).contains(&id) => {
                 let bit = (id - SKIN_PART) as usize;
                 let on = ctx.settings.model_parts >> bit & 1 == 0;
@@ -1265,7 +1245,6 @@ impl Screen for OptionPage {
     }
 }
 
-const REDUCED_DEBUG: i32 = 3000;
 const DIFFICULTY: i32 = 108;
 const SKIN: i32 = 110;
 const SUPER_SECRET: i32 = 8675309;
@@ -1487,7 +1466,7 @@ impl Screen for Video {
         let n = self.row_count();
         if mb == 0 {
             self.held = true;
-            self.list.press(x, y, n, ctx.now_ms);
+            self.list.press(x, y, n);
         }
         // `GuiListExtended.mouseClicked`: only the row under the mouse takes the click.
         let row = (y >= self.list.top && y <= self.list.bottom)
@@ -1670,7 +1649,7 @@ impl Screen for Controls {
         let n = self.rows.len();
         if mb == 0 {
             self.held = true;
-            self.list.press(x, y, n, ctx.now_ms);
+            self.list.press(x, y, n);
             let in_list = y >= self.list.top && y <= self.list.bottom;
             if let Some(KeyRow::Key(k, change, reset)) = in_list
                 .then(|| self.list.row_at(x, y, n))

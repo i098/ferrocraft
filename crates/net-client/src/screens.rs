@@ -26,8 +26,8 @@ pub struct ServerStatus {
     pub max: i32,
     /// Description with `§` formatting codes, like `IChatComponent.getFormattedText`.
     pub motd: String,
-    /// PNG bytes of the 64x64 server icon.
-    pub favicon: Option<Vec<u8>>,
+    /// Base64 of the 64x64 PNG server icon, as `servers.dat` stores it.
+    pub favicon: Option<String>,
     pub ping_ms: i64,
     /// `players.sample` names, the tooltip over the player count.
     pub sample: Vec<String>,
@@ -108,7 +108,7 @@ fn parse_status(json: &str) -> Option<ServerStatus> {
         .get("favicon")
         .and_then(Value::as_str)
         .and_then(|s| s.strip_prefix("data:image/png;base64,"))
-        .and_then(base64);
+        .map(str::to_owned);
     let sample = v
         .pointer("/players/sample")
         .and_then(Value::as_array)
@@ -130,7 +130,11 @@ fn parse_status(json: &str) -> Option<ServerStatus> {
             .to_owned(),
         protocol: int("/version/protocol"),
         online: int("/players/online"),
-        max: int("/players/max"),
+        // `-1` draws vanilla's `???` when the server sends no `players` block.
+        max: v
+            .pointer("/players/max")
+            .and_then(Value::as_i64)
+            .map_or(-1, |n| n as i32),
         motd,
         favicon,
         ping_ms: 0,
@@ -276,7 +280,7 @@ pub fn load_servers(path: &Path) -> Vec<ServerEntry> {
         .collect()
 }
 
-/// Write `servers.dat` in vanilla's layout.
+/// Write `servers.dat` in vanilla's layout, through a temporary file as `CompressedStreamTools.safeWrite` does.
 pub fn save_servers(path: &Path, servers: &[ServerEntry]) -> io::Result<()> {
     let list = servers
         .iter()
@@ -300,7 +304,9 @@ pub fn save_servers(path: &Path, servers: &[ServerEntry]) -> io::Result<()> {
     };
     let mut out = Vec::new();
     nbt.write(&mut out);
-    std::fs::write(path, out)
+    let tmp = path.with_extension("dat_tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(tmp, path)
 }
 
 impl Session {
@@ -333,10 +339,8 @@ mod tests {
         let s = parse_status(j).expect("parses");
         assert_eq!((s.protocol, s.online, s.max), (47, 1, 20));
         assert_eq!(s.motd, "Hi §r§6§lthere§r");
-        assert_eq!(
-            s.favicon.as_deref(),
-            Some(&[0x89, b'P', b'N', b'G', 0x0D][..])
-        );
+        assert_eq!(s.favicon.as_deref(), Some("iVBORw0="));
+        assert_eq!(parse_status("{}").unwrap().max, -1);
         assert_eq!(s.sample, ["Bob"]);
         assert_eq!(
             parse_status(r#"{"description":"plain"}"#).unwrap().motd,

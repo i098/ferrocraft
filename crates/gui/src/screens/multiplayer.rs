@@ -4,7 +4,7 @@
 use super::{
     answer, blit256, centered, default_background, draw_buttons, key, press, release_all, text,
     tooltip, wrap, Button, Canvas, Connecting, Ctx, Mods, Nav, Screen, ScrollList, TextField,
-    YesNo, GRAY_LABEL, WHITE,
+    YesNo, GRAY_LABEL, ICONS, WHITE,
 };
 use ferrocraft_net_client::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-const ICONS: &str = "textures/gui/icons.png";
 const UNKNOWN_SERVER: &str = "textures/misc/unknown_server.png";
 const SELECTION: &str = "textures/gui/server_selection.png";
 const PROTOCOL: i32 = 47;
@@ -258,13 +257,6 @@ impl Multiplayer {
         };
         u *= 10;
         blit256(c, ICONS, x + ROW_W - 15, y, u, 176 + v * 8, 10, 8);
-        // A new favicon from the ping replaces the stored one and is saved, as vanilla does.
-        if let Some(png) = status.and_then(|s| s.favicon.as_ref()) {
-            let b64 = encode_base64(png);
-            if row.entry.icon.as_deref() != Some(&b64) {
-                row.entry.icon = Some(b64);
-            }
-        }
         let tex = format!("servers/{}/icon", row.entry.ip);
         if row.icon_shown != row.entry.icon {
             row.icon_shown = row.entry.icon.clone();
@@ -381,24 +373,6 @@ fn is_64px_png(p: &[u8]) -> bool {
     p.len() >= 24 && p[..8] == *b"\x89PNG\r\n\x1a\n" && p[16..24] == [0, 0, 0, 64, 0, 0, 0, 64]
 }
 
-fn encode_base64(bytes: &[u8]) -> String {
-    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for ch in bytes.chunks(3) {
-        let n = (ch[0] as u32) << 16
-            | (*ch.get(1).unwrap_or(&0) as u32) << 8
-            | *ch.get(2).unwrap_or(&0) as u32;
-        for k in 0..4 {
-            out.push(if k <= ch.len() {
-                A[(n >> (18 - 6 * k) & 63) as usize] as char
-            } else {
-                '='
-            });
-        }
-    }
-    out
-}
-
 impl Screen for Multiplayer {
     fn init(&mut self, ctx: &mut Ctx) {
         let (w, h) = (ctx.width, ctx.height);
@@ -452,7 +426,11 @@ impl Screen for Multiplayer {
         while let Ok((key, res)) = self.pings.1.try_recv() {
             if let Some(r) = self.rows.iter_mut().find(|r| r.key == key) {
                 r.ping = match res {
-                    Ok(s) => Ping::Done(s),
+                    Ok(s) => {
+                        // `ServerPinger`: the ping's icon replaces the stored one, or clears it.
+                        r.entry.icon = s.favicon.clone();
+                        Ping::Done(s)
+                    }
                     Err(PingError::UnknownHost) => Ping::Failed("Can't resolve hostname"),
                     Err(PingError::Failed(_)) => Ping::Failed("Can't connect to server."),
                 };
@@ -530,7 +508,7 @@ impl Screen for Multiplayer {
         let n = self.row_count();
         if mb == 0 {
             self.held = true;
-            self.list.press(x, y, n, ctx.now_ms);
+            self.list.press(x, y, n);
         }
         if y < self.list.top || y > self.list.bottom {
             return None;
@@ -556,7 +534,7 @@ impl Screen for Multiplayer {
         false
     }
 
-    fn confirm(&mut self, yes: bool, id: i32, ctx: &mut Ctx) -> Option<Nav> {
+    fn confirm(&mut self, yes: bool, id: i32, _ctx: &mut Ctx) -> Option<Nav> {
         let edited = self.edit.borrow().clone();
         match self.pending.take() {
             Some(Pending::Delete) if yes => {
@@ -584,7 +562,6 @@ impl Screen for Multiplayer {
             }
             _ => {}
         }
-        let _ = ctx;
         None
     }
 }
@@ -881,18 +858,5 @@ impl Screen for DirectConnect {
     fn closed(&mut self, ctx: &mut Ctx) {
         ctx.settings.last_server = self.ip.text.clone();
         ctx.save_settings();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn base64_round_trips() {
-        for s in [&b""[..], b"f", b"fo", b"foo", b"foob", b"\x89PNG\r\n"] {
-            assert_eq!(base64(&encode_base64(s)).as_deref(), Some(s));
-        }
-        assert_eq!(encode_base64(b"fo"), "Zm8=");
     }
 }

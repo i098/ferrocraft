@@ -70,6 +70,9 @@ impl App {
                 None => {}
             }
         }
+        if std::mem::take(&mut self.game.teleported) {
+            self.send_pose();
+        }
         let Some(r) = &mut self.renderer else { return };
         if clear {
             r.clear_chunks();
@@ -96,22 +99,22 @@ impl App {
                 let r = self.session.send_chat(&line);
                 self.send_result(r);
             }
-            let (dx, dy) = self.input.take_look_delta();
-            self.game.look(dx, dy);
             self.game.tick(self.input.movement());
-            if let Some(p) = &self.game.player {
-                let [x, y, z] = p.pos;
-                let r =
-                    self.session
-                        .send_position_look(x, y, z, p.yaw, self.game.pitch, p.on_ground);
-                self.send_result(r);
-            }
+            self.send_pose();
         }
         if ran == MAX_TICKS_PER_FRAME {
             self.next_tick = now + TICK;
         }
     }
 
+    fn send_pose(&mut self) {
+        let Some(p) = &self.game.player else { return };
+        let [x, y, z] = p.pos;
+        let r = self
+            .session
+            .send_position_look(x, y, z, p.yaw, self.game.pitch, p.on_ground);
+        self.send_result(r);
+    }
     fn send_result(&mut self, r: std::io::Result<()>) {
         if let Err(e) = r {
             self.game
@@ -138,6 +141,8 @@ impl App {
     }
 
     fn draw(&mut self) {
+        let until = self.next_tick.saturating_duration_since(Instant::now());
+        let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let (Some(r), Some(p)) = (&mut self.renderer, &self.game.player) else {
             if let Some(r) = &mut self.renderer {
                 r.render(
@@ -157,8 +162,11 @@ impl App {
             }
             return;
         };
+        let [px, py, pz] = p.pos;
+        let [qx, qy, qz] = self.game.prev_pos;
+        let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
         let cam = Camera {
-            pos: [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]],
+            pos: [lerp(qx, px), lerp(qy, py) + EYE_HEIGHT, lerp(qz, pz)],
             yaw: p.yaw,
             pitch: self.game.pitch,
             fov_deg: 70.0,
@@ -212,6 +220,8 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.pump_network();
+        let (dx, dy) = self.input.take_look_delta();
+        self.game.look(dx, dy);
         self.run_ticks();
         self.sync_cursor();
         if self.game.disconnected.is_some() || self.deadline.is_some_and(|d| Instant::now() >= d) {

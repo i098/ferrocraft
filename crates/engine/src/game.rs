@@ -37,6 +37,10 @@ impl World for Collision<'_> {
 pub struct Game {
     pub store: ChunkStore,
     pub player: Option<Player>,
+    /// Player position before the latest tick, for partial-tick interpolation.
+    pub prev_pos: [f64; 3],
+    /// Set by S08 until the engine has echoed the new pose to the server.
+    pub teleported: bool,
     pub pitch: f32,
     pub chat: Vec<String>,
     pub disconnected: Option<String>,
@@ -47,6 +51,8 @@ impl Game {
         Game {
             store: ChunkStore::default(),
             player: None,
+            prev_pos: [0.0; 3],
+            teleported: false,
             pitch: 0.0,
             chat: Vec::new(),
             disconnected: None,
@@ -115,6 +121,8 @@ impl Game {
         self.pitch = if rel(4) { self.pitch + pitch } else { pitch };
         // `Player::new` rebuilds the private bounding box, which a bare `pos` write would not.
         self.player = Some(Player::new(at, yaw));
+        self.prev_pos = at;
+        self.teleported = true;
     }
 
     /// Apply a look delta in degrees; pitch clamps to +-90 like `Entity.setAngles`.
@@ -129,6 +137,7 @@ impl Game {
     /// it does not fall through the void while the world loads.
     pub fn tick(&mut self, input: Input) {
         let Some(p) = &mut self.player else { return };
+        self.prev_pos = p.pos;
         let (cx, cz) = (
             (p.pos[0].floor() as i32) >> 4,
             (p.pos[2].floor() as i32) >> 4,
@@ -181,6 +190,8 @@ mod tests {
             flags: 0b11111,
         });
         let p = g.player.as_ref().unwrap();
+        assert!(g.teleported);
+        assert_eq!(g.prev_pos, [2.0, 71.0, 3.0]);
         assert_eq!(p.pos, [2.0, 71.0, 3.0]);
         assert_eq!(p.yaw, 15.0);
         assert_eq!(g.pitch, 10.0);

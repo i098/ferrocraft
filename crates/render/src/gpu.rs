@@ -4,7 +4,7 @@ use crate::assets::{AssetSource, Atlas, Font};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
 use crate::text::{layout, HudVertex};
 use crate::{Camera, ChunkBlocks, Hud};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -60,6 +60,7 @@ pub struct Renderer {
     font: Option<Font>,
     blocks: HashMap<(i32, i32), Vec<u16>>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
+    dirty: HashSet<(i32, i32)>,
 }
 
 impl Renderer {
@@ -203,6 +204,7 @@ impl Renderer {
             font,
             blocks: HashMap::new(),
             meshes: HashMap::new(),
+            dirty: HashSet::new(),
         }
     }
 
@@ -237,18 +239,19 @@ impl Renderer {
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
         self.blocks.insert(key, data);
-        self.remesh_around(key);
+        self.mark_around(key);
     }
 
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
         self.meshes.remove(&(x, z));
-        self.remesh_neighbors((x, z));
+        self.mark_neighbors((x, z));
     }
 
     pub fn clear_chunks(&mut self) {
         self.blocks.clear();
         self.meshes.clear();
+        self.dirty.clear();
     }
 
     /// Apply a single block change at world coordinates.
@@ -265,17 +268,23 @@ impl Renderer {
             y as usize,
             z.rem_euclid(16) as usize,
         )] = state;
-        self.remesh_around(key);
+        self.mark_around(key);
     }
 
-    fn remesh_around(&mut self, key: (i32, i32)) {
-        self.remesh(key);
-        self.remesh_neighbors(key);
+    fn mark_around(&mut self, key: (i32, i32)) {
+        self.dirty.insert(key);
+        self.mark_neighbors(key);
     }
 
-    fn remesh_neighbors(&mut self, (cx, cz): (i32, i32)) {
-        for k in [(cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)] {
-            self.remesh(k);
+    fn mark_neighbors(&mut self, (cx, cz): (i32, i32)) {
+        self.dirty
+            .extend([(cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)]);
+    }
+
+    /// Remesh every chunk touched since the last frame once, however many changes hit it.
+    fn flush_meshes(&mut self) {
+        for key in std::mem::take(&mut self.dirty) {
+            self.remesh(key);
         }
     }
 
@@ -334,6 +343,7 @@ impl Renderer {
 
     /// Draw one frame to the window. Offscreen renderers draw into their texture.
     pub fn render(&mut self, cam: &Camera, hud: &Hud) {
+        self.flush_meshes();
         let frame = match &self.target {
             Target::Window { surface, .. } => match surface.get_current_texture() {
                 Ok(f) => Some(f),
@@ -703,7 +713,7 @@ fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
         -pitch.sin(),
         yaw.cos() * pitch.cos(),
     ];
-    let right = norm(cross(fwd, [0.0, 1.0, 0.0]));
+    let right = [-yaw.cos(), 0.0, -yaw.sin()];
     let up = cross(right, fwd);
     let eye = [cam.pos[0] as f32, cam.pos[1] as f32, cam.pos[2] as f32];
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -732,11 +742,6 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-fn norm(a: [f32; 3]) -> [f32; 3] {
-    let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-    [a[0] / l, a[1] / l, a[2] / l]
-}
-
 fn mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut o = [[0.0; 4]; 4];
     for c in 0..4 {
@@ -745,4 +750,29 @@ fn mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
         }
     }
     o
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clip_x(cam: &Camera, p: [f32; 3]) -> f32 {
+        let m = view_proj(cam, 1.0);
+        (0..3).map(|c| m[c][0] * p[c]).sum::<f32>() + m[3][0]
+    }
+
+    /// A point at the player's left stays left while the pitch clamps at +-90.
+    #[test]
+    fn view_does_not_flip_at_the_pitch_clamp() {
+        let at = |pitch| Camera {
+            pos: [0.0; 3],
+            yaw: 0.0,
+            pitch,
+            fov_deg: 70.0,
+        };
+        // Yaw 0 faces +z, so +x is on the left of the screen: clip x < 0.
+        for pitch in [-90.0, -89.0, 0.0, 89.0, 90.0] {
+            assert!(clip_x(&at(pitch), [1.0, 0.0, 0.0]) < 0.0, "pitch {pitch}");
+        }
+    }
 }

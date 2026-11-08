@@ -1,0 +1,11 @@
+[package]
+name = "input-audio"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Keyboard and mouse input state for the Ferrocraft engine (vanilla 1.8.9 default keys, chat mode)"
+
+[dependencies]
+winit = "0.30"
+world = { path = "../world" }

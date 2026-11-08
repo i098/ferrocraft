@@ -185,7 +185,7 @@ mod tests {
     fn torch_light_falls_off_by_one_per_block() {
         let c = chunk(|x, y, z| match (x, y, z) {
             (8, 40, 8) => 50 << 4 | 5,
-            _ if y < 30 || y > 50 => 1 << 4,
+            _ if !(30..=50).contains(&y) => 1 << 4,
             _ if (x, z) == (0, 0) => 0,
             _ => 0,
         });

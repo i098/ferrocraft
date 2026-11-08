@@ -179,7 +179,10 @@ impl EnvTexture {
     pub fn load(source: Option<&mut AssetSource>) -> EnvTexture {
         let mut rgba = vec![255u8; (ENV_W * ENV_H * 4) as usize];
         // Everything but the white tile starts transparent so missing textures draw nothing.
-        for px in rgba[..(WHITE_Y as usize * ENV_W as usize * 4)].chunks_exact_mut(4) {
+        for px in rgba[..(WHITE_Y as usize * ENV_W as usize * 4)]
+            .as_chunks_mut::<4>()
+            .0
+        {
             px.copy_from_slice(&[255, 255, 255, 0]);
         }
         let mut clouds = vec![false; 256 * 256];
@@ -190,7 +193,7 @@ impl EnvTexture {
                     .and_then(|b| decode_png(&b))
             };
             if let Some(img) = load("clouds").filter(|i| i.width == 256 && i.height == 256) {
-                for (c, px) in clouds.iter_mut().zip(img.rgba.chunks_exact(4)) {
+                for (c, px) in clouds.iter_mut().zip(img.rgba.as_chunks::<4>().0) {
                     *c = px[3] > 0;
                 }
                 has_clouds = true;

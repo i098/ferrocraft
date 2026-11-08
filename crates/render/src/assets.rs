@@ -203,7 +203,13 @@ fn bake_overlay(base: &mut Image, over: &Image, tint: [f32; 3]) {
     if (base.width, base.height) != (over.width, over.height) {
         return;
     }
-    for (b, o) in base.rgba.chunks_exact_mut(4).zip(over.rgba.chunks_exact(4)) {
+    for (b, o) in base
+        .rgba
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(over.rgba.as_chunks::<4>().0)
+    {
         let a = o[3] as f32 / 255.0;
         for c in 0..3 {
             let top = o[c] as f32 * tint[c];

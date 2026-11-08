@@ -4,10 +4,12 @@ mod assets;
 mod blocks;
 mod gpu;
 mod mesh;
+mod particles;
 mod text;
 
 pub use assets::encode_png;
 pub use gpu::Renderer;
+pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips
 /// or blends (plants, doors, panes, water) is not.

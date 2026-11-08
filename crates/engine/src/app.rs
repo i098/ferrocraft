@@ -73,8 +73,6 @@ impl App {
                 self.session.send_chat(&line);
             }
             let (dx, dy) = self.input.take_look_delta();
-            self.game
-                .look(dx * DEGREES_PER_PIXEL, dy * DEGREES_PER_PIXEL);
             self.game.tick(self.input.movement());
             if let Some(p) = &self.game.player {
                 let [x, y, z] = p.pos;

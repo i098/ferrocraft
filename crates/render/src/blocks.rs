@@ -74,6 +74,106 @@ fn cutout(color: u32, name: &'static str) -> Look {
     }
 }
 
+type Entry = (u16, fn() -> Look);
+const TABLE: &[Entry] = &[
+    (1, || cube(0x7d7d7d, "stone")),
+    (2, || Look {
+        tint: Tint::Grass,
+        ..cube3(0x5d9a3a, "grass_top", "dirt", "grass_side")
+    }),
+    (3, || cube(0x866043, "dirt")),
+    (4, || cube(0x7a7a7a, "cobblestone")),
+    (5, || cube(0x9f8150, "planks_oak")),
+    (7, || cube(0x333333, "bedrock")),
+    (8, || Look {
+        kind: Kind::Water,
+        ..cube(0x2f5bd6, "water_still")
+    }),
+    (9, || Look {
+        kind: Kind::Water,
+        ..cube(0x2f5bd6, "water_still")
+    }),
+    (10, || cube(0xe8650c, "lava_still")),
+    (11, || cube(0xe8650c, "lava_still")),
+    (12, || cube(0xdbd3a0, "sand")),
+    (13, || cube(0x857f7e, "gravel")),
+    (14, || cube(0x8f8b79, "gold_ore")),
+    (15, || cube(0x88807b, "iron_ore")),
+    (16, || cube(0x6c6c6c, "coal_ore")),
+    (17, || {
+        cube3(0x665132, "log_oak_top", "log_oak_top", "log_oak")
+    }),
+    (18, || Look {
+        tint: Tint::Grass,
+        ..cutout(0x3b7a24, "leaves_oak")
+    }),
+    (19, || cube(0xc9c24a, "sponge")),
+    (20, || cutout(0xc0e8ee, "glass")),
+    (21, || cube(0x6b7488, "lapis_ore")),
+    (22, || cube(0x2742a0, "lapis_block")),
+    (24, || {
+        cube3(
+            0xdbd3a0,
+            "sandstone_top",
+            "sandstone_bottom",
+            "sandstone_normal",
+        )
+    }),
+    (35, || cube(0xe0e0e0, "wool_colored_white")),
+    (41, || cube(0xf9ec4e, "gold_block")),
+    (42, || cube(0xdddddd, "iron_block")),
+    (43, || cube(0xa8a8a8, "stone_slab_top")),
+    (44, || cube(0xa8a8a8, "stone_slab_top")),
+    (45, || cube(0x965a4a, "brick")),
+    (46, || cube3(0xdb2e1f, "tnt_top", "tnt_bottom", "tnt_side")),
+    (47, || {
+        cube3(0x6d5636, "planks_oak", "planks_oak", "bookshelf")
+    }),
+    (48, || cube(0x5f7a5f, "cobblestone_mossy")),
+    (49, || cube(0x14121f, "obsidian")),
+    (56, || cube(0x8a9a9d, "diamond_ore")),
+    (57, || cube(0x62ece0, "diamond_block")),
+    (58, || {
+        cube3(
+            0x7a5a33,
+            "crafting_table_top",
+            "planks_oak",
+            "crafting_table_side",
+        )
+    }),
+    (73, || cube(0x8a6e6e, "redstone_ore")),
+    (74, || cube(0x8a6e6e, "redstone_ore")),
+    (78, || cube(0xf5fafa, "snow")),
+    (79, || cutout(0x9cc6ff, "ice")),
+    (80, || cube(0xf5fafa, "snow")),
+    (81, || {
+        cube3(0x0d6a1c, "cactus_top", "cactus_bottom", "cactus_side")
+    }),
+    (82, || cube(0xa0a6b3, "clay")),
+    (86, || {
+        cube3(0xc77a1a, "pumpkin_top", "pumpkin_top", "pumpkin_side")
+    }),
+    (87, || cube(0x6f3636, "netherrack")),
+    (88, || cube(0x54402f, "soul_sand")),
+    (89, || cube(0xf0d08a, "glowstone")),
+    (95, || cutout(0xc0e8ee, "glass")),
+    (98, || cube(0x7b7b7b, "stonebrick")),
+    (102, || cutout(0xc0e8ee, "glass")),
+    (112, || cube(0x2d1519, "nether_brick")),
+    (129, || cube(0x7f9a86, "emerald_ore")),
+    (133, || cube(0x2fc15a, "emerald_block")),
+    (159, || cube(0x965e43, "hardened_clay")),
+    (161, || Look {
+        tint: Tint::Grass,
+        ..cutout(0x3b7a24, "leaves_oak")
+    }),
+    (162, || {
+        cube3(0x665132, "log_oak_top", "log_oak_top", "log_oak")
+    }),
+    (172, || cube(0x965e43, "hardened_clay")),
+    (173, || cube(0x131313, "coal_block")),
+];
+
 pub fn look(id: u16) -> Look {
     if SKIP.contains(&id) {
         return Look {
@@ -81,74 +181,9 @@ pub fn look(id: u16) -> Look {
             ..cube(0, "stone")
         };
     }
-    match id {
-        1 => cube(0x7d7d7d, "stone"),
-        2 => Look {
-            tint: Tint::Grass,
-            ..cube3(0x5d9a3a, "grass_top", "dirt", "grass_side")
-        },
-        3 => cube(0x866043, "dirt"),
-        4 => cube(0x7a7a7a, "cobblestone"),
-        5 => cube(0x9f8150, "planks_oak"),
-        7 => cube(0x333333, "bedrock"),
-        8 | 9 => Look {
-            kind: Kind::Water,
-            ..cube(0x2f5bd6, "water_still")
-        },
-        10 | 11 => cube(0xe8650c, "lava_still"),
-        12 => cube(0xdbd3a0, "sand"),
-        13 => cube(0x857f7e, "gravel"),
-        14 => cube(0x8f8b79, "gold_ore"),
-        15 => cube(0x88807b, "iron_ore"),
-        16 => cube(0x6c6c6c, "coal_ore"),
-        17 | 162 => cube3(0x665132, "log_oak_top", "log_oak_top", "log_oak"),
-        18 | 161 => Look {
-            tint: Tint::Grass,
-            ..cutout(0x3b7a24, "leaves_oak")
-        },
-        19 => cube(0xc9c24a, "sponge"),
-        20 | 95 | 102 => cutout(0xc0e8ee, "glass"),
-        21 => cube(0x6b7488, "lapis_ore"),
-        22 => cube(0x2742a0, "lapis_block"),
-        24 => cube3(
-            0xdbd3a0,
-            "sandstone_top",
-            "sandstone_bottom",
-            "sandstone_normal",
-        ),
-        35 => cube(0xe0e0e0, "wool_colored_white"),
-        41 => cube(0xf9ec4e, "gold_block"),
-        42 => cube(0xdddddd, "iron_block"),
-        43 | 44 => cube(0xa8a8a8, "stone_slab_top"),
-        45 => cube(0x965a4a, "brick"),
-        46 => cube3(0xdb2e1f, "tnt_top", "tnt_bottom", "tnt_side"),
-        47 => cube3(0x6d5636, "planks_oak", "planks_oak", "bookshelf"),
-        48 => cube(0x5f7a5f, "cobblestone_mossy"),
-        49 => cube(0x14121f, "obsidian"),
-        56 => cube(0x8a9a9d, "diamond_ore"),
-        57 => cube(0x62ece0, "diamond_block"),
-        58 => cube3(
-            0x7a5a33,
-            "crafting_table_top",
-            "planks_oak",
-            "crafting_table_side",
-        ),
-        73 | 74 => cube(0x8a6e6e, "redstone_ore"),
-        79 => cutout(0x9cc6ff, "ice"),
-        80 | 78 => cube(0xf5fafa, "snow"),
-        81 => cube3(0x0d6a1c, "cactus_top", "cactus_bottom", "cactus_side"),
-        82 => cube(0xa0a6b3, "clay"),
-        86 => cube3(0xc77a1a, "pumpkin_top", "pumpkin_top", "pumpkin_side"),
-        87 => cube(0x6f3636, "netherrack"),
-        88 => cube(0x54402f, "soul_sand"),
-        89 => cube(0xf0d08a, "glowstone"),
-        98 => cube(0x7b7b7b, "stonebrick"),
-        112 => cube(0x2d1519, "nether_brick"),
-        129 => cube(0x7f9a86, "emerald_ore"),
-        133 => cube(0x2fc15a, "emerald_block"),
-        159 | 172 => cube(0x965e43, "hardened_clay"),
-        173 => cube(0x131313, "coal_block"),
-        _ => {
+    match TABLE.binary_search_by_key(&id, |e| e.0) {
+        Ok(i) => (TABLE[i].1)(),
+        Err(_) => {
             // Unknown full cube: stable gray-brown from the id so different blocks stay distinguishable.
             let h = (id as u32).wrapping_mul(2654435761);
             cube(0x606060 + (h >> 8 & 0x3f3f3f), "stone")

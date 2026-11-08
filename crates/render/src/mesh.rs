@@ -167,6 +167,20 @@ pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas) -> Meshes {
     out
 }
 
+/// Texture name and tint for the face looking along `dir`; only cutout sides and bottoms keep the tint.
+fn face_texture(l: &crate::blocks::Look, dir: [i32; 3]) -> (&'static str, Tint) {
+    let side_tint = if l.kind == Kind::Cutout {
+        l.tint
+    } else {
+        Tint::None
+    };
+    match dir {
+        [0, 1, 0] => (l.top, l.tint),
+        [0, -1, 0] => (l.bottom, side_tint),
+        _ => (l.side, side_tint),
+    }
+}
+
 fn mesh_block(hood: &Neighborhood, atlas: &Atlas, at: [i32; 3], state: u16, out: &mut Meshes) {
     let id = state >> 4;
     let l = look(id);
@@ -184,25 +198,7 @@ fn mesh_block(hood: &Neighborhood, atlas: &Atlas, at: [i32; 3], state: u16, out:
         if !face_visible(state, l.kind, hood.block(n[0], n[1], n[2])) {
             continue;
         }
-        let (name, tint) = match face.dir {
-            [0, 1, 0] => (l.top, l.tint),
-            [0, -1, 0] => (
-                l.bottom,
-                if l.kind == Kind::Cutout {
-                    l.tint
-                } else {
-                    Tint::None
-                },
-            ),
-            _ => (
-                l.side,
-                if l.kind == Kind::Cutout {
-                    l.tint
-                } else {
-                    Tint::None
-                },
-            ),
-        };
+        let (name, tint) = face_texture(&l, face.dir);
         let rgb = face_color(atlas, &l, name, tint);
         let alpha = if l.kind == Kind::Water { 0.7 } else { 1.0 };
         let color = [

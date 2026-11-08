@@ -179,95 +179,7 @@ impl Renderer {
         let world_group = group(&atlas_view);
         let hud_group = group(&font_view);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-        });
-        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&layout_bg],
-            push_constant_ranges: &[],
-        });
-        let world_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
-        let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
-        let pipe = |vs: &str,
-                    stride: usize,
-                    attrs: &[wgpu::VertexAttribute],
-                    blend: bool,
-                    depth_write: bool,
-                    depth: bool,
-                    cull: bool| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&pl),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some(vs),
-                    compilation_options: Default::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: stride as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: attrs,
-                    }],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_world"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: cull.then_some(wgpu::Face::Back),
-                    front_face: wgpu::FrontFace::Ccw,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: depth_write,
-                    depth_compare: if depth {
-                        wgpu::CompareFunction::Less
-                    } else {
-                        wgpu::CompareFunction::Always
-                    },
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: Default::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
-        let opaque_pipe = pipe(
-            "vs_world",
-            std::mem::size_of::<Vertex>(),
-            &world_attrs,
-            false,
-            true,
-            true,
-            true,
-        );
-        let water_pipe = pipe(
-            "vs_world",
-            std::mem::size_of::<Vertex>(),
-            &world_attrs,
-            true,
-            false,
-            true,
-            false,
-        );
-        let hud_pipe = pipe(
-            "vs_hud",
-            std::mem::size_of::<HudVertex>(),
-            &hud_attrs,
-            true,
-            false,
-            false,
-            false,
-        );
+        let [opaque_pipe, water_pipe, hud_pipe] = build_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
         let depth = depth_view(&device, w, h);
@@ -554,6 +466,103 @@ impl Renderer {
     }
 }
 
+fn build_pipelines(
+    device: &wgpu::Device,
+    layout_bg: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+) -> [wgpu::RenderPipeline; 3] {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+    });
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[layout_bg],
+        push_constant_ranges: &[],
+    });
+    let world_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
+    let hud_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
+    let pipe = |vs: &str,
+                stride: usize,
+                attrs: &[wgpu::VertexAttribute],
+                blend: bool,
+                depth_write: bool,
+                depth: bool,
+                cull: bool| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some(vs),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: stride as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: attrs,
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_world"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: cull.then_some(wgpu::Face::Back),
+                front_face: wgpu::FrontFace::Ccw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: depth_write,
+                depth_compare: if depth {
+                    wgpu::CompareFunction::Less
+                } else {
+                    wgpu::CompareFunction::Always
+                },
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        })
+    };
+    let opaque_pipe = pipe(
+        "vs_world",
+        std::mem::size_of::<Vertex>(),
+        &world_attrs,
+        false,
+        true,
+        true,
+        true,
+    );
+    let water_pipe = pipe(
+        "vs_world",
+        std::mem::size_of::<Vertex>(),
+        &world_attrs,
+        true,
+        false,
+        true,
+        false,
+    );
+    let hud_pipe = pipe(
+        "vs_hud",
+        std::mem::size_of::<HudVertex>(),
+        &hud_attrs,
+        true,
+        false,
+        false,
+        false,
+    );
+    [opaque_pipe, water_pipe, hud_pipe]
+}
+
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {
     pass.set_vertex_buffer(0, m.vertices.slice(..));
     pass.set_index_buffer(m.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -564,13 +573,21 @@ async fn request_device(
     instance: &wgpu::Instance,
     surface: Option<&wgpu::Surface<'_>>,
 ) -> (wgpu::Adapter, wgpu::Device, wgpu::Queue) {
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: surface,
-            ..Default::default()
-        })
-        .await
-        .expect("no wgpu adapter found");
+    let mut adapter = None;
+    // A software adapter (lavapipe, WARP) is the fallback when no GPU exists, e.g. on CI runners.
+    for force_fallback_adapter in [false, true] {
+        adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: surface,
+                force_fallback_adapter,
+                ..Default::default()
+            })
+            .await;
+        if adapter.is_some() {
+            break;
+        }
+    }
+    let adapter = adapter.expect("no wgpu adapter found");
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor::default(), None)
         .await

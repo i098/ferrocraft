@@ -129,16 +129,16 @@ impl App {
         }
     }
 
-    /// The entity under the crosshair (`EntityRenderer.getMouseOver`, entity part).
-    // shortcut: a block in front of the entity does not hide it; the dig `Hit` has no distance.
+    /// The entity under the crosshair (`EntityRenderer.getMouseOver`): a nearer block hides it.
     pub(super) fn entity_target(&self) -> Option<i32> {
         let p = self.game.player.as_ref()?;
         let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
         let dir = look_vector(p.yaw, self.game.pitch);
         let reach = if self.game.creative { 6.0 } else { 3.0 };
+        let block = self.game.target_dist(eye).map(|(_, d)| d);
         self.game
             .entities
-            .pick(eye, dir, reach, self.game.entity_id, None)
+            .pick(eye, dir, reach, self.game.entity_id, block)
     }
 
     fn attack(&mut self) {
@@ -173,7 +173,7 @@ impl App {
         for (pos, state) in std::mem::take(&mut self.game.broken) {
             self.particles.break_block(pos, state);
             if let Some(s) = &mut self.sound {
-                s.dig(state, pos.map(|v| f64::from(v) + 0.5));
+                s.dig(state >> 4, pos.map(|v| f64::from(v) + 0.5));
             }
         }
         if attack.held && !self.game.creative {
@@ -204,7 +204,7 @@ impl App {
         }
     }
 
-    fn session_send(
+    pub(super) fn session_send(
         &mut self,
         f: impl FnOnce(&mut ferrocraft_net_client::Session) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
@@ -358,10 +358,8 @@ impl App {
         if self.container.take().is_some() {
             let id = self.game.inv.window_id();
             self.game.inv.close_window();
-            if id != 0 {
-                let r = self.session_send(|s| s.close_window(id));
-                self.send_result(r);
-            }
+            let r = self.session_send(|s| s.close_window(id));
+            self.send_result(r);
         }
     }
 }

@@ -403,7 +403,12 @@ impl App {
             return (Vec::new(), Vec::new(), Vec::new());
         };
         let (w, h) = r.size();
-        let scale = gui::GuiScale::new(w, h, u32::from(self.ui.settings.gui_scale));
+        let scale = gui::GuiScale::new(
+            w,
+            h,
+            u32::from(self.ui.settings.gui_scale),
+            self.ui.settings.force_unicode,
+        );
         let factor = scale.factor.max(1) as f64;
         let (mx, my) = (
             (self.cursor.0 / factor) as i32,

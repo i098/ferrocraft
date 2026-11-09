@@ -58,6 +58,8 @@ struct Part {
     armor: Option<(usize, f32)>,
     /// Second texture box over the first (hat layer).
     inflate: f32,
+    /// `ModelRenderer.mirror`: the box samples the opposite-hand texture layout, flipped.
+    mirror: bool,
 }
 
 impl Part {
@@ -70,6 +72,7 @@ impl Part {
             rot: [0.0; 3],
             armor: None,
             inflate: 0.0,
+            mirror: false,
         }
     }
     fn armor(mut self, slot: usize, scale: f32) -> Part {
@@ -78,6 +81,10 @@ impl Part {
     }
     fn rot(mut self, rot: [f32; 3]) -> Part {
         self.rot = rot;
+        self
+    }
+    fn mirrored(mut self, mirror: bool) -> Part {
+        self.mirror = mirror;
         self
     }
 }
@@ -218,6 +225,13 @@ fn biped(
     let mut hat = Part::new(head_pivot, [-4.0, -8.0, -4.0], [8.0; 3], (32.0, 0.0))
         .rot([head_rot_x, head_rot_y, 0.0]);
     hat.inflate = 0.5;
+    // `ModelBiped` mirrors the right limb for the left one; only `ModelPlayer` has its own 64x64 regions.
+    let mirrored = !matches!(d.class, Class::Player { .. });
+    let (l_arm_uv, l_leg_uv) = if mirrored {
+        ((40.0, 16.0), (0.0, 16.0))
+    } else {
+        ((32.0, 48.0), (16.0, 48.0))
+    };
     let parts = vec![
         Part::new(head_pivot, [-4.0, -8.0, -4.0], [8.0; 3], (0.0, 0.0))
             .rot([head_rot_x, head_rot_y, 0.0])
@@ -238,9 +252,10 @@ fn biped(
             l_arm_pivot,
             [l_arm_min, -2.0, arm_z],
             [arm_w, 12.0, arm_d],
-            (32.0, 48.0),
+            l_arm_uv,
         )
         .rot(l_arm)
+        .mirrored(mirrored)
         .armor(2, 1.0),
         Part::new(
             leg_pivots[0],
@@ -254,9 +269,10 @@ fn biped(
             leg_pivots[1],
             [limb_min, 0.0, arm_z],
             [limb_w, 12.0, arm_d],
-            (16.0, 48.0),
+            l_leg_uv,
         )
         .rot(l_leg)
+        .mirrored(mirrored)
         .armor(1, 0.5),
     ];
     Model { skin, tint, parts }
@@ -638,7 +654,17 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
             r[2] + part.pivot[2],
         ])
     };
-    add_box(out, &tf, min, size, part.uv, v_off, color, skin_dims());
+    add_box(
+        out,
+        &tf,
+        min,
+        size,
+        part.uv,
+        part.mirror,
+        v_off,
+        color,
+        skin_dims(),
+    );
 }
 
 fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
@@ -696,6 +722,7 @@ fn add_box(
     min: V3,
     size: V3,
     (u0, v0): (f32, f32),
+    mirror: bool,
     v_off: f32,
     color: [f32; 3],
     tex: [f32; 2],
@@ -706,7 +733,7 @@ fn add_box(
     let v0 = v0 + v_off;
     let uv = |u: f32, v: f32| [u / tex[0], v / tex[1]];
     // (corners in model space, texel corners, outward model-space normal, shade)
-    let faces: [Face; 6] = [
+    let mut faces: [Face; 6] = [
         // +x: u grows with z
         (
             [[x2, y1, z1], [x2, y1, z2], [x2, y2, z2], [x2, y2, z1]],
@@ -780,6 +807,14 @@ fn add_box(
             0.8,
         ),
     ];
+    if mirror {
+        let (plus, minus) = (faces[0].1, faces[1].1);
+        (faces[0].1, faces[1].1) = (minus, plus);
+        for f in &mut faces {
+            f.1.swap(0, 1);
+            f.1.swap(2, 3);
+        }
+    }
     for (corners, uvs, normal, shade) in faces {
         let mut order = [0usize, 1, 2, 3];
         let e1 = sub(corners[1], corners[0]);
@@ -888,6 +923,25 @@ mod tests {
             armor: [0; 4],
             name: None,
         }
+    }
+
+    #[test]
+    fn skeleton_left_limbs_sample_the_mirrored_right_limb_regions() {
+        // Rows 48..64 of the 64x64 layout hold the player's left arm (u 32..48) and leg (u 16..32).
+        let in_left_limb_rows = |d: EntityDraw| {
+            build(&[d], &Skins::flat())
+                .vertices
+                .iter()
+                .filter(|p| {
+                    let (u, v) = (p.uv[0] * 64.0, p.uv[1] * 576.0 - 512.0);
+                    (48.0..=64.0).contains(&v) && (16.0..=48.0).contains(&u)
+                })
+                .count()
+        };
+        let mut skeleton = steve();
+        skeleton.class = Class::Mob(51);
+        assert!(in_left_limb_rows(steve()) > 0);
+        assert_eq!(in_left_limb_rows(skeleton), 0);
     }
 
     #[test]

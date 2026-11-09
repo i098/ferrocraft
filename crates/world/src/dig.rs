@@ -498,6 +498,17 @@ pub fn raycast(
     pitch: f32,
     reach: f64,
 ) -> Option<Hit> {
+    raycast_dist(state, eye, yaw, pitch, reach).map(|(hit, _)| hit)
+}
+
+/// [`raycast`] plus the distance from `eye` to the hit point.
+pub fn raycast_dist(
+    state: &dyn Fn([i32; 3]) -> u16,
+    eye: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+    reach: f64,
+) -> Option<(Hit, f64)> {
     let dir = look_vector(yaw, pitch);
     let mut cell = eye.map(|v| v.floor() as i32);
     let step = dir.map(|d| if d < 0.0 { -1 } else { 1 });
@@ -521,7 +532,7 @@ pub fn raycast(
         if let Some(b) = selection_box(state, cell) {
             if let Some((t, face)) = enter_box(eye, dir, cell, b) {
                 if t <= reach {
-                    return Some(Hit { pos: cell, face });
+                    return Some((Hit { pos: cell, face }, t));
                 }
             }
         }

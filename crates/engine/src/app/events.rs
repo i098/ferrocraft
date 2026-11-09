@@ -42,17 +42,13 @@ impl App {
         self.run_effects(q);
     }
 
-    pub(super) fn run_effects(&mut self, mut q: Vec<UiEffect>) {
-        let mut i = 0;
-        while i < q.len() {
-            let more = self.run_effect(q[i].clone());
-            q.extend(more);
-            i += 1;
+    pub(super) fn run_effects(&mut self, q: Vec<UiEffect>) {
+        for effect in q {
+            self.run_effect(effect);
         }
     }
 
-    /// One screen effect; returns the effects that closing screens raised.
-    fn run_effect(&mut self, effect: UiEffect) -> Vec<UiEffect> {
+    fn run_effect(&mut self, effect: UiEffect) {
         match effect {
             UiEffect::Sound(name) => {
                 if let Some(s) = &mut self.sound {
@@ -61,14 +57,15 @@ impl App {
             }
             UiEffect::Connect { host, port } => {
                 self.game = Game::new();
-                self.link = Link::connect(format!("{host}:{port}"), self.args.username.clone());
+                let addr = if host.contains(':') {
+                    format!("[{host}]:{port}")
+                } else {
+                    format!("{host}:{port}")
+                };
+                self.link = Link::connect(addr, self.args.username.clone());
             }
             UiEffect::CancelConnect => self.link = Link::Offline,
-            UiEffect::Disconnect => {
-                self.leave_world();
-                let m = metrics!(self);
-                return self.ui.close(&m);
-            }
+            UiEffect::Disconnect => self.leave_world(),
             UiEffect::Respawn => {
                 let r = self.link.session().map(|s| s.respawn());
                 self.send_result(r.unwrap_or(Ok(())));
@@ -76,7 +73,6 @@ impl App {
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
         }
-        Vec::new()
     }
 
     /// Back to the menus: forget the world and the connection.
@@ -302,6 +298,11 @@ impl App {
                 ));
             }
             Effect::CloseWindow => self.container = None,
+            Effect::RejectWindow(id) => {
+                self.container = None;
+                let r = self.session_send(|s| s.close_window(id));
+                self.send_result(r);
+            }
             Effect::Confirm { window, action } => {
                 if let Some(s) = self.link.session() {
                     let r = s.confirm_transaction(window, action, true);

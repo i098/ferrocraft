@@ -78,11 +78,13 @@ impl App {
             return (0, 0);
         };
         let (w, h) = r.size();
-        let f = f64::from(
-            gui::GuiScale::new(w, h, u32::from(self.ui.settings.gui_scale))
-                .factor
-                .max(1),
+        let scale = gui::GuiScale::new(
+            w,
+            h,
+            u32::from(self.ui.settings.gui_scale),
+            self.ui.settings.force_unicode,
         );
+        let f = f64::from(scale.factor.max(1));
         ((self.cursor.0 / f) as i32, (self.cursor.1 / f) as i32)
     }
 

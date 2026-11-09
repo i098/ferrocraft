@@ -10,7 +10,8 @@ pub const WIDGETS: &str = "textures/gui/widgets.png";
 const ASCII: &str = "textures/font/ascii.png";
 pub const FONT_HEIGHT: i32 = 9;
 
-/// `ScaledResolution`: the largest factor (up to `gui_scale`, 0 = auto) that keeps 320x240 GUI units.
+/// `ScaledResolution`: the largest factor (up to `gui_scale`, 0 = auto) that keeps 320x240 GUI
+/// units; an odd factor above 1 drops by one when the unicode font is forced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuiScale {
     pub factor: i32,
@@ -19,7 +20,7 @@ pub struct GuiScale {
 }
 
 impl GuiScale {
-    pub fn new(px_w: u32, px_h: u32, gui_scale: u32) -> GuiScale {
+    pub fn new(px_w: u32, px_h: u32, gui_scale: u32, unicode: bool) -> GuiScale {
         let (w, h) = (px_w as i32, px_h as i32);
         let max = if gui_scale == 0 {
             1000
@@ -29,6 +30,9 @@ impl GuiScale {
         let mut factor = 1;
         while factor < max && w / (factor + 1) >= 320 && h / (factor + 1) >= 240 {
             factor += 1;
+        }
+        if unicode && factor % 2 != 0 && factor != 1 {
+            factor -= 1;
         }
         GuiScale {
             factor,
@@ -791,11 +795,13 @@ mod tests {
 
     #[test]
     fn gui_scale_follows_scaled_resolution() {
-        assert_eq!(GuiScale::new(854, 480, 0).factor, 2);
-        assert_eq!(GuiScale::new(1920, 1080, 0).factor, 4);
-        assert_eq!(GuiScale::new(1920, 1080, 2).factor, 2);
-        assert_eq!(GuiScale::new(2560, 1440, 0).factor, 6);
-        let s = GuiScale::new(855, 481, 2);
+        assert_eq!(GuiScale::new(854, 480, 0, false).factor, 2);
+        assert_eq!(GuiScale::new(1920, 1080, 0, false).factor, 4);
+        assert_eq!(GuiScale::new(1920, 1080, 2, false).factor, 2);
+        assert_eq!(GuiScale::new(2560, 1440, 0, false).factor, 6);
+        assert_eq!(GuiScale::new(1280, 720, 0, true).factor, 2);
+        assert_eq!(GuiScale::new(854, 480, 0, true).factor, 2);
+        let s = GuiScale::new(855, 481, 2, false);
         assert_eq!((s.width, s.height), (428, 241));
     }
 
@@ -833,7 +839,7 @@ mod tests {
 
     #[test]
     fn transforms_compose_like_gl() {
-        let mut g = Gui::new(GuiScale::new(640, 480, 0), None, 1);
+        let mut g = Gui::new(GuiScale::new(640, 480, 0, false), None, 1);
         g.translate(10.0, 0.0);
         g.scale(2.0, 2.0);
         g.fill(0, 0, 1, 1, 0xFFFFFFFF);

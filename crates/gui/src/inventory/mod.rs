@@ -472,7 +472,6 @@ impl ContainerScreen {
             out.push(Request::Close {
                 window_id: inv.window_id(),
             });
-            inv.close_window();
             return out;
         }
         if self.hotbar_key(inv, key, &mut out) {

@@ -23,6 +23,8 @@ pub use title::Title;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::toolkit::GuiScale;
+
 /// Font measurement, `FontRenderer.getStringWidth`: `§` codes have no width.
 pub trait Metrics {
     fn width(&self, s: &str) -> i32;
@@ -272,23 +274,6 @@ pub struct Mods {
     pub shift: bool,
 }
 
-/// `ScaledResolution`: the GUI scale for a framebuffer and the `guiScale` option (0 = auto).
-pub fn scaled(px_w: u32, px_h: u32, gui_scale: u8, unicode: bool) -> (i32, i32, i32) {
-    let limit = if gui_scale == 0 {
-        1000
-    } else {
-        gui_scale as u32
-    };
-    let mut f = 1;
-    while f < limit && px_w / (f + 1) >= 320 && px_h / (f + 1) >= 240 {
-        f += 1;
-    }
-    if unicode && f % 2 != 0 && f != 1 {
-        f -= 1;
-    }
-    (px_w.div_ceil(f) as i32, px_h.div_ceil(f) as i32, f as i32)
-}
-
 /// The open screen, as `Minecraft.currentScreen`.
 #[derive(Default)]
 pub struct Screens {
@@ -336,17 +321,17 @@ impl Screens {
     pub fn resize(&mut self, px_w: u32, px_h: u32, ctx: &mut Ctx) -> i32 {
         self.px = (px_w, px_h);
         self.gui_scale = ctx.settings.gui_scale;
-        let (w, h, f) = scaled(
+        let s = GuiScale::new(
             px_w,
             px_h,
-            ctx.settings.gui_scale,
+            u32::from(ctx.settings.gui_scale),
             ctx.settings.force_unicode,
         );
-        (ctx.width, ctx.height) = (w, h);
+        (ctx.width, ctx.height) = (s.width, s.height);
         if let Some(s) = self.current.as_mut() {
             s.init(ctx);
         }
-        f
+        s.factor
     }
 
     pub fn event(&mut self, ev: Event, ctx: &mut Ctx) {
@@ -915,14 +900,15 @@ impl TextField {
         let visible = trim(m, self.slice(self.scroll, len), w, false)
             .chars()
             .count();
+        let end = visible + self.scroll;
         if i == self.scroll {
             self.scroll -= trim(m, &self.text, w, true)
                 .chars()
                 .count()
                 .min(self.scroll);
         }
-        if i > visible + self.scroll {
-            self.scroll += i - (visible + self.scroll);
+        if i > end {
+            self.scroll += i - end;
         } else if i <= self.scroll {
             self.scroll = i;
         }
@@ -982,7 +968,11 @@ impl TextField {
             key::END => self.move_end(m),
             key::LEFT | key::RIGHT => {
                 let dir = if code == key::LEFT { -1 } else { 1 };
-                let from = if mods.shift { self.sel } else { self.cursor };
+                let from = if mods.shift || !mods.ctrl {
+                    self.sel
+                } else {
+                    self.cursor
+                };
                 let to = if mods.ctrl {
                     self.word(dir, from)
                 } else {
@@ -1389,11 +1379,14 @@ mod tests {
 
     #[test]
     fn scaled_resolution_matches_vanilla() {
-        assert_eq!(scaled(854, 480, 0, false), (427, 240, 2));
-        assert_eq!(scaled(1920, 1080, 0, false), (480, 270, 4));
-        assert_eq!(scaled(1920, 1080, 2, false), (960, 540, 2));
-        assert_eq!(scaled(1920, 1080, 0, true), (480, 270, 4));
-        assert_eq!(scaled(1440, 900, 0, true), (720, 450, 2));
+        let at = |w, h, g, u| {
+            let s = GuiScale::new(w, h, g, u);
+            (s.width, s.height, s.factor)
+        };
+        assert_eq!(at(854, 480, 0, false), (427, 240, 2));
+        assert_eq!(at(1920, 1080, 2, false), (960, 540, 2));
+        assert_eq!(at(1920, 1080, 0, true), (480, 270, 4));
+        assert_eq!(at(1440, 900, 0, true), (720, 450, 2));
     }
 
     #[test]

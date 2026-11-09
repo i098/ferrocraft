@@ -123,7 +123,7 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
     st.player_health = i;
     let j = st.last_player_health;
     let mut rand = JavaRandom::new(i64::from(update_counter) * 312871);
-    let k = s.food;
+    let k = s.food.clamp(0, 20);
     let i1 = w / 2 - 91;
     let j1 = w / 2 + 91;
     let k1 = h - 39;

@@ -94,7 +94,7 @@ fn draws_hud_to_png() {
         pos: [8.0, 68.0, -4.0],
         ..Default::default()
     });
-    let mut g = Gui::new(GuiScale::new(854, 480, 0), r.font(), 0);
+    let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
     hud.draw(
         &mut g,
         &Frame {
@@ -116,6 +116,35 @@ fn draws_hud_to_png() {
     );
     let quads = g.into_quads();
     let (w, h, rgba) = r.render_to_rgba(&Camera::default(), &quads);
+    // `GuiIngame.renderHotbar`: the 182x22 bar sits at (scaledWidth / 2 - 91, scaledHeight - 22);
+    // 854x480 scales by 2 to 427x240, so the bar is at GUI (122, 218) and 364x44 pixels.
+    let bar = quads.iter().any(|q| {
+        let xs = q.pos.map(|p| p[0]);
+        let ys = q.pos.map(|p| p[1]);
+        q.tex == "textures/gui/widgets.png"
+            && xs.iter().copied().fold(f32::MAX, f32::min) == 244.0
+            && xs.iter().copied().fold(f32::MIN, f32::max) == 608.0
+            && ys.iter().copied().fold(f32::MAX, f32::min) == 436.0
+            && ys.iter().copied().fold(f32::MIN, f32::max) == 480.0
+    });
+    assert!(bar, "hotbar background quad at the vanilla position");
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        rgba[((y * w + x) * 4) as usize..][..4]
+            .try_into()
+            .expect("four bytes")
+    };
+    let sky = at(w - 5, 5);
+    assert_eq!(sky, [121, 167, 255, 255], "top-right is plain sky");
+    // `GuiOverlayDebug.renderDebugInfoLeft` fills from GUI (1, 1) with 0x90505050; the scale is 2.
+    assert_eq!(at(1, 1), sky, "nothing is drawn left of or above GUI (1, 1)");
+    let alpha = f32::from(0x90_u8) / 255.0;
+    for (i, s) in sky.iter().take(3).enumerate() {
+        let want = f32::from(*s) * (1.0 - alpha) + f32::from(0x50_u8) * alpha;
+        assert!(
+            (f32::from(at(3, 3)[i]) - want).abs() <= 2.0,
+            "debug box channel {i}"
+        );
+    }
     let path = std::env::var("HUD_PNG").unwrap_or_else(|_| {
         std::env::temp_dir()
             .join("ferrocraft-hud.png")

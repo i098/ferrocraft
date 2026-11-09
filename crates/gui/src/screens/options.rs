@@ -456,7 +456,7 @@ impl Settings {
             "saturation" => self.saturation = f()?,
             "invertYMouse" => self.invert_mouse = b,
             "renderDistance" => self.render_distance = i()?,
-            "guiScale" => self.gui_scale = i()? as u8,
+            "guiScale" => self.gui_scale = i()?.clamp(0, 255) as u8,
             "particles" => self.particles = i()?,
             "bobView" => self.view_bobbing = b,
             "anaglyph3d" => self.anaglyph = b,
@@ -712,7 +712,7 @@ impl Settings {
         use Opt::*;
         match o {
             InvertMouse => self.invert_mouse ^= true,
-            GuiScale => self.gui_scale = (self.gui_scale + 1) & 3,
+            GuiScale => self.gui_scale = self.gui_scale.wrapping_add(1) & 3,
             Particles => self.particles = (self.particles + 1) % 3,
             ViewBobbing => self.view_bobbing ^= true,
             RenderClouds => self.clouds = (self.clouds + 1) % 3,
@@ -1049,6 +1049,13 @@ fn opt_drag(buttons: &mut [Button], mx: i32, ctx: &mut Ctx) {
     }
 }
 
+fn release_sliders(buttons: &mut [Button], ctx: &mut Ctx) {
+    if buttons.iter().any(|b| b.slider.is_some_and(|s| s.dragging)) {
+        ctx.save_settings();
+    }
+    release_all(buttons);
+}
+
 /// Grid slot `i` of the two-column option layouts.
 fn grid(ctx: &Ctx, i: i32, top: i32) -> (i32, i32) {
     (ctx.width / 2 - 155 + i % 2 * 160, top + 24 * (i >> 1))
@@ -1220,6 +1227,9 @@ impl Screen for OptionPage {
                 super::button(&mut self.buttons, id).label = Self::skin_label(bit, ctx);
             }
             _ if (SOUND..SOUND + 9).contains(&id) => {
+                if matches!(ctx.effects.last(), Some(Effect::Sound("gui.button.press"))) {
+                    ctx.effects.pop();
+                }
                 let b = super::button(&mut self.buttons, id);
                 let cat = SoundCategory::ALL[(id - SOUND) as usize];
                 ctx.settings.volumes[cat as usize] = b.slider.map_or(1.0, |s| s.pos);
@@ -1239,7 +1249,7 @@ impl Screen for OptionPage {
         {
             ctx.effects.push(Effect::Sound("gui.button.press"));
         }
-        release_all(&mut self.buttons);
+        release_sliders(&mut self.buttons, ctx);
     }
 }
 
@@ -1370,8 +1380,8 @@ impl Screen for Options {
         }
     }
 
-    fn release(&mut self, _x: i32, _y: i32, _b: i32, _ctx: &mut Ctx) {
-        release_all(&mut self.buttons);
+    fn release(&mut self, _x: i32, _y: i32, _b: i32, ctx: &mut Ctx) {
+        release_sliders(&mut self.buttons, ctx);
     }
 }
 
@@ -1478,10 +1488,10 @@ impl Screen for Video {
         None
     }
 
-    fn release(&mut self, _x: i32, _y: i32, _b: i32, _ctx: &mut Ctx) {
+    fn release(&mut self, _x: i32, _y: i32, _b: i32, ctx: &mut Ctx) {
         self.held = false;
         self.list.release();
-        release_all(&mut self.rows);
+        release_sliders(&mut self.rows, ctx);
         release_all(&mut self.buttons);
     }
 
@@ -1670,20 +1680,22 @@ impl Screen for Controls {
         }
         match press(&mut self.buttons, x, y, mb, ctx)? {
             DONE => return self.parent.take().map(Nav::Open),
-            RESET_ALL => ctx
-                .settings
-                .keys
-                .iter_mut()
-                .for_each(|k| k.code = k.default),
+            RESET_ALL => {
+                ctx.settings
+                    .keys
+                    .iter_mut()
+                    .for_each(|k| k.code = k.default);
+                ctx.save_settings();
+            }
             id => opt_pressed(button(&mut self.buttons, id), ctx),
         }
         None
     }
 
-    fn release(&mut self, _x: i32, _y: i32, _b: i32, _ctx: &mut Ctx) {
+    fn release(&mut self, _x: i32, _y: i32, _b: i32, ctx: &mut Ctx) {
         self.held = false;
         self.list.release();
-        release_all(&mut self.buttons);
+        release_sliders(&mut self.buttons, ctx);
     }
 
     fn key(&mut self, code: i32, ch: char, _mods: Mods, ctx: &mut Ctx) -> Option<Nav> {

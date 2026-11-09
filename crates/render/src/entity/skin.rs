@@ -68,7 +68,7 @@ impl Skins {
     }
 
     /// Copies a skin into its slot. A legacy 64x32 skin also fills the left arm and leg regions
-    /// with the mirrored right ones, which is what the 64x64 layout expects.
+    /// of the 64x64 layout, flipping each face as `ImageBufferDownload` does.
     fn blit(&mut self, slot: u32, img: &Image) {
         let base = (slot * SLOT) as usize;
         let w = SLOT as usize;
@@ -79,12 +79,26 @@ impl Skins {
             self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
         }
         if img.height <= 32 {
-            // (source x, source y) of the right limb region, (destination x, y) of the left one.
-            for ((sx, sy), (dx, dy)) in [((40, 16), (32, 48)), ((0, 16), (16, 48))] {
-                for y in 0..16 {
-                    for x in 0..16 {
-                        let from = ((base + sy + y) * w + sx + (15 - x)) * 4;
-                        let to = ((base + dy + y) * w + dx + x) * 4;
+            // (source x, source y, destination x, rows) of each 4-wide face; the left limbs sit 32 rows down.
+            const FACES: [(usize, usize, usize, usize); 12] = [
+                (4, 16, 20, 4),
+                (8, 16, 24, 4),
+                (0, 20, 24, 12),
+                (4, 20, 20, 12),
+                (8, 20, 16, 12),
+                (12, 20, 28, 12),
+                (44, 16, 36, 4),
+                (48, 16, 40, 4),
+                (40, 20, 40, 12),
+                (44, 20, 36, 12),
+                (48, 20, 32, 12),
+                (52, 20, 44, 12),
+            ];
+            for (sx, sy, dx, rows) in FACES {
+                for y in 0..rows {
+                    for x in 0..4 {
+                        let from = ((base + sy + y) * w + sx + x) * 4;
+                        let to = ((base + sy + 32 + y) * w + dx + 3 - x) * 4;
                         let px: [u8; 4] = self.rgba[from..from + 4].try_into().unwrap();
                         self.rgba[to..to + 4].copy_from_slice(&px);
                     }
@@ -120,4 +134,39 @@ fn slot(skin: Skin) -> Option<u32> {
         Skin::Cow => 7,
         Skin::White => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_skin_left_limb_faces_are_flipped_one_by_one() {
+        // Every source texel holds its own (x, y), so the copied position is readable.
+        let mut rgba = Vec::new();
+        for y in 0..32u8 {
+            for x in 0..64u8 {
+                rgba.extend_from_slice(&[x, y, 0, 255]);
+            }
+        }
+        let img = Image {
+            width: 64,
+            height: 32,
+            rgba,
+        };
+        let mut skins = Skins::flat();
+        skins.blit(0, &img);
+        let at = |x: usize, y: usize| {
+            let i = (y * SLOT as usize + x) * 4;
+            (skins.rgba[i], skins.rgba[i + 1])
+        };
+        // ImageBufferDownload: right leg front (4,20) goes to the left leg front (20,52), flipped.
+        assert_eq!(at(20, 52), (7, 20));
+        assert_eq!(at(23, 63), (4, 31));
+        // Right leg right face (0,20) becomes the left leg's left face (24,52).
+        assert_eq!(at(24, 52), (3, 20));
+        // Right arm front (44,20) goes to the left arm front (36,52); its top (44,16) to (36,48).
+        assert_eq!(at(36, 52), (47, 20));
+        assert_eq!(at(36, 48), (47, 16));
+    }
 }

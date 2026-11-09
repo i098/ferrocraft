@@ -29,6 +29,8 @@ pub enum Effect {
     ActionBar(String),
     OpenWindow,
     CloseWindow,
+    /// The server opened a window type this client lacks: answer with `CloseWindow(id)`.
+    RejectWindow(u8),
     /// A server reply that must be answered with `confirm_transaction`.
     Confirm {
         window: u8,
@@ -220,7 +222,7 @@ impl Game {
             } => Some(if self.inv.open_window(id, &kind, title, slots) {
                 Effect::OpenWindow
             } else {
-                Effect::CloseWindow
+                Effect::RejectWindow(id)
             }),
             NetEvent::CloseWindow => {
                 self.inv.close_window();
@@ -357,9 +359,14 @@ impl Game {
 
     /// The block under the crosshair for a camera at `eye`, within the game mode's reach.
     pub fn target(&self, eye: [f64; 3]) -> Option<Hit> {
+        self.target_dist(eye).map(|(hit, _)| hit)
+    }
+
+    /// [`Game::target`] plus the distance from `eye` to the hit point.
+    pub fn target_dist(&self, eye: [f64; 3]) -> Option<(Hit, f64)> {
         let p = self.player.as_ref()?;
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
-        dig::raycast(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
+        dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
     }
 
     /// One client tick of block breaking. Returns the packets to send and the chunks whose

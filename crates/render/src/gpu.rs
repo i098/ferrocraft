@@ -17,6 +17,11 @@ const CLEAR_COLOR: [f64; 3] = [0.0; 3];
 /// Eye height of the standing player; rain is centred on the feet.
 const EYE_HEIGHT: f64 = 1.62;
 const OFFSCREEN: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Vertices of the 12 edges of the block selection outline.
+const SELECTION_VERTICES: u32 = 24;
+/// Vanilla draws the outline black at 40% alpha with 2 px lines; wgpu lines are 1 px, so the
+/// alpha is raised to keep it as visible.
+const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -72,6 +77,8 @@ pub struct Renderer {
     sky_add_pipe: wgpu::RenderPipeline,
     cloud_pipe: wgpu::RenderPipeline,
     hand_pipe: wgpu::RenderPipeline,
+    line_pipe: wgpu::RenderPipeline,
+    selection: Option<[f64; 6]>,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
@@ -115,7 +122,12 @@ impl Renderer {
         // Colors are authored in display space like vanilla, so avoid an sRGB surface.
         config.format = config.format.remove_srgb_suffix();
         config.view_formats.clear();
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        // `FERROCRAFT_VSYNC=0` picks Immediate or Mailbox where the surface has them (vanilla: VSync off).
+        config.present_mode = if std::env::var("FERROCRAFT_VSYNC").is_ok_and(|v| v == "0") {
+            wgpu::PresentMode::AutoNoVsync
+        } else {
+            wgpu::PresentMode::AutoVsync
+        };
         surface.configure(&device, &config);
         let format = config.format;
         Self::build(
@@ -248,7 +260,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe] =
+        let [opaque_pipe, water_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -273,6 +285,8 @@ impl Renderer {
             sky_add_pipe,
             cloud_pipe,
             hand_pipe,
+            line_pipe,
+            selection: None,
             hand_globals,
             hand_atlas_group,
             hand_skin,
@@ -295,6 +309,11 @@ impl Renderer {
     /// Glyph widths of the vanilla font; `None` without assets.
     pub fn font(&self) -> Option<&Font> {
         self.font.as_ref()
+    }
+
+    /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
+    pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
+        self.selection = selection;
     }
 
     /// Target size in pixels.
@@ -643,6 +662,15 @@ impl Renderer {
                 })
         });
 
+        let sel_buf = self.selection.map(|b| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&selection_lines(b)),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -694,6 +722,12 @@ impl Renderer {
             pass.set_pipeline(&self.water_pipe);
             for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {
                 draw_mesh(&mut pass, m);
+            }
+            if let Some(buf) = &sel_buf {
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.line_pipe);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..SELECTION_VERTICES, 0..1);
             }
             if let Some(m) = &clouds {
                 pass.set_bind_group(0, &self.env_group, &[]);
@@ -901,7 +935,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 6] {
+) -> [wgpu::RenderPipeline; 7] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -955,6 +989,11 @@ fn build_pipelines(
                 })],
             }),
             primitive: wgpu::PrimitiveState {
+                topology: if fs == "fs_flat" {
+                    wgpu::PrimitiveTopology::LineList
+                } else {
+                    wgpu::PrimitiveTopology::TriangleList
+                },
                 cull_mode: cull.then_some(wgpu::Face::Back),
                 front_face: wgpu::FrontFace::Ccw,
                 ..Default::default()
@@ -1037,6 +1076,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let line_pipe = pipe(
+        "vs_world",
+        "fs_flat",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -1044,7 +1093,34 @@ fn build_pipelines(
         sky_add_pipe,
         cloud_pipe,
         hand_pipe,
+        line_pipe,
     ]
+}
+
+/// The 12 edges of a world-space box `[x0, y0, z0, x1, y1, z1]` as line-list vertices.
+fn selection_lines(b: [f64; 6]) -> [Vertex; SELECTION_VERTICES as usize] {
+    let corner = |i: usize| {
+        let pick = |axis: usize| b[axis + 3 * ((i >> axis) & 1)] as f32;
+        Vertex {
+            pos: [pick(0), pick(1), pick(2)],
+            uv: [0.0; 2],
+            color: SELECTION_COLOR,
+            light: [1.0; 2],
+        }
+    };
+    let mut v = [corner(0); SELECTION_VERTICES as usize];
+    let mut n = 0;
+    // Corner indices differ in exactly one bit along an edge.
+    for a in 0..8usize {
+        for axis in 0..3 {
+            if a & (1 << axis) == 0 {
+                v[n] = corner(a);
+                v[n + 1] = corner(a | 1 << axis);
+                n += 2;
+            }
+        }
+    }
+    v
 }
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

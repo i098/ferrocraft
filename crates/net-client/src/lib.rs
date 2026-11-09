@@ -9,7 +9,7 @@ mod link;
 mod play;
 mod screens;
 
-use ferrocraft_protocol::codec::VarInt;
+use ferrocraft_protocol::codec::{Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
 use ferrocraft_protocol::{handshake, login, PROTOCOL_VERSION};
 use link::{Reader, Writer};
@@ -64,6 +64,9 @@ pub enum NetEvent {
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.
     ActionBar(String),
+    /// Game mode (0 survival, 1 creative, 2 adventure, 3 spectator) after a respawn or a
+    /// game-state change.
+    GameMode(u8),
     /// Spawn, move, metadata or destroy of a remote entity.
     Entity(world::entities::EntityEvent),
     /// The server kicked the client or the connection ended. Always the last event.
@@ -133,6 +136,22 @@ impl Session {
             on_ground,
         };
         send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// `PlayerDigging`: `status` 0 start, 1 abort, 2 finish; `face` is the `EnumFacing` index.
+    pub fn send_dig(&mut self, status: u8, pos: [i32; 3], face: u8) -> io::Result<()> {
+        let [x, y, z] = pos;
+        let p = sb::PlayerDigging {
+            status,
+            location: Position { x, y, z },
+            face,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// `Animation`: the arm swing.
+    pub fn send_swing(&mut self) -> io::Result<()> {
+        send(&self.writer, sb::Packet::from(sb::Animation {}))
     }
 
     pub fn send_chat(&mut self, message: &str) -> io::Result<()> {

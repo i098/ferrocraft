@@ -1,7 +1,7 @@
 //! winit glue: window, event routing, the 20 TPS clock and the render call.
 
 use crate::args::Args;
-use crate::game::{Effect, Game, EYE_HEIGHT};
+use crate::game::{Attack, Effect, Game, EYE_HEIGHT};
 use ferrocraft_net_client::Session;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, InputState};
 use render::{Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, Renderer};
@@ -13,6 +13,7 @@ use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Fullscreen, Window, WindowId};
 use world::chunk::Chunk;
+use world::dig::Action as DigAction;
 use world::entities::{look_vector, Entity, Kind};
 
 const TICK: Duration = Duration::from_millis(50);
@@ -33,6 +34,8 @@ pub struct App {
     fps: (u32, u32, Instant),
     next_tick: Instant,
     grabbed: bool,
+    /// Left-click presses since the last tick that did not hit an entity.
+    attack_presses: u32,
     show_debug: bool,
     hide_hud: bool,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
@@ -52,6 +55,7 @@ impl App {
             fps: (0, 0, Instant::now()),
             next_tick: Instant::now(),
             grabbed: false,
+            attack_presses: 0,
             show_debug: false,
             hide_hud: false,
             deadline: std::env::var("FERROCRAFT_WINDOW_SECS")
@@ -121,6 +125,7 @@ impl App {
                 self.send_result(r);
             }
             self.hud.tick();
+            self.dig();
             self.game.tick(self.input.movement());
             self.send_pose();
         }
@@ -145,22 +150,54 @@ impl App {
         }
     }
 
-    /// Left click: hit the entity under the crosshair (`EntityRenderer.getMouseOver`, entity part).
-    /// Reach is 3 blocks in survival, 6 in creative; the swing is sent either way.
-    fn attack(&mut self) {
-        let Some(p) = &self.game.player else { return };
+    /// The entity under the crosshair (`EntityRenderer.getMouseOver`, entity part). Reach is 3
+    /// blocks in survival, 6 in creative.
+    // shortcut: a block in front of the entity does not hide it; the dig `Hit` has no distance.
+    fn entity_target(&self) -> Option<i32> {
+        let p = self.game.player.as_ref()?;
         let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
         let dir = look_vector(p.yaw, self.game.pitch);
         let reach = if self.game.creative { 6.0 } else { 3.0 };
-        let hit = self
-            .game
+        self.game
             .entities
-            .pick(eye, dir, reach, self.game.entity_id, None);
-        let r = match hit {
-            Some(id) => self.session.attack_entity(id),
-            None => self.session.swing_arm(),
+            .pick(eye, dir, reach, self.game.entity_id, None)
+    }
+
+    /// Left click: attack the entity under the crosshair, else count a press for block breaking.
+    fn attack(&mut self) {
+        match self.entity_target() {
+            Some(id) => {
+                let r = self.session.attack_entity(id);
+                self.send_result(r);
+            }
+            None => self.attack_presses += 1,
+        }
+    }
+
+    /// One tick of block breaking: send its packets and mirror the local removal.
+    fn dig(&mut self) {
+        let attack = Attack {
+            held: self.input.attack_held(),
+            presses: std::mem::take(&mut self.attack_presses),
         };
-        self.send_result(r);
+        let blocked = self.entity_target().is_some();
+        let (actions, effects) = self.game.dig_tick(attack, blocked);
+        for action in actions {
+            let sent = match action {
+                DigAction::Dig { status, pos, face } => {
+                    self.session.send_dig(status as u8, pos, face)
+                }
+                DigAction::Swing => self.session.send_swing(),
+            };
+            self.send_result(sent);
+        }
+        for effect in effects {
+            if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {
+                if let Some(c) = self.game.store.get(x, z) {
+                    r.upload_chunk(&View(c));
+                }
+            }
+        }
     }
 
     fn sync_cursor(&mut self) {
@@ -175,7 +212,10 @@ impl App {
     fn handle_actions(&mut self) {
         for action in self.input.take_actions() {
             match action {
-                Action::Attack => self.game.swing.start(),
+                Action::Attack => {
+                    self.game.swing.start();
+                    self.attack();
+                }
                 Action::ToggleDebug => self.show_debug = !self.show_debug,
                 Action::ToggleHud => self.hide_hud = !self.hide_hud,
                 Action::ToggleFullscreen => {
@@ -201,7 +241,6 @@ impl App {
                 let open = self.input.chat_input().is_some();
                 self.hud.chat.scroll(step * 7, open);
             }
-            Action::Attack => self.attack(),
             _ => {}
         }
     }
@@ -255,6 +294,7 @@ impl App {
             .map(|e| entity_draw(e, frac))
             .collect();
         r.set_entities(&draws);
+        r.set_selection(self.game.selection(cam.pos));
         r.render(&cam, &quads);
     }
 
@@ -345,8 +385,8 @@ impl ApplicationHandler for App {
         self.pump_network();
         let (dx, dy) = self.input.take_look_delta();
         self.game.look(dx, dy);
-        self.run_ticks();
         self.handle_actions();
+        self.run_ticks();
         self.sync_cursor();
         if self.game.disconnected.is_some() || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();

@@ -63,6 +63,11 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb, t.a * i.color.a);
 }
 
+@fragment
+fn fs_flat(i: WorldOut) -> @location(0) vec4<f32> {
+    return i.color;
+}
+
 // Sky, stars, sun, moon and clouds: no light map, no fog.
 @fragment
 fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {

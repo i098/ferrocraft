@@ -12,6 +12,8 @@ use input_audio::sound::blocks::wire_pitch;
 use render::Renderer;
 use std::collections::HashMap;
 
+/// A change to one tab list entry.
+type TabUpdate = Box<dyn FnOnce(&mut TabEntry)>;
 type Dirty = HashMap<(i32, i32), Effect>;
 
 impl App {
@@ -331,7 +333,7 @@ impl App {
 
     fn player_list(&mut self, action: PlayerListEvent) {
         let list = &mut self.hud.tablist;
-        let (uuid, update): (u128, Box<dyn FnOnce(&mut TabEntry)>) = match action {
+        let (uuid, update): (u128, TabUpdate) = match action {
             PlayerListEvent::Add(players) => {
                 for p in players {
                     list.add(TabEntry {

@@ -3,7 +3,8 @@
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
-use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
+use crate::mesh::{index, MeshData, Vertex, HEIGHT};
+use crate::mesher::{Done, Job, Mesher, SharedBlocks};
 use crate::particles::Quads;
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
 use crate::weather::{build_rain, precipitation_height};
@@ -24,6 +25,10 @@ const SELECTION_VERTICES: u32 = 24;
 /// alpha is raised to keep it as visible.
 const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 const PARTICLE_SHEET: &str = "textures/particle/particles.png";
+/// Outstanding mesh tasks (queued, running or waiting for upload); `ChunkRenderDispatcher.pendingTasks` holds 100.
+const MAX_PENDING_MESHES: usize = 100;
+/// Time per frame for uploading finished meshes, at least one; vanilla `runTasksUntil` stops at the frame's finish time.
+const UPLOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(2);
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -113,13 +118,20 @@ pub struct Renderer {
     /// GUI textures by path, loaded on first use.
     textures: HashMap<String, wgpu::BindGroup>,
     source: Option<AssetSource>,
-    atlas: Atlas,
+    atlas: Arc<Atlas>,
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
-    blocks: HashMap<(i32, i32), Vec<u16>>,
+    blocks: HashMap<(i32, i32), SharedBlocks>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
+    mesher: Mesher,
+    /// Chunks to remesh on the workers.
     dirty: HashSet<(i32, i32)>,
+    /// Chunks to remesh on the render thread this frame (a block changed in them), as vanilla `rebuildSync`.
+    urgent: HashSet<(i32, i32)>,
+    /// Newest mesh job per chunk; a result with another generation is stale.
+    pending: HashMap<(i32, i32), u64>,
+    next_generation: u64,
     screenshot_requested: bool,
     screenshot: Option<(u32, u32, Vec<u8>)>,
 }
@@ -193,7 +205,7 @@ impl Renderer {
         assets: Option<&Path>,
     ) -> Renderer {
         let mut source = assets.and_then(AssetSource::open);
-        let atlas = source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets);
+        let atlas = Arc::new(source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets));
         let font = source.as_mut().and_then(Font::load);
         let env_tex = EnvTexture::load(source.as_mut());
         let entity_skins = source.as_mut().map_or_else(Skins::flat, Skins::from_assets);
@@ -325,6 +337,7 @@ impl Renderer {
             gui_pipes,
             textures: HashMap::new(),
             source,
+            mesher: Mesher::new(atlas.clone()),
             atlas,
             font,
             env_tex,
@@ -332,6 +345,9 @@ impl Renderer {
             blocks: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
+            urgent: HashSet::new(),
+            pending: HashMap::new(),
+            next_generation: 0,
             screenshot_requested: false,
             screenshot: None,
         }
@@ -448,13 +464,14 @@ impl Renderer {
             }
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
-        self.blocks.insert(key, data);
+        self.blocks.insert(key, Arc::new(data));
         self.mark_around(key);
     }
 
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
         self.meshes.remove(&(x, z));
+        self.pending.remove(&(x, z));
         self.mark_neighbors((x, z));
     }
 
@@ -462,6 +479,8 @@ impl Renderer {
         self.blocks.clear();
         self.meshes.clear();
         self.dirty.clear();
+        self.urgent.clear();
+        self.pending.clear();
     }
 
     /// Apply a single block change at world coordinates.
@@ -473,12 +492,22 @@ impl Renderer {
         if !(0..HEIGHT as i32).contains(&y) {
             return;
         }
-        data[index(
-            x.rem_euclid(16) as usize,
-            y as usize,
-            z.rem_euclid(16) as usize,
-        )] = state;
+        let (lx, lz) = (x.rem_euclid(16), z.rem_euclid(16));
+        // Copies only while a mesh job still reads the old data.
+        Arc::make_mut(data)[index(lx as usize, y as usize, lz as usize)] = state;
         self.mark_around(key);
+        // The edited chunk, and a neighbour when the block touches its edge, show the change this frame.
+        self.urgent.insert(key);
+        for (edge, dx, dz) in [
+            (lx == 0, -1, 0),
+            (lx == 15, 1, 0),
+            (lz == 0, 0, -1),
+            (lz == 15, 0, 1),
+        ] {
+            if edge {
+                self.urgent.insert((key.0 + dx, key.1 + dz));
+            }
+        }
     }
 
     fn mark_around(&mut self, key: (i32, i32)) {
@@ -491,36 +520,92 @@ impl Renderer {
             .extend([(cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)]);
     }
 
-    /// Remesh every chunk touched since the last frame once, however many changes hit it.
-    fn flush_meshes(&mut self) {
-        for key in std::mem::take(&mut self.dirty) {
-            self.remesh(key);
+    /// Mesh jobs for the chunks around `near`, nearest first, up to `MAX_PENDING_MESHES` outstanding.
+    fn dispatch_meshes(&mut self, near: (i32, i32)) {
+        let mut keys: Vec<_> = self.dirty.drain().collect();
+        keys.retain(|k| self.blocks.contains_key(k));
+        keys.sort_unstable_by_key(|&(x, z)| (x - near.0).pow(2) + (z - near.1).pow(2));
+        let room = MAX_PENDING_MESHES.saturating_sub(self.pending.len());
+        self.dirty.extend(keys.split_off(room.min(keys.len())));
+        for key in keys {
+            let job = self.mesh_job(key);
+            self.pending.insert(key, job.generation);
+            self.mesher.submit(job);
         }
     }
 
-    fn remesh(&mut self, (cx, cz): (i32, i32)) {
-        let Some(center) = self.blocks.get(&(cx, cz)) else {
-            return;
-        };
-        let get = |k| self.blocks.get(&k).map(Vec::as_slice);
-        let hood = Neighborhood {
-            origin: (cx, cz),
-            center,
+    fn mesh_job(&mut self, key @ (cx, cz): (i32, i32)) -> Job {
+        self.next_generation += 1;
+        let get = |k| self.blocks.get(&k).cloned();
+        Job {
+            key,
+            generation: self.next_generation,
+            center: self.blocks[&key].clone(),
             neighbors: [
                 get((cx - 1, cz)),
                 get((cx + 1, cz)),
                 get((cx, cz - 1)),
                 get((cx, cz + 1)),
             ],
-        };
-        let m = mesh_chunk(&hood, &self.atlas);
+        }
+    }
+
+    /// Remesh the chunks of block changes now, dispatch the other dirty chunks to the workers and upload
+    /// finished meshes. Offscreen renderers wait for every mesh, so a frame shows the whole world.
+    fn flush_meshes(&mut self, cam: &Camera) {
+        for key in std::mem::take(&mut self.urgent) {
+            self.dirty.remove(&key);
+            if self.blocks.contains_key(&key) {
+                let job = self.mesh_job(key);
+                self.pending.insert(key, job.generation);
+                let done = job.run(&self.atlas);
+                self.finish_mesh(done);
+            }
+        }
+        let near = (
+            (cam.pos[0] / 16.0).floor() as i32,
+            (cam.pos[2] / 16.0).floor() as i32,
+        );
+        let wait = matches!(self.target, Target::Offscreen { .. });
+        let start = std::time::Instant::now();
+        let mut uploaded = false;
+        loop {
+            if !self.dirty.is_empty() {
+                self.dispatch_meshes(near);
+            }
+            let done = if wait {
+                if self.pending.is_empty() {
+                    return;
+                }
+                self.mesher.recv()
+            } else if !uploaded || start.elapsed() < UPLOAD_BUDGET {
+                let Some(done) = self.mesher.try_recv() else {
+                    return;
+                };
+                done
+            } else {
+                return;
+            };
+            uploaded = true;
+            self.finish_mesh(done);
+        }
+    }
+
+    /// Upload a finished mesh unless its chunk was removed or queued again since.
+    fn finish_mesh(&mut self, done: Done) {
+        if self.pending.get(&done.key) != Some(&done.generation) {
+            return;
+        }
+        self.pending.remove(&done.key);
+        let (cx, cz) = done.key;
+        let m = done.meshes;
         let origin = [cx as f32 * 16.0, 0.0, cz as f32 * 16.0];
         let mesh = ChunkMesh {
             opaque: self.upload_mesh(m.opaque, origin),
             water: self.upload_mesh(m.water, origin),
             light: m.light,
         };
-        self.meshes.insert((cx, cz), mesh);
+        self.meshes.insert(done.key, mesh);
     }
 
     fn upload_mesh(&self, mut data: MeshData, origin: [f32; 3]) -> Option<GpuMesh> {
@@ -561,7 +646,7 @@ impl Renderer {
 
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
     pub fn render(&mut self, cam: &Camera, overlay: &[Quad]) {
-        self.flush_meshes();
+        self.flush_meshes(cam);
         let frame = match &self.target {
             Target::Window { surface, .. } => match surface.get_current_texture() {
                 Ok(f) => Some(f),

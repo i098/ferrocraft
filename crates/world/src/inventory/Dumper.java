@@ -115,6 +115,15 @@ public class Dumper {
             + (FurnaceBlockEntity.isFuel(s) ? 1 : 0) + "\t" + (smelts ? 1 : 0) + "\t" + Integer.toHexString(it.getColorTint(s, 0)) + "\t" + Integer.toHexString(it.getColorTint(s, 1)) + "\t" + list(info) + "\t" + list(attrs);
     }
 
+    /** GrassColors is empty until the grass colormap is set; getColorTint then returns 0 (black icons). */
+    static void loadGrassColormap() throws Exception {
+        java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(Dumper.class.getResourceAsStream("/assets/minecraft/textures/colormap/grass.png"));
+        int w = img.getWidth();
+        int[] px = img.getRGB(0, 0, w, img.getHeight(), null, 0, w);
+        for (int i = 0; i < px.length; i++) px[i] &= 0xFFFFFF; // getRGB yields ARGB; tints are RGB
+        GrassColors.set(px);
+    }
+
     /** Writes items.tsv and variants.tsv; returns every creative stack except enchanted books. */
     static List<ItemStack> writeItems(String out) throws Exception {
         List<ItemStack> all = new ArrayList<>();
@@ -194,6 +203,7 @@ public class Dumper {
 
     public static void main(String[] a) throws Exception {
         Bootstrap.init();
+        loadGrassColormap();
         String out = a[0];
         List<ItemStack> all = writeItems(out);
         writeModels(out, all);

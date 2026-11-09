@@ -132,33 +132,68 @@ const HOTBAR_KEYS: [KeyCode; 9] = [
     K::Digit9,
 ];
 
-/// Current control for every [`Bind`].
+/// Order of `GameSettings.keyBindings` construction. `KeyBinding.resetKeyBindingArrayAndHash`
+/// fills a key-code hash in this order, so the last bind on a shared key wins.
+const VANILLA_ORDER: [Bind; BIND_COUNT] = [
+    Bind::Forward,
+    Bind::Left,
+    Bind::Back,
+    Bind::Right,
+    Bind::Jump,
+    Bind::Sneak,
+    Bind::Sprint,
+    Bind::Inventory,
+    Bind::Use,
+    Bind::Drop,
+    Bind::Attack,
+    Bind::PickBlock,
+    Bind::Chat,
+    Bind::PlayerList,
+    Bind::Command,
+    Bind::Screenshot,
+    Bind::Perspective,
+    Bind::Fullscreen,
+    Bind::Hotbar(0),
+    Bind::Hotbar(1),
+    Bind::Hotbar(2),
+    Bind::Hotbar(3),
+    Bind::Hotbar(4),
+    Bind::Hotbar(5),
+    Bind::Hotbar(6),
+    Bind::Hotbar(7),
+    Bind::Hotbar(8),
+];
+
+/// Current control for every [`Bind`]; `None` is unbound (`options.txt` code 0).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KeyBindings([Control; BIND_COUNT]);
+pub struct KeyBindings([Option<Control>; BIND_COUNT]);
 
 impl Default for KeyBindings {
     fn default() -> Self {
-        Self(Bind::ALL.map(Bind::default_control))
+        Self(Bind::ALL.map(|b| Some(b.default_control())))
     }
 }
 
 impl KeyBindings {
-    pub fn get(&self, bind: Bind) -> Control {
+    pub fn get(&self, bind: Bind) -> Option<Control> {
         self.0[bind.index()]
     }
 
-    pub fn set(&mut self, bind: Bind, control: Control) {
+    pub fn set(&mut self, bind: Bind, control: Option<Control>) {
         self.0[bind.index()] = control;
     }
 
-    pub(crate) fn matching(&self, control: Control) -> impl Iterator<Item = Bind> + '_ {
-        Bind::ALL
+    /// The one bind vanilla's key-code hash resolves `control` to, if any.
+    pub fn lookup(&self, control: Control) -> Option<Bind> {
+        VANILLA_ORDER
             .into_iter()
-            .filter(move |b| self.get(*b) == control)
+            .rev()
+            .find(|b| self.get(*b) == Some(control))
     }
 
-    /// Read `key_key.*:<lwjgl code>` lines of vanilla `options.txt`. Unknown names and codes
-    /// keep the default, like `GameSettings.loadOptions`.
+    /// Read `key_key.*:<lwjgl code>` lines of vanilla `options.txt`. Code 0 and codes with no
+    /// supported control leave the bind unbound, like a `GameSettings.loadOptions` key code
+    /// that no pressed key matches. Unknown names and unparsable codes keep the default.
     pub fn from_options_txt(text: &str) -> Self {
         let mut out = Self::default();
         for line in text.lines() {
@@ -171,9 +206,7 @@ impl KeyBindings {
             ) else {
                 continue;
             };
-            if let Some(c) = control_from_lwjgl(code) {
-                out.set(bind, c);
-            }
+            out.set(bind, control_from_lwjgl(code));
         }
         out
     }
@@ -276,6 +309,33 @@ const LWJGL_KEYS: &[(i32, KeyCode)] = &[
     (68, K::F10),
     (87, K::F11),
     (88, K::F12),
+    (55, K::NumpadMultiply),
+    (69, K::NumLock),
+    (70, K::ScrollLock),
+    (71, K::Numpad7),
+    (72, K::Numpad8),
+    (73, K::Numpad9),
+    (74, K::NumpadSubtract),
+    (75, K::Numpad4),
+    (76, K::Numpad5),
+    (77, K::Numpad6),
+    (78, K::NumpadAdd),
+    (79, K::Numpad1),
+    (80, K::Numpad2),
+    (81, K::Numpad3),
+    (82, K::Numpad0),
+    (83, K::NumpadDecimal),
+    (100, K::F13),
+    (101, K::F14),
+    (102, K::F15),
+    (141, K::NumpadEqual),
+    (156, K::NumpadEnter),
+    (179, K::NumpadComma),
+    (181, K::NumpadDivide),
+    (183, K::PrintScreen),
+    (197, K::Pause),
+    (219, K::SuperLeft),
+    (220, K::SuperRight),
     (157, K::ControlRight),
     (184, K::AltRight),
     (199, K::Home),
@@ -299,11 +359,28 @@ mod tests {
         let b = KeyBindings::from_options_txt(
             "key_key.forward:200\nkey_key.attack:-99\nkey_key.jump:9999\nfoo:1\nkey_key.drop:x\nkey_key.hotbar.3:30",
         );
-        assert_eq!(b.get(Bind::Forward), Control::Key(KeyCode::ArrowUp));
-        assert_eq!(b.get(Bind::Attack), Control::Mouse(MouseButton::Right));
-        assert_eq!(b.get(Bind::Jump), Control::Key(KeyCode::Space));
-        assert_eq!(b.get(Bind::Drop), Control::Key(KeyCode::KeyQ));
-        assert_eq!(b.get(Bind::Hotbar(2)), Control::Key(KeyCode::KeyA));
+        assert_eq!(b.get(Bind::Forward), Some(Control::Key(KeyCode::ArrowUp)));
+        assert_eq!(
+            b.get(Bind::Attack),
+            Some(Control::Mouse(MouseButton::Right))
+        );
+        assert_eq!(b.get(Bind::Jump), None);
+        assert_eq!(b.get(Bind::Drop), Some(Control::Key(KeyCode::KeyQ)));
+        assert_eq!(b.get(Bind::Hotbar(2)), Some(Control::Key(KeyCode::KeyA)));
+    }
+
+    #[test]
+    fn code_zero_unbinds_and_keypad_maps() {
+        let b = KeyBindings::from_options_txt("key_key.drop:0\nkey_key.jump:82");
+        assert_eq!(b.get(Bind::Drop), None);
+        assert_eq!(b.lookup(Control::Key(KeyCode::KeyQ)), None);
+        assert_eq!(b.get(Bind::Jump), Some(Control::Key(KeyCode::Numpad0)));
+    }
+
+    #[test]
+    fn shared_key_resolves_to_one_bind() {
+        let b = KeyBindings::from_options_txt("key_key.drop:18");
+        assert_eq!(b.lookup(Control::Key(KeyCode::KeyE)), Some(Bind::Drop));
     }
 
     #[test]

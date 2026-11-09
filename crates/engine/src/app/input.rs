@@ -183,18 +183,14 @@ impl App {
         if code == KeyCode::Backspace {
             return Key::Backspace;
         }
-        let b = self.input.bindings();
-        let is = |bind: Bind| b.get(bind) == Control::Key(code);
-        [
-            (Bind::Inventory, Key::Inventory),
-            (Bind::Drop, Key::Drop),
-            (Bind::PickBlock, Key::PickBlock),
-            (Bind::Chat, Key::Chat),
-        ]
-        .into_iter()
-        .find_map(|(bind, k)| is(bind).then_some(k))
-        .or_else(|| (0..9).find(|n| is(Bind::Hotbar(*n))).map(Key::Hotbar))
-        .unwrap_or(Key::Other)
+        match self.input.bindings().lookup(Control::Key(code)) {
+            Some(Bind::Inventory) => Key::Inventory,
+            Some(Bind::Drop) => Key::Drop,
+            Some(Bind::PickBlock) => Key::PickBlock,
+            Some(Bind::Chat) => Key::Chat,
+            Some(Bind::Hotbar(n)) => Key::Hotbar(n),
+            _ => Key::Other,
+        }
     }
 
     fn send_requests(&mut self, reqs: Vec<Request>) {

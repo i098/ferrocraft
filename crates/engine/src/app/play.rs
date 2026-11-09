@@ -7,6 +7,7 @@ use gui::screens::Pause;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, DebugCombo};
 use std::time::Instant;
 use world::dig::{look_vector, Action as DigAction};
+use world::entities::Kind;
 use world::inventory::ItemStack;
 
 /// `rightClickDelayTimer` after a use.
@@ -99,6 +100,7 @@ impl App {
             world::Input::default()
         };
         self.game.tick(input);
+        self.boss_tick();
         self.step_sound();
         self.particles
             .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
@@ -109,6 +111,21 @@ impl App {
         if let (Some(s), Some(at)) = (&mut self.sound, at) {
             s.set_listener(at);
             s.tick(self.ui.in_world);
+        }
+    }
+
+    /// `BossStatus.setBossStatus` for a Wither (id 64, 300 hp) or Ender Dragon (id 63, 200 hp) in the world.
+    fn boss_tick(&mut self) {
+        let boss = self.game.entities.iter().find_map(|e| {
+            let (default, max) = match e.kind {
+                Kind::Mob(64) => ("Wither", 300.0),
+                Kind::Mob(63) => ("Ender Dragon", 200.0),
+                _ => return None,
+            };
+            Some((e.name.clone().unwrap_or_else(|| default.into()), max, e.health?))
+        });
+        if let Some((name, max, health)) = boss {
+            self.hud.set_boss(name, (health / max).clamp(0.0, 1.0));
         }
     }
 

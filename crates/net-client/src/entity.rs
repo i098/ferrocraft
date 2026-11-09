@@ -35,6 +35,13 @@ fn name(meta: &Metadata) -> Option<String> {
     }
 }
 
+fn health(meta: &Metadata) -> Option<f32> {
+    match find(meta, 6) {
+        Some(MetaValue::Float(h)) => Some(*h),
+        _ => None,
+    }
+}
+
 fn stack(meta: &Metadata) -> Option<ItemRef> {
     match find(meta, 10) {
         Some(MetaValue::Slot(s)) => item(s),
@@ -76,6 +83,7 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
             vel: [p.velocity_x, p.velocity_y, p.velocity_z],
             flags: flags(&p.metadata),
             name: name(&p.metadata),
+            health: health(&p.metadata),
         },
         P::SpawnObject(p) => EntityEvent::SpawnObject {
             id: p.entity_id.0,
@@ -142,6 +150,7 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             flags: flags(&p.metadata),
             name: name(&p.metadata),
             stack: stack(&p.metadata),
+            health: health(&p.metadata),
         },
         P::EntityEquipment(p) => EntityEvent::Equipment {
             id: p.entity_id.0,
@@ -242,6 +251,10 @@ mod tests {
                     value: MetaValue::Byte(0b10),
                 },
                 MetaEntry {
+                    index: 6,
+                    value: MetaValue::Float(150.0),
+                },
+                MetaEntry {
                     index: 2,
                     value: MetaValue::String("Bob".into()),
                 },
@@ -253,6 +266,7 @@ mod tests {
             id,
             flags,
             name,
+            health,
             pos,
             ..
         } = events(&decoded).remove(0)
@@ -260,8 +274,8 @@ mod tests {
             panic!("not a spawn")
         };
         assert_eq!(
-            (id, flags, name.as_deref(), pos),
-            (5, Some(2), Some("Bob"), [32, 64, 96])
+            (id, flags, name.as_deref(), health, pos),
+            (5, Some(2), Some("Bob"), Some(150.0), [32, 64, 96])
         );
     }
 }

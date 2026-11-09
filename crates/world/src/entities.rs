@@ -99,6 +99,8 @@ pub struct Entity {
     pub uuid: Option<u128>,
     /// Display name for players (from the player list) or a custom name tag.
     pub name: Option<String>,
+    /// Living entities: metadata index 6 (`getHealth`), as last sent.
+    pub health: Option<f32>,
     pub pos: [f64; 3],
     pub prev_pos: [f64; 3],
     pub yaw: f32,
@@ -158,6 +160,7 @@ impl Entity {
             kind,
             uuid: None,
             name: None,
+            health: None,
             pos,
             prev_pos: pos,
             yaw,
@@ -258,7 +261,13 @@ impl Entity {
         }
     }
 
-    fn set_metadata(&mut self, flags: Option<u8>, name: Option<String>, stack: Option<ItemRef>) {
+    fn set_metadata(
+        &mut self,
+        flags: Option<u8>,
+        name: Option<String>,
+        stack: Option<ItemRef>,
+        health: Option<f32>,
+    ) {
         if let Some(f) = flags {
             self.flags = f;
         }
@@ -267,6 +276,9 @@ impl Entity {
         }
         if stack.is_some() {
             self.stack = stack;
+        }
+        if health.is_some() {
+            self.health = health;
         }
     }
 
@@ -349,6 +361,7 @@ pub enum EntityEvent {
         vel: [i16; 3],
         flags: Option<u8>,
         name: Option<String>,
+        health: Option<f32>,
     },
     SpawnObject {
         id: i32,
@@ -394,6 +407,7 @@ pub enum EntityEvent {
         id: i32,
         flags: Option<u8>,
         name: Option<String>,
+        health: Option<f32>,
         stack: Option<ItemRef>,
     },
     Equipment {
@@ -547,6 +561,7 @@ impl Entities {
                 vel,
                 flags,
                 name,
+                health,
             } => {
                 let mut e = Entity::new(id, Kind::Mob(kind), pos, yaw, pitch);
                 e.head_yaw = angle(head_yaw);
@@ -554,6 +569,7 @@ impl Entities {
                 e.vel = velocity(vel);
                 e.flags = flags.unwrap_or(0);
                 e.name = name.filter(|n| !n.is_empty());
+                e.health = health;
                 (id, e)
             }
             EntityEvent::SpawnObject {
@@ -581,8 +597,9 @@ impl Entities {
                 id,
                 flags,
                 name,
+                health,
                 stack,
-            } => self.with(id, |e| e.set_metadata(flags, name, stack)),
+            } => self.with(id, |e| e.set_metadata(flags, name, stack, health)),
             E::Equipment { id, slot, item } => self.with(id, |e| {
                 if let Some(s) = e.equipment.get_mut(slot as usize) {
                     *s = item;
@@ -687,6 +704,7 @@ mod tests {
             vel: [0; 3],
             flags: None,
             name: None,
+            health: None,
         });
     }
 

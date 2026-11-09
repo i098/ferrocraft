@@ -271,50 +271,65 @@ impl App {
     pub(super) fn handle_actions(&mut self) {
         let in_game = self.game.player.is_some() && self.ui.in_world;
         for action in self.input.take_actions() {
-            match action {
-                Action::ToggleFullscreen => {
-                    if let Some(w) = &self.window {
-                        let on = w.fullscreen().is_none();
-                        w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
-                    }
-                }
-                _ if !in_game => {}
-                Action::Attack => {
-                    self.game.swing.start();
-                    self.attack();
-                }
-                Action::Use => {
-                    if self.use_delay <= 0 {
-                        self.use_item();
-                    }
-                }
-                Action::ToggleDebug => self.show_debug = !self.show_debug,
-                Action::ToggleHud => self.hide_hud = !self.hide_hud,
-                Action::TogglePerspective => self.perspective = (self.perspective + 1) % 3,
-                Action::Debug(DebugCombo::ClearChat) => self.hud.chat.clear(),
-                Action::Debug(_) | Action::Screenshot | Action::PickBlock => {}
-                Action::Hotbar(n) => self.select_slot(n),
-                Action::HotbarScroll(step) => {
-                    self.select_slot(scroll_slot(self.game.inv.held, step));
-                }
-                Action::ChatScroll(step) => {
-                    let open = self.input.chat_input().is_some();
-                    self.hud.chat.scroll(step * 7, open);
-                }
-                Action::Inventory => self.open_inventory(),
-                Action::Drop { whole_stack } => {
-                    let r = self.session_send(|s| s.drop_item(whole_stack));
-                    self.send_result(r);
-                }
-                Action::Pause => {
-                    if !self.ui.is_open() && self.container.is_none() {
-                        let m = metrics!(self);
-                        let q = self.ui.open(&m, boxed(Pause::default()));
-                        self.run_effects(q);
-                    }
-                }
-                Action::CloseScreen => self.close_container(),
+            if action == Action::ToggleFullscreen {
+                self.toggle_fullscreen();
+            } else if in_game {
+                self.game_action(action);
             }
+        }
+    }
+
+    fn toggle_fullscreen(&mut self) {
+        if let Some(w) = &self.window {
+            let on = w.fullscreen().is_none();
+            w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+        }
+    }
+
+    fn game_action(&mut self, action: Action) {
+        match action {
+            Action::Attack => {
+                self.game.swing.start();
+                self.attack();
+            }
+            Action::Use => {
+                if self.use_delay <= 0 {
+                    self.use_item();
+                }
+            }
+            Action::Hotbar(n) => self.select_slot(n),
+            Action::HotbarScroll(step) => self.select_slot(scroll_slot(self.game.inv.held, step)),
+            Action::Inventory => self.open_inventory(),
+            Action::Drop { whole_stack } => {
+                let r = self.session_send(|s| s.drop_item(whole_stack));
+                self.send_result(r);
+            }
+            Action::Pause => self.open_pause(),
+            Action::CloseScreen => self.close_container(),
+            other => self.view_action(other),
+        }
+    }
+
+    /// Actions that change only what the client shows.
+    fn view_action(&mut self, action: Action) {
+        match action {
+            Action::ToggleDebug => self.show_debug = !self.show_debug,
+            Action::ToggleHud => self.hide_hud = !self.hide_hud,
+            Action::TogglePerspective => self.perspective = (self.perspective + 1) % 3,
+            Action::Debug(DebugCombo::ClearChat) => self.hud.chat.clear(),
+            Action::ChatScroll(step) => {
+                let open = self.input.chat_input().is_some();
+                self.hud.chat.scroll(step * 7, open);
+            }
+            _ => {}
+        }
+    }
+
+    fn open_pause(&mut self) {
+        if !self.ui.is_open() && self.container.is_none() {
+            let m = metrics!(self);
+            let q = self.ui.open(&m, boxed(Pause::default()));
+            self.run_effects(q);
         }
     }
 

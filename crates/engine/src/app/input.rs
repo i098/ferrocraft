@@ -12,12 +12,7 @@ impl App {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                if self.mouse_down {
-                    let (mx, my) = self.gui_cursor();
-                    if let Some(c) = &mut self.container {
-                        c.mouse_drag(&self.game.inv, mx, my);
-                    }
-                }
+                self.drag_container();
                 return;
             }
             WindowEvent::ModifiersChanged(m) => {
@@ -28,11 +23,25 @@ impl App {
             _ => {}
         }
         let modal = self.ui.is_open() || self.container.is_some();
-        let typing = self.input.chat_input().is_some();
-        if !modal && !typing {
+        if modal || self.input.chat_input().is_some() {
+            self.route_to_screen(event, modal);
+        } else {
             self.input.on_window_event(event);
+        }
+    }
+
+    fn drag_container(&mut self) {
+        if !self.mouse_down {
             return;
         }
+        let (mx, my) = self.gui_cursor();
+        if let Some(c) = &mut self.container {
+            c.mouse_drag(&self.game.inv, mx, my);
+        }
+    }
+
+    /// Mouse and keys while a screen is open or chat is being typed.
+    fn route_to_screen(&mut self, event: &WindowEvent, modal: bool) {
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
                 let b = match button {
@@ -43,16 +52,13 @@ impl App {
                 };
                 self.mouse_button(*state == ElementState::Pressed, b);
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, .. } if modal => {
                 let y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
                     MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
                 };
-                let step = y.signum() as i32;
-                if y != 0.0 && modal {
-                    self.scroll_screen(step);
-                } else {
-                    self.input.on_window_event(event);
+                if y != 0.0 {
+                    self.scroll_screen(y.signum() as i32);
                 }
             }
             WindowEvent::KeyboardInput { event: k, .. } if modal => {

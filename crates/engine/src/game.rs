@@ -148,6 +148,19 @@ impl Game {
     }
 
     pub fn apply(&mut self, ev: NetEvent) -> Option<Effect> {
+        let ev = match self.apply_player(ev) {
+            Ok(e) => return e,
+            Err(ev) => ev,
+        };
+        let ev = match self.apply_window(ev) {
+            Ok(e) => return e,
+            Err(ev) => ev,
+        };
+        self.apply_world(ev)
+    }
+
+    /// Join, vitals, game mode and abilities. `Err` hands back an event it does not own.
+    fn apply_player(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         match ev {
             NetEvent::JoinGame {
                 entity_id,
@@ -161,12 +174,8 @@ impl Game {
                 self.difficulty = difficulty;
                 self.inv = Inventory::default();
                 self.set_gamemode(gamemode);
-                None
             }
-            NetEvent::Difficulty(d) => {
-                self.difficulty = d;
-                None
-            }
+            NetEvent::Difficulty(d) => self.difficulty = d,
             NetEvent::Health {
                 health,
                 food,
@@ -174,12 +183,21 @@ impl Game {
             } => {
                 let was_alive = self.health > 0.0;
                 (self.health, self.food, self.saturation) = (health, food, saturation);
-                (was_alive && health <= 0.0).then_some(Effect::Died)
+                return Ok((was_alive && health <= 0.0).then_some(Effect::Died));
             }
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
-                None
             }
+            NetEvent::Abilities { flags, .. } => self.abilities = flags,
+            NetEvent::GameMode(mode) => self.set_gamemode(mode),
+            other => return Err(other),
+        }
+        Ok(None)
+    }
+
+    /// Hotbar, slots and container windows.
+    fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
+        let effect = match ev {
             NetEvent::HeldItem(slot) => {
                 self.inv.held = slot.min(8);
                 None
@@ -197,13 +215,11 @@ impl Game {
                 kind,
                 title,
                 slots,
-            } => {
-                if self.inv.open_window(id, &kind, title, slots) {
-                    Some(Effect::OpenWindow)
-                } else {
-                    Some(Effect::CloseWindow)
-                }
-            }
+            } => Some(if self.inv.open_window(id, &kind, title, slots) {
+                Effect::OpenWindow
+            } else {
+                Effect::CloseWindow
+            }),
             NetEvent::CloseWindow => {
                 self.inv.close_window();
                 Some(Effect::CloseWindow)
@@ -221,36 +237,33 @@ impl Game {
                 action,
                 accepted,
             } => (!accepted).then_some(Effect::Confirm { window, action }),
-            NetEvent::Abilities { flags, .. } => {
-                self.abilities = flags;
-                None
-            }
-            NetEvent::GameMode(mode) => {
-                self.set_gamemode(mode);
-                None
-            }
-            NetEvent::Entity(e) => {
-                self.entities.apply(e);
-                None
-            }
+            other => return Err(other),
+        };
+        Ok(effect)
+    }
+
+    /// Chunks, blocks, entities, time, weather, chat and disconnects.
+    fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
+        match ev {
+            NetEvent::Entity(e) => self.entities.apply(e),
             NetEvent::Respawn => {
                 self.digger = Digger::default();
                 self.store.clear();
-                Some(Effect::Clear)
+                return Some(Effect::Clear);
             }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
                 self.store.insert(c);
-                Some(Effect::Upload(at.0, at.1))
+                return Some(Effect::Upload(at.0, at.1));
             }
             NetEvent::UnloadChunk(x, z) => {
                 self.store.remove(x, z);
-                Some(Effect::Remove(x, z))
+                return Some(Effect::Remove(x, z));
             }
             NetEvent::BlockChange { x, y, z, state } => {
                 self.store.get(x >> 4, z >> 4)?;
                 self.store.set_block(x, y, z, state);
-                Some(Effect::Upload(x >> 4, z >> 4))
+                return Some(Effect::Upload(x >> 4, z >> 4));
             }
             NetEvent::PlayerPosLook {
                 x,
@@ -259,26 +272,15 @@ impl Game {
                 yaw,
                 pitch,
                 flags,
-            } => {
-                self.teleport([x, y, z], yaw, pitch, flags);
-                None
-            }
-            NetEvent::TimeUpdate { time_of_day, .. } => {
-                self.world_time = time_of_day.abs();
-                None
-            }
-            NetEvent::GameState { reason, value } => {
-                self.weather.apply(reason, value);
-                None
-            }
-            NetEvent::Chat(m) => Some(Effect::Chat(m)),
-            NetEvent::ActionBar(m) => Some(Effect::ActionBar(m)),
-            NetEvent::Disconnect(r) => {
-                self.disconnected = Some(r);
-                None
-            }
-            _ => None,
+            } => self.teleport([x, y, z], yaw, pitch, flags),
+            NetEvent::TimeUpdate { time_of_day, .. } => self.world_time = time_of_day.abs(),
+            NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
+            NetEvent::Chat(m) => return Some(Effect::Chat(m)),
+            NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
+            NetEvent::Disconnect(r) => self.disconnected = Some(r),
+            _ => {}
         }
+        None
     }
 
     /// S08: bits 0..=2 make x/y/z relative, bit 3 yaw, bit 4 pitch.

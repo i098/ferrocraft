@@ -43,33 +43,38 @@ impl App {
     pub(super) fn run_effects(&mut self, mut q: Vec<UiEffect>) {
         let mut i = 0;
         while i < q.len() {
-            match q[i].clone() {
-                UiEffect::Sound(name) => {
-                    if let Some(s) = &mut self.sound {
-                        s.play_ui(name);
-                    }
-                }
-                UiEffect::Connect { host, port } => {
-                    self.game = Game::new();
-                    self.link = Link::connect(format!("{host}:{port}"), self.args.username.clone());
-                }
-                UiEffect::CancelConnect => self.link = Link::Offline,
-                UiEffect::Disconnect => {
-                    self.leave_world();
-                    let m = metrics!(self);
-                    q.extend(self.ui.close(&m));
-                }
-                UiEffect::Respawn => {
-                    if let Some(s) = self.link.session() {
-                        let r = s.respawn();
-                        self.send_result(r);
-                    }
-                }
-                UiEffect::Quit => self.quit = true,
-                UiEffect::SettingsSaved => self.apply_settings(),
-            }
+            let more = self.run_effect(q[i].clone());
+            q.extend(more);
             i += 1;
         }
+    }
+
+    /// One screen effect; returns the effects that closing screens raised.
+    fn run_effect(&mut self, effect: UiEffect) -> Vec<UiEffect> {
+        match effect {
+            UiEffect::Sound(name) => {
+                if let Some(s) = &mut self.sound {
+                    s.play_ui(name);
+                }
+            }
+            UiEffect::Connect { host, port } => {
+                self.game = Game::new();
+                self.link = Link::connect(format!("{host}:{port}"), self.args.username.clone());
+            }
+            UiEffect::CancelConnect => self.link = Link::Offline,
+            UiEffect::Disconnect => {
+                self.leave_world();
+                let m = metrics!(self);
+                return self.ui.close(&m);
+            }
+            UiEffect::Respawn => {
+                let r = self.link.session().map(|s| s.respawn());
+                self.send_result(r.unwrap_or(Ok(())));
+            }
+            UiEffect::Quit => self.quit = true,
+            UiEffect::SettingsSaved => self.apply_settings(),
+        }
+        Vec::new()
     }
 
     /// Back to the menus: forget the world and the connection.
@@ -323,7 +328,7 @@ impl App {
 
     fn player_list(&mut self, action: PlayerListEvent) {
         let list = &mut self.hud.tablist;
-        match action {
+        let (uuid, update): (u128, Box<dyn FnOnce(&mut TabEntry)>) = match action {
             PlayerListEvent::Add(players) => {
                 for p in players {
                     list.add(TabEntry {
@@ -334,27 +339,20 @@ impl App {
                         display: p.display,
                     });
                 }
-            }
-            PlayerListEvent::Gamemode(u, g) => {
-                if let Some(e) = list.entry_mut(u) {
-                    e.gamemode = g;
-                }
-            }
-            PlayerListEvent::Latency(u, ping) => {
-                if let Some(e) = list.entry_mut(u) {
-                    e.ping = ping;
-                }
-            }
-            PlayerListEvent::DisplayName(u, d) => {
-                if let Some(e) = list.entry_mut(u) {
-                    e.display = d;
-                }
+                return;
             }
             PlayerListEvent::Remove(ids) => {
                 for u in ids {
                     list.remove(u);
                 }
+                return;
             }
+            PlayerListEvent::Gamemode(u, g) => (u, Box::new(move |e| e.gamemode = g)),
+            PlayerListEvent::Latency(u, ping) => (u, Box::new(move |e| e.ping = ping)),
+            PlayerListEvent::DisplayName(u, d) => (u, Box::new(move |e| e.display = d)),
+        };
+        if let Some(e) = list.entry_mut(uuid) {
+            update(e);
         }
     }
 }

@@ -376,6 +376,26 @@ impl App {
         r.render(&cam, &quads);
     }
 
+    /// The F3 left column, `None` without a player.
+    fn debug_lines(&self, cam: &Camera) -> Option<Vec<String>> {
+        self.game.player.as_ref().map(|p| {
+            gui::debug::left_lines(&gui::debug::DebugInfo {
+                fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
+                provider: format!(
+                    "MultiplayerChunkCache: {}, {}",
+                    self.game.store.len(),
+                    self.game.store.len()
+                ),
+                pos: p.pos,
+                yaw: p.yaw,
+                pitch: self.game.pitch,
+                looking_at: self.game.target(cam.pos).map(|h| h.pos),
+                reduced: self.ui.settings.reduced_debug_info,
+                ..Default::default()
+            })
+        })
+    }
+
     /// The HUD, the open container and the menu screens as quads, plus the textures they
     /// registered and the effects they raised.
     fn overlay(&mut self, frac: f64, cam: &Camera) -> Overlay {
@@ -394,22 +414,7 @@ impl App {
         let screen_open = self.ui.is_open() || self.container.is_some();
         let in_world = self.ui.in_world && self.game.player.is_some();
         if in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none()) {
-            let debug = self.game.player.as_ref().map(|p| {
-                gui::debug::left_lines(&gui::debug::DebugInfo {
-                    fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
-                    provider: format!(
-                        "MultiplayerChunkCache: {}, {}",
-                        self.game.store.len(),
-                        self.game.store.len()
-                    ),
-                    pos: p.pos,
-                    yaw: p.yaw,
-                    pitch: self.game.pitch,
-                    looking_at: self.game.target(cam.pos).map(|h| h.pos),
-                    reduced: self.ui.settings.reduced_debug_info,
-                    ..Default::default()
-                })
-            });
+            let debug = self.debug_lines(cam);
             let status = status_of(&self.game, self.input.sneaking());
             self.hud.selected_slot = i32::from(self.game.inv.held);
             let inv = &self.game.inv;

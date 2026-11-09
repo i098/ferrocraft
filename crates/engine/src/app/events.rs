@@ -127,7 +127,23 @@ impl App {
     }
 
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
-        match &ev {
+        self.note_session_state(&ev);
+        let ev = match self.world_event(ev, dirty) {
+            Ok(()) => return,
+            Err(ev) => ev,
+        };
+        let ev = match self.hud_event(ev) {
+            Ok(()) => return,
+            Err(ev) => ev,
+        };
+        if let Some(e) = self.game.apply(ev) {
+            self.game_effect(e, clear, dirty);
+        }
+    }
+
+    /// Join, held slot and difficulty change the menus and the container before `Game` sees them.
+    fn note_session_state(&mut self, ev: &NetEvent) {
+        match ev {
             NetEvent::JoinGame {
                 difficulty,
                 hardcore,
@@ -148,6 +164,10 @@ impl App {
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
             _ => {}
         }
+    }
+
+    /// Sounds, particles and explosions; `Err` hands back an event it does not own.
+    fn world_event(&mut self, ev: NetEvent, dirty: &mut Dirty) -> Result<(), NetEvent> {
         match ev {
             NetEvent::Sound {
                 name,
@@ -171,22 +191,32 @@ impl App {
                 .particles
                 .spawn_packet(id, pos, offset, speed, count, &data),
             NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
-            NetEvent::Explosion { pos, records, .. } => {
-                if let Some(s) = &mut self.sound {
-                    s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
-                }
-                let base = pos.map(|v| v.floor() as i32);
-                for r in records {
-                    let at = [0, 1, 2].map(|i| base[i] + i32::from(r[i]));
-                    if self.game.store.get(at[0] >> 4, at[2] >> 4).is_some() {
-                        self.game.store.set_block(at[0], at[1], at[2], 0);
-                        dirty.insert(
-                            (at[0] >> 4, at[2] >> 4),
-                            Effect::Upload(at[0] >> 4, at[2] >> 4),
-                        );
-                    }
-                }
+            NetEvent::Explosion { pos, records, .. } => self.explode(pos, &records, dirty),
+            other => return Err(other),
+        }
+        Ok(())
+    }
+
+    fn explode(&mut self, pos: [f32; 3], records: &[[i8; 3]], dirty: &mut Dirty) {
+        if let Some(s) = &mut self.sound {
+            s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
+        }
+        let base = pos.map(|v| v.floor() as i32);
+        for r in records {
+            let at = [0, 1, 2].map(|i| base[i] + i32::from(r[i]));
+            if self.game.store.get(at[0] >> 4, at[2] >> 4).is_some() {
+                self.game.store.set_block(at[0], at[1], at[2], 0);
+                dirty.insert(
+                    (at[0] >> 4, at[2] >> 4),
+                    Effect::Upload(at[0] >> 4, at[2] >> 4),
+                );
             }
+        }
+    }
+
+    /// Tab list, title, scoreboard and teams; `Err` hands back an event it does not own.
+    fn hud_event(&mut self, ev: NetEvent) -> Result<(), NetEvent> {
+        match ev {
             NetEvent::PlayerList { action } => self.player_list(action),
             NetEvent::TabHeaderFooter { header, footer } => {
                 self.hud.tablist.header = header;
@@ -202,42 +232,39 @@ impl App {
                 .hud
                 .title
                 .set_title(action, text, fade_in, stay, fade_out),
+            other => return self.scoreboard_event(other),
+        }
+        Ok(())
+    }
+
+    fn scoreboard_event(&mut self, ev: NetEvent) -> Result<(), NetEvent> {
+        let sb = &mut self.hud.scoreboard;
+        match ev {
             NetEvent::ScoreboardObjective {
                 name,
                 display,
                 mode,
             } => {
-                self.hud.scoreboard.set_objective(&name, &display, mode);
+                sb.set_objective(&name, &display, mode);
             }
             NetEvent::ScoreUpdate {
                 name,
                 objective,
                 value,
                 remove,
-            } => self
-                .hud
-                .scoreboard
-                .set_score(&name, &objective, value, remove),
-            NetEvent::DisplayScoreboard { position, name } => {
-                self.hud.scoreboard.set_display(position, &name);
-            }
+            } => sb.set_score(&name, &objective, value, remove),
+            NetEvent::DisplayScoreboard { position, name } => sb.set_display(position, &name),
             NetEvent::Team {
                 name,
                 mode,
                 prefix,
                 suffix,
                 members,
-            } => self
-                .hud
-                .scoreboard
-                .set_team(&name, mode, &prefix, &suffix, &members),
+            } => sb.set_team(&name, mode, &prefix, &suffix, &members),
             NetEvent::BlockBreakAnim { .. } => {}
-            other => {
-                if let Some(e) = self.game.apply(other) {
-                    self.game_effect(e, clear, dirty);
-                }
-            }
+            other => return Err(other),
         }
+        Ok(())
     }
 
     fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {

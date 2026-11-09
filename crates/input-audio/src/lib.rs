@@ -137,6 +137,11 @@ impl InputState {
         self.sensitivity = sensitivity;
     }
 
+    /// `options.txt` `pauseOnLostFocus`.
+    pub fn set_pause_on_lost_focus(&mut self, on: bool) {
+        self.pause_on_lost_focus = on;
+    }
+
     pub fn set_bindings(&mut self, bindings: KeyBindings) {
         self.release_all();
         self.bindings = bindings;

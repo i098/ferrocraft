@@ -18,5 +18,5 @@ Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, part
 each `render`. The quads are relative to that frame's camera.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.
-`render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame.
+`render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame; the eight surrounding chunks remesh on the workers because light crosses chunk edges and corners.
 Offscreen renderers wait for every mesh, so `render_to_rgba` shows the whole world.

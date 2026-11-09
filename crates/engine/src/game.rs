@@ -285,6 +285,7 @@ impl Game {
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
             NetEvent::Respawn => {
+                self.vehicle = None;
                 self.digger = Digger::default();
                 self.store.clear();
                 return Some(Effect::Clear);
@@ -322,6 +323,11 @@ impl Game {
                 status: s @ (22 | 23),
             }) if id == self.entity_id => self.reduced_debug = s == 22,
             NetEvent::Entity(e) => {
+                if let EntityEvent::Destroy(ids) = &e {
+                    if self.vehicle.is_some_and(|v| ids.contains(&v)) {
+                        self.vehicle = None;
+                    }
+                }
                 if let EntityEvent::Attach { id, vehicle } = &e {
                     if *id == self.entity_id {
                         self.vehicle = (*vehicle >= 0).then_some(*vehicle);

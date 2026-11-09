@@ -342,6 +342,13 @@ impl Renderer {
         self.font.as_ref()
     }
 
+    /// `FontRenderer.setUnicodeFlag`; returns whether it changed.
+    pub fn set_force_unicode(&mut self, on: bool) -> bool {
+        self.font
+            .as_mut()
+            .is_some_and(|f| std::mem::replace(&mut f.force_unicode, on) != on)
+    }
+
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
     pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
         self.selection = selection;

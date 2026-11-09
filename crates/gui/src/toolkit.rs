@@ -128,7 +128,7 @@ impl Metrics<'_> {
             return 4;
         }
         let Some(font) = self.0 else { return 0 };
-        if let Some(i) = glyph_index(c).filter(|_| c != '\0') {
+        if let Some(i) = glyph_index(c).filter(|_| c != '\0' && !font.force_unicode) {
             return font.ascii[i] as i32;
         }
         let g = font.unicode.get(c as usize).copied().unwrap_or(0);
@@ -598,11 +598,13 @@ impl<'f> Gui<'f> {
         if style.random && glyph.is_some() {
             c = self.obfuscated(c);
         }
-        let back = (c == '\0' || glyph.is_none()) && shadow;
-        let o = if back { -1.0 } else { 0.0 };
+        let forced = self.font.0.is_some_and(|f| f.force_unicode);
+        let step = if forced { 0.5 } else { 1.0 };
+        let back = (c == '\0' || glyph.is_none() || forced) && shadow;
+        let o = if back { -step } else { 0.0 };
         let mut f = self.render_char(c, style.italic, px + o, py + o, cur);
         if style.bold {
-            self.render_char(c, style.italic, px + 1.0 + o, py + o, cur);
+            self.render_char(c, style.italic, px + step + o, py + o, cur);
             f += 1.0;
         }
         if style.strike {
@@ -638,7 +640,7 @@ impl<'f> Gui<'f> {
         }
         let Some(font) = self.font.0 else { return 0.0 };
         let k = if italic { 1.0 } else { 0.0 };
-        if let Some(i) = glyph_index(c) {
+        if let Some(i) = glyph_index(c).filter(|_| !font.force_unicode) {
             let (u, v) = ((i % 16 * 8) as f32, (i / 16 * 8) as f32);
             let l = font.ascii[i] as f32;
             let f = l - 0.01;
@@ -785,6 +787,7 @@ mod tests {
         Font {
             ascii,
             unicode: vec![0; 65536],
+            force_unicode: false,
         }
     }
 

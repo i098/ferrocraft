@@ -321,6 +321,7 @@ mod tests {
         let f = Font {
             ascii: [6; 256],
             unicode: vec![0; 65536],
+            force_unicode: false,
         };
         let m = Metrics(Some(&f));
         // "aaa bbb" is 6*6 + 4 = 40 wide; 30 keeps "aaa" and moves " bbb" down.

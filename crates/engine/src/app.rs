@@ -236,9 +236,13 @@ impl App {
             height_focused: s.chat_height_focused,
             height_unfocused: s.chat_height_unfocused,
         };
-        let (fullscreen, vsync) = (s.fullscreen, s.vsync);
+        let (fullscreen, vsync, force_unicode) = (s.fullscreen, s.vsync, s.force_unicode);
         let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
-        if self.hud.chat.settings != chat_settings {
+        let unicode = self
+            .renderer
+            .as_mut()
+            .is_some_and(|r| r.set_force_unicode(force_unicode));
+        if unicode || self.hud.chat.settings != chat_settings {
             self.hud.chat.settings = chat_settings;
             let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
             self.hud.chat.refresh(m);

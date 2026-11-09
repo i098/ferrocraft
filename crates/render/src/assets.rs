@@ -223,6 +223,7 @@ fn bake_overlay(base: &mut Image, over: &Image, tint: [f32; 3]) {
 pub struct Font {
     pub ascii: [u8; 256],
     pub unicode: Vec<u8>,
+    pub force_unicode: bool,
 }
 
 impl Font {
@@ -250,6 +251,10 @@ impl Font {
             .read("assets/minecraft/font/glyph_sizes.bin")
             .unwrap_or_default();
         unicode.resize(65536, 0);
-        Some(Font { ascii, unicode })
+        Some(Font {
+            ascii,
+            unicode,
+            force_unicode: false,
+        })
     }
 }

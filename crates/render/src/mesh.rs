@@ -209,7 +209,7 @@ impl Mesher<'_> {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
                 let list = boxes(state, &nb);
                 for b in &list {
-                    self.boxed(at, b);
+                    self.boxed(at, b, Self::pass_of(state));
                 }
             }
         }
@@ -217,7 +217,7 @@ impl Mesher<'_> {
 
     fn pass_of(state: u16) -> Pass {
         match state >> 4 {
-            8 | 9 | 79 | 95 | 165 | 174 => Pass::Blend,
+            8 | 9 | 79 | 95 | 160 | 165 => Pass::Blend,
             _ => Pass::Opaque,
         }
     }
@@ -354,7 +354,8 @@ impl Mesher<'_> {
         let own = self.light_at(at, [0; 3]);
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
-            if same(n) || is_opaque_cube(n) {
+            // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
+            if same(n) || (f != UP && is_opaque_cube(n)) {
                 continue;
             }
             let mut light = if f == UP {
@@ -471,7 +472,7 @@ impl Mesher<'_> {
         }
     }
 
-    fn boxed(&mut self, at: [i32; 3], b: &Bx) {
+    fn boxed(&mut self, at: [i32; 3], b: &Bx, pass: Pass) {
         let l = Look {
             kind: Kind::Shape,
             tint: b.tint,
@@ -514,7 +515,7 @@ impl Mesher<'_> {
                     light,
                 };
             }
-            self.push_quad(Pass::Opaque, verts, false);
+            self.push_quad(pass, verts, false);
         }
     }
 }
@@ -665,5 +666,25 @@ mod tests {
     fn plant_is_two_crossed_quads_drawn_from_both_sides() {
         let c = flat(|x, y, z| if (x, y, z) == (4, 70, 4) { 37 << 4 } else { 0 });
         assert_eq!(mesh(&c, [None; 8]).opaque.vertices.len(), 16);
+    }
+
+    #[test]
+    fn water_top_shows_under_a_solid_block() {
+        let c = flat(|x, y, z| match (x, y, z) {
+            (4, 60, 4) => 9 << 4,
+            (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) | (4, 61, 4) => 1 << 4,
+            _ => 0,
+        });
+        let m = mesh(&c, [None; 4]);
+        assert_eq!(m.water.vertices.len(), 4);
+    }
+
+    #[test]
+    fn stained_glass_pane_blends_and_packed_ice_does_not() {
+        let at = |id: u16| flat(move |x, y, z| if (x, y, z) == (4, 70, 4) { id << 4 } else { 0 });
+        let pane = mesh(&at(160), [None; 4]);
+        assert!(pane.opaque.is_empty() && !pane.water.is_empty());
+        let ice = mesh(&at(174), [None; 4]);
+        assert!(ice.water.is_empty() && !ice.opaque.is_empty());
     }
 }

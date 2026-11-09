@@ -124,8 +124,8 @@ impl Pose {
         self.r_arm[1] += s;
         self.l_arm[1] += s;
         self.l_arm[0] += s;
-        let f1 = 1.0 - (1.0 - swing).powi(4);
-        let f2 = (f1 * PI).sin() * (swing * PI).sin() * -(head_rot_x - 0.7) * 0.75;
+        let f1 = ((1.0 - (1.0 - swing).powi(4)) * PI).sin();
+        let f2 = (swing * PI).sin() * -(head_rot_x - 0.7) * 0.75;
         self.r_arm[0] -= f1 * 1.2 + f2;
         self.r_arm[1] += s * 2.0;
         self.r_arm[2] += (swing * PI).sin() * -0.4;
@@ -137,6 +137,18 @@ impl Pose {
         self.l_arm[2] -= cos(age * 0.09) * 0.05 + 0.05;
         self.r_arm[0] += (age * 0.067).sin() * 0.05;
         self.l_arm[0] -= (age * 0.067).sin() * 0.05;
+    }
+
+    /// `ModelZombie.setRotationAngles`, which skeletons inherit: both arms point forward and replace
+    /// every arm angle set so far (walk, sneak, held item); only the swing pivots stay.
+    fn raise(&mut self, swing: f32, age: f32) {
+        let f = (swing * PI).sin();
+        let f1 = ((1.0 - (1.0 - swing) * (1.0 - swing)) * PI).sin();
+        let arm_x = -FRAC_PI_2 - (f * 1.2 - f1 * 0.4);
+        let sway_z = cos(age * 0.09) * 0.05 + 0.05;
+        let sway_x = (age * 0.067).sin() * 0.05;
+        self.r_arm = [arm_x + sway_x, -(0.1 - f * 0.6), sway_z];
+        self.l_arm = [arm_x - sway_x, 0.1 - f * 0.6, -sway_z];
     }
 
     fn sneak(&mut self) {
@@ -167,7 +179,7 @@ fn biped(
     let swing = d.swing;
 
     let mut r_arm = [cos(f * 0.6662 + PI) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let mut l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
+    let l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
     let r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
     let l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
     let body_rot = [0.0f32; 3];
@@ -183,10 +195,6 @@ fn biped(
     if arm_w == 3.0 {
         r_arm_pivot[1] = 2.5;
         l_arm_pivot[1] = 2.5;
-    }
-    if raised {
-        r_arm[0] = -FRAC_PI_2;
-        l_arm[0] = -FRAC_PI_2;
     }
     if d.held != 0 && !raised {
         r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27;
@@ -206,6 +214,9 @@ fn biped(
     pose.sway(d.age);
     if d.sneaking {
         pose.sneak();
+    }
+    if raised {
+        pose.raise(swing, d.age);
     }
     let Pose {
         r_arm,
@@ -375,7 +386,7 @@ fn pig(d: &EntityDraw) -> Model {
     ));
     Model {
         skin: Skin::Pig,
-        tint: [1.0, 0.75, 0.75],
+        tint: [1.0; 3],
         parts,
     }
 }
@@ -437,7 +448,7 @@ fn cow(d: &EntityDraw) -> Model {
     ));
     Model {
         skin: Skin::Cow,
-        tint: [0.6, 0.45, 0.35],
+        tint: [1.0; 3],
         parts,
     }
 }
@@ -471,7 +482,7 @@ fn model(d: &EntityDraw) -> Model {
         }
         Class::Mob(54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(57) => biped(d, Skin::PigZombie, [1.0; 3], 4.0, 4.0, true),
-        Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 2.0, 2.0, false),
+        Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 2.0, 2.0, true),
         Class::Mob(50) => creeper(d),
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
@@ -555,7 +566,6 @@ struct Xf {
     lift: f32,
     sneak_drop: f32,
     fall: f32,
-    height: f32,
     scale: f32,
     /// The generic box is built y-up from the feet, so it skips the body offset.
     generic: bool,
@@ -572,7 +582,7 @@ impl Xf {
         let (st, ct) = (180.0 - body_yaw).to_radians().sin_cos();
         // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees).
         let fall = if d.death_time > 0.0 {
-            ((d.death_time - 1.0) / 20.0 * 1.6).sqrt().min(1.0) * FRAC_PI_2
+            ((d.death_time - 1.0).max(0.0) / 20.0 * 1.6).sqrt().min(1.0) * FRAC_PI_2
         } else {
             0.0
         };
@@ -587,7 +597,6 @@ impl Xf {
             },
             sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
             fall,
-            height: d.size.1,
             // `RenderPlayer.preRenderCallback` scales the player model by 15/16.
             scale: if matches!(d.class, Class::Player { .. }) {
                 0.9375
@@ -617,10 +626,9 @@ impl Xf {
         let (x, y) = (-q[0] / 16.0 * s, (BODY_OFFSET - q[1] / 16.0) * s);
         let z = q[2] / 16.0 * s;
         let (x, y) = if self.fall != 0.0 {
+            // `LivingRenderer.applyRotation`: a z rotation about the feet origin.
             let (sf, cf) = self.fall.sin_cos();
-            let cy = self.height / 2.0;
-            let ry = y - cy;
-            (x * cf - ry * sf, x * sf + ry * cf + cy)
+            (x * cf - y * sf, x * sf + y * cf)
         } else {
             (x, y)
         };
@@ -1004,5 +1012,41 @@ mod tests {
         let idle = build(&[steve()], &Skins::flat());
         assert_ne!(walking.vertices.len(), 0);
         assert_ne!(walking.vertices[100].pos, idle.vertices[100].pos);
+    }
+
+    #[test]
+    fn attack_swing_follows_model_biped() {
+        // `ModelBiped.setRotationAngles` at progress 0.5 and level head: sin((1 - 0.5^4) pi) * 1.2 + sin(pi / 2) * 0.7 * 0.75.
+        let mut pose = Pose {
+            r_arm: [0.0; 3],
+            l_arm: [0.0; 3],
+            body_rot: [0.0; 3],
+            r_arm_pivot: [0.0; 3],
+            l_arm_pivot: [0.0; 3],
+            head_pivot: [0.0; 3],
+            leg_pivots: [[0.0; 3]; 2],
+        };
+        pose.swing(0.5, 0.0);
+        let expected = -((0.9375f32 * PI).sin() * 1.2 + 0.7 * 0.75);
+        assert!((pose.r_arm[0] - expected).abs() < 1e-5, "{}", pose.r_arm[0]);
+    }
+
+    #[test]
+    fn skeleton_arms_point_forward_like_zombie_arms() {
+        let mut d = steve();
+        d.class = Class::Mob(51);
+        let arm = &model(&d).parts[3];
+        assert!((arm.rot[0] + FRAC_PI_2).abs() < 0.1, "{}", arm.rot[0]);
+    }
+
+    #[test]
+    fn dead_mob_rotates_about_its_feet() {
+        let mut d = steve();
+        d.class = Class::Mob(54);
+        d.death_time = 20.0;
+        let m = build(&[d], &Skins::flat());
+        let top = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+        // Lying on its side the highest point is the half-width of the model, not the 1.8 block height.
+        assert!(top < 64.0 + 0.6, "{top}");
     }
 }

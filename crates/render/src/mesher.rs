@@ -12,13 +12,13 @@ const WORKERS: usize = 2;
 /// Block data of one chunk, shared between the renderer and the jobs that read it.
 pub type SharedBlocks = Arc<Vec<u16>>;
 
-/// A snapshot of the chunk and its -x, +x, -z, +z neighbours.
+/// A snapshot of the chunk and its eight neighbours, ordered as `Neighborhood::neighbors`.
 pub struct Job {
     pub key: (i32, i32),
     /// Tells a result from the job that is still wanted for `key`.
     pub generation: u64,
     pub center: SharedBlocks,
-    pub neighbors: [Option<SharedBlocks>; 4],
+    pub neighbors: [Option<SharedBlocks>; 8],
 }
 
 pub struct Done {
@@ -30,14 +30,10 @@ pub struct Done {
 impl Job {
     /// Mesh on the calling thread.
     pub fn run(self, atlas: &Atlas) -> Done {
-        let [a, b, c, d] = &self.neighbors;
-        fn get(n: &Option<SharedBlocks>) -> Option<&[u16]> {
-            n.as_deref().map(Vec::as_slice)
-        }
         let hood = Neighborhood {
             origin: self.key,
             center: &self.center,
-            neighbors: [get(a), get(b), get(c), get(d)],
+            neighbors: std::array::from_fn(|i| self.neighbors[i].as_deref().map(Vec::as_slice)),
         };
         Done {
             key: self.key,

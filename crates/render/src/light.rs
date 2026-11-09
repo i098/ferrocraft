@@ -1,12 +1,16 @@
 //! Sky and block light of one chunk plus a one-block border, flood-filled like vanilla `World.checkLight`.
 //! The server sends light data but the renderer is fed blocks only, so light is recomputed here.
+//! The flood covers the chunk and its eight neighbours: light travels at most 15 blocks, so every source that can
+//! reach the border lies inside that 48 x 48 block window.
 
 use crate::blocks::{emission, light_opacity};
 use crate::mesh::{Neighborhood, HEIGHT};
 use std::collections::VecDeque;
 use std::sync::LazyLock;
 
-const W: usize = 18;
+/// Width of the flooded window and the offset of chunk-local coordinate 0 in it.
+const W: usize = 48;
+const OFF: i32 = 16;
 
 /// `(light_opacity, emission)` per block state.
 static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
@@ -21,7 +25,12 @@ pub struct Light {
 }
 
 fn idx(x: i32, y: usize, z: i32) -> usize {
-    (y * W + (z + 1) as usize) * W + (x + 1) as usize
+    (y * W + (z + OFF) as usize) * W + (x + OFF) as usize
+}
+
+/// Index into the 18 x 18 cells of the border ring.
+fn ring_idx(x: i32, y: usize, z: i32) -> usize {
+    (y * 18 + (z + 1) as usize) * 18 + (x + 1) as usize
 }
 
 impl Light {
@@ -30,16 +39,16 @@ impl Light {
         let mut opacity = vec![0u8; n];
         let mut sky = vec![0u8; n];
         let mut block = vec![0u8; n];
-        let loaded = |x: i32, z: i32| loaded(hood, x, z);
+        let loaded = |x: i32, z: i32| hood.loaded(x.div_euclid(16), z.div_euclid(16));
         let mut queue = VecDeque::new();
-        for z in -1..=16 {
-            for x in -1..=16 {
+        for z in -OFF..W as i32 - OFF {
+            for x in -OFF..W as i32 - OFF {
                 let known = loaded(x, z);
                 let mut level = 15u8;
                 for y in (0..HEIGHT).rev() {
                     let i = idx(x, y, z);
                     if !known {
-                        // Unloaded border columns block light; their light is copied from the chunk edge below.
+                        // Unloaded columns block light; the border ring copies its light from the chunk edge below.
                         opacity[i] = 15;
                         continue;
                     }
@@ -49,7 +58,9 @@ impl Light {
                         block[i] = em;
                         queue.push_back(i);
                     }
-                    level = level.saturating_sub(op);
+                    // Chunk.generateSkylightMap: once the level is below 15, every block takes at least 1.
+                    let step = if op == 0 && level != 15 { 1 } else { op };
+                    level = level.saturating_sub(step);
                     sky[i] = level;
                 }
             }
@@ -59,7 +70,7 @@ impl Light {
         spread(&opacity, &mut sky, sky_queue);
         spread(&opacity, &mut block, queue);
 
-        let mut cells = vec![0u8; n];
+        let mut cells = vec![0u8; HEIGHT * 18 * 18];
         for y in 0..HEIGHT {
             for z in -1..=16 {
                 for x in -1..=16 {
@@ -69,7 +80,7 @@ impl Light {
                         (x.clamp(0, 15), z.clamp(0, 15))
                     };
                     let from = idx(sx, y, sz);
-                    cells[idx(x, y, z)] = sky[from] << 4 | block[from];
+                    cells[ring_idx(x, y, z)] = sky[from] << 4 | block[from];
                 }
             }
         }
@@ -84,26 +95,15 @@ impl Light {
         if y < 0 {
             return (0, 0);
         }
-        let c = self.cells[idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
+        let c = self.cells[ring_idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
         (c >> 4, c & 15)
-    }
-}
-
-fn loaded(hood: &Neighborhood, x: i32, z: i32) -> bool {
-    match (x, z) {
-        (0..=15, 0..=15) => true,
-        (-1, 0..=15) => hood.neighbors[0].is_some(),
-        (16, 0..=15) => hood.neighbors[1].is_some(),
-        (0..=15, -1) => hood.neighbors[2].is_some(),
-        (0..=15, 16) => hood.neighbors[3].is_some(),
-        _ => false,
     }
 }
 
 fn darker_edges(sky: &[u8]) -> VecDeque<usize> {
     let mut sky_queue = VecDeque::new();
-    for z in -1..=16 {
-        for x in -1..=16 {
+    for z in -OFF..W as i32 - OFF {
+        for x in -OFF..W as i32 - OFF {
             for y in 0..HEIGHT {
                 let i = idx(x, y, z);
                 if sky[i] > 1 && has_darker_neighbor(sky, i) {
@@ -164,7 +164,7 @@ mod tests {
         Neighborhood {
             origin: (0, 0),
             center: blocks,
-            neighbors: [None; 4],
+            neighbors: [None; 8],
         }
     }
 
@@ -212,5 +212,63 @@ mod tests {
         let l = Light::compute(&hood_of(&c));
         assert_eq!(l.get(7, 60, 4).0, 14);
         assert_eq!(l.get(4, 60, 4).0, 11);
+    }
+
+    #[test]
+    fn torch_light_crosses_into_the_neighbour_chunk() {
+        let stone_below = |y: usize| if y < 30 { 1 << 4 } else { 0 };
+        let center = chunk(|_, y, _| stone_below(y));
+        let east = chunk(|x, y, z| match (x, y, z) {
+            (1, 40, 8) => 50 << 4 | 5,
+            _ => stone_below(y),
+        });
+        let hood = Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [None, None, None, None, Some(&east), None, None, None],
+        };
+        let l = Light::compute(&hood);
+        assert_eq!(l.get(16, 40, 8).1, 13);
+        assert_eq!(l.get(15, 40, 8).1, 12);
+    }
+
+    #[test]
+    fn torch_light_crosses_a_chunk_corner() {
+        let stone_below = |y: usize| if y < 30 { 1 << 4 } else { 0 };
+        let center = chunk(|_, y, _| stone_below(y));
+        let corner = chunk(|x, y, z| match (x, y, z) {
+            (1, 40, 1) => 50 << 4 | 5,
+            _ => stone_below(y),
+        });
+        let hood = Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [
+                Some(&center),
+                Some(&center),
+                Some(&center),
+                Some(&center),
+                Some(&center),
+                Some(&center),
+                Some(&center),
+                Some(&corner),
+            ],
+        };
+        // Two blocks across x and z plus nothing in y: 14 - 4 = 10.
+        assert_eq!(Light::compute(&hood).get(15, 40, 15).1, 10);
+    }
+
+    #[test]
+    fn sky_light_keeps_decaying_below_leaves() {
+        // A leaf canopy over a ceiling-less shaft: 15 -> 14 in the leaf, then one less per block below.
+        let c = chunk(|_, y, _| match y {
+            0..=9 => 1 << 4,
+            80 => 18 << 4,
+            _ => 0,
+        });
+        let l = Light::compute(&hood_of(&c));
+        assert_eq!(l.get(5, 79, 5).0, 13);
+        assert_eq!(l.get(5, 70, 5).0, 4);
+        assert_eq!(l.get(5, 60, 5).0, 0);
     }
 }

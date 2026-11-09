@@ -497,7 +497,8 @@ impl Particles {
     /// `bounds` is the block's `[min x, y, z, max x, y, z]` inside its cell, as vanilla `getMinX()`..`getMaxZ()`.
     pub fn dig_hit(&mut self, [x, y, z]: [i32; 3], face: u8, state: u16, bounds: [f64; 6]) {
         let o = [x, y, z].map(f64::from);
-        let e = 0.1;
+        // Vanilla `float f = 0.1F` widened to double.
+        let e = f64::from(0.1_f32);
         let mut c = [0, 1, 2]
             .map(|i| o[i] + self.rand() * (bounds[i + 3] - bounds[i] - e * 2.0) + e + bounds[i]);
         match face {
@@ -853,7 +854,12 @@ mod tests {
             ps.dig_hit([3, 10, 4], 1, 44 << 4, [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]);
         }
         for p in &ps.list {
-            assert!((p.pos[1] - 10.6).abs() < 1e-9, "y {}", p.pos[1]);
+            // Vanilla `maxY + (double) 0.1F`: the float widens to 0.10000000149, not 0.1.
+            assert!(
+                (p.pos[1] - (10.5 + f64::from(0.1_f32))).abs() < 1e-12,
+                "y {}",
+                p.pos[1]
+            );
             assert!((3.1..=3.9).contains(&p.pos[0]) && (4.1..=4.9).contains(&p.pos[2]));
         }
     }

@@ -223,16 +223,25 @@ impl InputState {
         self.key_event(code, pressed, false, text);
     }
 
+    /// Vanilla takes the screenshot in any screen, chat included. True when `code` is the
+    /// screenshot key, so the caller drops it; a press queues the action.
+    pub fn screenshot_key(&mut self, code: KeyCode, fresh_press: bool) -> bool {
+        if self.bindings.lookup(Control::Key(code)) != Some(Bind::Screenshot) {
+            return false;
+        }
+        if fresh_press {
+            self.actions.push_back(Action::Screenshot);
+        }
+        true
+    }
+
     fn key_event(&mut self, code: KeyCode, pressed: bool, repeat: bool, text: Option<&str>) {
         match code {
             KeyCode::ControlLeft | KeyCode::ControlRight => self.ctrl_down = pressed,
             KeyCode::F3 if !pressed => self.f3_down = false,
             _ => {}
         }
-        if pressed && !repeat && self.bindings.lookup(Control::Key(code)) == Some(Bind::Screenshot)
-        {
-            // Vanilla takes the screenshot in any screen, chat included.
-            self.actions.push_back(Action::Screenshot);
+        if self.screenshot_key(code, pressed && !repeat) {
             return;
         }
         if self.chat.is_some() || self.screen_open {

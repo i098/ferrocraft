@@ -3,7 +3,7 @@
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
-use crate::mesh::{index, MeshData, Vertex, HEIGHT};
+use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
 use crate::mesher::{Done, Job, Mesher, SharedBlocks};
 use crate::particles::Quads;
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
@@ -516,8 +516,8 @@ impl Renderer {
     }
 
     fn mark_neighbors(&mut self, (cx, cz): (i32, i32)) {
-        self.dirty
-            .extend([(cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)]);
+        // Light crosses chunk edges and corners, so all eight neighbours change.
+        self.dirty.extend(AROUND.map(|(dx, dz)| (cx + dx, cz + dz)));
     }
 
     /// Mesh jobs for the chunks around `near`, nearest first, up to `MAX_PENDING_MESHES` outstanding.
@@ -541,12 +541,7 @@ impl Renderer {
             key,
             generation: self.next_generation,
             center: self.blocks[&key].clone(),
-            neighbors: [
-                get((cx - 1, cz)),
-                get((cx + 1, cz)),
-                get((cx, cz - 1)),
-                get((cx, cz + 1)),
-            ],
+            neighbors: AROUND.map(|(dx, dz)| get((cx + dx, cz + dz))),
         }
     }
 

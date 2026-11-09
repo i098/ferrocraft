@@ -3,10 +3,17 @@
 mod app;
 mod args;
 mod game;
+mod link;
+mod log;
+mod swing;
+mod ui;
+mod weather;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() {
+    log::install_panic_hook();
+    let started = std::time::Instant::now();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match args::parse(&argv, std::env::var("FERROCRAFT_SERVER").ok()) {
         Ok(a) => a,
@@ -15,23 +22,12 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let session = match ferrocraft_net_client::Session::connect(&args.server, &args.username) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("ferrocraft-engine: cannot join {}: {e}", args.server);
-            std::process::exit(1);
-        }
-    };
-    println!(
-        "ferrocraft-engine: joined {} as {}",
-        args.server, args.username
-    );
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = app::App::new(args, session);
+    let mut app = app::App::new(args);
     event_loop.run_app(&mut app).expect("run");
-    if let Some(reason) = app.exit_reason() {
-        eprintln!("ferrocraft-engine: disconnected: {reason}");
-        std::process::exit(1);
-    }
+    log::line(&format!(
+        "event loop ended after {}s (window closed, quit or deadline)",
+        started.elapsed().as_secs()
+    ));
 }

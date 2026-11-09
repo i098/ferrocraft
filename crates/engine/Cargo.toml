@@ -15,4 +15,5 @@ world = { path = "../world" }
 ferrocraft-net-client = { path = "../net-client" }
 render = { path = "../render" }
 input-audio = { path = "../input-audio" }
+gui = { path = "../gui" }
 winit = "0.30"

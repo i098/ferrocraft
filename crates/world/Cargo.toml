@@ -8,3 +8,6 @@ description = "Minecraft 1.8.9 world and entity behavior ported from vanilla (pl
 
 [dev-dependencies]
 oracle = { path = "../oracle" }
+
+[dependencies]
+ferrocraft-protocol = { path = "../protocol" }

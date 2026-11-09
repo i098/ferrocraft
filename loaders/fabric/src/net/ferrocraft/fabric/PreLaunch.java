@@ -43,7 +43,11 @@ public final class PreLaunch implements PreLaunchEntrypoint {
             cmd.add(jar.getPath());
         }
         System.out.println("ferrocraft-fabric: starting " + cmd);
-        return new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        long start = System.currentTimeMillis();
+        int code = new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        // Java reports 128+N when the engine died from signal N; the engine's own exit reasons are in ~/.ferrocraft/engine.log.
+        System.out.println("ferrocraft-fabric: engine exited with code " + code + " after " + (System.currentTimeMillis() - start) / 1000 + "s");
+        return code;
     }
 
     /** Vanilla jar of the `minecraft` mod: the engine reads textures and the font from it. Last flag wins in the engine's parser. */

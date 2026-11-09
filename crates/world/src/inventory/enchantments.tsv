@@ -1,0 +1,28 @@
+# Generated from the Minecraft 1.8.9 client classes (Item registry, creative tabs, RenderItem model
+# registrations); see crates/world/src/inventory/items.rs.
+# id	name	max_level
+0	Protection	4
+1	Fire Protection	4
+2	Feather Falling	4
+3	Blast Protection	4
+4	Projectile Protection	4
+5	Respiration	3
+6	Aqua Affinity	1
+7	Thorns	3
+8	Depth Strider	3
+16	Sharpness	5
+17	Smite	5
+18	Bane of Arthropods	5
+19	Knockback	2
+20	Fire Aspect	2
+21	Looting	3
+32	Efficiency	5
+33	Silk Touch	1
+34	Unbreaking	3
+35	Fortune	3
+48	Power	5
+49	Punch	2
+50	Flame	1
+51	Infinity	1
+61	Luck of the Sea	3
+62	Lure	3

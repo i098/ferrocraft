@@ -1,12 +1,13 @@
 //! Reader thread: play packets in, [`NetEvent`] values out.
 
 use crate::link::{Reader, Writer};
-use crate::{chat, send, NetEvent};
+use crate::{chat, entity, events, send, NetEvent};
 use ferrocraft_protocol::play::{clientbound as cb, serverbound as sb};
 use std::io;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use world::chunk::Chunk;
+use world::entities::EntityEvent;
 
 pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>) {
     let mut dimension = 0;
@@ -57,7 +58,12 @@ fn handle(
         }
         cb::Packet::Respawn(r) => {
             *dimension = r.dimension;
-            vec![NetEvent::Respawn, NetEvent::GameMode(r.gamemode & 7)]
+            vec![
+                NetEvent::Respawn,
+                NetEvent::Entity(EntityEvent::Clear),
+                NetEvent::GameMode(r.gamemode & 7),
+                NetEvent::Difficulty(r.difficulty),
+            ]
         }
         // Reason 3 is "change game mode"; the value is the mode as a float.
         cb::Packet::ChangeGameState(g) if g.reason == 3 => {
@@ -65,20 +71,22 @@ fn handle(
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
-            // Only now is the server surely in the play state; earlier play packets get "Bad packet id".
-            let settings = sb::ClientSettings {
-                locale: "en_US".into(),
-                view_distance: 8,
-                chat_mode: 0,
-                chat_colors: true,
-                skin_parts: 0x7F,
-            };
-            send(writer, sb::Packet::from(settings))?;
             vec![NetEvent::JoinGame {
                 entity_id: j.entity_id,
                 gamemode: j.gamemode & 7,
+                hardcore: j.gamemode & 8 != 0,
+                difficulty: j.difficulty,
+                max_players: j.max_players,
+                reduced_debug_info: j.reduced_debug_info,
             }]
         }
+        cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
+        other => game_events(other, *dimension)?,
+    })
+}
+
+fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
+    Ok(match packet {
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
             x: p.x,
             y: p.y,
@@ -87,10 +95,18 @@ fn handle(
             pitch: p.pitch,
             flags: p.flags,
         }],
-        cb::Packet::ChatMessage(c) if c.position != 2 => {
-            vec![NetEvent::Chat(chat::plain_text(&c.json))]
+        cb::Packet::ChatMessage(c) if c.position == 2 => {
+            vec![NetEvent::ActionBar(chat::plain_text(&c.json))]
         }
-        cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
+        cb::Packet::TimeUpdate(t) => vec![NetEvent::TimeUpdate {
+            world_age: t.world_age,
+            time_of_day: t.time_of_day,
+        }],
+        cb::Packet::ChangeGameState(g) => vec![NetEvent::GameState {
+            reason: g.reason,
+            value: g.value,
+        }],
+        cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
         cb::Packet::BlockChange(b) => vec![block_change(
             b.location.x,
             b.location.y,
@@ -98,9 +114,14 @@ fn handle(
             b.block_id.0,
         )],
         cb::Packet::MultiBlockChange(m) => multi_block_change(&m),
-        cb::Packet::ChunkData(c) => chunk_data(&c, *dimension == 0)?,
+        cb::Packet::ChunkData(c) => chunk_data(&c, dimension == 0)?,
         cb::Packet::MapChunkBulk(b) => chunk_bulk(&b)?,
-        _ => vec![],
+        // The player list feeds both entity names and the tab list.
+        other => entity::events(&other)
+            .into_iter()
+            .map(NetEvent::Entity)
+            .chain(events::events(&other))
+            .collect(),
     })
 }
 

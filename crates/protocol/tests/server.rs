@@ -228,6 +228,94 @@ fn status_phase(server: &Server) {
     assert_eq!(pong.time, 1234567);
 }
 
+#[derive(Default)]
+struct PlayState {
+    seen: BTreeSet<String>,
+    sent_chat: bool,
+    chat_echo: bool,
+    tab_matches: bool,
+    dead: bool,
+    sentinel: bool,
+}
+
+impl PlayState {
+    fn handle(
+        &mut self,
+        packet: cb::Packet,
+        server: &mut Server,
+        conn: &mut Connection<TcpStream>,
+        commands: &[&str],
+    ) {
+        match packet {
+            cb::Packet::JoinGame(_) => {
+                send_client_hello(conn);
+                commands.iter().for_each(|c| server.command(c));
+            }
+            cb::Packet::KeepAlive(k) => conn
+                .send(&sb::Packet::from(sb::KeepAlive { id: k.id }))
+                .unwrap(),
+            cb::Packet::PlayerPositionAndLook(p) => {
+                conn.send(&sb::Packet::from(sb::PlayerPositionAndLook {
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    on_ground: true,
+                }))
+                .unwrap();
+                if !self.sent_chat {
+                    self.sent_chat = true;
+                    send_play_burst(conn, p.x, p.y, p.z);
+                }
+            }
+            cb::Packet::ChatMessage(c) => {
+                self.chat_echo |= c.json.contains("hello from ferrocraft");
+                self.sentinel |= c.json.contains("ferro-sentinel");
+            }
+            cb::Packet::TabComplete(t) => {
+                self.tab_matches |= t.matches.iter().any(|m| m == "/gamemode")
+            }
+            cb::Packet::UpdateHealth(h) if h.health <= 0.0 && !self.dead => {
+                self.dead = true;
+                server.command("say ferro-sentinel");
+                conn.send(&sb::Packet::from(sb::ClientStatus {
+                    action_id: VarInt(0),
+                }))
+                .unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Play: run `commands` after JoinGame and answer the server until the respawn after death.
+fn play_phase(
+    server: &mut Server,
+    conn: &mut Connection<TcpStream>,
+    commands: &[&str],
+) -> PlayState {
+    let mut play = PlayState::default();
+    let deadline = std::time::Instant::now() + Duration::from_secs(40);
+    while std::time::Instant::now() < deadline {
+        let frame = conn.recv_frame().unwrap();
+        let packet =
+            cb::Packet::decode(&frame).unwrap_or_else(|e| panic!("decode {frame:02x?}: {e}"));
+        assert_eq!(
+            packet.encode(),
+            frame,
+            "re-encode differs for {}",
+            variant_name(&packet)
+        );
+        play.seen.insert(variant_name(&packet));
+        play.handle(packet, server, conn, commands);
+        if play.sentinel && play.seen.contains("Respawn") {
+            break;
+        }
+    }
+    play
+}
+
 #[test]
 fn vanilla_server_status_login_and_play() {
     let Ok(jar) = std::env::var("FC_SERVER_JAR") else {
@@ -270,71 +358,12 @@ fn vanilla_server_status_login_and_play() {
     ];
     // Like the vanilla client, send nothing in play until JoinGame arrives: the server
     // switches to the play state on its own tick, after it sent LoginSuccess.
-
-    let mut seen = BTreeSet::new();
-    let mut sent_chat = false;
-    let mut chat_echo = false;
-    let mut tab_matches = false;
-    let mut dead = false;
-    let mut sentinel = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(40);
-    while std::time::Instant::now() < deadline {
-        let frame = conn.recv_frame().unwrap();
-        let packet =
-            cb::Packet::decode(&frame).unwrap_or_else(|e| panic!("decode {frame:02x?}: {e}"));
-        assert_eq!(
-            packet.encode(),
-            frame,
-            "re-encode differs for {}",
-            variant_name(&packet)
-        );
-        seen.insert(variant_name(&packet));
-        match packet {
-            cb::Packet::JoinGame(_) => {
-                send_client_hello(&mut conn);
-                commands.iter().for_each(|c| server.command(c));
-            }
-            cb::Packet::KeepAlive(k) => conn
-                .send(&sb::Packet::from(sb::KeepAlive { id: k.id }))
-                .unwrap(),
-            cb::Packet::PlayerPositionAndLook(p) => {
-                conn.send(&sb::Packet::from(sb::PlayerPositionAndLook {
-                    x: p.x,
-                    y: p.y,
-                    z: p.z,
-                    yaw: p.yaw,
-                    pitch: p.pitch,
-                    on_ground: true,
-                }))
-                .unwrap();
-                if !sent_chat {
-                    sent_chat = true;
-                    send_play_burst(&mut conn, p.x, p.y, p.z);
-                }
-            }
-            cb::Packet::ChatMessage(c) => {
-                chat_echo |= c.json.contains("hello from ferrocraft");
-                sentinel |= c.json.contains("ferro-sentinel");
-            }
-            cb::Packet::TabComplete(t) => tab_matches |= t.matches.iter().any(|m| m == "/gamemode"),
-            cb::Packet::UpdateHealth(h) if h.health <= 0.0 && !dead => {
-                dead = true;
-                server.command("say ferro-sentinel");
-                conn.send(&sb::Packet::from(sb::ClientStatus {
-                    action_id: VarInt(0),
-                }))
-                .unwrap();
-            }
-            _ => {}
-        }
-        if sentinel && seen.contains("Respawn") {
-            break;
-        }
-    }
+    let play = play_phase(&mut server, &mut conn, &commands);
+    let seen = play.seen;
     eprintln!("play packets seen: {seen:?}");
 
-    assert!(chat_echo, "server did not echo the chat message");
-    assert!(tab_matches, "tab completion reply missing /gamemode");
+    assert!(play.chat_echo, "server did not echo the chat message");
+    assert!(play.tab_matches, "tab completion reply missing /gamemode");
     for name in [
         "JoinGame",
         "SpawnPosition",

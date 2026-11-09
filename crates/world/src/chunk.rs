@@ -152,6 +152,11 @@ impl ChunkStore {
         self.chunks.len()
     }
 
+    /// Chunk coordinates of every loaded chunk.
+    pub fn positions(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        self.chunks.keys().copied()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
     }

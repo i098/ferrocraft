@@ -1,19 +1,33 @@
-//! wgpu renderer for the 1.8.9 client: face-culled chunk meshes, sky color, crosshair, chat and debug text.
+//! wgpu renderer for the 1.8.9 client: face-culled chunk meshes, sky color and a 2D overlay of
+//! textured quads that the `gui` crate lays out.
+
+use std::borrow::Cow;
 
 mod assets;
 mod blocks;
+mod entity;
 mod gpu;
+mod hand;
+mod light;
 mod mesh;
-mod text;
+mod particles;
+mod shapes;
+mod sky;
+mod weather;
 
-pub use assets::encode_png;
+pub use hand::{Hand, HeldKind};
+pub use sky::Environment;
+
+pub use assets::{encode_png, AssetSource, Font};
+pub use entity::{nametags, Class, EntityDraw};
 pub use gpu::Renderer;
+pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips
 /// or blends (plants, doors, panes, water) is not.
 pub fn is_solid(state: u16) -> bool {
     matches!(
-        blocks::look(state >> 4).kind,
+        blocks::look(state).kind,
         blocks::Kind::Opaque | blocks::Kind::Cutout
     )
 }
@@ -25,6 +39,9 @@ pub struct Camera {
     pub yaw: f32,
     pub pitch: f32,
     pub fov_deg: f32,
+    /// View bobbing of `EntityRenderer.setupViewBobbing`: translate x, translate y, roll and
+    /// pitch in degrees, applied in view space before the camera rotation.
+    pub bob: [f32; 4],
 }
 
 impl Default for Camera {
@@ -34,18 +51,37 @@ impl Default for Camera {
             yaw: 0.0,
             pitch: 0.0,
             fov_deg: 70.0,
+            bob: [0.0; 4],
         }
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Hud {
-    /// Chat lines, oldest first; `§` color codes are honored.
-    pub chat: Vec<String>,
-    /// `Some` while the chat box is open.
-    pub chat_input: Option<String>,
-    pub crosshair: bool,
-    pub debug: Vec<String>,
+/// How a [`Quad`] mixes with the pixels under it: the vanilla `blendFunc` pairs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Blend {
+    /// 770, 771: source alpha over the destination.
+    #[default]
+    Alpha,
+    /// 775, 769: inverts the destination (the crosshair).
+    Invert,
+    /// 0, 769: darkens the destination by the source color (the vignette).
+    Darken,
+    /// 768, 1: adds the source color (the enchantment glint).
+    Add,
+}
+
+/// One textured quad in window pixels, origin top-left. Corners run top-left, top-right,
+/// bottom-right, bottom-left, so a transformed (rotated, sheared) rectangle stays one quad.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Quad {
+    /// Path under `assets/minecraft/`, such as `textures/gui/icons.png`; `""` is solid white.
+    pub tex: Cow<'static, str>,
+    pub blend: Blend,
+    pub pos: [[f32; 2]; 4],
+    /// Texture coordinates in `0..=1`.
+    pub uv: [[f32; 2]; 4],
+    /// ARGB tint of each corner (`drawGradientRect` uses two).
+    pub color: [u32; 4],
 }
 
 /// One 16x16 column of blocks as the renderer reads it.

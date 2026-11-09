@@ -51,12 +51,7 @@ impl Tag {
             return Err(Error::Nbt("nesting too deep"));
         }
         Ok(match id {
-            1 => Tag::Byte(Wire::read(r)?),
-            2 => Tag::Short(Wire::read(r)?),
-            3 => Tag::Int(Wire::read(r)?),
-            4 => Tag::Long(Wire::read(r)?),
-            5 => Tag::Float(Wire::read(r)?),
-            6 => Tag::Double(Wire::read(r)?),
+            1..=6 => Self::read_number(id, r)?,
             7 => {
                 let n = array_len(r, 1)?;
                 Tag::ByteArray(r.take(n)?.iter().map(|&b| b as i8).collect())
@@ -69,6 +64,17 @@ impl Tag {
                 Tag::IntArray((0..n).map(|_| i32::read(r)).collect::<Result<_>>()?)
             }
             _ => return Err(Error::Nbt("unknown tag type")),
+        })
+    }
+
+    fn read_number(id: u8, r: &mut Reader) -> Result<Tag> {
+        Ok(match id {
+            1 => Tag::Byte(Wire::read(r)?),
+            2 => Tag::Short(Wire::read(r)?),
+            3 => Tag::Int(Wire::read(r)?),
+            4 => Tag::Long(Wire::read(r)?),
+            5 => Tag::Float(Wire::read(r)?),
+            _ => Tag::Double(Wire::read(r)?),
         })
     }
 

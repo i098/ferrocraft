@@ -54,8 +54,10 @@ fn join_receive_chunks_and_chat_echo() {
 
     s.send_chat("hello from ferrocraft").unwrap();
     wait_for(&mut s, &mut log, "chat echo", |l| {
-        l.iter()
-            .any(|e| matches!(e, NetEvent::Chat(t) if t == "<Ferro> hello from ferrocraft"))
+        l.iter().any(|e| {
+            matches!(e, NetEvent::Chat(runs)
+                if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "<Ferro> hello from ferrocraft")
+        })
     });
     eprintln!("chat echo received");
 }

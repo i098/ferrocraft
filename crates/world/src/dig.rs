@@ -197,22 +197,12 @@ fn pane_span(low: bool, high: bool, any: bool) -> (f64, f64) {
 /// `BlockWall.setBlockBoundsBasedOnState`: a post, lower and slimmer on a straight run.
 fn wall_box(joined: [bool; 4]) -> [f64; 6] {
     let [n, s, w, e] = joined;
-    let (mut x0, mut x1, mut z0, mut z1, mut top) = (0.25, 0.75, 0.25, 0.75, 1.0);
-    if n {
-        z0 = 0.0;
-    }
-    if s {
-        z1 = 1.0;
-    }
-    if w {
-        x0 = 0.0;
-    }
-    if e {
-        x1 = 1.0;
-    }
-    if n && s && !w && !e {
+    let pick = |j: bool, edge: f64| if j { edge } else { 0.25 + 0.5 * edge };
+    let (mut x0, mut x1, mut z0, mut z1, mut top) =
+        (pick(w, 0.0), pick(e, 1.0), pick(n, 0.0), pick(s, 1.0), 1.0);
+    if joined == [true, true, false, false] {
         (top, x0, x1) = (0.8125, 0.3125, 0.6875);
-    } else if w && e && !n && !s {
+    } else if joined == [false, false, true, true] {
         (top, z0, z1) = (0.8125, 0.3125, 0.6875);
     }
     [x0, 0.0, z0, x1, top, z1]
@@ -498,6 +488,17 @@ pub fn raycast(
     pitch: f32,
     reach: f64,
 ) -> Option<Hit> {
+    raycast_dist(state, eye, yaw, pitch, reach).map(|(hit, _)| hit)
+}
+
+/// [`raycast`] plus the distance from `eye` to the hit point.
+pub fn raycast_dist(
+    state: &dyn Fn([i32; 3]) -> u16,
+    eye: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+    reach: f64,
+) -> Option<(Hit, f64)> {
     let dir = look_vector(yaw, pitch);
     let mut cell = eye.map(|v| v.floor() as i32);
     let step = dir.map(|d| if d < 0.0 { -1 } else { 1 });
@@ -521,7 +522,7 @@ pub fn raycast(
         if let Some(b) = selection_box(state, cell) {
             if let Some((t, face)) = enter_box(eye, dir, cell, b) {
                 if t <= reach {
-                    return Some(Hit { pos: cell, face });
+                    return Some((Hit { pos: cell, face }, t));
                 }
             }
         }
@@ -554,6 +555,8 @@ pub enum Action {
     },
     /// The `Animation` arm swing packet.
     Swing,
+    /// `UseEntity` attack on the entity under the crosshair.
+    Attack(i32),
 }
 
 /// The loaded world as the dig state machine sees it.
@@ -577,6 +580,8 @@ pub struct Frame {
     pub no_dig: bool,
     pub on_ground: bool,
     pub target: Option<Hit>,
+    /// The entity under the crosshair; a click attacks it and `target` is then `None`.
+    pub entity: Option<i32>,
 }
 
 /// `PlayerControllerMP` dig fields plus `Minecraft.leftClickCounter`.
@@ -587,6 +592,13 @@ pub struct Digger {
     progress: f32,
     hit_delay: i32,
     click_delay: i32,
+}
+
+impl Digger {
+    /// `PlayerControllerMP.getIsHittingBlock`.
+    pub fn is_hitting(&self) -> bool {
+        self.hitting
+    }
 }
 
 /// Ticks to wait after a creative break or a finished dig: `blockHitDelay`.
@@ -617,6 +629,10 @@ impl Digger {
             return;
         }
         out.push(Action::Swing);
+        if let Some(id) = f.entity {
+            out.push(Action::Attack(id));
+            return;
+        }
         match f.target {
             Some(hit) if w.state(hit.pos) >> 4 != 0 => self.click_block(f, hit, w, out),
             _ if !f.creative => self.click_delay = MISS_DELAY,

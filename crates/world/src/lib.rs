@@ -8,6 +8,8 @@
 
 pub mod chunk;
 pub mod dig;
+pub mod entities;
+pub mod inventory;
 
 use std::sync::LazyLock;
 
@@ -40,7 +42,7 @@ pub trait World {
 }
 
 /// Player input for one tick, as the client sets it before `onLivingUpdate`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Input {
     pub forward: f32,
     pub strafe: f32,
@@ -287,6 +289,46 @@ impl Player {
         boxes
     }
 
+    /// The step-up part of `Entity.moveEntity`: the stepped move when it goes farther than `d`.
+    fn step(
+        world: &dyn World,
+        original: &Aabb,
+        motion: [f64; 3],
+        kept_d: [f64; 3],
+        kept_bb: Aabb,
+    ) -> ([f64; 3], Aabb) {
+        let boxes = Self::colliding_boxes(
+            world,
+            &original.add_coord([motion[0], STEP_HEIGHT, motion[2]]),
+        );
+
+        let rise = |sweep: &Aabb| {
+            boxes
+                .iter()
+                .fold(STEP_HEIGHT, |off, b| b.calculate_offset(sweep, 1, off))
+        };
+        // Candidate A: rise with the box stretched over the horizontal move, then slide.
+        let rise_a = rise(&original.add_coord([motion[0], 0.0, motion[2]]));
+        let (a_x, a_z, bb_a) = Self::slide(&boxes, original.offset(1, rise_a), motion);
+        // Candidate B: rise with the plain box, then slide.
+        let rise_b = rise(original);
+        let (b_x, b_z, bb_b) = Self::slide(&boxes, original.offset(1, rise_b), motion);
+
+        let (x, z, rise, cur) = if a_x * a_x + a_z * a_z > b_x * b_x + b_z * b_z {
+            (a_x, a_z, rise_a, bb_a)
+        } else {
+            (b_x, b_z, rise_b, bb_b)
+        };
+        let mut y = -rise;
+        for b in &boxes {
+            y = b.calculate_offset(&cur, 1, y);
+        }
+        if kept_d[0] * kept_d[0] + kept_d[2] * kept_d[2] >= x * x + z * z {
+            return (kept_d, kept_bb);
+        }
+        ([x, y, z], cur.offset(1, y))
+    }
+
     /// `Entity.moveEntity`.
     fn move_entity(&mut self, world: &dyn World, motion: [f64; 3]) {
         let original = self.bb;
@@ -302,42 +344,7 @@ impl Player {
 
         let can_step = self.on_ground || (motion[1] != d[1] && motion[1] < 0.0);
         if STEP_HEIGHT > 0.0 && can_step && (motion[0] != d[0] || motion[2] != d[2]) {
-            let (kept_d, kept_bb) = (d, bb);
-            let boxes = Self::colliding_boxes(
-                world,
-                &original.add_coord([motion[0], STEP_HEIGHT, motion[2]]),
-            );
-
-            let rise = |sweep: &Aabb| {
-                boxes
-                    .iter()
-                    .fold(STEP_HEIGHT, |off, b| b.calculate_offset(sweep, 1, off))
-            };
-            // Candidate A: rise with the box stretched over the horizontal move, then slide.
-            let rise_a = rise(&original.add_coord([motion[0], 0.0, motion[2]]));
-            let (a_x, a_z, bb_a) = Self::slide(&boxes, original.offset(1, rise_a), motion);
-            // Candidate B: rise with the plain box, then slide.
-            let rise_b = rise(&original);
-            let (b_x, b_z, bb_b) = Self::slide(&boxes, original.offset(1, rise_b), motion);
-
-            let (mut x, mut z, rise, mut cur) = if a_x * a_x + a_z * a_z > b_x * b_x + b_z * b_z {
-                (a_x, a_z, rise_a, bb_a)
-            } else {
-                (b_x, b_z, rise_b, bb_b)
-            };
-            let mut y = -rise;
-            for b in &boxes {
-                y = b.calculate_offset(&cur, 1, y);
-            }
-            cur = cur.offset(1, y);
-            if kept_d[0] * kept_d[0] + kept_d[2] * kept_d[2] >= x * x + z * z {
-                x = kept_d[0];
-                y = kept_d[1];
-                z = kept_d[2];
-                cur = kept_bb;
-            }
-            d = [x, y, z];
-            bb = cur;
+            (d, bb) = Self::step(world, &original, motion, d, bb);
         }
 
         self.pos = [
@@ -346,17 +353,19 @@ impl Player {
             (bb.min[2] + bb.max[2]) / 2.0,
         ];
         self.bb = bb;
+        self.set_collisions(motion, d);
+    }
+
+    /// Collision flags and stopped velocity after moving `d` of the wanted `motion`.
+    fn set_collisions(&mut self, motion: [f64; 3], d: [f64; 3]) {
         self.collided_horizontally = motion[0] != d[0] || motion[2] != d[2];
         self.collided_vertically = motion[1] != d[1];
         self.on_ground = self.collided_vertically && motion[1] < 0.0;
-        if motion[0] != d[0] {
-            self.vel[0] = 0.0;
-        }
-        if motion[2] != d[2] {
-            self.vel[2] = 0.0;
-        }
-        if motion[1] != d[1] {
-            self.vel[1] = 0.0; // Block.onLanded; no bouncy blocks yet
+        // Block.onLanded on y; no bouncy blocks yet
+        for a in 0..3 {
+            if motion[a] != d[a] {
+                self.vel[a] = 0.0;
+            }
         }
     }
 

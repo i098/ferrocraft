@@ -3,9 +3,13 @@
 //!
 //! Only for servers with `online-mode=false`: no encryption, no Microsoft sign-in.
 
+mod actions;
 mod chat;
+mod entity;
+mod events;
 mod link;
 mod play;
+mod screens;
 
 use ferrocraft_protocol::codec::{Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
@@ -17,7 +21,11 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use chat::plain_text;
+pub use chat::{formatted_text, plain_text, styled, Styled};
+pub use events::{PlayerInfo, PlayerListEvent};
+pub use screens::{
+    base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
+};
 pub use world::chunk::Chunk;
 
 /// What the server told the client, in packet order.
@@ -26,6 +34,11 @@ pub enum NetEvent {
     JoinGame {
         entity_id: i32,
         gamemode: u8,
+        hardcore: bool,
+        difficulty: u8,
+        max_players: u8,
+        /// `reducedDebugInfo` game rule: F3 hides coordinates.
+        reduced_debug_info: bool,
     },
     Chunk(Chunk),
     UnloadChunk(i32, i32),
@@ -45,11 +58,160 @@ pub enum NetEvent {
     },
     /// Respawn or dimension change: every loaded chunk is gone.
     Respawn,
+    /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.
+    TimeUpdate {
+        world_age: i64,
+        time_of_day: i64,
+    },
+    /// Change Game State (0x2B): `reason` 1 starts rain, 2 stops it, 7 sets rain strength, 8 thunder strength.
+    GameState {
+        reason: u8,
+        value: f32,
+    },
+    /// A chat message (positions 0 and 1) as styled runs.
+    Chat(Vec<Styled>),
+    /// An action bar message (position 2): the component's unformatted text.
+    ActionBar(String),
     /// Game mode (0 survival, 1 creative, 2 adventure, 3 spectator) after a respawn or a
     /// game-state change.
     GameMode(u8),
-    /// Plain text of a chat message (the action bar is dropped).
-    Chat(String),
+    /// Spawn, move, metadata or destroy of a remote entity.
+    Entity(world::entities::EntityEvent),
+    /// S06 UpdateHealth.
+    Health {
+        health: f32,
+        food: i32,
+        saturation: f32,
+    },
+    /// S1F SetExperience.
+    Experience {
+        bar: f32,
+        level: i32,
+        total: i32,
+    },
+    /// S09: the selected hotbar slot, 0 to 8.
+    HeldItem(u8),
+    /// S2F: window -1 and slot -1 is the cursor stack.
+    SetSlot {
+        window: i8,
+        slot: i16,
+        item: world::inventory::Slot,
+    },
+    /// S30: every slot of a window.
+    WindowItems {
+        window: u8,
+        items: Vec<world::inventory::Slot>,
+    },
+    /// S2D: `title` is plain text; an untranslated key such as `container.chest` stays the key.
+    OpenWindow {
+        id: u8,
+        kind: String,
+        title: String,
+        slots: u8,
+    },
+    /// S2E.
+    CloseWindow,
+    /// S31.
+    WindowProperty {
+        window: u8,
+        property: i16,
+        value: i16,
+    },
+    /// S32: not answered by the reader; send [`Session::confirm_transaction`] when `!accepted`.
+    Transaction {
+        window: u8,
+        action: i16,
+        accepted: bool,
+    },
+    /// S38 tab list change.
+    PlayerList {
+        action: PlayerListEvent,
+    },
+    /// S47: formatted text (§ codes).
+    TabHeaderFooter {
+        header: String,
+        footer: String,
+    },
+    /// S45: `action` 0 title, 1 subtitle (`text` is formatted text), 2 times, 3 hide, 4 reset.
+    Title {
+        action: u8,
+        text: Option<String>,
+        fade_in: i32,
+        stay: i32,
+        fade_out: i32,
+    },
+    /// S3B: `mode` 0 create, 1 remove, 2 update display text.
+    ScoreboardObjective {
+        name: String,
+        display: String,
+        mode: u8,
+    },
+    /// S3C.
+    ScoreUpdate {
+        name: String,
+        objective: String,
+        value: i32,
+        remove: bool,
+    },
+    /// S3D: `position` 0 list, 1 sidebar, 2 below name.
+    DisplayScoreboard {
+        position: u8,
+        name: String,
+    },
+    /// S3E: `mode` 0 create, 1 remove, 2 update info, 3 add members, 4 remove members.
+    /// `prefix`/`suffix` are empty in modes 1, 3 and 4.
+    Team {
+        name: String,
+        mode: u8,
+        prefix: String,
+        suffix: String,
+        members: Vec<String>,
+    },
+    /// S29: `pos` in blocks.
+    Sound {
+        name: String,
+        pos: [f64; 3],
+        volume: f32,
+        pitch: u8,
+    },
+    /// S2A.
+    Particle {
+        id: i32,
+        long_distance: bool,
+        pos: [f32; 3],
+        offset: [f32; 3],
+        speed: f32,
+        count: i32,
+        data: Vec<i32>,
+    },
+    /// S28: world effect such as a door sound or a record.
+    Effect {
+        id: i32,
+        pos: [i32; 3],
+        data: i32,
+        global: bool,
+    },
+    /// S27.
+    Explosion {
+        pos: [f32; 3],
+        radius: f32,
+        records: Vec<[i8; 3]>,
+        motion: [f32; 3],
+    },
+    /// S39.
+    Abilities {
+        flags: u8,
+        fly_speed: f32,
+        walk_speed: f32,
+    },
+    /// S41.
+    Difficulty(u8),
+    /// S25.
+    BlockBreakAnim {
+        id: i32,
+        pos: [i32; 3],
+        stage: i8,
+    },
     /// The server kicked the client or the connection ended. Always the last event.
     Disconnect(String),
 }
@@ -139,10 +301,21 @@ impl Session {
         send(
             &self.writer,
             sb::Packet::from(sb::ChatMessage {
-                message: message.into(),
+                message: truncate_chat(message),
             }),
         )
     }
+}
+
+fn truncate_chat(message: &str) -> String {
+    let mut units = 0;
+    message
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= 100
+        })
+        .collect()
 }
 
 impl Drop for Session {
@@ -200,5 +373,16 @@ fn login(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod chat_limit_tests {
+    #[test]
+    fn truncates_to_100_utf16_units() {
+        assert_eq!(super::truncate_chat(&"a".repeat(150)), "a".repeat(100));
+        assert_eq!(super::truncate_chat("hi"), "hi");
+        let s = format!("{}\u{1F600}", "a".repeat(99));
+        assert_eq!(super::truncate_chat(&s), "a".repeat(99));
     }
 }

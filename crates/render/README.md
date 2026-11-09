@@ -3,10 +3,17 @@
 Owner: fc-render
 
 wgpu renderer for the 1.8.9 client: face-culled chunk meshes, block textures from the client jar
-(flat colors without assets), sky clear color, crosshair, block selection outline, chat lines, chat input and debug lines
-with the vanilla `ascii.png` font.
+(flat colors without assets), the sky clear color, and a 2D overlay of textured `Quad`s that the
+`gui` crate lays out.
 
 Entry points: `Renderer::new` (window), `Renderer::new_offscreen` (tests, screenshots),
-`upload_chunk`, `remove_chunk`, `set_block`, `set_selection`, `resize`, `render`, `render_to_rgba`.
+`upload_chunk`, `remove_chunk`, `set_block`, `set_selection`, `resize`, `render`, `render_to_rgba`, `font`.
 Camera yaw and pitch use vanilla degrees; `Camera::pos` is the eye position.
-Text needs assets: without them the HUD draws no glyphs.
+A `Quad` names its texture by jar path (such as `textures/gui/widgets.png`); `""` is solid white.
+`Blend` gives the vanilla blend modes (alpha, crosshair invert, vignette darken, glint add).
+`register_texture(name, png)` adds a runtime texture (server icons) that quads name by `name`.
+`set_hand` takes `HeldKind::Block(state)` or `HeldKind::Item { id, damage }`. A `builtin/generated` item model
+draws as the extruded sprite with its `firstperson` transform.
+Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial)` and then `set_particles` before
+each `render`. The quads are relative to that frame's camera.
+Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.

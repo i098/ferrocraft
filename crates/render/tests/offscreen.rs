@@ -1,6 +1,9 @@
 //! Meshes a synthetic terrain chunk, renders it offscreen and writes a PNG (`RENDER_PNG` overrides the path).
 
-use render::{encode_png, Camera, ChunkBlocks, Hud, Renderer};
+use render::{
+    encode_png, Blend, Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, HeldKind,
+    Particles, Quad, Renderer,
+};
 
 struct Synthetic(i32, i32);
 
@@ -40,22 +43,9 @@ fn renders_synthetic_chunks_to_png() {
         yaw: 10.0,
         pitch: 25.0,
         fov_deg: 70.0,
+        ..Camera::default()
     };
-    let hud = Hud {
-        crosshair: true,
-        chat: vec![
-            "<Steve> hello world".into(),
-            "§eAlex joined the game".into(),
-        ],
-        chat_input: Some("/say hi".into()),
-        debug: vec![
-            "Minecraft 1.8.9 (ferrocraft)".into(),
-            "XYZ: 8.000 / 68.000 / -4.000".into(),
-        ],
-    };
-    // The block outline of the targeted block, like the one a dig target gets in game.
-    r.set_selection(Some([7.998, 62.998, 11.998, 9.002, 64.002, 13.002]));
-    let (w, h, rgba) = r.render_to_rgba(&cam, &hud);
+    let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
 
     let px = |x: u32, y: u32| &rgba[((y * w + x) * 4) as usize..][..4];
     assert_ne!(
@@ -65,7 +55,7 @@ fn renders_synthetic_chunks_to_png() {
     );
     assert_eq!(
         px(w - 5, 5),
-        [120, 166, 255, 255],
+        [121, 167, 255, 255],
         "top-right shows the sky clear color"
     );
 
@@ -76,4 +66,178 @@ fn renders_synthetic_chunks_to_png() {
             .into()
     });
     encode_png(path.as_ref(), w, h, &rgba).expect("write png");
+}
+
+/// Rain, the first-person hand, a flat held item, particles, the local player model (third person)
+/// and a runtime-registered GUI texture: each changes the frame.
+#[test]
+fn rain_and_hand_draw_on_top_of_the_world() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        // Rain and the arm need textures from the client jar.
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let frame = |r: &mut Renderer, rain: f32, hand: Option<Hand>| {
+        r.set_environment(Environment {
+            rain,
+            ticks: 40,
+            ..Environment::default()
+        });
+        r.set_hand(hand);
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let bare = Hand {
+        held: None,
+        swing: 0.0,
+        lowered: 0.0,
+    };
+    let clear = frame(&mut r, 0.0, None);
+    let rainy = frame(&mut r, 1.0, None);
+    let armed = frame(&mut r, 0.0, Some(bare));
+    let holding = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Block(1 << 4)),
+            ..bare
+        }),
+    );
+    let sword = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            ..bare
+        }),
+    );
+    let torch = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 50, damage: 0 }),
+            ..bare
+        }),
+    );
+    assert_ne!(clear, rainy, "rain must change the frame");
+    assert_ne!(clear, armed, "the arm must change the frame");
+    assert_ne!(armed, holding, "a held block must differ from the arm");
+    assert_ne!(holding, sword, "a flat sword must differ from a held block");
+    assert_ne!(sword, torch, "a flat torch must differ from the sword");
+
+    let mut ps = Particles::new();
+    ps.break_block([7, 66, 12], 1 << 4);
+    ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
+    ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
+    r.set_particles(ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0));
+    let particles = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            ..bare
+        }),
+    );
+    assert_ne!(sword, particles, "particles must change the frame");
+
+    // Third person: the engine pushes the local player as an entity; nothing culls it.
+    r.set_entities(&[EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [7.5, 64.0, 11.5],
+        yaw: 180.0,
+        head_yaw: 180.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        size: (0.6, 1.8),
+        held: 276,
+        armor: [0; 4],
+        name: None,
+    }]);
+    let third = frame(&mut r, 0.0, None);
+    r.set_entities(&[]);
+    assert_ne!(clear, third, "the local player model must draw");
+
+    r.register_texture("ferrocraft/server-icon", &tiny_png());
+    let icon = Quad {
+        tex: "ferrocraft/server-icon".into(),
+        blend: Blend::Alpha,
+        pos: [[10.0, 10.0], [74.0, 10.0], [74.0, 74.0], [10.0, 74.0]],
+        uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        color: [0xFFFF_FFFF; 4],
+    };
+    r.set_hand(None);
+    let gui = r.render_to_rgba(&cam, &[icon]).2;
+    assert_eq!(&gui[(20 * 854 + 20) * 4..][..4], &[255, 0, 0, 255]);
+
+    if let Some(dir) = std::env::var_os("RENDER_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, px) in [
+            ("clear", &clear),
+            ("rain", &rainy),
+            ("arm", &armed),
+            ("block", &holding),
+            ("sword", &sword),
+            ("torch", &torch),
+            ("particles", &particles),
+            ("third", &third),
+            ("icon", &gui),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
+        }
+    }
+}
+
+/// A 2x2 solid red PNG.
+fn tiny_png() -> Vec<u8> {
+    let path = std::env::temp_dir().join(format!("ferrocraft-icon-{}.png", std::process::id()));
+    encode_png(&path, 2, 2, &[255, 0, 0, 255].repeat(4)).expect("write png");
+    let bytes = std::fs::read(&path).expect("read png");
+    let _ = std::fs::remove_file(path);
+    bytes
+}
+
+#[test]
+fn view_bob_and_gamma_change_the_frame() {
+    let frame = |bob: [f32; 4], gamma: f32| {
+        let mut r = Renderer::new_offscreen(320, 200, None);
+        r.set_environment(Environment {
+            gamma,
+            ..Environment::default()
+        });
+        for cx in -1..=1 {
+            for cz in 0..=2 {
+                r.upload_chunk(&Synthetic(cx, cz));
+            }
+        }
+        let cam = Camera {
+            pos: [8.0, 68.0, -4.0],
+            pitch: 25.0,
+            bob,
+            ..Camera::default()
+        };
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let base = frame([0.0; 4], 0.0);
+    assert_eq!(base, frame([0.0; 4], 0.0), "rendering is deterministic");
+    assert_ne!(base, frame([0.1, 0.1, 2.0, 1.0], 0.0), "bob moves the view");
+    assert_ne!(base, frame([0.0; 4], 1.0), "gamma brightens the terrain");
 }

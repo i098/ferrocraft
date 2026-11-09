@@ -34,13 +34,17 @@ public final class Accept {
         System.out.println("| Mod jar | Classes (named/missing) | SRG members (named/missing) | Mixin refmap (named/missing) | Forge classes named | Static result |");
         System.out.println("|---|---|---|---|---|---|");
         StringBuilder detail = new StringBuilder();
+        boolean ok = true;
         for (int i = 1; i < args.length; i++) {
-            scan(args[i], classes, members, detail);
+            ok &= scan(args[i], classes, members, detail);
         }
         System.out.print("\n" + detail);
+        if (!ok) {
+            System.exit(1);
+        }
     }
 
-    private static void scan(String jar, Set<String> classes, Set<String> members, StringBuilder detail) throws IOException {
+    private static boolean scan(String jar, Set<String> classes, Set<String> members, StringBuilder detail) throws IOException {
         Set<String> cls = new TreeSet<>(), mem = new TreeSet<>(), ref = new TreeSet<>(), forge = new TreeSet<>();
         Set<String> refMem = new TreeSet<>();
         try (ZipFile zip = new ZipFile(jar)) {
@@ -62,13 +66,15 @@ public final class Accept {
         List<String> missRef = missing(ref, classes), missRefMem = missing(refMem, members);
         missRef.addAll(missRefMem);
         boolean pass = missCls.isEmpty() && missMem.isEmpty() && missRef.isEmpty();
+        boolean named = !cls.isEmpty() || !mem.isEmpty() || !ref.isEmpty() || !refMem.isEmpty();
         String name = Paths.get(jar).getFileName().toString();
         System.out.println("| " + name + " | " + cls.size() + "/" + missCls.size() + " | " + mem.size() + "/" + missMem.size()
                 + " | " + (ref.size() + refMem.size()) + "/" + missRef.size() + " | " + forge.size() + " | "
-                + (pass ? "PASS" : "FAIL") + " |");
+                + (!named ? "N/A (nothing named)" : pass ? "PASS" : "FAIL") + " |");
         for (String m : missCls) detail.append(name).append(" missing class ").append(m).append('\n');
         for (String m : missMem) detail.append(name).append(" missing member ").append(m).append('\n');
         for (String m : missRef) detail.append(name).append(" missing refmap target ").append(m).append('\n');
+        return pass;
     }
 
     private static void collect(String s, Set<String> cls, Set<String> mem, Set<String> forge) {

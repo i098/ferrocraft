@@ -653,7 +653,17 @@ fn look_11(id: u16, meta: u16) -> Look {
             0x9f8150,
             [["iron_trapdoor", "trapdoor"][usize::from(id == 96)]; 6],
         ),
-        97 => cube(0x7d7d7d, "stone"),
+        97 => cube(
+            0x7d7d7d,
+            [
+                "stone",
+                "cobblestone",
+                "stonebrick",
+                "stonebrick_mossy",
+                "stonebrick_cracked",
+                "stonebrick_carved",
+            ][meta.min(5) as usize],
+        ),
         98 => cube(
             0x7b7b7b,
             [
@@ -663,20 +673,53 @@ fn look_11(id: u16, meta: u16) -> Look {
                 "stonebrick_carved",
             ][meta as usize & 3],
         ),
-        99 | 100 => cube(0x967a64, mushroom_tex(id, meta)),
+        99 | 100 => {
+            let tex = mushroom_tex(id, meta);
+            let mut l = cube(0x967a64, "mushroom_block_inside");
+            l.tex = tex;
+            l
+        }
         101 => shape(0xa0a0a0, ["iron_bars"; 6]),
         _ => look_12(id, meta),
     }
 }
 
-fn mushroom_tex(id: u16, meta: u16) -> &'static str {
-    if meta == 0 {
-        "mushroom_block_inside"
-    } else if id == 99 {
+/// Vanilla `BlockHugeMushroom` variants: 1-9 are cap corners/edges/centre, 10 stem sides, 14 all cap, 15 all stem.
+fn mushroom_tex(id: u16, meta: u16) -> [&'static str; 6] {
+    const INSIDE: &str = "mushroom_block_inside";
+    let skin = if id == 99 {
         "mushroom_block_skin_brown"
     } else {
         "mushroom_block_skin_red"
+    };
+    let stem = "mushroom_block_skin_stem";
+    let mut t = [INSIDE; 6];
+    match meta {
+        1..=9 => {
+            t[UP] = skin;
+            let (row, col) = ((meta - 1) / 3, (meta - 1) % 3);
+            // Rows 0-2 are north, middle, south; columns 0-2 are west, middle, east.
+            match row {
+                0 => t[NORTH] = skin,
+                2 => t[SOUTH] = skin,
+                _ => {}
+            }
+            match col {
+                0 => t[WEST] = skin,
+                2 => t[EAST] = skin,
+                _ => {}
+            }
+        }
+        10 => {
+            for f in [NORTH, SOUTH, WEST, EAST] {
+                t[f] = stem;
+            }
+        }
+        14 => t = [skin; 6],
+        15 => t = [stem; 6],
+        _ => {}
     }
+    t
 }
 
 fn look_12(id: u16, meta: u16) -> Look {
@@ -1146,6 +1189,24 @@ pub fn texture_names() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mushroom_and_infested_blocks_pick_texture_by_meta() {
+        let t = look(99 << 4 | 1).tex;
+        assert_eq!(
+            [t[UP], t[NORTH], t[WEST], t[SOUTH]],
+            [
+                "mushroom_block_skin_brown",
+                "mushroom_block_skin_brown",
+                "mushroom_block_skin_brown",
+                "mushroom_block_inside"
+            ]
+        );
+        assert_eq!(look(100 << 4 | 10).tex[EAST], "mushroom_block_skin_stem");
+        assert_eq!(look(100 << 4 | 15).tex[UP], "mushroom_block_skin_stem");
+        assert_eq!(look(97 << 4 | 1).tex[UP], "cobblestone");
+        assert_eq!(look(97 << 4 | 5).tex[UP], "stonebrick_carved");
+    }
 
     #[test]
     fn colored_blocks_pick_texture_by_meta() {

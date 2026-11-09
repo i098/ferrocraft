@@ -92,6 +92,7 @@ pub struct Game {
     pub entities: Entities,
     /// The local player's entity id, from `JoinGame`.
     pub entity_id: i32,
+    pub vehicle: Option<i32>,
     /// Creative mode (6 block entity reach instead of 3).
     pub creative: bool,
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
@@ -139,6 +140,7 @@ impl Game {
             store: ChunkStore::default(),
             entities: Entities::default(),
             entity_id: -1,
+            vehicle: None,
             creative: false,
             gamemode: 0,
             digger: Digger::default(),
@@ -194,6 +196,7 @@ impl Game {
                 ..
             } => {
                 self.entity_id = entity_id;
+                self.vehicle = None;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
                 self.reduced_debug = reduced_debug_info;
@@ -318,7 +321,14 @@ impl Game {
                 id,
                 status: s @ (22 | 23),
             }) if id == self.entity_id => self.reduced_debug = s == 22,
-            NetEvent::Entity(e) => self.entities.apply(e),
+            NetEvent::Entity(e) => {
+                if let EntityEvent::Attach { id, vehicle } = &e {
+                    if *id == self.entity_id {
+                        self.vehicle = (*vehicle >= 0).then_some(*vehicle);
+                    }
+                }
+                self.entities.apply(e)
+            }
             NetEvent::PlayerPosLook {
                 x,
                 y,

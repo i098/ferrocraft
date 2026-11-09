@@ -354,7 +354,7 @@ impl App {
         let block = self.game.target_dist(eye).map(|(_, d)| d);
         self.game
             .entities
-            .pick(eye, dir, reach, self.game.entity_id, None, block)
+            .pick(eye, dir, reach, self.game.entity_id, self.game.vehicle, block)
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.

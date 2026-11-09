@@ -10,6 +10,7 @@ mod gpu;
 mod hand;
 mod light;
 mod mesh;
+mod mesher;
 mod particles;
 mod shapes;
 mod sky;

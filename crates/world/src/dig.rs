@@ -119,7 +119,7 @@ fn is_gate(id: u16) -> bool {
 }
 
 /// Full opaque cubes: `material.isOpaque() && isFullCube()`.
-fn opaque_cube(id: u16) -> bool {
+pub(crate) fn opaque_cube(id: u16) -> bool {
     matches!(
         id,
         1..=5 | 7 | 12 | 13 | 14..=17 | 19 | 21..=25 | 35 | 41..=43 | 45 | 47..=49 | 56..=58
@@ -277,7 +277,7 @@ fn torch_box(meta: u16) -> [f64; 6] {
     }
 }
 
-fn ladder_box(meta: u16) -> [f64; 6] {
+pub(crate) fn ladder_box(meta: u16) -> [f64; 6] {
     match meta {
         2 => [0.0, 0.0, 0.875, 1.0, 1.0, 1.0],
         3 => [0.0, 0.0, 0.0, 1.0, 1.0, 0.125],

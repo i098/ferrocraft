@@ -132,6 +132,9 @@ pub struct Game {
     pub walk_speed: f32,
     /// `ItemStack.animationsToGo` of each hotbar slot (the pick-up pop).
     pub bob: [i32; 9],
+    /// The held slot got another item stack or another index: vanilla's `EntityPlayer.onUpdate`
+    /// then clears the item use. The app takes the flag each tick.
+    pub held_replaced: bool,
 }
 
 impl Game {
@@ -168,6 +171,7 @@ impl Game {
             abilities: 0,
             walk_speed: 0.1,
             bob: [0; 9],
+            held_replaced: false,
         }
     }
 
@@ -230,10 +234,12 @@ impl Game {
     fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         let effect = match ev {
             NetEvent::HeldItem(slot) => {
+                self.held_replaced |= self.inv.held != slot.min(8);
                 self.inv.held = slot.min(8);
                 None
             }
             NetEvent::SetSlot { window, slot, item } => {
+                self.held_replaced |= window == 0 && slot == 36 + i16::from(self.inv.held);
                 if window == 0 && (36..45).contains(&slot) {
                     let b = &mut self.bob[(slot - 36) as usize];
                     let old = &self.inv.player[slot as usize];
@@ -246,6 +252,7 @@ impl Game {
                 None
             }
             NetEvent::WindowItems { window, items } => {
+                self.held_replaced |= window == 0;
                 self.inv.set_items(window, items);
                 None
             }
@@ -447,6 +454,40 @@ impl Game {
         Some([p.pos[0], p.pos[1] + eye_height(sneaking), p.pos[2]])
     }
 
+    /// The local player's bounding box `[x0, y0, z0, x1, y1, z1]`, which blocks a placement.
+    pub fn body(&self) -> [f64; 6] {
+        let [x, y, z] = self.player.as_ref().map_or([0.0; 3], |p| p.pos);
+        [x - 0.3, y, z - 0.3, x + 0.3, y + 1.8, z + 0.3]
+    }
+
+    /// The client half of `ItemBlock.onItemUse`: set the blocks and use up one item outside
+    /// creative mode. Unloaded chunks are skipped.
+    pub fn place_blocks(&mut self, blocks: &[([i32; 3], u16)]) -> Vec<Effect> {
+        let mut touched = Vec::new();
+        for &([x, y, z], state) in blocks {
+            if self.store.get(x >> 4, z >> 4).is_some() {
+                self.store.set_block(x, y, z, state);
+                touched.push((x >> 4, z >> 4));
+            }
+        }
+        if !touched.is_empty() && !self.creative {
+            let slot = 36 + usize::from(self.inv.held);
+            let stack = &mut self.inv.player[slot];
+            if let Some(s) = stack {
+                s.count -= 1;
+                if s.count <= 0 {
+                    *stack = None;
+                }
+            }
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        touched
+            .into_iter()
+            .map(|(x, z)| Effect::Upload(x, z))
+            .collect()
+    }
+
     /// `PlayerControllerMP.getIsHittingBlock`: right click does nothing while a block is dug.
     pub fn is_hitting_block(&self) -> bool {
         self.digger.is_hitting()
@@ -514,6 +555,53 @@ mod tests {
         jump: false,
         sprint: false,
     };
+
+    #[test]
+    fn a_new_held_stack_or_slot_ends_the_item_use() {
+        let mut g = Game::new();
+        g.apply(NetEvent::HeldItem(0));
+        g.apply(NetEvent::SetSlot {
+            window: 0,
+            slot: 20,
+            item: None,
+        });
+        assert!(!g.held_replaced, "same slot and another slot keep the use");
+        g.apply(NetEvent::SetSlot {
+            window: 0,
+            slot: 36,
+            item: None,
+        });
+        assert!(std::mem::take(&mut g.held_replaced));
+        g.apply(NetEvent::HeldItem(3));
+        assert!(std::mem::take(&mut g.held_replaced));
+    }
+
+    #[test]
+    fn placing_uses_up_one_item_outside_creative() {
+        let mut g = Game::new();
+        g.store.insert(world::chunk::Chunk::new(0, 0));
+        let stack = |n| {
+            Some(world::inventory::ItemStack {
+                id: 1,
+                count: n,
+                damage: 0,
+                nbt: None,
+            })
+        };
+        g.inv.player[36] = stack(2);
+        assert_eq!(
+            g.place_blocks(&[([1, 4, 1], 1 << 4)]),
+            vec![Effect::Upload(0, 0)]
+        );
+        assert_eq!(g.store.get_block(1, 4, 1), 1 << 4);
+        assert_eq!(g.inv.player[36], stack(1));
+        g.place_blocks(&[([2, 4, 1], 1 << 4)]);
+        assert_eq!(g.inv.player[36], None);
+        g.inv.player[36] = stack(5);
+        g.creative = true;
+        g.place_blocks(&[([3, 4, 1], 1 << 4)]);
+        assert_eq!(g.inv.player[36], stack(5));
+    }
 
     #[test]
     fn relative_teleport_adds_and_absolute_replaces() {

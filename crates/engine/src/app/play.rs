@@ -352,9 +352,14 @@ impl App {
         let dir = look_vector(p.yaw, self.game.pitch);
         let reach = if self.game.creative { 6.0 } else { 3.0 };
         let block = self.game.target_dist(eye).map(|(_, d)| d);
-        self.game
-            .entities
-            .pick(eye, dir, reach, self.game.entity_id, self.game.vehicle, block)
+        self.game.entities.pick(
+            eye,
+            dir,
+            reach,
+            self.game.entity_id,
+            self.game.vehicle,
+            block,
+        )
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
@@ -793,6 +798,18 @@ impl App {
     }
 }
 
+fn pick_damage(block: u16, meta: u16, subtypes: bool) -> i16 {
+    let mask = match block {
+        17 | 18 | 161 | 162 => 3,
+        44 | 126 => 7,
+        _ => 15,
+    };
+    if subtypes {
+        (meta & mask) as i16
+    } else {
+        0
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on};
@@ -806,18 +823,5 @@ mod tests {
         assert!(item_used_on(1, 1 << 4, 0, 1, 0) && !item_used_on(1, 1 << 4, 0, 1, 2));
         assert!(item_used_on(295, 60 << 4, 0, 1, 0) && !item_used_on(295, 2 << 4, 0, 1, 0));
         assert!(!item_used_on(325, 1 << 4, 0, 1, 0));
-    }
-}
-
-fn pick_damage(block: u16, meta: u16, subtypes: bool) -> i16 {
-    let mask = match block {
-        17 | 18 | 161 | 162 => 3,
-        44 | 126 => 7,
-        _ => 15,
-    };
-    if subtypes {
-        (meta & mask) as i16
-    } else {
-        0
     }
 }

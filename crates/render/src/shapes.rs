@@ -384,9 +384,8 @@ fn boxes_9(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
 fn boxes_10(state: u16, _nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
     let id = state >> 4;
     let t = l.tex;
-    match id {
-        171 => out.push(px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t)),
-        _ => {}
+    if id == 171 {
+        out.push(px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t));
     }
 }
 

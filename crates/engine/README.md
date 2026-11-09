@@ -12,4 +12,4 @@ Input and chat come from `input-audio`.
 Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`.
 The renderer reads textures and the font from a client jar. The boot jar passes the classpath jar that holds `ascii.png` as a file value of `--assetsDir`, and the engine uses it as is. Otherwise the engine looks for `versions/1.8.9/1.8.9.jar` (or `versions/<--version>/<--version>.jar`) under the assets dir's parent, `--gameDir` or its parent. It logs a warning when no font is found.
 The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`, `--port` and `FERROCRAFT_SERVER` are all unset, the title screen opens and nothing connects.
-The debug text shows `N fps (X ms)`. Set `FERROCRAFT_VSYNC=0` to turn off vsync (Immediate or Mailbox present mode). The default is vsync on.
+The debug text shows `N fps (X ms)`. Vsync follows the in-game VSync option (`enableVsync` in `options.txt`, default on). `FERROCRAFT_VSYNC` overrides it: `0` turns vsync off (Immediate or Mailbox present mode), any other value turns it on.

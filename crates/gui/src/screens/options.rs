@@ -422,8 +422,10 @@ const STRING_KEYS: &[(&str, bool, Field<String>)] = &[
     }),
 ];
 
+type Flag = (Opt, fn(&Settings) -> bool, Field<bool>);
+
 /// Button options backed by one `bool` field: getter and toggle target.
-const FLAGS: &[(Opt, fn(&Settings) -> bool, Field<bool>)] = &[
+const FLAGS: &[Flag] = &[
     (
         Opt::InvertMouse,
         |s| s.invert_mouse,

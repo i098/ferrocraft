@@ -73,7 +73,7 @@ fn enchantments(t: &Compound, key: &str) -> Vec<(i16, i16)> {
 /// `Enchantment.getTranslatedName`.
 fn enchantment_name(id: i16, lvl: i16) -> Option<String> {
     let e = items::enchantment(id)?;
-    let level = usize::try_from(lvl - 1)
+    let level = usize::try_from(i32::from(lvl) - 1)
         .ok()
         .and_then(|i| ROMAN.get(i))
         .map_or_else(|| format!("enchantment.level.{lvl}"), |r| (*r).to_string());

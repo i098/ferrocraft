@@ -6,12 +6,8 @@
 pub enum DebugCombo {
     /// F3+A: reload chunks (`RenderGlobal.loadRenderers`).
     ReloadChunks,
-    /// F3+B: entity hitboxes.
-    Hitboxes,
     /// F3+D: clear chat.
     ClearChat,
-    /// F3+G: chunk borders.
-    ChunkBorders,
     /// F3+H: advanced item tooltips.
     AdvancedTooltips,
     /// F3+P: pause when the window loses focus.

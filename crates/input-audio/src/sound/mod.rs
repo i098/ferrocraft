@@ -174,7 +174,13 @@ impl Sound {
             return;
         }
         let roll = self.rand();
-        let Some(event) = self.ticker.tick(in_world, self.music.is_some(), roll) else {
+        let tick = self.ticker.tick(in_world, self.music.is_some(), roll);
+        if tick.stop {
+            if let Some(p) = self.music.take() {
+                p.stop();
+            }
+        }
+        let Some(event) = tick.start else {
             return;
         };
         let pick = self.rand();

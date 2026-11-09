@@ -1,5 +1,6 @@
 struct Globals {
     view_proj: mat4x4<f32>,
+    // xyz: eye position, w: gamma
     eye: vec4<f32>,
     fog_color: vec4<f32>,
     // x: fog start, y: fog end, z: sun brightness, w: torch flicker factor
@@ -41,13 +42,15 @@ fn brightness(level: f32) -> f32 {
     return (1.0 - f) / (f * 3.0 + 1.0);
 }
 
-// EntityRenderer.updateLightmap for the overworld at gamma 0.
+// EntityRenderer.updateLightmap for the overworld.
 fn lightmap(sky: f32, block: f32) -> vec3<f32> {
     let f2 = brightness(sky) * g.fog.z;
     let f3 = brightness(block) * g.fog.w;
     let f4 = f3 * ((f3 * 0.6 + 0.4) * 0.6 + 0.4);
     let f5 = f3 * (f3 * f3 * 0.6 + 0.4);
-    return clamp(vec3<f32>(f2 + f3, f2 + f4, f2 + f5) * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));
+    let c = clamp(vec3<f32>(f2 + f3, f2 + f4, f2 + f5) * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));
+    let inv = vec3<f32>(1.0) - c;
+    return c * (1.0 - g.eye.w) + (vec3<f32>(1.0) - inv * inv * inv * inv) * g.eye.w;
 }
 
 @fragment

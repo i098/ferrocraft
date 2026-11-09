@@ -39,6 +39,9 @@ pub struct Camera {
     pub yaw: f32,
     pub pitch: f32,
     pub fov_deg: f32,
+    /// View bobbing of `EntityRenderer.setupViewBobbing`: translate x, translate y, roll and
+    /// pitch in degrees, applied in view space before the camera rotation.
+    pub bob: [f32; 4],
 }
 
 impl Default for Camera {
@@ -48,6 +51,7 @@ impl Default for Camera {
             yaw: 0.0,
             pitch: 0.0,
             fov_deg: 70.0,
+            bob: [0.0; 4],
         }
     }
 }

@@ -115,6 +115,8 @@ pub struct Game {
     pub xp_level: i32,
     /// `PlayerCapabilities`: bit 0 invulnerable, 1 flying, 2 allow flying, 3 creative.
     pub abilities: u8,
+    /// `ItemStack.animationsToGo` of each hotbar slot (the pick-up pop).
+    pub bob: [i32; 9],
 }
 
 impl Game {
@@ -146,6 +148,7 @@ impl Game {
             xp_bar: 0.0,
             xp_level: 0,
             abilities: 0,
+            bob: [0; 9],
         }
     }
 
@@ -207,6 +210,14 @@ impl Game {
                 None
             }
             NetEvent::SetSlot { window, slot, item } => {
+                if window == 0 && (36..45).contains(&slot) {
+                    let b = &mut self.bob[(slot - 36) as usize];
+                    let old = &self.inv.player[slot as usize];
+                    let grew = item
+                        .as_ref()
+                        .is_some_and(|n| old.as_ref().is_none_or(|o| o.count < n.count));
+                    *b = if grew { 5 } else { 0 };
+                }
                 self.inv.set_slot(window, slot, item);
                 None
             }
@@ -277,7 +288,9 @@ impl Game {
                 pitch,
                 flags,
             } => self.teleport([x, y, z], yaw, pitch, flags),
-            NetEvent::TimeUpdate { time_of_day, .. } => self.world_time = time_of_day.abs(),
+            NetEvent::TimeUpdate { time_of_day, .. } => {
+                self.world_time = time_of_day.wrapping_abs()
+            }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
@@ -322,6 +335,9 @@ impl Game {
         self.ticks += 1;
         self.weather.tick();
         self.swing.tick();
+        for b in &mut self.bob {
+            *b = (*b - 1).max(0);
+        }
         self.entities.tick();
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
@@ -369,14 +385,16 @@ impl Game {
         dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
     }
 
+    /// `PlayerControllerMP.getIsHittingBlock`: right click does nothing while a block is dug.
+    pub fn is_hitting_block(&self) -> bool {
+        self.digger.is_hitting()
+    }
+
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
-    /// blocks the player removed locally. `entity_in_front` hides the block, as in vanilla's
-    /// `objectMouseOver`. Only survival and creative can dig.
-    pub fn dig_tick(
-        &mut self,
-        attack: Attack,
-        entity_in_front: bool,
-    ) -> (Vec<Action>, Vec<Effect>) {
+    /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
+    /// the block and a click attacks it, as in vanilla's `objectMouseOver`. Only survival and
+    /// creative can dig.
+    pub fn dig_tick(&mut self, attack: Attack, entity: Option<i32>) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
         let Some(p) = &self.player else {
             return (actions, Vec::new());
@@ -389,11 +407,12 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
-            target: if entity_in_front {
+            target: if entity.is_some() {
                 None
             } else {
                 self.target(eye)
             },
+            entity,
         };
         let mut local = Local {
             store: &mut self.store,

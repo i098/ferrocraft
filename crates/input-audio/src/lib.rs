@@ -70,9 +70,7 @@ fn press_action(bind: Bind, ctrl: bool) -> Option<Action> {
 fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
     Some(match code {
         KeyCode::KeyA => DebugCombo::ReloadChunks,
-        KeyCode::KeyB => DebugCombo::Hitboxes,
         KeyCode::KeyD => DebugCombo::ClearChat,
-        KeyCode::KeyG => DebugCombo::ChunkBorders,
         KeyCode::KeyH => DebugCombo::AdvancedTooltips,
         KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
         KeyCode::KeyQ => DebugCombo::Help,
@@ -96,6 +94,7 @@ pub struct InputState {
     submit: Option<String>,
     history: Vec<String>,
     history_pos: Option<usize>,
+    history_draft: String,
     grab_requested: bool,
     screen_open: bool,
     focused: bool,
@@ -126,6 +125,7 @@ impl InputState {
             submit: None,
             history: Vec::new(),
             history_pos: None,
+            history_draft: String::new(),
             grab_requested: true,
             screen_open: false,
             focused: true,
@@ -336,6 +336,7 @@ impl InputState {
     fn open_chat(&mut self, initial: String) {
         self.release_all();
         self.history_pos = None;
+        self.history_draft.clear();
         self.chat = Some(initial);
     }
 
@@ -352,7 +353,7 @@ impl InputState {
             KeyCode::ArrowUp => self.history_step(-1),
             KeyCode::ArrowDown => self.history_step(1),
             _ => {
-                for c in text.unwrap_or("").chars().filter(|c| !c.is_control()) {
+                for c in text.unwrap_or("").chars().filter(|&c| allowed_char(c)) {
                     if buf.chars().count() < CHAT_MAX_CHARS {
                         buf.push(c);
                     }
@@ -374,13 +375,31 @@ impl InputState {
         self.submit = Some(line);
     }
 
-    /// `GuiChat.getSentHistory`: -1 older, +1 newer; past the newest clears the line.
+    /// `GuiChat.getSentHistory`: -1 older, +1 newer; past the newest restores the typed draft.
     fn history_step(&mut self, dir: i32) {
         let len = self.history.len();
         let cur = self.history_pos.unwrap_or(len);
         let next = (cur as i32 + dir).clamp(0, len as i32) as usize;
+        if next == cur {
+            return;
+        }
+        if next == len {
+            self.history_pos = None;
+            self.chat = Some(std::mem::take(&mut self.history_draft));
+            return;
+        }
+        if self.history_pos.is_none() {
+            self.history_draft = self.chat.clone().unwrap_or_default();
+        }
         self.history_pos = Some(next);
-        self.chat = Some(self.history.get(next).cloned().unwrap_or_default());
+        self.chat = Some(self.history[next].clone());
+    }
+
+    /// The sent-message part of `GuiNewChat.clearChatMessages` (F3+D).
+    pub fn clear_chat_history(&mut self) {
+        self.history.clear();
+        self.history_pos = None;
+        self.history_draft.clear();
     }
 
     fn release_all(&mut self) {
@@ -465,6 +484,11 @@ impl InputState {
     pub fn wants_cursor_grab(&self) -> bool {
         self.chat.is_none() && !self.screen_open && self.grab_requested && self.focused
     }
+}
+
+/// `ChatAllowedCharacters.isAllowedCharacter`: no `§`, no control chars below space, no DEL.
+pub fn allowed_char(c: char) -> bool {
+    c != '\u{a7}' && c >= ' ' && c != '\u{7f}'
 }
 
 #[cfg(test)]
@@ -601,7 +625,9 @@ mod tests {
         press(&mut s, KeyCode::ControlLeft);
         press(&mut s, KeyCode::KeyQ);
         press(&mut s, KeyCode::F3);
+        press(&mut s, KeyCode::KeyD);
         press(&mut s, KeyCode::KeyB);
+        press(&mut s, KeyCode::KeyG);
         press(&mut s, KeyCode::Escape);
         assert_eq!(
             s.take_actions(),
@@ -610,7 +636,7 @@ mod tests {
                 Action::Drop { whole_stack: false },
                 Action::Drop { whole_stack: true },
                 Action::ToggleDebug,
-                Action::Debug(DebugCombo::Hitboxes),
+                Action::Debug(DebugCombo::ClearChat),
                 Action::Pause,
             ]
         );
@@ -657,5 +683,33 @@ mod tests {
         press(&mut s, KeyCode::ArrowDown);
         press(&mut s, KeyCode::ArrowDown);
         assert_eq!(s.chat_input(), Some(""));
+    }
+
+    #[test]
+    fn chat_rejects_section_sign_and_del() {
+        assert!(!allowed_char('\u{a7}'));
+        assert!(!allowed_char('\u{7f}'));
+        assert!(!allowed_char('\n'));
+        assert!(allowed_char(' ') && allowed_char('é'));
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        typ(&mut s, KeyCode::KeyA, "a\u{a7}b\u{7f}c");
+        assert_eq!(s.chat_input(), Some("abc"));
+    }
+
+    #[test]
+    fn chat_history_keeps_and_restores_draft() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        typ(&mut s, KeyCode::KeyA, "draft");
+        press(&mut s, KeyCode::ArrowUp);
+        assert_eq!(s.chat_input(), Some("draft"));
+        press(&mut s, KeyCode::Enter);
+        press(&mut s, KeyCode::KeyT);
+        typ(&mut s, KeyCode::KeyA, "wip");
+        press(&mut s, KeyCode::ArrowUp);
+        assert_eq!(s.chat_input(), Some("draft"));
+        press(&mut s, KeyCode::ArrowDown);
+        assert_eq!(s.chat_input(), Some("wip"));
     }
 }

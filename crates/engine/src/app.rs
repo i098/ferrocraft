@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 use world::chunk::Chunk;
 use world::entities::{look_vector, Entity, Kind};
@@ -89,9 +89,17 @@ pub struct App {
     sprint_sent: bool,
     /// Ticks the left button has dug at one block, for hit sounds and shards every 4 ticks.
     dig_ticks: u32,
+    /// Whether the chat input was open last tick; closing it resets the chat scroll.
+    chat_open: bool,
+    /// `Entity.distanceWalkedOnStepModified` and `nextStepDistance` for footstep sounds.
+    walked: f32,
+    next_step: i32,
     limbs: Limbs,
     /// `EntityRenderer.fovModifierHand` and its previous tick value.
     fov_mod: (f32, f32),
+    view_bob: play::ViewBob,
+    /// When the last frame was shown, for the `maxFps` limit.
+    last_frame: Instant,
     /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
     equip: (f32, f32, Option<(i16, i16)>),
     /// `GuiDownloadingTerrain` stays until the first position packet.
@@ -136,8 +144,13 @@ impl App {
             sneak_sent: false,
             sprint_sent: false,
             dig_ticks: 0,
+            chat_open: false,
+            walked: 0.0,
+            next_step: 0,
             limbs: Limbs::default(),
             fov_mod: (1.0, 1.0),
+            view_bob: play::ViewBob::default(),
+            last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
             awaiting_terrain: false,
             cursor: (0.0, 0.0),
@@ -209,6 +222,20 @@ impl App {
                 sound.set_volume(*cat, v);
             }
         }
+        let chat_settings = gui::chat::ChatSettings {
+            visibility: match s.chat_visibility {
+                0 => gui::chat::Visibility::Full,
+                1 => gui::chat::Visibility::System,
+                _ => gui::chat::Visibility::Hidden,
+            },
+            colors: s.chat_colors,
+            opacity: s.chat_opacity,
+            scale: s.chat_scale,
+            width: s.chat_width,
+            height_focused: s.chat_height_focused,
+            height_unfocused: s.chat_height_unfocused,
+        };
+        let (fullscreen, vsync) = (s.fullscreen, s.vsync);
         let (lang, distance, chat, colors, parts) = (
             s.lang.clone(),
             s.render_distance as i8,
@@ -216,10 +243,69 @@ impl App {
             s.chat_colors,
             s.model_parts,
         );
+        if self.hud.chat.settings != chat_settings {
+            self.hud.chat.settings = chat_settings;
+            let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+            self.hud.chat.refresh(m);
+        }
+        if let Some(w) = &self.window {
+            if w.fullscreen().is_some() != fullscreen {
+                w.set_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
+            }
+        }
+        if let Some(r) = &mut self.renderer {
+            r.set_vsync(vsync);
+        }
         if let Some(sess) = self.link.session() {
             let r = sess.client_settings(&lang, distance, chat, colors, parts);
             self.send_result(r);
         }
+    }
+
+    /// `Minecraft.getLimitFramerate`: 30 fps in menus without a world, else `maxFps` (260 is
+    /// unlimited).
+    fn pace_frame(&mut self, el: &ActiveEventLoop) -> bool {
+        let limit = if !self.ui.in_world && self.ui.is_open() {
+            30
+        } else {
+            self.ui.settings.max_fps
+        };
+        if (1..260).contains(&limit) {
+            let due = self.last_frame + Duration::from_secs_f64(1.0 / f64::from(limit));
+            if due > Instant::now() {
+                el.set_control_flow(ControlFlow::WaitUntil(due));
+                return false;
+            }
+        }
+        el.set_control_flow(ControlFlow::Poll);
+        self.last_frame = Instant::now();
+        true
+    }
+
+    /// `ScreenShotHelper.saveScreenshot`: `screenshots/<date>.png` under the game dir, and a chat line.
+    fn save_screenshot(&mut self, (w, h, rgba): (u32, u32, Vec<u8>)) {
+        let dir = self.args.game_dir.join("screenshots");
+        let stamp = screenshot_stamp();
+        let mut path = dir.join(format!("{stamp}.png"));
+        for n in 2.. {
+            if !path.exists() {
+                break;
+            }
+            path = dir.join(format!("{stamp}_{n}.png"));
+        }
+        let saved =
+            std::fs::create_dir_all(&dir).and_then(|()| render::encode_png(&path, w, h, &rgba));
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let text = match saved {
+            Ok(()) => self.ui.texts.fmt("screenshot.success", &[&name]),
+            Err(e) => self.ui.texts.fmt("screenshot.failure", &[&e.to_string()]),
+        };
+        self.chat_line(vec![ferrocraft_net_client::Styled {
+            format: String::new(),
+            text,
+        }]);
     }
 
     fn send_result(&mut self, r: std::io::Result<()>) {
@@ -245,6 +331,14 @@ impl App {
     }
 
     fn camera(&self, frac: f64) -> Camera {
+        let mut cam = self.view_camera(frac);
+        if self.ui.settings.view_bobbing && self.game.player.is_some() {
+            cam.bob = self.view_bob.offsets(frac as f32);
+        }
+        cam
+    }
+
+    fn view_camera(&self, frac: f64) -> Camera {
         let fov = self.ui.settings.fov
             * (self.fov_mod.0 + (self.fov_mod.1 - self.fov_mod.0) * frac as f32);
         let (Some(p), Some(eye)) = (&self.game.player, self.eye(frac)) else {
@@ -253,6 +347,7 @@ impl App {
                 yaw: 0.0,
                 pitch: 0.0,
                 fov_deg: fov,
+                ..Camera::default()
             };
         };
         if self.perspective == 0 {
@@ -261,6 +356,7 @@ impl App {
                 yaw: p.yaw,
                 pitch: self.game.pitch,
                 fov_deg: fov,
+                ..Camera::default()
             };
         }
         let (yaw, pitch) = if self.perspective == 2 {
@@ -283,6 +379,7 @@ impl App {
             yaw,
             pitch,
             fov_deg: fov,
+            ..Camera::default()
         }
     }
 
@@ -351,6 +448,7 @@ impl App {
             rain,
             thunder,
             render_distance_chunks: self.ui.settings.render_distance as u32,
+            gamma: self.ui.settings.gamma,
         });
         let hand_item = self.equip.2.or(held);
         r.set_hand(
@@ -374,6 +472,9 @@ impl App {
             .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32);
         r.set_particles(verts);
         r.render(&cam, &quads);
+        if let Some(shot) = r.take_screenshot() {
+            self.save_screenshot(shot);
+        }
     }
 
     /// The F3 left column, `None` without a player.
@@ -426,7 +527,7 @@ impl App {
             let hotbar = self.icons.as_ref().map(|icons| gui::HotbarItems {
                 slots: std::array::from_fn(|i| &inv.player[36 + i]),
                 icons,
-                bob: [0; 9],
+                bob: self.game.bob,
             });
             self.hud.draw(
                 &mut g,
@@ -440,7 +541,7 @@ impl App {
                     reduced_debug: self.ui.settings.reduced_debug_info,
                     fancy: self.ui.settings.fancy_graphics,
                     brightness: 1.0,
-                    player_view: true,
+                    player_view: self.game.gamemode != 3,
                     status: Some(&status),
                     hotbar,
                     player_list: self.input.player_list_held(),
@@ -511,6 +612,7 @@ impl ApplicationHandler for App {
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
+        self.apply_settings();
         self.start_screen();
     }
 
@@ -553,8 +655,10 @@ impl ApplicationHandler for App {
         if self.quit || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();
         }
-        if let Some(w) = &self.window {
-            w.request_redraw();
+        if self.pace_frame(el) {
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
         }
     }
 }
@@ -615,4 +719,27 @@ impl ChunkBlocks for View<'_> {
 /// Builds a screen with no arguments, for effects that open one.
 fn boxed<S: Screen + 'static>(s: S) -> Box<dyn Screen> {
     Box::new(s)
+}
+
+/// `yyyy-MM-dd_HH.mm.ss` in UTC, the vanilla screenshot file name.
+fn screenshot_stamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}_{:02}.{:02}.{:02}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }

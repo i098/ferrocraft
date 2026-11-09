@@ -200,7 +200,7 @@ pub struct Ctx<'a> {
     /// Folder that holds `servers.dat`.
     pub game_dir: PathBuf,
     pub effects: Vec<Effect>,
-    /// The system clipboard text, read and written by text fields.
+    /// The clipboard text for Ctrl+C and Ctrl+V in text fields; it lives only in this process.
     pub clipboard: &'a mut String,
     /// Font widths, for text fields handling keys outside a draw.
     pub metrics: &'a dyn Metrics,

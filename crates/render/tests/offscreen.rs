@@ -43,6 +43,7 @@ fn renders_synthetic_chunks_to_png() {
         yaw: 10.0,
         pitch: 25.0,
         fov_deg: 70.0,
+        ..Camera::default()
     };
     let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
 
@@ -87,6 +88,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         yaw: 20.0,
         pitch: 10.0,
         fov_deg: 70.0,
+        ..Camera::default()
     };
     let frame = |r: &mut Renderer, rain: f32, hand: Option<Hand>| {
         r.set_environment(Environment {
@@ -211,4 +213,31 @@ fn tiny_png() -> Vec<u8> {
     let bytes = std::fs::read(&path).expect("read png");
     let _ = std::fs::remove_file(path);
     bytes
+}
+
+#[test]
+fn view_bob_and_gamma_change_the_frame() {
+    let frame = |bob: [f32; 4], gamma: f32| {
+        let mut r = Renderer::new_offscreen(320, 200, None);
+        r.set_environment(Environment {
+            gamma,
+            ..Environment::default()
+        });
+        for cx in -1..=1 {
+            for cz in 0..=2 {
+                r.upload_chunk(&Synthetic(cx, cz));
+            }
+        }
+        let cam = Camera {
+            pos: [8.0, 68.0, -4.0],
+            pitch: 25.0,
+            bob,
+            ..Camera::default()
+        };
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let base = frame([0.0; 4], 0.0);
+    assert_eq!(base, frame([0.0; 4], 0.0), "rendering is deterministic");
+    assert_ne!(base, frame([0.1, 0.1, 2.0, 1.0], 0.0), "bob moves the view");
+    assert_ne!(base, frame([0.0; 4], 1.0), "gamma brightens the terrain");
 }

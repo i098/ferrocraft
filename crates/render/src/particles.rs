@@ -32,7 +32,7 @@ pub enum Kind {
     Droplet,
     AngryVillager,
     HappyVillager,
-    /// `blockcrack`/`blockdust`: state id (`id << 4 | meta`) in the packet data.
+    /// `blockcrack`/`blockdust`: `id | meta << 12` in the packet data.
     BlockCrack,
 }
 
@@ -346,7 +346,8 @@ impl Particles {
             return;
         };
         let data0 = if kind == Kind::BlockCrack {
-            data.first().copied().unwrap_or(0)
+            let d = data.first().copied().unwrap_or(0);
+            ((d & 0xfff) << 4) | ((d >> 12) & 0xf)
         } else {
             0
         };

@@ -17,6 +17,8 @@ pub struct Environment {
     pub rain: f32,
     pub thunder: f32,
     pub render_distance_chunks: u32,
+    /// Brightness option `gameSettings.gammaSetting`, `0..1`.
+    pub gamma: f32,
 }
 
 impl Default for Environment {
@@ -29,6 +31,7 @@ impl Default for Environment {
             rain: 0.0,
             thunder: 0.0,
             render_distance_chunks: 8,
+            gamma: 0.0,
         }
     }
 }

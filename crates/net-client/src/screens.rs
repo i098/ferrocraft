@@ -118,10 +118,9 @@ fn parse_status(json: &str) -> Option<ServerStatus> {
                 .collect()
         })
         .unwrap_or_default();
-    let mut motd = String::new();
-    if let Some(d) = v.get("description") {
-        formatted(d, "", &mut motd);
-    }
+    let motd = v.get("description").map_or_else(String::new, |d| {
+        crate::chat::formatted_text(&crate::chat::styled(&d.to_string()))
+    });
     Some(ServerStatus {
         version_name: v
             .pointer("/version/name")
@@ -140,68 +139,6 @@ fn parse_status(json: &str) -> Option<ServerStatus> {
         ping_ms: 0,
         sample,
     })
-}
-
-/// `IChatComponent.getFormattedText`: each part gets its style codes, then a reset.
-fn formatted(v: &Value, inherited: &str, out: &mut String) {
-    match v {
-        Value::String(s) => {
-            out.push_str(inherited);
-            out.push_str(s);
-        }
-        Value::Array(items) => items.iter().for_each(|i| formatted(i, inherited, out)),
-        Value::Object(o) => {
-            let mut style = inherited.to_owned();
-            if let Some(c) = o.get("color").and_then(Value::as_str).and_then(color_code) {
-                style = format!("§{c}");
-            }
-            for (key, code) in [
-                ("obfuscated", 'k'),
-                ("bold", 'l'),
-                ("strikethrough", 'm'),
-                ("underlined", 'n'),
-                ("italic", 'o'),
-            ] {
-                if o.get(key).and_then(Value::as_bool) == Some(true) {
-                    style.push('§');
-                    style.push(code);
-                }
-            }
-            let text = o.get("text").and_then(Value::as_str).unwrap_or("");
-            if !text.is_empty() {
-                out.push_str(&style);
-                out.push_str(text);
-                out.push_str("§r");
-            }
-            if let Some(extra) = o.get("extra") {
-                formatted(extra, &style, out);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn color_code(name: &str) -> Option<char> {
-    const NAMES: [&str; 16] = [
-        "black",
-        "dark_blue",
-        "dark_green",
-        "dark_aqua",
-        "dark_red",
-        "dark_purple",
-        "gold",
-        "gray",
-        "dark_gray",
-        "blue",
-        "green",
-        "aqua",
-        "red",
-        "light_purple",
-        "yellow",
-        "white",
-    ];
-    let i = NAMES.iter().position(|n| *n == name)?;
-    char::from_digit(i as u32, 16)
 }
 
 /// Standard base64 (with padding or without); `None` on any other byte.
@@ -344,7 +281,7 @@ mod tests {
         assert_eq!(s.sample, ["Bob"]);
         assert_eq!(
             parse_status(r#"{"description":"plain"}"#).unwrap().motd,
-            "plain"
+            "plain§r"
         );
     }
 

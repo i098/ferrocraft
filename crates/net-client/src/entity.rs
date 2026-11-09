@@ -182,7 +182,7 @@ fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
 }
 
 impl Session {
-    /// Left click on an entity: `UseEntity` attack, then the arm swing (vanilla order).
+    /// Left click on an entity: `UseEntity` attack. The caller sends the arm swing first.
     pub fn attack_entity(&mut self, target: i32) -> io::Result<()> {
         send(
             &self.writer,
@@ -190,8 +190,7 @@ impl Session {
                 target: VarInt(target),
                 action: UseAction::Attack,
             }),
-        )?;
-        self.swing_arm()
+        )
     }
 
     /// Right click on an entity.
@@ -203,11 +202,6 @@ impl Session {
                 action: UseAction::Interact,
             }),
         )
-    }
-
-    /// `C0A`: the arm swing of a left click.
-    pub fn swing_arm(&mut self) -> io::Result<()> {
-        send(&self.writer, sb::Packet::from(sb::Animation {}))
     }
 
     /// `C0B` entity action: 0 sneak, 1 unsneak, 3 start sprint, 4 stop sprint.

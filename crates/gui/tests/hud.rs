@@ -136,7 +136,11 @@ fn draws_hud_to_png() {
     let sky = at(w - 5, 5);
     assert_eq!(sky, [121, 167, 255, 255], "top-right is plain sky");
     // `GuiOverlayDebug.renderDebugInfoLeft` fills from GUI (1, 1) with 0x90505050; the scale is 2.
-    assert_eq!(at(1, 1), sky, "nothing is drawn left of or above GUI (1, 1)");
+    assert_eq!(
+        at(1, 1),
+        sky,
+        "nothing is drawn left of or above GUI (1, 1)"
+    );
     let alpha = f32::from(0x90_u8) / 255.0;
     for (i, s) in sky.iter().take(3).enumerate() {
         let want = f32::from(*s) * (1.0 - alpha) + f32::from(0x50_u8) * alpha;

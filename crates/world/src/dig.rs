@@ -565,6 +565,8 @@ pub enum Action {
     },
     /// The `Animation` arm swing packet.
     Swing,
+    /// `UseEntity` attack on the entity under the crosshair.
+    Attack(i32),
 }
 
 /// The loaded world as the dig state machine sees it.
@@ -588,6 +590,8 @@ pub struct Frame {
     pub no_dig: bool,
     pub on_ground: bool,
     pub target: Option<Hit>,
+    /// The entity under the crosshair; a click attacks it and `target` is then `None`.
+    pub entity: Option<i32>,
 }
 
 /// `PlayerControllerMP` dig fields plus `Minecraft.leftClickCounter`.
@@ -598,6 +602,13 @@ pub struct Digger {
     progress: f32,
     hit_delay: i32,
     click_delay: i32,
+}
+
+impl Digger {
+    /// `PlayerControllerMP.getIsHittingBlock`.
+    pub fn is_hitting(&self) -> bool {
+        self.hitting
+    }
 }
 
 /// Ticks to wait after a creative break or a finished dig: `blockHitDelay`.
@@ -628,6 +639,10 @@ impl Digger {
             return;
         }
         out.push(Action::Swing);
+        if let Some(id) = f.entity {
+            out.push(Action::Attack(id));
+            return;
+        }
         match f.target {
             Some(hit) if w.state(hit.pos) >> 4 != 0 => self.click_block(f, hit, w, out),
             _ if !f.creative => self.click_delay = MISS_DELAY,

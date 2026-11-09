@@ -20,8 +20,8 @@ impl BlockSound {
     pub fn of(id: u16) -> Self {
         match id {
             2 | 18 | 31 | 32 | 37 | 38 | 39 | 40 | 59 | 6 | 106 | 111 | 161 | 175 | 141 | 142
-            | 83 | 110 | 170 => Self::Grass,
-            3 | 13 | 60 => Self::Gravel,
+            | 83 | 110 | 170 | 19 | 46 => Self::Grass,
+            3 | 13 | 60 | 82 => Self::Gravel,
             12 | 88 => Self::Sand,
             5
             | 17
@@ -58,15 +58,18 @@ impl BlockSound {
             | 163
             | 164
             | 178
-            | 183..=197 => Self::Wood,
+            | 183..=197
+            | 26
+            | 50
+            | 75
+            | 76 => Self::Wood,
             65 => Self::Ladder,
-            20 | 95 | 102 | 160 | 89 | 169 | 138 | 123 | 124 => Self::Glass,
-            35 | 171 | 30 | 81 => Self::Cloth,
+            20 | 95 | 102 | 160 | 89 | 169 | 138 | 123 | 124 | 79 | 174 => Self::Glass,
+            35 | 171 | 30 | 81 | 92 | 51 => Self::Cloth,
             78 | 80 => Self::Snow,
             145 => Self::Anvil,
-            41 | 42 | 57 | 101 | 66 | 27 | 28 | 157 | 71 | 133 | 148 | 147 | 152 | 154 | 167 => {
-                Self::Metal
-            }
+            41 | 42 | 57 | 101 | 66 | 27 | 28 | 157 | 71 | 133 | 148 | 147 | 152 | 154 | 167
+            | 52 => Self::Metal,
             _ => Self::Stone,
         }
     }
@@ -112,9 +115,15 @@ impl BlockSound {
     }
 
     /// Break (aux effect 2001) and place share one sound: `(event, volume, pitch)`.
+    /// Ladder breaks with `dig.wood` like vanilla `soundTypeLadder`.
     pub fn dig(self) -> (String, f32, f32) {
+        let s = if self == Self::Ladder {
+            "wood"
+        } else {
+            self.suffix()
+        };
         (
-            format!("dig.{}", self.suffix()),
+            format!("dig.{s}"),
             (self.volume() + 1.0) / 2.0,
             self.pitch() * 0.8,
         )
@@ -158,5 +167,32 @@ mod tests {
         assert_eq!(BlockSound::of(20).dig().0, "dig.glass");
         assert_eq!(wire_pitch(63), 1.0);
         assert_eq!(wire_pitch(10), 0.5);
+    }
+
+    #[test]
+    fn special_blocks_follow_vanilla_sound_types() {
+        use BlockSound::*;
+        let table = [
+            (82, Gravel),
+            (172, Stone),
+            (159, Stone),
+            (19, Grass),
+            (46, Grass),
+            (79, Glass),
+            (174, Glass),
+            (50, Wood),
+            (75, Wood),
+            (76, Wood),
+            (26, Wood),
+            (52, Metal),
+            (92, Cloth),
+            (51, Cloth),
+            (65, Ladder),
+        ];
+        for (id, ty) in table {
+            assert_eq!(BlockSound::of(id), ty, "block {id}");
+        }
+        assert_eq!(Ladder.dig().0, "dig.wood");
+        assert_eq!(Ladder.step().0, "step.ladder");
     }
 }

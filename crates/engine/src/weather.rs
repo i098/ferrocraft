@@ -18,16 +18,25 @@ impl Weather {
         match reason {
             1 => {
                 self.raining = true;
-                self.rain = 0.0;
+                self.set_rain(0.0);
             }
             2 => {
                 self.raining = false;
-                self.rain = 1.0;
+                self.set_rain(1.0);
             }
-            7 => self.rain = value,
-            8 => self.thunder = value,
+            7 => self.set_rain(value),
+            8 => {
+                self.prev_thunder = value;
+                self.thunder = value;
+            }
             _ => {}
         }
+    }
+
+    /// `World.setRainStrength`: the previous value follows at once, so there is no fade.
+    fn set_rain(&mut self, v: f32) {
+        self.prev_rain = v;
+        self.rain = v;
     }
 
     /// One 20 TPS step. The client never learns `WorldInfo.thundering`, so thunder only decays between server updates.
@@ -78,5 +87,18 @@ mod tests {
         w.apply(8, 1.0);
         w.tick();
         assert!((w.strengths(0.5).1 - 0.995).abs() < 1e-4);
+    }
+
+    #[test]
+    fn strength_changes_show_at_once_without_interpolating_from_the_old_value() {
+        let mut w = Weather::default();
+        w.apply(1, 0.0);
+        for _ in 0..50 {
+            w.tick();
+        }
+        w.apply(2, 0.0);
+        assert_eq!(w.strengths(0.0).0, 1.0);
+        w.apply(8, 0.75);
+        assert_eq!(w.strengths(0.0).1, 0.75);
     }
 }

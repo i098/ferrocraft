@@ -119,6 +119,8 @@ pub struct Renderer {
     blocks: HashMap<(i32, i32), Vec<u16>>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     dirty: HashSet<(i32, i32)>,
+    screenshot_requested: bool,
+    screenshot: Option<(u32, u32, Vec<u8>)>,
 }
 
 #[repr(C)]
@@ -143,12 +145,16 @@ impl Renderer {
         // Colors are authored in display space like vanilla, so avoid an sRGB surface.
         config.format = config.format.remove_srgb_suffix();
         config.view_formats.clear();
+        if surface
+            .get_capabilities(&adapter)
+            .usages
+            .contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         // `FERROCRAFT_VSYNC=0` picks Immediate or Mailbox where the surface has them (vanilla: VSync off).
-        config.present_mode = if std::env::var("FERROCRAFT_VSYNC").is_ok_and(|v| v == "0") {
-            wgpu::PresentMode::AutoNoVsync
-        } else {
-            wgpu::PresentMode::AutoVsync
-        };
+        config.present_mode =
+            present_mode(!std::env::var("FERROCRAFT_VSYNC").is_ok_and(|v| v == "0"));
         surface.configure(&device, &config);
         let format = config.format;
         Self::build(
@@ -325,6 +331,8 @@ impl Renderer {
             blocks: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
+            screenshot_requested: false,
+            screenshot: None,
         }
     }
 
@@ -336,6 +344,25 @@ impl Renderer {
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
     pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
         self.selection = selection;
+    }
+
+    /// Switches the window between vsync and no vsync; offscreen renderers ignore it.
+    pub fn set_vsync(&mut self, on: bool) {
+        if let Target::Window { surface, config } = &mut self.target {
+            config.present_mode = present_mode(on);
+            surface.configure(&self.device, config);
+        }
+    }
+
+    /// Captures the next rendered frame for [`Renderer::take_screenshot`].
+    pub fn request_screenshot(&mut self) {
+        self.screenshot_requested = true;
+    }
+
+    /// The captured frame as `(width, height, rgba8)`; `None` when none was captured or the
+    /// surface cannot be read back.
+    pub fn take_screenshot(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        self.screenshot.take()
     }
 
     /// Target size in pixels.
@@ -542,6 +569,17 @@ impl Renderer {
             _ => return,
         };
         self.draw(&view, cam, overlay);
+        if std::mem::take(&mut self.screenshot_requested) {
+            self.screenshot = match (&frame, &self.target) {
+                (Some(f), Target::Window { config, .. })
+                    if config.usage.contains(wgpu::TextureUsages::COPY_SRC) =>
+                {
+                    Some(self.read_texture(&f.texture))
+                }
+                (None, Target::Offscreen { texture, .. }) => Some(self.read_texture(texture)),
+                _ => None,
+            };
+        }
         if let Some(f) = frame {
             f.present();
         }
@@ -694,8 +732,11 @@ impl Renderer {
         }
         let [w, h, ..] = world.screen;
         let globals = Globals {
-            view_proj: mul(projection(cam.fov_deg, w / h), draw.model),
-            eye: [0.0; 4],
+            view_proj: mul(
+                projection(cam.fov_deg, w / h),
+                mul(bob_matrix(cam.bob), draw.model),
+            ),
+            eye: [0.0, 0.0, 0.0, self.environment.gamma],
             fog_color: world.fog_color,
             fog: [1.0e6, 2.0e6, sun_brightness, 1.5],
             screen: world.screen,
@@ -737,7 +778,12 @@ impl Renderer {
         let sky = env.sky_state();
         let globals = Globals {
             view_proj: view_proj(cam, w as f32 / h as f32),
-            eye: [cam.pos[0] as f32, cam.pos[1] as f32, cam.pos[2] as f32, 0.0],
+            eye: [
+                cam.pos[0] as f32,
+                cam.pos[1] as f32,
+                cam.pos[2] as f32,
+                env.gamma,
+            ],
             fog_color: [sky.fog[0], sky.fog[1], sky.fog[2], 1.0],
             // Torch flicker is a slow random walk around 0 in vanilla, so the factor stays near 1.5.
             fog: [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
@@ -913,15 +959,15 @@ impl Renderer {
     /// Render one frame offscreen and return `(width, height, rgba8)`. Only valid for offscreen renderers.
     pub fn render_to_rgba(&mut self, cam: &Camera, overlay: &[Quad]) -> (u32, u32, Vec<u8>) {
         self.render(cam, overlay);
-        let Target::Offscreen {
-            texture,
-            width,
-            height,
-        } = &self.target
-        else {
+        let Target::Offscreen { texture, .. } = &self.target else {
             panic!("render_to_rgba needs an offscreen renderer")
         };
-        let (w, h) = (*width, *height);
+        self.read_texture(texture)
+    }
+
+    /// Copies a rendered texture back as `(width, height, rgba8)`, swapping BGRA surfaces to RGBA.
+    fn read_texture(&self, texture: &wgpu::Texture) -> (u32, u32, Vec<u8>) {
+        let (w, h) = (texture.width(), texture.height());
         let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -954,6 +1000,14 @@ impl Renderer {
         let mut out = Vec::with_capacity((w * h * 4) as usize);
         for y in 0..h as usize {
             out.extend_from_slice(&mapped[y * row as usize..y * row as usize + (w * 4) as usize]);
+        }
+        if matches!(
+            texture.format(),
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        ) {
+            for px in out.as_chunks_mut::<4>().0 {
+                px.swap(0, 2);
+            }
         }
         (w, h, out)
     }
@@ -1411,7 +1465,43 @@ fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
         [right[2], up[2], -fwd[2], 0.0],
         [-dot(right, eye), -dot(up, eye), dot(fwd, eye), 1.0],
     ];
-    mul(projection(cam.fov_deg, aspect), view)
+    mul(
+        projection(cam.fov_deg, aspect),
+        mul(bob_matrix(cam.bob), view),
+    )
+}
+
+/// `T(x, y, 0) * Rz(roll) * Rx(pitch)` of `EntityRenderer.setupViewBobbing`, column-major.
+fn bob_matrix([x, y, roll, pitch]: [f32; 4]) -> [[f32; 4]; 4] {
+    let (sr, cr) = roll.to_radians().sin_cos();
+    let (sp, cp) = pitch.to_radians().sin_cos();
+    let t = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [x, y, 0.0, 1.0],
+    ];
+    let rz = [
+        [cr, sr, 0.0, 0.0],
+        [-sr, cr, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let rx = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, cp, sp, 0.0],
+        [0.0, -sp, cp, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    mul(t, mul(rz, rx))
+}
+
+fn present_mode(vsync: bool) -> wgpu::PresentMode {
+    if vsync {
+        wgpu::PresentMode::AutoVsync
+    } else {
+        wgpu::PresentMode::AutoNoVsync
+    }
 }
 
 fn projection(fov_deg: f32, aspect: f32) -> [[f32; 4]; 4] {
@@ -1460,10 +1550,37 @@ mod tests {
             yaw: 0.0,
             pitch,
             fov_deg: 70.0,
+            ..Camera::default()
         };
         // Yaw 0 faces +z, so +x is on the left of the screen: clip x < 0.
         for pitch in [-90.0, -89.0, 0.0, 89.0, 90.0] {
             assert!(clip_x(&at(pitch), [1.0, 0.0, 0.0]) < 0.0, "pitch {pitch}");
         }
+    }
+
+    #[test]
+    fn bob_translates_then_rolls_then_pitches_in_view_space() {
+        let apply = |m: [[f32; 4]; 4], p: [f32; 3]| {
+            [0, 1, 2].map(|r| (0..3).map(|c| m[c][r] * p[c]).sum::<f32>() + m[3][r])
+        };
+        let near = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-5);
+        let p = [1.0, 2.0, 3.0];
+        assert!(near(apply(bob_matrix([0.0; 4]), p), p));
+        assert!(near(
+            apply(bob_matrix([0.5, -0.25, 0.0, 0.0]), p),
+            [1.5, 1.75, 3.0]
+        ));
+        assert!(near(
+            apply(bob_matrix([0.0, 0.0, 90.0, 0.0]), [1.0, 0.0, 0.0]),
+            [0.0, 1.0, 0.0]
+        ));
+        assert!(near(
+            apply(bob_matrix([0.0, 0.0, 0.0, 90.0]), [0.0, 1.0, 0.0]),
+            [0.0, 0.0, 1.0]
+        ));
+        assert!(near(
+            apply(bob_matrix([1.0, 0.0, 90.0, 0.0]), [1.0, 0.0, 0.0]),
+            [1.0, 1.0, 0.0]
+        ));
     }
 }

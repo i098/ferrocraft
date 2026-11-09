@@ -77,7 +77,6 @@ pub struct Chat {
     drawn: Vec<Line<String>>,
     scroll_pos: i32,
     scrolled: bool,
-    sent: Vec<String>,
 }
 
 impl Chat {
@@ -130,7 +129,6 @@ impl Chat {
     pub fn clear(&mut self) {
         self.drawn.clear();
         self.messages.clear();
-        self.sent.clear();
     }
 
     fn delete(&mut self, id: i32) {
@@ -138,17 +136,6 @@ impl Chat {
         if let Some(i) = self.messages.iter().position(|l| l.id == id) {
             self.messages.remove(i);
         }
-    }
-
-    /// `addToSentMessages`: up/down arrow history, without repeats of the last entry.
-    pub fn add_sent(&mut self, msg: &str) {
-        if self.sent.last().map(String::as_str) != Some(msg) {
-            self.sent.push(msg.to_owned());
-        }
-    }
-
-    pub fn sent(&self) -> &[String] {
-        &self.sent
     }
 
     pub fn reset_scroll(&mut self) {

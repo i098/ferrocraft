@@ -172,6 +172,7 @@ impl App {
     }
 
     /// Sounds, particles and explosions; `Err` hands back an event it does not own.
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn world_event(&mut self, ev: NetEvent, dirty: &mut Dirty) -> Result<(), NetEvent> {
         match ev {
             NetEvent::Sound {
@@ -220,6 +221,7 @@ impl App {
     }
 
     /// Tab list, title, scoreboard and teams; `Err` hands back an event it does not own.
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn hud_event(&mut self, ev: NetEvent) -> Result<(), NetEvent> {
         match ev {
             NetEvent::PlayerList { action } => self.player_list(action),
@@ -242,6 +244,7 @@ impl App {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn scoreboard_event(&mut self, ev: NetEvent) -> Result<(), NetEvent> {
         let sb = &mut self.hud.scoreboard;
         match ev {

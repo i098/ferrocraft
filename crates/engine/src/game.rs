@@ -160,6 +160,7 @@ impl Game {
     }
 
     /// Join, vitals, game mode and abilities. `Err` hands back an event it does not own.
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn apply_player(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         match ev {
             NetEvent::JoinGame {
@@ -196,6 +197,7 @@ impl Game {
     }
 
     /// Hotbar, slots and container windows.
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         let effect = match ev {
             NetEvent::HeldItem(slot) => {

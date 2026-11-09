@@ -229,6 +229,19 @@ impl Game {
         Ok(None)
     }
 
+    /// `S2FSetSlot`: also starts the pick-up pop and flags a replaced held stack.
+    fn set_slot(&mut self, window: i8, slot: i16, item: world::inventory::Slot) {
+        self.held_replaced |= window == 0 && slot == 36 + i16::from(self.inv.held);
+        if window == 0 && (36..45).contains(&slot) {
+            let old = &self.inv.player[slot as usize];
+            let grew = item
+                .as_ref()
+                .is_some_and(|n| old.as_ref().is_none_or(|o| o.count < n.count));
+            self.bob[(slot - 36) as usize] = if grew { 5 } else { 0 };
+        }
+        self.inv.set_slot(window, slot, item);
+    }
+
     /// Hotbar, slots and container windows.
     #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
@@ -239,16 +252,7 @@ impl Game {
                 None
             }
             NetEvent::SetSlot { window, slot, item } => {
-                self.held_replaced |= window == 0 && slot == 36 + i16::from(self.inv.held);
-                if window == 0 && (36..45).contains(&slot) {
-                    let b = &mut self.bob[(slot - 36) as usize];
-                    let old = &self.inv.player[slot as usize];
-                    let grew = item
-                        .as_ref()
-                        .is_some_and(|n| old.as_ref().is_none_or(|o| o.count < n.count));
-                    *b = if grew { 5 } else { 0 };
-                }
-                self.inv.set_slot(window, slot, item);
+                self.set_slot(window, slot, item);
                 None
             }
             NetEvent::WindowItems { window, items } => {

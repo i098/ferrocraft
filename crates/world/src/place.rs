@@ -103,43 +103,16 @@ fn material_replaceable(id: u16) -> bool {
 }
 
 /// Collision box of the block's default state, `None` when it has none.
+const NO_COLLISION: [u16; 38] = [
+    6, 27, 28, 31, 32, 37, 38, 39, 40, 50, 55, 59, 63, 66, 68, 69, 70, 72, 75, 76, 77, 78, 83, 90,
+    93, 94, 104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
+];
+
 fn collision(id: u16) -> Option<[f64; 6]> {
+    if NO_COLLISION.contains(&id) {
+        return None;
+    }
     match id {
-        6
-        | 27
-        | 28
-        | 31
-        | 32
-        | 37..=40
-        | 50
-        | 55
-        | 59
-        | 63
-        | 66
-        | 68
-        | 69
-        | 70
-        | 72
-        | 75
-        | 76
-        | 77
-        | 78
-        | 83
-        | 90
-        | 93
-        | 94
-        | 104
-        | 105
-        | 106
-        | 115
-        | 131
-        | 132
-        | 141
-        | 142
-        | 143
-        | 147
-        | 148
-        | 175 => None,
         44 | 126 | 182 => Some([0.0, 0.0, 0.0, 1.0, 0.5, 1.0]),
         65 => Some(ladder_box(2)),
         171 => Some([0.0, 0.0, 0.0, 1.0, 0.0625, 1.0]),
@@ -186,6 +159,16 @@ fn ladder_can_stay(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3], face: u8) -> boo
     normal_cube(at(offset(pos, opposite(face))))
 }
 
+/// `BlockBush.canPlaceBlockAt`: saplings, grass, flowers, double plants and dead bushes.
+fn plant_supported(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3], below: u16) -> bool {
+    let soil = matches!(below >> 4, 2 | 3 | 60);
+    match id {
+        175 => soil && at(offset(pos, UP)) >> 4 == 0,
+        32 => matches!(below >> 4, 3 | 12 | 159 | 172),
+        _ => soil,
+    }
+}
+
 /// `Block.canPlaceBlockAt` of `id` into a cell whose material is replaceable.
 fn supported(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> bool {
     let below = at(offset(pos, 0));
@@ -197,9 +180,7 @@ fn supported(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> bool {
         27 | 28 | 66 | 157 | 70 | 72 | 147 | 148 => solid_top(below),
         171 => below >> 4 != 0,
         111 => matches!(below >> 4, 8 | 9) && below & 15 == 0,
-        6 | 31 | 37 | 38 => matches!(below >> 4, 2 | 3 | 60),
-        175 => matches!(below >> 4, 2 | 3 | 60) && at(offset(pos, UP)) >> 4 == 0,
-        32 => matches!(below >> 4, 3 | 12 | 159 | 172),
+        6 | 31 | 37 | 38 | 175 | 32 => plant_supported(at, id, pos, below),
         _ => true,
     }
 }
@@ -213,6 +194,46 @@ fn item_meta(id: u16, damage: i16) -> u16 {
         | 162 | 168 | 171 | 175 | 179 => d & 15,
         _ => 0,
     }
+}
+
+/// Stairs and slabs: the lower half unless the click hit the top half of a side face.
+fn bottom_half(face: u8, cursor_y: f32) -> bool {
+    face != 0 && (face == UP || cursor_y <= 0.5)
+}
+
+/// `BlockLog.onBlockPlaced`: the axis bits of the clicked face.
+fn log_axis(face: u8) -> u16 {
+    match face {
+        WEST | EAST => 4,
+        NORTH | SOUTH => 8,
+        _ => 0,
+    }
+}
+
+/// `BlockTorch.onBlockPlaced`: the clicked face, else the first side with support.
+fn torch_meta(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3], face: u8) -> u16 {
+    let facing = if torch_can_place(at, pos, face) {
+        face
+    } else {
+        HORIZONTAL
+            .into_iter()
+            .find(|&f| normal_cube(at(offset(pos, opposite(f)))))
+            .unwrap_or(UP)
+    };
+    [0_u16, 5, 4, 3, 2, 1][usize::from(facing)]
+}
+
+/// `BlockLadder.onBlockPlaced`: the clicked side face, else the first side with support.
+fn ladder_facing(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3], face: u8) -> u16 {
+    let facing = if (NORTH..=EAST).contains(&face) && ladder_can_stay(at, pos, face) {
+        face
+    } else {
+        HORIZONTAL
+            .into_iter()
+            .find(|&f| ladder_can_stay(at, pos, f))
+            .unwrap_or(NORTH)
+    };
+    u16::from(facing)
 }
 
 /// `onBlockPlaced` for the block at `pos` placed against `face`.
@@ -229,42 +250,12 @@ fn placed_state(
     let meta = match id {
         _ if is_stairs(id) => {
             let facing = [2_u16, 1, 3, 0][horizontal_index(yaw) as usize];
-            let bottom = face != 0 && (face == UP || cursor_y <= 0.5);
-            facing | if bottom { 0 } else { 4 }
+            facing | if bottom_half(face, cursor_y) { 0 } else { 4 }
         }
-        44 | 126 | 182 => {
-            let bottom = face != 0 && (face == UP || cursor_y <= 0.5);
-            (damage as u16 & 7) | if bottom { 0 } else { 8 }
-        }
-        17 | 162 => {
-            meta | match face {
-                WEST | EAST => 4,
-                NORTH | SOUTH => 8,
-                _ => 0,
-            }
-        }
-        50 | 75 | 76 => {
-            let facing = if torch_can_place(at, pos, face) {
-                face
-            } else {
-                HORIZONTAL
-                    .into_iter()
-                    .find(|&f| normal_cube(at(offset(pos, opposite(f)))))
-                    .unwrap_or(UP)
-            };
-            [0_u16, 5, 4, 3, 2, 1][usize::from(facing)]
-        }
-        65 => {
-            let facing = if (NORTH..=EAST).contains(&face) && ladder_can_stay(at, pos, face) {
-                face
-            } else {
-                HORIZONTAL
-                    .into_iter()
-                    .find(|&f| ladder_can_stay(at, pos, f))
-                    .unwrap_or(NORTH)
-            };
-            u16::from(facing)
-        }
+        44 | 126 | 182 => (damage as u16 & 7) | if bottom_half(face, cursor_y) { 0 } else { 8 },
+        17 | 162 => meta | log_axis(face),
+        50 | 75 | 76 => torch_meta(at, pos, face),
+        65 => ladder_facing(at, pos, face),
         _ => meta,
     };
     id << 4 | meta
@@ -280,19 +271,8 @@ pub fn can_place_on_side(
     body: [f64; 6],
 ) -> bool {
     let block = id as u16;
-    if is_slab(block) {
-        let (state, var) = (at(click.pos), damage as u16 & 7);
-        let top = state & 8 != 0;
-        if state >> 4 == block
-            && ((click.face == UP && !top) || (click.face == 0 && top))
-            && state & 7 == var
-        {
-            return true;
-        }
-        let next = at(offset(click.pos, click.face));
-        if next >> 4 == block && next & 7 == var {
-            return true;
-        }
+    if is_slab(block) && slab_target(at, block, damage, click).is_some() {
+        return true;
     }
     let state = at(click.pos);
     let pos = if block_replaceable(state) {
@@ -362,6 +342,28 @@ fn use_block(
     Outcome::Placed(vec![(pos, state)])
 }
 
+/// The cell a slab click would double up: the clicked slab or the one beside it.
+fn slab_target(
+    at: &dyn Fn([i32; 3]) -> u16,
+    id: u16,
+    damage: i16,
+    click: Click,
+) -> Option<[i32; 3]> {
+    let var = damage as u16 & 7;
+    let state = at(click.pos);
+    let top = state & 8 != 0;
+    let toward_slab = (click.face == UP && !top) || (click.face == 0 && top);
+    let next = offset(click.pos, click.face);
+    let same = |s: u16| s >> 4 == id && s & 7 == var;
+    if toward_slab && same(state) {
+        Some(click.pos)
+    } else if same(at(next)) {
+        Some(next)
+    } else {
+        None
+    }
+}
+
 /// `ItemSlab.onItemUse`: a second slab of the same kind makes a double slab, even when the
 /// player stands in it (the click then counts as used but changes nothing).
 fn merge_slab(
@@ -372,35 +374,24 @@ fn merge_slab(
     body: [f64; 6],
 ) -> Option<Outcome> {
     let var = damage as u16 & 7;
-    let state = at(click.pos);
-    let top = state & 8 != 0;
-    let here = state >> 4 == id
-        && ((click.face == UP && !top) || (click.face == 0 && top))
-        && state & 7 == var;
-    let next = offset(click.pos, click.face);
-    let there = at(next) >> 4 == id && at(next) & 7 == var;
-    let pos = if here {
-        click.pos
-    } else if there {
-        next
-    } else {
-        return None;
-    };
+    let pos = slab_target(at, id, damage, click)?;
     if blocked_by_player([0.0, 0.0, 0.0, 1.0, 1.0, 1.0], pos, body) {
         return Some(Outcome::Used);
     }
     Some(Outcome::Placed(vec![(pos, (id - 1) << 4 | var)]))
 }
 
+/// Blocks a sign cannot be hung on.
+const NON_SOLID_FOR_SIGN: [u16; 48] = [
+    0, 6, 8, 9, 10, 11, 27, 28, 31, 32, 37, 38, 39, 40, 50, 51, 55, 59, 65, 66, 69, 75, 76, 77, 78,
+    83, 90, 93, 94, 104, 105, 106, 111, 115, 119, 127, 131, 132, 140, 141, 142, 143, 144, 149, 150,
+    157, 171, 175,
+];
+
 /// `ItemSign.onItemUse` on the client: true when the sign can go there; the server places it.
 fn use_sign(at: &dyn Fn([i32; 3]) -> u16, click: Click) -> Outcome {
     let clicked = at(click.pos) >> 4;
-    let non_solid = matches!(
-        clicked,
-        0 | 6 | 8..=11 | 27 | 28 | 31 | 32 | 37..=40 | 50 | 51 | 55 | 59 | 65 | 66 | 69
-            | 75 | 76 | 77 | 78 | 83 | 90 | 93 | 94 | 104 | 105 | 106 | 111 | 115 | 119 | 127
-            | 131 | 132 | 140 | 141 | 142 | 143 | 144 | 149 | 150 | 157 | 171 | 175
-    );
+    let non_solid = NON_SOLID_FOR_SIGN.contains(&clicked);
     if click.face == 0 || non_solid {
         return Outcome::Refused;
     }
@@ -410,6 +401,17 @@ fn use_sign(at: &dyn Fn([i32; 3]) -> u16, click: Click) -> Outcome {
     } else {
         Outcome::Refused
     }
+}
+
+/// `ItemDoor.placeDoor`: the hinge goes right next to a left door or the more solid side.
+fn hinges_right(at: &dyn Fn([i32; 3]) -> u16, door: u16, pos: [i32; 3], index: i32) -> bool {
+    // `rotateY` and `rotateYCCW` of the facing, as horizontal indices.
+    let side = |i: i32| offset(pos, facing_of(i));
+    let (right, left) = (side(index + 1), side(index - 1));
+    let normals =
+        |p: [i32; 3]| u8::from(normal_cube(at(p))) + u8::from(normal_cube(at(offset(p, UP))));
+    let has_door = |p: [i32; 3]| at(p) >> 4 == door || at(offset(p, UP)) >> 4 == door;
+    (has_door(left) && !has_door(right)) || normals(right) > normals(left)
 }
 
 /// `ItemDoor.onItemUse` and `placeDoor`.
@@ -436,13 +438,7 @@ fn use_door(at: &dyn Fn([i32; 3]) -> u16, item: i16, click: Click, yaw: f32) -> 
         return Outcome::Refused;
     }
     let index = angle_index(yaw);
-    // `rotateY` and `rotateYCCW` of the facing, as horizontal indices.
-    let side = |i: i32| offset(pos, facing_of(i));
-    let (right, left) = (side(index + 1), side(index - 1));
-    let normals =
-        |p: [i32; 3]| u8::from(normal_cube(at(p))) + u8::from(normal_cube(at(offset(p, UP))));
-    let has_door = |p: [i32; 3]| at(p) >> 4 == door || at(offset(p, UP)) >> 4 == door;
-    let hinge_right = (has_door(left) && !has_door(right)) || normals(right) > normals(left);
+    let hinge_right = hinges_right(at, door, pos, index);
     let lower_meta = ((index + 1) & 3) as u16;
     let upper_meta = 8 | u16::from(hinge_right);
     Outcome::Placed(vec![

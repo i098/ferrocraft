@@ -571,24 +571,10 @@ impl App {
             self.game.store.get_block(x, y, z),
             self.game.store.get_block(x, y + 1, z),
         );
-        let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
-        let body = self.game.body();
-        let yaw = self.game.player.as_ref().map_or(0.0, |p| p.yaw);
         let activated =
             gamemode != 3 && (!sneaking || held.is_none()) && activates(state, held_id, gamemode);
-        if let Some(s) = held {
-            let item_block = (1..=255).contains(&s.id);
-            let can_place =
-                !item_block || place::can_place_on_side(&at, s.id, s.damage, click, body);
-            if gamemode != 3 && !activated && !can_place {
-                return false;
-            }
-        }
-        let outcome = match held {
-            Some(s) if gamemode != 3 && !activated && gamemode != 2 => {
-                place::use_item(&at, s.id, s.damage, click, yaw, body)
-            }
-            _ => Outcome::Refused,
+        let Some(outcome) = self.client_outcome(held, click, activated) else {
+            return false;
         };
         let packet = self
             .session_send(|s| s.place_block(h.pos, h.face, held, cursor.map(|c| (c * 16.0) as u8)));
@@ -606,6 +592,31 @@ impl App {
             self.send_result(r);
         }
         handled || held.is_none()
+    }
+
+    /// What the client does with a click before it sends C08: `None` when
+    /// `canPlaceBlockOnSide` refuses and nothing is sent, else the local placement.
+    fn client_outcome(
+        &self,
+        held: &Option<ItemStack>,
+        click: Click,
+        activated: bool,
+    ) -> Option<Outcome> {
+        let gamemode = self.game.gamemode;
+        let Some(s) = held.as_ref().filter(|_| gamemode != 3 && !activated) else {
+            return Some(Outcome::Refused);
+        };
+        let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
+        let body = self.game.body();
+        let item_block = (1..=255).contains(&s.id);
+        if item_block && !place::can_place_on_side(&at, s.id, s.damage, click, body) {
+            return None;
+        }
+        if gamemode == 2 {
+            return Some(Outcome::Refused);
+        }
+        let yaw = self.game.player.as_ref().map_or(0.0, |p| p.yaw);
+        Some(place::use_item(&at, s.id, s.damage, click, yaw, body))
     }
 
     /// The client half of `ItemBlock.onItemUse`: set the blocks, play the place sound, use up

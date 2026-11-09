@@ -255,7 +255,9 @@ fn boxes_6(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
         27 | 28 | 157 | 66 => {
             let mut b = px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t);
             b.mask = bit(UP);
-            b.rot = match (id, meta & 7) {
+            // Only powered, detector and activator rails carry the powered bit 8.
+            let shape = if id == 66 { meta } else { meta & 7 };
+            b.rot = match (id, shape) {
                 (66, m @ 6..=9) => (m - 6) as u8,
                 (_, 1..=3) => 1,
                 _ => 0,
@@ -422,6 +424,12 @@ fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], o
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_rail_keeps_curve_rotation_for_meta_8_and_9() {
+        let rot = |meta: u16| super::boxes(66 << 4 | meta, &|_, _, _| 0)[0].rot;
+        assert_eq!([rot(6), rot(7), rot(8), rot(9)], [0, 1, 2, 3]);
+    }
+
     #[test]
     fn open_door_east_facing_swings_to_north_or_south_by_hinge() {
         let bounds = |lower: u16, upper: u16| {

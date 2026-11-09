@@ -927,67 +927,77 @@ impl TextField {
         if !self.focused {
             return false;
         }
-        if mods.ctrl && !mods.shift {
-            match code {
-                key::A => {
-                    self.move_end(m);
-                    self.set_sel(0, m);
-                    return true;
-                }
-                key::C => {
-                    *clip = self.selected().to_owned();
-                    return true;
-                }
-                key::V => {
-                    let s = clip.clone();
-                    self.write(&s, m);
-                    return true;
-                }
-                key::X => {
-                    *clip = self.selected().to_owned();
-                    self.write("", m);
-                    return true;
-                }
-                _ => {}
-            }
+        if mods.ctrl && !mods.shift && self.clip_key(code, m, clip) {
+            return true;
         }
         match code {
-            key::BACK if mods.ctrl => {
-                let n = self.word(-1, self.cursor) as isize - self.cursor as isize;
-                self.delete(n, m);
-            }
-            key::BACK => self.delete(-1, m),
-            key::DELETE if mods.ctrl => {
-                let n = self.word(1, self.cursor) as isize - self.cursor as isize;
-                self.delete(n, m);
-            }
-            key::DELETE => self.delete(1, m),
-            key::HOME if mods.shift => self.set_sel(0, m),
-            key::HOME => self.set_cursor(0, m),
-            key::END if mods.shift => self.set_sel(self.len(), m),
-            key::END => self.move_end(m),
-            key::LEFT | key::RIGHT => {
-                let dir = if code == key::LEFT { -1 } else { 1 };
-                let from = if mods.shift || !mods.ctrl {
-                    self.sel
-                } else {
-                    self.cursor
-                };
-                let to = if mods.ctrl {
-                    self.word(dir, from)
-                } else {
-                    (from as isize + dir as isize).max(0) as usize
-                };
-                if mods.shift {
-                    self.set_sel(to, m);
-                } else {
-                    self.set_cursor(to, m);
-                }
-            }
+            key::BACK | key::DELETE => self.delete_key(code == key::BACK, mods.ctrl, m),
+            key::HOME | key::END => self.home_end(code == key::END, mods.shift, m),
+            key::LEFT | key::RIGHT => self.arrow(code == key::LEFT, mods, m),
             _ if allowed_char(ch) => self.write(&ch.to_string(), m),
             _ => return false,
         }
         true
+    }
+
+    /// Ctrl+A, C, V and X; true when `code` is one of them.
+    fn clip_key(&mut self, code: i32, m: &dyn Metrics, clip: &mut String) -> bool {
+        match code {
+            key::A => {
+                self.move_end(m);
+                self.set_sel(0, m);
+            }
+            key::C => *clip = self.selected().to_owned(),
+            key::V => {
+                let s = clip.clone();
+                self.write(&s, m);
+            }
+            key::X => {
+                *clip = self.selected().to_owned();
+                self.write("", m);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn arrow(&mut self, left: bool, mods: Mods, m: &dyn Metrics) {
+        let dir = if left { -1 } else { 1 };
+        let from = if mods.shift || !mods.ctrl {
+            self.sel
+        } else {
+            self.cursor
+        };
+        let to = if mods.ctrl {
+            self.word(dir, from)
+        } else {
+            (from as isize + dir as isize).max(0) as usize
+        };
+        if mods.shift {
+            self.set_sel(to, m);
+        } else {
+            self.set_cursor(to, m);
+        }
+    }
+
+    /// Backspace or Delete; with Ctrl a whole word.
+    fn delete_key(&mut self, back: bool, ctrl: bool, m: &dyn Metrics) {
+        let dir = if back { -1 } else { 1 };
+        let n = if ctrl {
+            self.word(dir, self.cursor) as isize - self.cursor as isize
+        } else {
+            dir as isize
+        };
+        self.delete(n, m);
+    }
+
+    fn home_end(&mut self, end: bool, shift: bool, m: &dyn Metrics) {
+        match (end, shift) {
+            (false, true) => self.set_sel(0, m),
+            (false, false) => self.set_cursor(0, m),
+            (true, true) => self.set_sel(self.len(), m),
+            (true, false) => self.move_end(m),
+        }
     }
 
     /// `mouseClicked`: focus follows the click; a left click inside places the cursor.
@@ -1038,13 +1048,7 @@ impl TextField {
             x += c.width(head) + 1;
         }
         let mid = self.cursor < len || len >= self.max_len;
-        let mut caret = x;
-        if !cursor_in {
-            caret = if cur > 0 { x0 + self.w } else { x0 };
-        } else if mid {
-            caret = x - 1;
-            x -= 1;
-        }
+        let (caret, x) = caret_x(cursor_in, mid, cur, x, x0, self.w);
         if !shown.is_empty() && cursor_in && (cur as usize) < shown_len {
             c.text(
                 &shown[byte_at(cur as usize)..],
@@ -1055,11 +1059,7 @@ impl TextField {
             );
         }
         if blink {
-            if mid {
-                c.fill(caret, y0 - 1, caret + 1, y0 + 1 + 9, 0xffd0d0d0);
-            } else {
-                c.text("_", caret as f32, y0 as f32, color, true);
-            }
+            draw_caret(c, mid, caret, y0, color);
         }
         if sel != cur {
             let sx = x0 + c.width(&shown[..byte_at(sel.max(0) as usize)]);
@@ -1067,6 +1067,25 @@ impl TextField {
             // shortcut: vanilla inverts with GL_OR_REVERSE; a translucent blue fill is the closest Canvas call.
             c.fill(a, y0 - 1, b.min(self.x + self.w), y0 + 1 + 9, 0x800000ff);
         }
+    }
+}
+
+/// Caret x and where the text after the caret starts.
+fn caret_x(cursor_in: bool, mid: bool, cur: isize, x: i32, x0: i32, w: i32) -> (i32, i32) {
+    if !cursor_in {
+        (if cur > 0 { x0 + w } else { x0 }, x)
+    } else if mid {
+        (x - 1, x - 1)
+    } else {
+        (x, x)
+    }
+}
+
+fn draw_caret(c: &mut dyn Canvas, mid: bool, caret: i32, y0: i32, color: u32) {
+    if mid {
+        c.fill(caret, y0 - 1, caret + 1, y0 + 1 + 9, 0xffd0d0d0);
+    } else {
+        c.text("_", caret as f32, y0 as f32, color, true);
     }
 }
 

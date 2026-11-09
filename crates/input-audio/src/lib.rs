@@ -7,7 +7,6 @@ pub use actions::{scroll_slot, Action, DebugCombo};
 pub use keys::{control_from_lwjgl, lwjgl_from_control, Bind, Control, KeyBindings};
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
 use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -19,8 +18,6 @@ const DEGREES_PER_PIXEL: f32 = 0.15;
 const CHAT_MAX_CHARS: usize = 100;
 /// Vanilla `GuiNewChat` keeps 100 sent lines.
 const CHAT_HISTORY: usize = 100;
-/// `sprintToggleTimer` is 7 ticks.
-const DOUBLE_TAP: Duration = Duration::from_millis(350);
 /// Trackpads report pixels; one wheel step per this many.
 const PIXELS_PER_STEP: f64 = 40.0;
 
@@ -86,8 +83,10 @@ pub struct InputState {
     actions: VecDeque<Action>,
     ctrl_down: bool,
     f3_down: bool,
-    last_forward_press: Option<Instant>,
-    sprint_toggle: bool,
+    sprinting: bool,
+    sprint_timer: u8,
+    was_full_forward: bool,
+    was_sneaking: bool,
     scroll_px: f64,
     look: (f32, f32),
     chat: Option<String>,
@@ -117,8 +116,10 @@ impl InputState {
             actions: VecDeque::new(),
             ctrl_down: false,
             f3_down: false,
-            last_forward_press: None,
-            sprint_toggle: false,
+            sprinting: false,
+            sprint_timer: 0,
+            was_full_forward: false,
+            was_sneaking: false,
             scroll_px: 0.0,
             look: (0.0, 0.0),
             chat: None,
@@ -162,19 +163,15 @@ impl InputState {
     }
 
     pub fn on_window_event(&mut self, event: &WindowEvent) {
-        self.on_window_event_at(event, Instant::now());
-    }
-
-    fn on_window_event_at(&mut self, event: &WindowEvent, now: Instant) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     let text = event.text.as_deref();
-                    self.key_event(code, event.state.is_pressed(), event.repeat, text, now);
+                    self.key_event(code, event.state.is_pressed(), event.repeat, text);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.mouse_button(*button, *state == ElementState::Pressed, now);
+                self.mouse_button(*button, *state == ElementState::Pressed);
             }
             WindowEvent::MouseWheel { delta, .. } => self.scroll(*delta),
             WindowEvent::Focused(focused) => self.set_focused(*focused),
@@ -223,17 +220,10 @@ impl InputState {
 
     /// Key press/release. `text` is the character text of a press, used in chat mode.
     pub fn on_key(&mut self, code: KeyCode, pressed: bool, text: Option<&str>) {
-        self.key_event(code, pressed, false, text, Instant::now());
+        self.key_event(code, pressed, false, text);
     }
 
-    fn key_event(
-        &mut self,
-        code: KeyCode,
-        pressed: bool,
-        repeat: bool,
-        text: Option<&str>,
-        now: Instant,
-    ) {
+    fn key_event(&mut self, code: KeyCode, pressed: bool, repeat: bool, text: Option<&str>) {
         match code {
             KeyCode::ControlLeft | KeyCode::ControlRight => self.ctrl_down = pressed,
             KeyCode::F3 if !pressed => self.f3_down = false,
@@ -246,7 +236,7 @@ impl InputState {
         if pressed && !repeat && self.hard_coded_key(code) {
             return;
         }
-        self.control(Control::Key(code), pressed, repeat, now);
+        self.control(Control::Key(code), pressed, repeat);
     }
 
     /// Key while chat or a GUI screen owns the keyboard.
@@ -286,7 +276,7 @@ impl InputState {
         true
     }
 
-    fn mouse_button(&mut self, button: MouseButton, pressed: bool, now: Instant) {
+    fn mouse_button(&mut self, button: MouseButton, pressed: bool) {
         if self.chat.is_some() || self.screen_open {
             return;
         }
@@ -295,38 +285,26 @@ impl InputState {
             self.grab_requested = true;
             return;
         }
-        self.control(Control::Mouse(button), pressed, false, now);
+        self.control(Control::Mouse(button), pressed, false);
     }
 
-    fn control(&mut self, control: Control, pressed: bool, repeat: bool, now: Instant) {
+    fn control(&mut self, control: Control, pressed: bool, repeat: bool) {
         let binds: Vec<Bind> = self.bindings.matching(control).collect();
         for bind in binds {
             self.held[bind.index()] = pressed;
-            if bind == Bind::Forward && !pressed {
-                self.sprint_toggle = false;
-            }
             if !pressed || repeat {
                 continue;
             }
-            self.on_press(bind, now);
+            self.on_press(bind);
         }
     }
 
-    fn on_press(&mut self, bind: Bind, now: Instant) {
+    fn on_press(&mut self, bind: Bind) {
         if let Some(action) = press_action(bind, self.ctrl_down) {
             self.actions.push_back(action);
             return;
         }
         match bind {
-            Bind::Forward => {
-                if self
-                    .last_forward_press
-                    .is_some_and(|t| now.duration_since(t) <= DOUBLE_TAP)
-                {
-                    self.sprint_toggle = true;
-                }
-                self.last_forward_press = Some(now);
-            }
             Bind::Chat => self.open_chat(String::new()),
             Bind::Command => self.open_chat("/".into()),
             _ => {}
@@ -354,7 +332,7 @@ impl InputState {
             KeyCode::ArrowDown => self.history_step(1),
             _ => {
                 for c in text.unwrap_or("").chars().filter(|&c| allowed_char(c)) {
-                    if buf.chars().count() < CHAT_MAX_CHARS {
+                    if buf.encode_utf16().count() + c.len_utf16() <= CHAT_MAX_CHARS {
                         buf.push(c);
                     }
                 }
@@ -363,8 +341,8 @@ impl InputState {
     }
 
     fn submit_chat(&mut self) {
-        let line = self.chat.take().unwrap_or_default();
-        if line.trim().is_empty() {
+        let line = self.chat.take().unwrap_or_default().trim().to_owned();
+        if line.is_empty() {
             return;
         }
         if self.history.last() != Some(&line) {
@@ -404,7 +382,6 @@ impl InputState {
 
     fn release_all(&mut self) {
         self.held = [false; Bind::ALL.len()];
-        self.sprint_toggle = false;
         self.f3_down = false;
     }
 
@@ -439,16 +416,40 @@ impl InputState {
         self.actions.drain(..).collect()
     }
 
-    pub fn movement(&self) -> world::Input {
+    /// Call once per game tick: `EntityPlayerSP.onLivingUpdate` sprint latch.
+    /// `can_sprint` is `foodLevel > 6 || allowFlying`.
+    pub fn movement(&mut self, on_ground: bool, collided: bool, can_sprint: bool) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
         let forward = axis(self.is_held(Bind::Forward), self.is_held(Bind::Back));
+        let sneak = self.sneaking();
+        let full = forward > 0.0 && !sneak;
+        let sprint_key = self.is_held(Bind::Sprint);
+        self.sprint_timer = self.sprint_timer.saturating_sub(1);
+        self.update_sprint(on_ground, can_sprint && full, sprint_key);
+        if self.sprinting && (!full || collided || !can_sprint) {
+            self.sprinting = false;
+        }
+        self.was_full_forward = full;
+        self.was_sneaking = sneak;
         world::Input {
             forward,
             strafe: axis(self.is_held(Bind::Left), self.is_held(Bind::Right)),
             jump: self.is_held(Bind::Jump),
-            sprint: forward > 0.0
-                && !self.sneaking()
-                && (self.is_held(Bind::Sprint) || self.sprint_toggle),
+            sprint: self.sprinting,
+        }
+    }
+
+    fn update_sprint(&mut self, on_ground: bool, can_start: bool, sprint_key: bool) {
+        let fresh = on_ground && !self.was_sneaking && !self.was_full_forward;
+        if fresh && can_start && !self.sprinting {
+            if self.sprint_timer == 0 && !sprint_key {
+                self.sprint_timer = 7;
+            } else {
+                self.sprinting = true;
+            }
+        }
+        if !self.sprinting && can_start && sprint_key {
+            self.sprinting = true;
         }
     }
 
@@ -503,6 +504,70 @@ mod tests {
         s.on_key(c, true, Some(t));
     }
 
+    fn release(s: &mut InputState, c: KeyCode) {
+        s.on_key(c, false, None);
+    }
+
+    fn walk(s: &mut InputState, ticks: usize) -> bool {
+        let mut sprint = false;
+        for _ in 0..ticks {
+            sprint = s.movement(true, false, true).sprint;
+        }
+        sprint
+    }
+
+    #[test]
+    fn double_tap_forward_within_seven_ticks_sprints() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        assert!(!walk(&mut s, 1));
+        release(&mut s, KeyCode::KeyW);
+        walk(&mut s, 2);
+        press(&mut s, KeyCode::KeyW);
+        assert!(walk(&mut s, 1));
+    }
+
+    #[test]
+    fn double_tap_after_eight_ticks_does_not_sprint() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        walk(&mut s, 1);
+        release(&mut s, KeyCode::KeyW);
+        walk(&mut s, 8);
+        press(&mut s, KeyCode::KeyW);
+        assert!(!walk(&mut s, 1));
+    }
+
+    #[test]
+    fn sprint_survives_releasing_ctrl_and_stops_on_each_cancel() {
+        let start = |s: &mut InputState| {
+            press(s, KeyCode::ControlLeft);
+            press(s, KeyCode::KeyW);
+            assert!(walk(s, 1));
+            release(s, KeyCode::ControlLeft);
+        };
+        let mut s = InputState::default();
+        start(&mut s);
+        assert!(walk(&mut s, 3));
+        assert!(!s.movement(true, true, true).sprint);
+
+        let mut s = InputState::default();
+        start(&mut s);
+        assert!(!s.movement(true, false, false).sprint);
+
+        let mut s = InputState::default();
+        start(&mut s);
+        press(&mut s, KeyCode::ShiftLeft);
+        assert!(!s.movement(true, false, true).sprint);
+        release(&mut s, KeyCode::ShiftLeft);
+        assert!(!walk(&mut s, 2));
+
+        let mut s = InputState::default();
+        start(&mut s);
+        release(&mut s, KeyCode::KeyW);
+        assert!(!walk(&mut s, 1));
+    }
+
     #[test]
     fn keys_map_to_input() {
         let mut s = InputState::default();
@@ -510,18 +575,18 @@ mod tests {
         press(&mut s, KeyCode::KeyA);
         press(&mut s, KeyCode::Space);
         press(&mut s, KeyCode::ControlLeft);
-        let i = s.movement();
+        let i = s.movement(true, false, true);
         assert_eq!(
             (i.forward, i.strafe, i.jump, i.sprint),
             (1.0, 1.0, true, true)
         );
         press(&mut s, KeyCode::KeyS);
         press(&mut s, KeyCode::KeyD);
-        let i = s.movement();
+        let i = s.movement(true, false, true);
         assert_eq!((i.forward, i.strafe), (0.0, 0.0));
         s.on_key(KeyCode::KeyW, false, None);
         s.on_key(KeyCode::Space, false, None);
-        let i = s.movement();
+        let i = s.movement(true, false, true);
         assert_eq!((i.forward, i.jump), (-1.0, false));
         press(&mut s, KeyCode::ShiftLeft);
         assert!(s.sneaking());
@@ -534,7 +599,7 @@ mod tests {
         press(&mut s, KeyCode::KeyT);
         assert_eq!(s.chat_input(), Some(""));
         assert!(!s.wants_cursor_grab());
-        assert_eq!(s.movement().forward, 0.0);
+        assert_eq!(s.movement(true, false, true).forward, 0.0);
         typ(&mut s, KeyCode::KeyH, "h");
         typ(&mut s, KeyCode::KeyI, "i");
         typ(&mut s, KeyCode::KeyT, "t");
@@ -597,24 +662,37 @@ mod tests {
     }
 
     #[test]
-    fn double_tap_forward_sprints_until_released() {
+    fn double_tap_forward_latches_sprint() {
         let mut s = InputState::default();
-        let t = Instant::now();
-        let k = |s: &mut InputState, p, dt| {
-            s.key_event(KeyCode::KeyW, p, false, None, t + Duration::from_millis(dt))
-        };
-        k(&mut s, true, 0);
-        k(&mut s, false, 50);
-        assert!(!s.movement().sprint);
-        k(&mut s, true, 200);
-        assert!(s.movement().sprint);
-        s.on_key(KeyCode::ShiftLeft, true, None);
-        assert!(!s.movement().sprint);
+        let tick = |s: &mut InputState| s.movement(true, false, true).sprint;
+        press(&mut s, KeyCode::KeyW);
+        assert!(!tick(&mut s));
+        s.on_key(KeyCode::KeyW, false, None);
+        assert!(!tick(&mut s));
+        press(&mut s, KeyCode::KeyW);
+        assert!(tick(&mut s));
+        assert!(tick(&mut s));
+        press(&mut s, KeyCode::ShiftLeft);
+        assert!(!tick(&mut s));
         s.on_key(KeyCode::ShiftLeft, false, None);
-        k(&mut s, false, 900);
-        assert!(!s.movement().sprint);
-        k(&mut s, true, 2000);
-        assert!(!s.movement().sprint);
+        assert!(!tick(&mut s));
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(tick(&mut s));
+        s.on_key(KeyCode::ControlLeft, false, None);
+        assert!(tick(&mut s));
+        assert!(!s.movement(true, true, true).sprint);
+        s.on_key(KeyCode::KeyW, false, None);
+        for _ in 0..10 {
+            tick(&mut s);
+        }
+        press(&mut s, KeyCode::KeyW);
+        tick(&mut s);
+        s.on_key(KeyCode::KeyW, false, None);
+        for _ in 0..7 {
+            tick(&mut s);
+        }
+        press(&mut s, KeyCode::KeyW);
+        assert!(!tick(&mut s));
     }
 
     #[test]
@@ -647,12 +725,11 @@ mod tests {
         let mut s = InputState::default();
         press(&mut s, KeyCode::Escape);
         s.take_actions();
-        let t = Instant::now();
-        s.mouse_button(MouseButton::Left, true, t);
+        s.mouse_button(MouseButton::Left, true);
         assert!(s.wants_cursor_grab() && s.take_actions().is_empty());
-        s.mouse_button(MouseButton::Left, false, t);
-        s.mouse_button(MouseButton::Left, true, t);
-        s.mouse_button(MouseButton::Right, true, t);
+        s.mouse_button(MouseButton::Left, false);
+        s.mouse_button(MouseButton::Left, true);
+        s.mouse_button(MouseButton::Right, true);
         assert!(s.attack_held());
         assert_eq!(s.take_actions(), vec![Action::Attack, Action::Use]);
     }
@@ -662,7 +739,7 @@ mod tests {
         let mut s = InputState::default();
         press(&mut s, KeyCode::KeyW);
         s.set_focused(false);
-        assert_eq!(s.movement().forward, 0.0);
+        assert_eq!(s.movement(true, false, true).forward, 0.0);
         assert_eq!(s.take_actions(), vec![Action::Pause]);
         s.set_focused(true);
         assert!(!s.wants_cursor_grab());

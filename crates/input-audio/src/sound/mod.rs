@@ -148,6 +148,12 @@ impl Sound {
         self.play(&e, Some(at), v, p);
     }
 
+    /// Dig hit while breaking a block; the caller fires it every 4 ticks.
+    pub fn dig_hit(&mut self, block_id: u16, at: [f64; 3]) {
+        let (e, v, p) = BlockSound::of(block_id).dig_hit();
+        self.play(&e, Some(at), v, p);
+    }
+
     /// Local break (aux effect 2001) and place share this sound.
     pub fn dig(&mut self, block_id: u16, at: [f64; 3]) {
         let (e, v, p) = BlockSound::of(block_id).dig();
@@ -160,7 +166,8 @@ impl Sound {
             return self.dig((data & 0xfff) as u16, at);
         }
         let r = (self.rand() >> 8) as f32 / (1u32 << 24) as f32;
-        if let Some((e, v, p)) = effect_sound(id, r) {
+        let r2 = (self.rand() >> 8) as f32 / (1u32 << 24) as f32;
+        if let Some((e, v, p)) = effect_sound(id, r, r2) {
             self.play(e, Some(at), v, p);
         }
     }

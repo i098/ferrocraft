@@ -165,7 +165,7 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             id: p.entity_id,
             status: p.status,
         },
-        P::AttachEntity(p) => EntityEvent::Attach {
+        P::AttachEntity(p) if !p.leash => EntityEvent::Attach {
             id: p.entity_id,
             vehicle: p.vehicle_id,
         },
@@ -202,7 +202,18 @@ impl Session {
         )
     }
 
-    /// Right click on an entity.
+    /// Right click on an entity: `InteractAt` with the hit point relative to the entity.
+    pub fn interact_entity_at(&mut self, target: i32, [x, y, z]: [f32; 3]) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::UseEntity {
+                target: VarInt(target),
+                action: UseAction::InteractAt { x, y, z },
+            }),
+        )
+    }
+
+    /// Right click on an entity that `InteractAt` did not handle: `Interact`.
     pub fn interact_entity(&mut self, target: i32) -> io::Result<()> {
         send(
             &self.writer,

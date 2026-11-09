@@ -1,7 +1,7 @@
 //! The 20 TPS step and the player's actions: movement packets, digging, attacking, using items.
 
 use super::{boxed, App, View, MAX_TICKS_PER_FRAME, TICK};
-use crate::game::{Attack, Effect, EYE_HEIGHT};
+use crate::game::{Attack, Effect};
 use gui::inventory::ContainerScreen;
 use gui::screens::Pause;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, DebugCombo};
@@ -12,6 +12,100 @@ use world::inventory::ItemStack;
 
 /// `rightClickDelayTimer` after a use.
 const USE_DELAY: i32 = 4;
+
+/// `Block.onBlockActivated` on the client: whether a right click on `state` is consumed.
+fn activates(state: u16, held: Option<i16>, gamemode: u8) -> bool {
+    let edit = gamemode != 2;
+    match state >> 4 {
+        23
+        | 25
+        | 26
+        | 54
+        | 58
+        | 61
+        | 62
+        | 63
+        | 64
+        | 68
+        | 69
+        | 71
+        | 77
+        | 92
+        | 96
+        | 107
+        | 116
+        | 117
+        | 118
+        | 122
+        | 130
+        | 138
+        | 143
+        | 145
+        | 146
+        | 154
+        | 158
+        | 167
+        | 183..=187
+        | 193..=197 => true,
+        93 | 94 | 149 | 150 | 151 | 178 => edit,
+        84 => state & 1 != 0,
+        137 => gamemode == 1,
+        46 => matches!(held, Some(259 | 385)),
+        _ => false,
+    }
+}
+
+/// `Item.onItemUse` on the client for a click on `face` of `state`, with `above` over it:
+/// whether the item is consumed. Adventure mode (`canPlayerEdit` false) stops most items.
+fn item_used_on(id: i16, state: u16, above: u16, face: u8, gamemode: u8) -> bool {
+    match id {
+        355 | 383 | 385 => true,
+        2256..=2267 => state >> 4 == 84 && state & 1 == 0,
+        420 => matches!(state >> 4, 85 | 113 | 188..=192),
+        _ => gamemode != 2 && edit_item_used_on(id, state, above, face),
+    }
+}
+
+fn edit_item_used_on(id: i16, state: u16, above: u16, face: u8) -> bool {
+    let block = state >> 4;
+    match id {
+        0..=255 | 259 | 287 | 331 | 338 | 354 | 356 | 379 | 380 | 390 | 404 => true,
+        323 | 397 | 416 | 425 => face != 0,
+        321 | 389 => face >= 2,
+        324 | 330 | 427..=431 => face == 1,
+        290..=295 | 361 | 362 | 391 | 392 | 372 => planted(id, state, face, above >> 4 == 0),
+        328 | 342 | 343 | 407 | 408 | 422 => matches!(block, 27 | 28 | 66 | 157),
+        381 => block == 120 && state & 4 == 0,
+        _ => false,
+    }
+}
+
+/// Seeds, nether wart and hoes: they need a free block over the clicked face.
+fn planted(id: i16, state: u16, face: u8, free_above: bool) -> bool {
+    let block = state >> 4;
+    if face == 0 || !free_above {
+        return false;
+    }
+    match id {
+        295 | 361 | 362 | 391 | 392 => face == 1 && block == 60,
+        372 => face == 1 && block == 88,
+        _ => block == 2 || (block == 3 && state & 15 < 2),
+    }
+}
+
+/// Whether a click on `state` with `held_id` is consumed by the block or the item.
+fn block_handled(
+    gamemode: u8,
+    sneaking: bool,
+    held_id: Option<i16>,
+    state: u16,
+    above: u16,
+    face: u8,
+) -> bool {
+    gamemode == 3
+        || ((!sneaking || held_id.is_none()) && activates(state, held_id, gamemode))
+        || held_id.is_some_and(|id| item_used_on(id, state, above, face, gamemode))
+}
 
 /// `EntityPlayerSP.cameraYaw`/`cameraPitch` and `distanceWalkedModified`, with the values of the
 /// tick before, for `EntityRenderer.setupViewBobbing`.
@@ -67,6 +161,52 @@ impl App {
     }
 
     fn tick_once(&mut self) {
+        self.chat_tick();
+        self.hud.tick();
+        if self.game.player.is_some() {
+            self.hud.update_held(self.game.inv.held_stack());
+        }
+        let m = metrics!(self);
+        let q = self.ui.tick(&m);
+        self.run_effects(q);
+        if let Some(c) = &mut self.container {
+            c.tick();
+            c.sync_game_mode(&self.game.inv);
+        }
+        let playing = self.game.player.is_some() && !self.ui.is_open() && self.container.is_none();
+        if playing {
+            self.dig();
+            self.use_tick();
+        }
+        self.fov_tick();
+        if !playing {
+            self.attack_presses = 0;
+        }
+        self.limb_tick();
+        let input = if playing {
+            self.game
+                .player
+                .as_ref()
+                .map_or_else(world::Input::default, |p| {
+                    self.input
+                        .movement(p.on_ground, p.collided_horizontally, self.game.food > 6)
+                })
+        } else {
+            world::Input::default()
+        };
+        self.game.tick(input);
+        self.use_ticks = (self.use_ticks - 1).max(0);
+        self.boss_tick();
+        self.step_sound();
+        self.particles
+            .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
+        self.equip_tick();
+        self.send_state();
+        self.send_pose();
+        self.sound_tick();
+    }
+
+    fn chat_tick(&mut self) {
         if let Some(line) = self.input.take_chat_submit() {
             if let Some(s) = self.link.session() {
                 let r = s.send_chat(&line);
@@ -78,38 +218,14 @@ impl App {
             self.hud.chat.reset_scroll();
         }
         self.chat_open = chat_open;
-        self.hud.tick();
-        if self.game.player.is_some() {
-            self.hud.update_held(self.game.inv.held_stack());
-        }
-        let m = metrics!(self);
-        let q = self.ui.tick(&m);
-        self.run_effects(q);
-        if let Some(c) = &mut self.container {
-            c.tick();
-        }
-        let playing = self.game.player.is_some() && !self.ui.is_open() && self.container.is_none();
-        if playing {
-            self.dig();
-            self.use_tick();
-        }
-        self.limb_tick();
-        let input = if playing {
-            self.input.movement()
-        } else {
-            world::Input::default()
-        };
-        self.game.tick(input);
-        self.boss_tick();
-        self.step_sound();
-        self.particles
-            .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
-        self.equip_tick();
-        self.send_state();
-        self.send_pose();
+    }
+
+    fn sound_tick(&mut self) {
         let at = self.game.player.as_ref().map(|p| p.pos);
-        if let (Some(s), Some(at)) = (&mut self.sound, at) {
-            s.set_listener(at);
+        if let Some(s) = &mut self.sound {
+            if let Some(at) = at {
+                s.set_listener(at);
+            }
             s.tick(self.ui.in_world);
         }
     }
@@ -122,7 +238,11 @@ impl App {
                 Kind::Mob(63) => ("Ender Dragon", 200.0),
                 _ => return None,
             };
-            Some((e.name.clone().unwrap_or_else(|| default.into()), max, e.health?))
+            Some((
+                e.name.clone().unwrap_or_else(|| default.into()),
+                max,
+                e.health?,
+            ))
         });
         if let Some((name, max, health)) = boss {
             self.hud.set_boss(name, (health / max).clamp(0.0, 1.0));
@@ -226,25 +346,29 @@ impl App {
     }
 
     /// The entity under the crosshair (`EntityRenderer.getMouseOver`): a nearer block hides it.
-    pub(super) fn entity_target(&self) -> Option<i32> {
+    pub(super) fn entity_target(&self) -> Option<(i32, f64)> {
         let p = self.game.player.as_ref()?;
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
+        let eye = self.game.eye(self.input.sneaking())?;
         let dir = look_vector(p.yaw, self.game.pitch);
         let reach = if self.game.creative { 6.0 } else { 3.0 };
         let block = self.game.target_dist(eye).map(|(_, d)| d);
         self.game
             .entities
-            .pick(eye, dir, reach, self.game.entity_id, block)
+            .pick(eye, dir, reach, self.game.entity_id, None, block)
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
     fn dig(&mut self) {
+        let presses = std::mem::take(&mut self.attack_presses);
+        if self.use_ticks > 0 {
+            return;
+        }
         let attack = Attack {
             held: self.input.attack_held(),
-            presses: std::mem::take(&mut self.attack_presses),
+            presses,
         };
-        let entity = self.entity_target();
-        let (actions, effects) = self.game.dig_tick(attack, entity);
+        let entity = self.entity_target().map(|(id, _)| id);
+        let (actions, effects) = self.game.dig_tick(attack, entity, self.input.sneaking());
         for action in actions {
             let sent = match action {
                 DigAction::Dig { status, pos, face } => {
@@ -258,12 +382,7 @@ impl App {
             };
             self.send_result(sent);
         }
-        for (pos, state) in std::mem::take(&mut self.game.broken) {
-            self.particles.break_block(pos, state);
-            if let Some(s) = &mut self.sound {
-                s.dig(state >> 4, pos.map(|v| f64::from(v) + 0.5));
-            }
-        }
+        self.broken_effects();
         if attack.held && !self.game.creative {
             self.dig_ticks += 1;
             if self.dig_ticks.is_multiple_of(4) {
@@ -281,13 +400,26 @@ impl App {
         }
     }
 
+    fn broken_effects(&mut self) {
+        for (pos, state) in std::mem::take(&mut self.game.broken) {
+            self.particles.break_block(pos, state);
+            if let Some(s) = &mut self.sound {
+                s.dig(state >> 4, pos.map(|v| f64::from(v) + 0.5));
+            }
+        }
+    }
+
     fn hit_shard(&mut self) {
-        let Some(p) = &self.game.player else { return };
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
+        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+            return;
+        };
         if let Some(h) = self.game.target(eye) {
             let state = self.game.store.get_block(h.pos[0], h.pos[1], h.pos[2]);
             if state != 0 {
                 self.particles.dig_hit(h.pos, h.face, state);
+                if let Some(s) = &mut self.sound {
+                    s.dig_hit(state >> 4, h.pos.map(|v| f64::from(v) + 0.5));
+                }
             }
         }
     }
@@ -307,26 +439,58 @@ impl App {
         if self.use_delay > 0 {
             self.use_delay -= 1;
         }
-        if !self.input.use_held() {
-            if self.using_item {
-                self.using_item = false;
-                let r = self.session_send(|s| s.release_use_item());
-                self.send_result(r);
-            }
-        } else if self.use_delay == 0 && !self.using_item {
+        let held = self.input.use_held();
+        if self.use_ticks > 0 && !held {
+            self.use_ticks = 0;
+            let r = self.session_send(|s| s.release_use_item());
+            self.send_result(r);
+        } else if held && self.use_delay == 0 && self.use_ticks == 0 {
             self.use_item();
         }
     }
 
-    /// `ItemFood`, `ItemBow`, `ItemSword`, `ItemPotion` and the milk bucket start a timed use
-    /// (`setItemInUse`), which the client then ends with a release packet.
-    fn starts_item_use(&self, s: &ItemStack) -> bool {
+    /// `EntityRenderer.updateFovModifierHand` toward `AbstractClientPlayer.getFovModifier`.
+    fn fov_tick(&mut self) {
+        let mut f = 1.0_f32;
+        if let Some(p) = &self.game.player {
+            if self.game.abilities & 2 != 0 {
+                f *= 1.1;
+            }
+            let sprint = if p.sprinting {
+                1.300_000_011_920_929
+            } else {
+                1.0
+            };
+            let speed = 0.100_000_001_490_116_12 * sprint;
+            let walk = self.game.walk_speed;
+            f = (f64::from(f) * ((speed / f64::from(walk) + 1.0) / 2.0)) as f32;
+            if walk == 0.0 || !f.is_finite() {
+                f = 1.0;
+            }
+            let bow = self
+                .game
+                .inv
+                .held_stack()
+                .as_ref()
+                .is_some_and(|s| s.id == 261);
+            if self.use_ticks > 0 && bow {
+                let t = (72_000 - self.use_ticks) as f32 / 20.0;
+                f *= 1.0 - if t > 1.0 { 1.0 } else { t * t } * 0.15;
+            }
+        }
+        let cur = self.fov_mod.0;
+        self.fov_mod = ((cur + (f - cur) * 0.5).clamp(0.1, 1.5), cur);
+    }
+
+    /// `Item.getMaxItemUseDuration` of an item whose right click starts a timed use
+    /// (`setItemInUse`): food, potions and milk 32 ticks, bows and swords 72000; 0 for others.
+    fn use_duration(&self, s: &ItemStack) -> i32 {
         const FOOD: [i16; 26] = [
             260, 282, 297, 319, 320, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392,
             393, 394, 396, 400, 411, 412, 413, 423, 424,
         ];
         let g = &self.game;
-        match s.id {
+        let uses = match s.id {
             261 => {
                 g.creative
                     || g.inv.player[5..]
@@ -337,43 +501,72 @@ impl App {
             267 | 268 | 272 | 276 | 283 | 335 => true,
             373 => s.damage & 16384 == 0,
             id => FOOD.contains(&id) && g.abilities & 1 == 0 && g.food < 20,
+        };
+        if !uses {
+            0
+        } else if [261, 267, 268, 272, 276, 283].contains(&s.id) {
+            72_000
+        } else {
+            32
         }
     }
 
-    /// Right click: interact with the entity, place on the targeted block, or use in the air.
+    /// `Minecraft.rightClickMouse`: interact with the entity or the block under the crosshair,
+    /// and when neither consumed the click use the held item in the air.
     fn use_item(&mut self) {
         if self.game.is_hitting_block() {
             return;
         }
         self.use_delay = USE_DELAY;
-        if let Some(id) = self.entity_target() {
-            let r = self.session_send(|s| s.interact_entity(id));
-            self.send_result(r);
+        let sneaking = self.input.sneaking();
+        let (Some(p), Some(eye)) = (&self.game.player, self.game.eye(sneaking)) else {
             return;
-        }
-        let Some(p) = &self.game.player else { return };
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
+        };
         let dir = look_vector(p.yaw, self.game.pitch);
         let held = self.game.inv.held_stack().clone();
-        let uses = held.as_ref().is_some_and(|s| self.starts_item_use(s));
-        if let Some((h, dist)) = self
-            .game
-            .target_dist(eye)
-            .filter(|_| self.game.gamemode != 3)
-        {
+        let gamemode = self.game.gamemode;
+        if let Some((id, dist)) = self.entity_target() {
+            let Some(e) = self.game.entities.get(id) else {
+                return;
+            };
+            let at = [0, 1, 2].map(|a| (eye[a] + dir[a] * dist - e.pos[a]) as f32);
+            let handled = gamemode != 3 && e.kind == Kind::Object(78);
+            let r = self.session_send(|s| s.interact_entity_at(id, at));
+            self.send_result(r);
+            if handled {
+                return;
+            }
+            let r = self.session_send(|s| s.interact_entity(id));
+            self.send_result(r);
+        } else if let Some((h, dist)) = self.game.target_dist(eye) {
             let cursor =
                 [0, 1, 2].map(|a| ((eye[a] + dir[a] * dist - f64::from(h.pos[a])) * 16.0) as u8);
             let r = self.session_send(|s| s.place_block(h.pos, h.face, &held, cursor));
             self.send_result(r);
-            if !uses {
+            let [x, y, z] = h.pos;
+            let (state, above) = (
+                self.game.store.get_block(x, y, z),
+                self.game.store.get_block(x, y + 1, z),
+            );
+            let handled = block_handled(
+                gamemode,
+                sneaking,
+                held.as_ref().map(|s| s.id),
+                state,
+                above,
+                h.face,
+            );
+            if handled {
                 self.game.swing.start();
                 let r = self.session_send(|s| s.send_swing());
                 self.send_result(r);
+            }
+            if handled || held.is_none() {
                 return;
             }
         }
-        if held.is_some() {
-            self.using_item = uses;
+        if let Some(s) = &held {
+            self.use_ticks = self.use_duration(s);
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
             self.send_result(r);
         }
@@ -382,8 +575,9 @@ impl App {
     /// `Minecraft.middleClickMouse`: select the targeted block's item on the hotbar; creative
     /// puts it there when missing.
     fn pick_block(&mut self) {
-        let Some(p) = &self.game.player else { return };
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
+        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+            return;
+        };
         let Some(h) = self.game.target(eye) else {
             return;
         };
@@ -394,16 +588,7 @@ impl App {
         if item.id != id {
             return;
         }
-        let mask = match block {
-            17 | 18 | 161 | 162 => 3,
-            44 | 126 => 7,
-            _ => 15,
-        };
-        let damage = if item.subtypes {
-            (meta & mask) as i16
-        } else {
-            0
-        };
+        let damage = pick_damage(block, meta, item.subtypes);
         let hotbar = &self.game.inv.player[36..45];
         let found = hotbar.iter().position(|s| {
             s.as_ref()
@@ -481,7 +666,11 @@ impl App {
     fn game_action(&mut self, action: Action) {
         match action {
             Action::Attack => self.attack_presses += 1,
-            Action::Use => self.use_item(),
+            Action::Use => {
+                if self.use_ticks == 0 {
+                    self.use_item();
+                }
+            }
             Action::PickBlock => self.pick_block(),
             Action::Hotbar(n) => self.select_slot(n),
             Action::HotbarScroll(step) => self.select_slot(scroll_slot(self.game.inv.held, step)),
@@ -601,5 +790,34 @@ impl App {
             let r = self.session_send(|s| s.close_window(id));
             self.send_result(r);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{activates, item_used_on};
+
+    #[test]
+    fn right_click_tables_follow_vanilla() {
+        assert!(activates(54 << 4, None, 0));
+        assert!(!activates(1 << 4, None, 0));
+        assert!(!activates(93 << 4, None, 2));
+        assert!(activates(46 << 4, Some(259), 0) && !activates(46 << 4, None, 0));
+        assert!(item_used_on(1, 1 << 4, 0, 1, 0) && !item_used_on(1, 1 << 4, 0, 1, 2));
+        assert!(item_used_on(295, 60 << 4, 0, 1, 0) && !item_used_on(295, 2 << 4, 0, 1, 0));
+        assert!(!item_used_on(325, 1 << 4, 0, 1, 0));
+    }
+}
+
+fn pick_damage(block: u16, meta: u16, subtypes: bool) -> i16 {
+    let mask = match block {
+        17 | 18 | 161 | 162 => 3,
+        44 | 126 => 7,
+        _ => 15,
+    };
+    if subtypes {
+        (meta & mask) as i16
+    } else {
+        0
     }
 }

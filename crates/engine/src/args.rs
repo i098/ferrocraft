@@ -40,25 +40,31 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
             _ => {}
         }
     }
-    let server = match (host.or(env_server), port) {
-        (Some(h), Some(p)) => Some(format!("{}:{p}", h.split(':').next().unwrap_or(&h))),
-        (Some(h), None) if h.contains(':') => Some(h),
-        (Some(h), None) => Some(format!("{h}:25565")),
-        (None, Some(p)) => Some(format!("127.0.0.1:{p}")),
-        (None, None) => None,
-    };
-    let game_dir = game_dir.clone().unwrap_or_else(|| {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("APPDATA"))
-            .map_or_else(|| PathBuf::from("."), PathBuf::from)
-            .join(".minecraft")
-    });
+    let server = server_address(host.or(env_server), port);
+    let game_dir = game_dir.clone().unwrap_or_else(default_game_dir);
     Ok(Args {
         username,
         assets_dir: resolve_assets(assets_dir, Some(&game_dir), version.as_deref()),
         server,
         game_dir,
     })
+}
+
+fn default_game_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("APPDATA"))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+        .join(".minecraft")
+}
+
+fn server_address(host: Option<String>, port: Option<u16>) -> Option<String> {
+    match (host, port) {
+        (Some(h), Some(p)) => Some(format!("{}:{p}", h.split(':').next().unwrap_or(&h))),
+        (Some(h), None) if h.contains(':') => Some(h),
+        (Some(h), None) => Some(format!("{h}:25565")),
+        (None, Some(p)) => Some(format!("127.0.0.1:{p}")),
+        (None, None) => None,
+    }
 }
 
 /// Launchers pass `<minecraft-dir>/assets`, which holds hashed objects, not the textures and

@@ -37,6 +37,8 @@ pub enum NetEvent {
         hardcore: bool,
         difficulty: u8,
         max_players: u8,
+        /// `reducedDebugInfo` game rule: F3 hides coordinates.
+        reduced_debug_info: bool,
     },
     Chunk(Chunk),
     UnloadChunk(i32, i32),
@@ -299,10 +301,21 @@ impl Session {
         send(
             &self.writer,
             sb::Packet::from(sb::ChatMessage {
-                message: message.into(),
+                message: truncate_chat(message),
             }),
         )
     }
+}
+
+fn truncate_chat(message: &str) -> String {
+    let mut units = 0;
+    message
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= 100
+        })
+        .collect()
 }
 
 impl Drop for Session {
@@ -360,5 +373,16 @@ fn login(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod chat_limit_tests {
+    #[test]
+    fn truncates_to_100_utf16_units() {
+        assert_eq!(super::truncate_chat(&"a".repeat(150)), "a".repeat(100));
+        assert_eq!(super::truncate_chat("hi"), "hi");
+        let s = format!("{}\u{1F600}", "a".repeat(99));
+        assert_eq!(super::truncate_chat(&s), "a".repeat(99));
     }
 }

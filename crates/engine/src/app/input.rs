@@ -44,19 +44,13 @@ impl App {
     fn route_to_screen(&mut self, event: &WindowEvent, modal: bool) {
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
-                let b = match button {
-                    MouseButton::Left => 0,
-                    MouseButton::Right => 1,
-                    MouseButton::Middle => 2,
-                    _ => return,
+                let Some(b) = button_index(*button) else {
+                    return;
                 };
                 self.mouse_button(*state == ElementState::Pressed, b);
             }
             WindowEvent::MouseWheel { delta, .. } if modal => {
-                let y = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
-                    MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
-                };
+                let y = wheel_lines(delta);
                 if y != 0.0 {
                     self.scroll_screen(y.signum() as i32);
                 }
@@ -72,7 +66,25 @@ impl App {
             _ => self.input.on_window_event(event),
         }
     }
+}
 
+fn button_index(button: MouseButton) -> Option<u8> {
+    match button {
+        MouseButton::Left => Some(0),
+        MouseButton::Right => Some(1),
+        MouseButton::Middle => Some(2),
+        _ => None,
+    }
+}
+
+fn wheel_lines(delta: &MouseScrollDelta) -> f64 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
+        MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+    }
+}
+
+impl App {
     fn gui_cursor(&self) -> (i32, i32) {
         let Some(r) = &self.renderer else {
             return (0, 0);
@@ -173,19 +185,16 @@ impl App {
         }
         let b = self.input.bindings();
         let is = |bind: Bind| b.get(bind) == Control::Key(code);
-        if is(Bind::Inventory) {
-            Key::Inventory
-        } else if is(Bind::Drop) {
-            Key::Drop
-        } else if is(Bind::PickBlock) {
-            Key::PickBlock
-        } else if is(Bind::Chat) {
-            Key::Chat
-        } else if let Some(n) = (0..9).find(|n| is(Bind::Hotbar(*n))) {
-            Key::Hotbar(n)
-        } else {
-            Key::Other
-        }
+        [
+            (Bind::Inventory, Key::Inventory),
+            (Bind::Drop, Key::Drop),
+            (Bind::PickBlock, Key::PickBlock),
+            (Bind::Chat, Key::Chat),
+        ]
+        .into_iter()
+        .find_map(|(bind, k)| is(bind).then_some(k))
+        .or_else(|| (0..9).find(|n| is(Bind::Hotbar(*n))).map(Key::Hotbar))
+        .unwrap_or(Key::Other)
     }
 
     fn send_requests(&mut self, reqs: Vec<Request>) {

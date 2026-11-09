@@ -358,21 +358,30 @@ impl Inventory {
             5 => self.drag_click(slot_id, button),
             _ if self.drag.event != 0 => self.drag = Drag::default(),
             0 | 1 if button == 0 || button == 1 => return self.pickup_click(slot_id, button, mode),
-            2 if (0..9).contains(&button) => {
-                if let Some(i) = self.window_slot(slot_id) {
-                    self.swap_hotbar(i, button as usize);
-                }
-            }
+            2 => self.hotbar_click(slot_id, button),
             3 => self.creative_pick(slot_id),
             4 => self.drop_click(slot_id, button),
-            6 => {
-                if let Some(i) = self.window_slot(slot_id) {
-                    self.collect(i, button);
-                }
-            }
+            6 => self.collect_click(slot_id, button),
             _ => {}
         }
         None
+    }
+
+    /// Mode 2 (number key 1-9): swap the slot with that hotbar slot.
+    fn hotbar_click(&mut self, slot_id: i32, button: i32) {
+        if !(0..9).contains(&button) {
+            return;
+        }
+        if let Some(i) = self.window_slot(slot_id) {
+            self.swap_hotbar(i, button as usize);
+        }
+    }
+
+    /// Mode 6 (double click): collect matching items on the cursor.
+    fn collect_click(&mut self, slot_id: i32, button: i32) {
+        if let Some(i) = self.window_slot(slot_id) {
+            self.collect(i, button);
+        }
     }
 
     /// Mode 3 (middle click) in creative: a full stack of the slot's item on the cursor.
@@ -397,7 +406,12 @@ impl Inventory {
             return;
         }
         if let Some(n) = self.slot(i).as_ref().map(|s| i32::from(s.count)) {
-            take(self.slot_mut(i), if button == 0 { 1 } else { n });
+            let n = if button == 0 && self.can_merge(i) {
+                1
+            } else {
+                n
+            };
+            take(self.slot_mut(i), n);
             self.on_take(i);
         }
     }
@@ -450,7 +464,7 @@ impl Inventory {
                 self.cursor = (c.count > 0).then_some(c);
             }
             (Some(s), None) => {
-                let n = if button == 0 {
+                let n = if button == 0 || !self.can_merge(i) {
                     i32::from(s.count)
                 } else {
                     (i32::from(s.count) + 1) / 2
@@ -675,33 +689,37 @@ impl Inventory {
             (start..end).collect()
         };
         let max = max_stack(s);
-        let mut moved = false;
-        if stackable(s) {
-            for &i in &order {
-                if s.count <= 0 {
-                    break;
-                }
-                let Some(t) = self.slot_mut(i).as_mut() else {
-                    continue;
-                };
-                if mergeable(t, s) {
-                    let joined = i32::from(t.count) + i32::from(s.count);
-                    if joined <= max {
-                        s.count = 0;
-                        t.count = joined as i8;
-                        moved = true;
-                    } else if i32::from(t.count) < max {
-                        s.count -= (max - i32::from(t.count)) as i8;
-                        t.count = max as i8;
-                        moved = true;
-                    }
-                }
-            }
-        }
+        let mut moved = stackable(s) && self.merge_into_stacks(s, &order, max);
         if s.count > 0 {
             if let Some(&i) = order.iter().find(|&&i| self.slot(i).is_none()) {
                 *self.slot_mut(i) = Some(s.clone());
                 s.count = 0;
+                moved = true;
+            }
+        }
+        moved
+    }
+
+    fn merge_into_stacks(&mut self, s: &mut ItemStack, order: &[usize], max: i32) -> bool {
+        let mut moved = false;
+        for &i in order {
+            if s.count <= 0 {
+                break;
+            }
+            let Some(t) = self.slot_mut(i).as_mut() else {
+                continue;
+            };
+            if !mergeable(t, s) {
+                continue;
+            }
+            let joined = i32::from(t.count) + i32::from(s.count);
+            if joined <= max {
+                s.count = 0;
+                t.count = joined as i8;
+                moved = true;
+            } else if i32::from(t.count) < max {
+                s.count -= (max - i32::from(t.count)) as i8;
+                t.count = max as i8;
                 moved = true;
             }
         }

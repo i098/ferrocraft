@@ -5,11 +5,19 @@ use crate::weather::Weather;
 use ferrocraft_net_client::{NetEvent, Styled};
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
-use world::entities::Entities;
+use world::entities::{Entities, EntityEvent};
 use world::inventory::Inventory;
 use world::{Block, Input, Player, World};
 
-pub const EYE_HEIGHT: f64 = 1.62;
+/// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
+pub fn eye_height(sneaking: bool) -> f64 {
+    if sneaking {
+        1.62 - 0.08
+    } else {
+        1.62
+    }
+}
+
 const CREATIVE: u8 = 1;
 
 /// Left-button state for one client tick, as `world::dig` wants it.
@@ -100,6 +108,10 @@ pub struct Game {
     pub swing: Swing,
     /// Time of day from Time Update; the packet sends a negative value while the cycle is frozen.
     pub world_time: i64,
+    /// `doDaylightCycle`, from the sign of the last Time Update.
+    pub daylight_cycle: bool,
+    /// `EntityPlayer.hasReducedDebug`: from `JoinGame` and entity status 22/23.
+    pub reduced_debug: bool,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
     pub ticks: u64,
     pub inv: Inventory,
@@ -115,6 +127,8 @@ pub struct Game {
     pub xp_level: i32,
     /// `PlayerCapabilities`: bit 0 invulnerable, 1 flying, 2 allow flying, 3 creative.
     pub abilities: u8,
+    /// `PlayerCapabilities.walkSpeed`.
+    pub walk_speed: f32,
     /// `ItemStack.animationsToGo` of each hotbar slot (the pick-up pop).
     pub bob: [i32; 9],
 }
@@ -136,6 +150,8 @@ impl Game {
             weather: Weather::default(),
             swing: Swing::default(),
             world_time: 6000,
+            daylight_cycle: true,
+            reduced_debug: false,
             ticks: 0,
             inv: Inventory::default(),
             broken: Vec::new(),
@@ -148,6 +164,7 @@ impl Game {
             xp_bar: 0.0,
             xp_level: 0,
             abilities: 0,
+            walk_speed: 0.1,
             bob: [0; 9],
         }
     }
@@ -173,11 +190,13 @@ impl Game {
                 gamemode,
                 hardcore,
                 difficulty,
+                reduced_debug_info,
                 ..
             } => {
                 self.entity_id = entity_id;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
+                self.reduced_debug = reduced_debug_info;
                 self.inv = Inventory::default();
                 self.set_gamemode(gamemode);
             }
@@ -194,7 +213,9 @@ impl Game {
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
             }
-            NetEvent::Abilities { flags, .. } => self.abilities = flags,
+            NetEvent::Abilities {
+                flags, walk_speed, ..
+            } => (self.abilities, self.walk_speed) = (flags, walk_speed),
             NetEvent::GameMode(mode) => self.set_gamemode(mode),
             other => return Err(other),
         }
@@ -260,7 +281,6 @@ impl Game {
     /// Chunks, blocks, entities, time, weather, chat and disconnects.
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::Entity(e) => self.entities.apply(e),
             NetEvent::Respawn => {
                 self.digger = Digger::default();
                 self.store.clear();
@@ -280,6 +300,25 @@ impl Game {
                 self.store.set_block(x, y, z, state);
                 return Some(Effect::Upload(x >> 4, z >> 4));
             }
+            NetEvent::Chat(m) => return Some(Effect::Chat(m)),
+            NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
+            ev => self.apply_state(ev),
+        }
+        None
+    }
+
+    fn apply_state(&mut self, ev: NetEvent) {
+        match ev {
+            NetEvent::Entity(EntityEvent::Velocity { id, vel }) if id == self.entity_id => {
+                if let Some(p) = &mut self.player {
+                    p.vel = vel.map(|v| f64::from(v) / 8000.0);
+                }
+            }
+            NetEvent::Entity(EntityEvent::Status {
+                id,
+                status: s @ (22 | 23),
+            }) if id == self.entity_id => self.reduced_debug = s == 22,
+            NetEvent::Entity(e) => self.entities.apply(e),
             NetEvent::PlayerPosLook {
                 x,
                 y,
@@ -289,15 +328,13 @@ impl Game {
                 flags,
             } => self.teleport([x, y, z], yaw, pitch, flags),
             NetEvent::TimeUpdate { time_of_day, .. } => {
-                self.world_time = time_of_day.wrapping_abs()
+                self.daylight_cycle = time_of_day >= 0;
+                self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
-            NetEvent::Chat(m) => return Some(Effect::Chat(m)),
-            NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
         }
-        None
     }
 
     /// S08: bits 0..=2 make x/y/z relative, bit 3 yaw, bit 4 pitch.
@@ -333,6 +370,9 @@ impl Game {
     /// it does not fall through the void while the world loads.
     pub fn tick(&mut self, input: Input) {
         self.ticks += 1;
+        if self.daylight_cycle {
+            self.world_time += 1;
+        }
         self.weather.tick();
         self.swing.tick();
         for b in &mut self.bob {
@@ -385,6 +425,12 @@ impl Game {
         dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
     }
 
+    /// `Entity.getPositionEyes(1)` of the local player.
+    pub fn eye(&self, sneaking: bool) -> Option<[f64; 3]> {
+        let p = self.player.as_ref()?;
+        Some([p.pos[0], p.pos[1] + eye_height(sneaking), p.pos[2]])
+    }
+
     /// `PlayerControllerMP.getIsHittingBlock`: right click does nothing while a block is dug.
     pub fn is_hitting_block(&self) -> bool {
         self.digger.is_hitting()
@@ -394,12 +440,16 @@ impl Game {
     /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
     /// the block and a click attacks it, as in vanilla's `objectMouseOver`. Only survival and
     /// creative can dig.
-    pub fn dig_tick(&mut self, attack: Attack, entity: Option<i32>) -> (Vec<Action>, Vec<Effect>) {
+    pub fn dig_tick(
+        &mut self,
+        attack: Attack,
+        entity: Option<i32>,
+        sneaking: bool,
+    ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
-        let Some(p) = &self.player else {
+        let (Some(p), Some(eye)) = (&self.player, self.eye(sneaking)) else {
             return (actions, Vec::new());
         };
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
         let frame = Frame {
             held: attack.held,
             presses: attack.presses,
@@ -557,5 +607,38 @@ mod tests {
         g.apply(NetEvent::Chunk(floor_chunk()));
         assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
         assert!(g.store.is_empty());
+    }
+
+    #[test]
+    fn time_runs_unless_frozen_and_local_velocity_and_status_apply() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        g.apply(NetEvent::TimeUpdate {
+            world_age: 0,
+            time_of_day: 100,
+        });
+        g.tick(IDLE);
+        assert_eq!(g.world_time, 101);
+        g.apply(NetEvent::TimeUpdate {
+            world_age: 0,
+            time_of_day: -200,
+        });
+        g.tick(IDLE);
+        assert_eq!(g.world_time, 200);
+        g.apply(NetEvent::PlayerPosLook {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+        });
+        g.apply(NetEvent::Entity(EntityEvent::Velocity {
+            id: 7,
+            vel: [8000, -4000, 0],
+        }));
+        assert_eq!(g.player.as_ref().unwrap().vel, [1.0, -0.5, 0.0]);
+        g.apply(NetEvent::Entity(EntityEvent::Status { id: 7, status: 22 }));
+        assert!(g.reduced_debug);
     }
 }

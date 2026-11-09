@@ -1,7 +1,7 @@
 //! Box models of the blocks that are not full cubes: slabs, stairs, fences, panes, doors, torches and more.
 //! Coordinates are block-local in `0..=1`; sources are written in 1/16 block units like vanilla JSON models.
 
-use crate::blocks::{look, Kind, Tint, DOWN, EAST, NORTH, SOUTH, UP, WEST};
+use crate::blocks::{look, Kind, Look, Tint, DOWN, EAST, NORTH, SOUTH, UP, WEST};
 
 pub const ALL: u8 = 0b11_1111;
 pub const fn bit(face: usize) -> u8 {
@@ -53,10 +53,15 @@ fn full(state: u16) -> bool {
 
 /// `nb(dx, dy, dz)` returns the state around the block.
 pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
-    let (id, meta) = (state >> 4, state & 15);
     let l = look(state);
-    let t = l.tex;
     let mut out = Vec::new();
+    boxes_0(state, nb, &l, &mut out);
+    out
+}
+
+fn boxes_0(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
     match id {
         44 | 126 | 182 => {
             let (lo, hi) = if meta & 8 != 0 {
@@ -82,6 +87,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             };
             out.push(px([x.0, step.0, z.0], [x.1, step.1, z.1], t));
         }
+        _ => boxes_1(state, nb, l, out),
+    }
+}
+
+fn boxes_1(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let id = state >> 4;
+    let t = l.tex;
+    match id {
         85 | 113 | 188..=192 => {
             out.push(px([6.0, 0.0, 6.0], [10.0, 16.0, 10.0], t));
             let joins = |dx, dz| {
@@ -102,6 +115,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
                 }
             }
         }
+        _ => boxes_2(state, nb, l, out),
+    }
+}
+
+fn boxes_2(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         107 | 183..=187 => {
             let along_x = meta & 1 == 0;
             let at = |a: f32, b: f32, y0: f32, y1: f32, w0: f32, w1: f32| {
@@ -121,6 +142,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
                 out.push(at(10.0, 14.0, 12.0, 15.0, 7.0, 9.0));
             }
         }
+        _ => boxes_3(state, nb, l, out),
+    }
+}
+
+fn boxes_3(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let id = state >> 4;
+    let t = l.tex;
+    match id {
         139 => {
             out.push(px([4.0, 0.0, 4.0], [12.0, 16.0, 12.0], t));
             for (dx, dz) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
@@ -136,6 +165,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
                 });
             }
         }
+        _ => boxes_4(state, nb, l, out),
+    }
+}
+
+fn boxes_4(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         101 | 102 | 160 => {
             let top = if id == 101 {
                 "iron_bars"
@@ -163,22 +200,32 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
                 out[0].tex[DOWN] = top;
             } else {
                 out.push(post);
-                for (i, (dx, dz)) in [(0, -1), (0, 1), (-1, 0), (1, 0)].into_iter().enumerate() {
-                    if !sides[i] {
-                        continue;
-                    }
-                    let mut b = match (dx, dz) {
-                        (0, -1) => px([7.0, 0.0, 0.0], [9.0, 16.0, 7.0], t),
-                        (0, _) => px([7.0, 0.0, 9.0], [9.0, 16.0, 16.0], t),
-                        (-1, _) => px([0.0, 0.0, 7.0], [7.0, 16.0, 9.0], t),
-                        _ => px([9.0, 0.0, 7.0], [16.0, 16.0, 9.0], t),
-                    };
+                let arms = [
+                    ([7.0, 0.0, 0.0], [9.0, 16.0, 7.0]),
+                    ([7.0, 0.0, 9.0], [9.0, 16.0, 16.0]),
+                    ([0.0, 0.0, 7.0], [7.0, 16.0, 9.0]),
+                    ([9.0, 0.0, 7.0], [16.0, 16.0, 9.0]),
+                ];
+                for (a, b) in arms
+                    .into_iter()
+                    .zip(sides)
+                    .filter_map(|(ab, s)| s.then_some(ab))
+                {
+                    let mut b = px(a, b, t);
                     b.tex[UP] = top;
                     b.tex[DOWN] = top;
                     out.push(b);
                 }
             }
         }
+        _ => boxes_5(state, nb, l, out),
+    }
+}
+
+fn boxes_5(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         50 | 75 | 76 => {
             let (dx, dy) = match meta {
                 1 => (-6.0, 3.0),
@@ -197,6 +244,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             out.push(b);
         }
         26 => out.push(px([0.0, 3.0, 0.0], [16.0, 9.0, 16.0], t)),
+        _ => boxes_6(state, nb, l, out),
+    }
+}
+
+fn boxes_6(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         27 | 28 | 157 | 66 => {
             let mut b = px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t);
             b.mask = bit(UP);
@@ -215,7 +270,15 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
         }
         54 | 146 | 130 => out.push(px([1.0, 0.0, 1.0], [15.0, 14.0, 15.0], t)),
         60 => out.push(px([0.0, 0.0, 0.0], [16.0, 15.0, 16.0], t)),
-        64 | 71 | 193..=197 => door(state, nb, t, &mut out),
+        64 | 71 | 193..=197 => door(state, nb, t, out),
+        _ => boxes_7(state, nb, l, out),
+    }
+}
+
+fn boxes_7(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         65 => {
             let (a, b) = match meta {
                 2 => ([0.0, 0.0, 14.0], [16.0, 16.0, 16.0]),
@@ -250,6 +313,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             [15.0, 8.0, 15.0],
             t,
         )),
+        _ => boxes_8(state, nb, l, out),
+    }
+}
+
+fn boxes_8(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         93 | 94 => out.push(px([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], t)),
         96 | 167 => {
             let (a, b) = if meta & 4 != 0 {
@@ -268,6 +339,14 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
             bx.cull = false;
             out.push(bx);
         }
+        _ => boxes_9(state, nb, l, out),
+    }
+}
+
+fn boxes_9(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    let t = l.tex;
+    match id {
         106 => {
             for (bit_mask, a, b) in [
                 (1, [0.0, 0.0, 15.2], [16.0, 16.0, 16.0]),
@@ -298,10 +377,17 @@ pub fn boxes(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Bx> {
         120 => out.push(px([0.0, 0.0, 0.0], [16.0, 13.0, 16.0], t)),
         140 => out.push(px([5.0, 0.0, 5.0], [11.0, 6.0, 11.0], t)),
         151 => out.push(px([0.0, 0.0, 0.0], [16.0, 6.0, 16.0], t)),
+        _ => boxes_10(state, nb, l, out),
+    }
+}
+
+fn boxes_10(state: u16, _nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Vec<Bx>) {
+    let id = state >> 4;
+    let t = l.tex;
+    match id {
         171 => out.push(px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t)),
         _ => {}
     }
-    out
 }
 
 fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], out: &mut Vec<Bx>) {
@@ -317,29 +403,34 @@ fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], o
     let hinge_right = high & 1 != 0;
     // Slab sides: 0 west, 1 north, 2 east, 3 south.
     let side = if !open {
-        facing
+        facing as usize
     } else {
-        match (facing, hinge_right) {
-            (0, false) => 3,
-            (0, true) => 1,
-            (1, false) => 2,
-            (1, true) => 0,
-            (2, false) => 1,
-            (2, true) => 3,
-            (3, false) => 0,
-            _ => 2,
-        }
+        [[1, 3], [2, 0], [3, 1], [0, 2]][facing as usize][hinge_right as usize]
     };
-    let (a, b) = match side {
-        0 => ([0.0, 0.0, 0.0], [3.0, 16.0, 16.0]),
-        1 => ([0.0, 0.0, 0.0], [16.0, 16.0, 3.0]),
-        2 => ([13.0, 0.0, 0.0], [16.0, 16.0, 16.0]),
-        _ => ([0.0, 0.0, 13.0], [16.0, 16.0, 16.0]),
-    };
+    let (a, b) = [
+        ([0.0, 0.0, 0.0], [3.0, 16.0, 16.0]),
+        ([0.0, 0.0, 0.0], [16.0, 16.0, 3.0]),
+        ([13.0, 0.0, 0.0], [16.0, 16.0, 16.0]),
+        ([0.0, 0.0, 13.0], [16.0, 16.0, 16.0]),
+    ][side];
     let mut bx = px(a, b, tex);
     if upper {
         bx.tex = [crate::blocks::door_upper(tex[0]); 6];
     }
     bx.cull = false;
     out.push(bx);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn open_door_east_facing_swings_to_north_or_south_by_hinge() {
+        let bounds = |lower: u16, upper: u16| {
+            let b = &super::boxes(64 << 4 | lower, &|_, _, _| 64 << 4 | upper)[0];
+            (b.min, b.max)
+        };
+        assert_eq!(bounds(0, 8), ([0.0; 3], [0.1875, 1.0, 1.0]));
+        assert_eq!(bounds(4, 8), ([0.0; 3], [1.0, 1.0, 0.1875]));
+        assert_eq!(bounds(4, 9), ([0.0, 0.0, 0.8125], [1.0; 3]));
+    }
 }

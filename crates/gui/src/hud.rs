@@ -30,8 +30,8 @@ pub struct Hud {
     pub boss: BossStatus,
     record: String,
     record_up_for: i32,
-    /// `prevVignetteBrightness`, eased toward the light level each frame.
-    vignette: f32,
+    /// `1 - prevVignetteBrightness`, so the derived default starts the vignette at 1.
+    vignette_lag: f32,
     /// `highlightingItemStack` and `remainingHighlightTicks`.
     highlight: Option<ItemStack>,
     highlight_ticks: i32,
@@ -118,55 +118,27 @@ impl Hud {
             self.draw_vignette(gui, f.brightness);
         }
         if f.player_view {
-            gui.set_color(0xFFFF_FFFF);
-            gui.blit(WIDGETS, w / 2 - 91, h - 22, 0, 0, 182, 22);
-            let x = w / 2 - 91 - 1 + self.selected_slot * 20;
-            gui.blit(WIDGETS, x, h - 22 - 1, 0, 22, 24, 22);
-            if let Some(items) = &f.hotbar {
-                draw_hotbar_items(gui, items, f.partial_ticks);
-            }
+            self.draw_hotbar(gui, f);
         }
         gui.set_color(0xFFFF_FFFF);
-        if f.debug.is_none() || f.reduced_debug {
+        let spectator = f.status.is_some_and(|s| s.spectator);
+        if (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
         }
         gui.set_blend(Blend::Alpha);
         self.boss.draw(gui);
         let survival = f.status.is_some_and(Status::survival);
-        if let Some(s) = f.status.filter(|s| s.survival()) {
-            status::draw_stats(gui, s, &mut self.status_state, self.update_counter);
-        }
         if let Some(s) = f.status {
-            match s.horse_jump {
-                Some(p) => status::draw_jump(gui, p),
-                None if s.survival() => status::draw_xp(gui, s),
-                None => {}
-            }
+            self.draw_status(gui, s);
         }
-        let spectator = f.status.is_some_and(|s| s.spectator);
         if f.held_item_tooltips && !spectator {
             self.draw_selected_item(gui, survival);
         }
         if let Some((left, right)) = f.debug {
             debug::draw(gui, left, right);
         }
-        if self.record_up_for > 0 {
-            let t = self.record_up_for as f32 - f.partial_ticks;
-            let alpha = ((t * 255.0 / 20.0) as i32).min(255);
-            if alpha > 8 {
-                gui.push();
-                gui.translate((w / 2) as f32, (h - 68) as f32);
-                let x = -gui.width(&self.record) / 2;
-                gui.text_plain(
-                    &self.record,
-                    x as f32,
-                    -4.0,
-                    0xFFFFFF | (alpha as u32) << 24,
-                );
-                gui.pop();
-            }
-        }
+        self.draw_record(gui, f.partial_ticks);
         self.title.draw(gui, f.partial_ticks);
         self.scoreboard.draw_sidebar(gui);
         let open = f.chat_input.is_some();
@@ -181,6 +153,49 @@ impl Hud {
             chat::draw_input(gui, text, self.update_counter);
         }
         gui.set_color(0xFFFF_FFFF);
+    }
+
+    fn draw_hotbar(&self, gui: &mut Gui, f: &Frame) {
+        let (w, h) = (gui.scale.width, gui.scale.height);
+        gui.set_color(0xFFFF_FFFF);
+        gui.blit(WIDGETS, w / 2 - 91, h - 22, 0, 0, 182, 22);
+        let x = w / 2 - 91 - 1 + self.selected_slot * 20;
+        gui.blit(WIDGETS, x, h - 22 - 1, 0, 22, 24, 22);
+        if let Some(items) = &f.hotbar {
+            draw_hotbar_items(gui, items, f.partial_ticks);
+        }
+    }
+
+    fn draw_status(&mut self, gui: &mut Gui, s: &Status) {
+        if s.survival() {
+            status::draw_stats(gui, s, &mut self.status_state, self.update_counter);
+        }
+        match s.horse_jump {
+            Some(p) => status::draw_jump(gui, p),
+            None if s.survival() => status::draw_xp(gui, s),
+            None => {}
+        }
+    }
+
+    fn draw_record(&self, gui: &mut Gui, partial_ticks: f32) {
+        if self.record_up_for <= 0 {
+            return;
+        }
+        let (w, h) = (gui.scale.width, gui.scale.height);
+        let t = self.record_up_for as f32 - partial_ticks;
+        let alpha = ((t * 255.0 / 20.0) as i32).min(255);
+        if alpha > 8 {
+            gui.push();
+            gui.translate((w / 2) as f32, (h - 68) as f32);
+            let x = -gui.width(&self.record) / 2;
+            gui.text_plain(
+                &self.record,
+                x as f32,
+                -4.0,
+                0xFFFFFF | (alpha as u32) << 24,
+            );
+            gui.pop();
+        }
     }
 
     /// `renderSelectedItem`: the held item's name above the hotbar, fading out.
@@ -204,9 +219,9 @@ impl Hud {
 
     /// `renderVignette`: darkens the screen edges more the darker the player's spot is.
     fn draw_vignette(&mut self, gui: &mut Gui, brightness: f32) {
-        let level = (1.0 - brightness).clamp(0.0, 1.0);
-        self.vignette += (level - self.vignette) * 0.01;
-        let v = (self.vignette.clamp(0.0, 1.0) * 255.0) as u32;
+        let level = brightness.clamp(0.0, 1.0);
+        self.vignette_lag += (level - self.vignette_lag) * 0.01;
+        let v = ((1.0 - self.vignette_lag).clamp(0.0, 1.0) * 255.0) as u32;
         let (w, h) = (gui.scale.width as f32, gui.scale.height as f32);
         gui.set_blend(Blend::Darken);
         gui.blit_tinted(

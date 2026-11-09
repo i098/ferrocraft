@@ -99,28 +99,108 @@ fn color_code(name: &str) -> Option<char> {
 }
 
 fn push(out: &mut Vec<Styled>, style: Style, text: &str) {
+    if text.is_empty() {
+        return;
+    }
     out.push(Styled {
         format: style.code(),
         text: text.to_owned(),
     });
 }
 
+const TRANSLATIONS: &[(&str, &str)] = &[
+    ("chat.type.text", "<%s> %s"),
+    ("chat.type.emote", "* %s %s"),
+    ("chat.type.announcement", "[%s] %s"),
+    ("chat.type.admin", "[%s: %s]"),
+    ("multiplayer.player.joined", "%s joined the game"),
+    ("multiplayer.player.left", "%s left the game"),
+    (
+        "chat.type.achievement",
+        "%s has just earned the achievement %s",
+    ),
+    (
+        "chat.type.achievement.taken",
+        "%s has lost the achievement %s",
+    ),
+    ("chat.stream.emote", "(%s) * %s %s"),
+    ("chat.stream.text", "(%s) <%s> %s"),
+    (
+        "commands.generic.notFound",
+        "Unknown command. Try /help for a list of commands",
+    ),
+    (
+        "commands.generic.permission",
+        "You do not have permission to use this command",
+    ),
+    ("commands.generic.usage", "Usage: %s"),
+    (
+        "commands.generic.player.notFound",
+        "That player cannot be found",
+    ),
+    (
+        "commands.generic.exception",
+        "An unknown error occurred while attempting to perform this command",
+    ),
+    (
+        "commands.message.display.incoming",
+        "%s whispers to you: %s",
+    ),
+    ("commands.message.display.outgoing", "You whisper to %s: %s"),
+    ("death.attack.inFire", "%1$s went up in flames"),
+    ("death.attack.onFire", "%1$s burned to death"),
+    ("death.attack.lava", "%1$s tried to swim in lava"),
+    ("death.attack.inWall", "%1$s suffocated in a wall"),
+    ("death.attack.drown", "%1$s drowned"),
+    ("death.attack.starve", "%1$s starved to death"),
+    ("death.attack.cactus", "%1$s was pricked to death"),
+    ("death.attack.generic", "%1$s died"),
+    ("death.attack.explosion", "%1$s blew up"),
+    ("death.attack.explosion.player", "%1$s was blown up by %2$s"),
+    ("death.attack.magic", "%1$s was killed by magic"),
+    ("death.attack.wither", "%1$s withered away"),
+    ("death.attack.anvil", "%1$s was squashed by a falling anvil"),
+    (
+        "death.attack.fallingBlock",
+        "%1$s was squashed by a falling block",
+    ),
+    ("death.attack.mob", "%1$s was slain by %2$s"),
+    ("death.attack.player", "%1$s was slain by %2$s"),
+    ("death.attack.arrow", "%1$s was shot by %2$s"),
+    ("death.attack.fireball", "%1$s was fireballed by %2$s"),
+    ("death.attack.thrown", "%1$s was pummeled by %2$s"),
+    (
+        "death.attack.indirectMagic",
+        "%1$s was killed by %2$s using magic",
+    ),
+    ("death.attack.thorns", "%1$s was killed trying to hurt %2$s"),
+    ("death.attack.fall", "%1$s hit the ground too hard"),
+    ("death.attack.outOfWorld", "%1$s fell out of the world"),
+    ("death.fell.accident.generic", "%1$s fell from a high place"),
+    ("death.fell.accident.ladder", "%1$s fell off a ladder"),
+    ("death.fell.accident.vines", "%1$s fell off some vines"),
+    ("death.fell.accident.water", "%1$s fell out of the water"),
+    ("death.fell.killer", "%1$s was doomed to fall"),
+];
+
 fn translation(key: &str) -> Option<&'static str> {
-    Some(match key {
-        "chat.type.text" => "<%s> %s",
-        "chat.type.emote" => "* %s %s",
-        "chat.type.announcement" => "[%s] %s",
-        "chat.type.admin" => "[%s: %s]",
-        "multiplayer.player.joined" => "%s joined the game",
-        "multiplayer.player.left" => "%s left the game",
-        _ => return None,
-    })
+    TRANSLATIONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|&(_, v)| v)
 }
 
 fn flatten(v: &Value, parent: Style, out: &mut Vec<Styled>) {
     match v {
         Value::String(s) => push(out, parent, s),
-        Value::Array(items) => items.iter().for_each(|i| flatten(i, parent, out)),
+        Value::Array(items) => {
+            let Some((first, rest)) = items.split_first() else {
+                return;
+            };
+            flatten(first, parent, out);
+            let style = first.as_object().map_or(parent, |o| parent.child(o));
+            rest.iter().for_each(|i| flatten(i, style, out));
+        }
         Value::Object(o) => {
             let style = parent.child(o);
             if let Some(t) = o.get("text").and_then(Value::as_str) {
@@ -132,8 +212,8 @@ fn flatten(v: &Value, parent: Style, out: &mut Vec<Styled>) {
                     .map_or(&[][..], |a| a);
                 translate(key, args, style, out);
             }
-            if let Some(extra) = o.get("extra") {
-                flatten(extra, style, out);
+            if let Some(extra) = o.get("extra").and_then(Value::as_array) {
+                extra.iter().for_each(|e| flatten(e, style, out));
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
@@ -149,14 +229,29 @@ fn translate(key: &str, args: &[Value], style: Style, out: &mut Vec<Styled>) {
         }
         return;
     };
-    let mut next = args.iter();
+    let mut next = 0;
     let mut rest = pattern;
-    while let Some(i) = rest.find("%s") {
+    while let Some(i) = rest.find('%') {
         push(out, style, &rest[..i]);
-        if let Some(a) = next.next() {
+        let spec = &rest[i + 1..];
+        let (index, len) = match spec.find("$s") {
+            Some(d) if d > 0 && spec[..d].bytes().all(|b| b.is_ascii_digit()) => {
+                (spec[..d].parse::<usize>().unwrap_or(1) - 1, d + 2)
+            }
+            _ if spec.starts_with('s') => {
+                next += 1;
+                (next - 1, 1)
+            }
+            _ => {
+                push(out, style, "%");
+                rest = spec;
+                continue;
+            }
+        };
+        if let Some(a) = args.get(index) {
             flatten(a, style, out);
         }
-        rest = &rest[i + 2..];
+        rest = &spec[len..];
     }
     push(out, style, rest);
 }
@@ -164,6 +259,29 @@ fn translate(key: &str, args: &[Value], style: Style, out: &mut Vec<Styled>) {
 #[cfg(test)]
 mod tests {
     use super::{formatted_text, plain_text, styled};
+
+    #[test]
+    fn array_siblings_inherit_first_style() {
+        let runs = styled(r#"[{"text":"a","color":"red"},"b"]"#);
+        assert_eq!(formatted_text(&runs), "\u{a7}ca\u{a7}r\u{a7}cb\u{a7}r");
+    }
+
+    #[test]
+    fn empty_translate_is_empty() {
+        assert_eq!(formatted_text(&styled(r#"{"translate":""}"#)), "");
+        assert_eq!(formatted_text(&styled(r#"{"text":""}"#)), "");
+    }
+
+    #[test]
+    fn positional_death_message() {
+        let j = r#"{"translate":"death.attack.player","with":["Steve","Alex"]}"#;
+        assert_eq!(plain_text(j), "Steve was slain by Alex");
+        let j = r#"{"translate":"chat.type.achievement","with":["Steve","[Taking Inventory]"]}"#;
+        assert_eq!(
+            plain_text(j),
+            "Steve has just earned the achievement [Taking Inventory]"
+        );
+    }
 
     #[test]
     fn vanilla_chat_echo() {

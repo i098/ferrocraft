@@ -56,7 +56,12 @@ impl TitleState {
                     self.timer = self.fade_in + self.stay + self.fade_out;
                 }
             }
-            3 => self.timer = 0,
+            3 => {
+                self.fade_in = 0;
+                self.stay = 0;
+                self.fade_out = 0;
+                self.timer = 0;
+            }
             4 => *self = TitleState::default(),
             _ => {}
         }

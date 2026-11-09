@@ -71,23 +71,22 @@ fn handle(
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
-            // Only now is the server surely in the play state; earlier play packets get "Bad packet id".
-            let settings = sb::ClientSettings {
-                locale: "en_US".into(),
-                view_distance: 8,
-                chat_mode: 0,
-                chat_colors: true,
-                skin_parts: 0x7F,
-            };
-            send(writer, sb::Packet::from(settings))?;
             vec![NetEvent::JoinGame {
                 entity_id: j.entity_id,
                 gamemode: j.gamemode & 7,
                 hardcore: j.gamemode & 8 != 0,
                 difficulty: j.difficulty,
                 max_players: j.max_players,
+                reduced_debug_info: j.reduced_debug_info,
             }]
         }
+        cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
+        other => game_events(other, *dimension)?,
+    })
+}
+
+fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
+    Ok(match packet {
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
             x: p.x,
             y: p.y,
@@ -108,7 +107,6 @@ fn handle(
             value: g.value,
         }],
         cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
-        cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
         cb::Packet::BlockChange(b) => vec![block_change(
             b.location.x,
             b.location.y,
@@ -116,7 +114,7 @@ fn handle(
             b.block_id.0,
         )],
         cb::Packet::MultiBlockChange(m) => multi_block_change(&m),
-        cb::Packet::ChunkData(c) => chunk_data(&c, *dimension == 0)?,
+        cb::Packet::ChunkData(c) => chunk_data(&c, dimension == 0)?,
         cb::Packet::MapChunkBulk(b) => chunk_bulk(&b)?,
         // The player list feeds both entity names and the tab list.
         other => entity::events(&other)

@@ -197,22 +197,12 @@ fn pane_span(low: bool, high: bool, any: bool) -> (f64, f64) {
 /// `BlockWall.setBlockBoundsBasedOnState`: a post, lower and slimmer on a straight run.
 fn wall_box(joined: [bool; 4]) -> [f64; 6] {
     let [n, s, w, e] = joined;
-    let (mut x0, mut x1, mut z0, mut z1, mut top) = (0.25, 0.75, 0.25, 0.75, 1.0);
-    if n {
-        z0 = 0.0;
-    }
-    if s {
-        z1 = 1.0;
-    }
-    if w {
-        x0 = 0.0;
-    }
-    if e {
-        x1 = 1.0;
-    }
-    if n && s && !w && !e {
+    let pick = |j: bool, edge: f64| if j { edge } else { 0.25 + 0.5 * edge };
+    let (mut x0, mut x1, mut z0, mut z1, mut top) =
+        (pick(w, 0.0), pick(e, 1.0), pick(n, 0.0), pick(s, 1.0), 1.0);
+    if joined == [true, true, false, false] {
         (top, x0, x1) = (0.8125, 0.3125, 0.6875);
-    } else if w && e && !n && !s {
+    } else if joined == [false, false, true, true] {
         (top, z0, z1) = (0.8125, 0.3125, 0.6875);
     }
     [x0, 0.0, z0, x1, top, z1]

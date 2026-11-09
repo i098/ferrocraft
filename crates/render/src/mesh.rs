@@ -46,6 +46,8 @@ pub struct Meshes {
     pub opaque: MeshData,
     /// Blended geometry: water, ice, stained glass, slime.
     pub water: MeshData,
+    /// Light of the chunk, `x` and `z` in `-1..=16`.
+    pub light: Option<Light>,
 }
 
 /// The chunk to mesh plus the neighbours in -x, +x, -z, +z order (when loaded).
@@ -142,6 +144,7 @@ pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas) -> Meshes {
             }
         }
     }
+    m.out.light = Some(m.light);
     m.out
 }
 
@@ -151,7 +154,19 @@ impl Mesher<'_> {
     }
 
     fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
-        let (s, b) = self.light.get(at[0] + d[0], at[1] + d[1], at[2] + d[2]);
+        let p = [at[0] + d[0], at[1] + d[1], at[2] + d[2]];
+        let (s, b) = if matches!(
+            self.hood.block(p[0], p[1], p[2]) >> 4,
+            44 | 126 | 182 | 53 | 67 | 108 | 109 | 114 | 128 | 134
+                ..=136 | 156 | 163 | 164 | 180 | 60
+        ) {
+            [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+                .iter()
+                .map(|o| self.light.get(p[0] + o[0], p[1] + o[1], p[2] + o[2]))
+                .fold((0, 0), |(s, b), (s2, b2)| (s.max(s2), b.max(b2)))
+        } else {
+            self.light.get(p[0], p[1], p[2])
+        };
         [s as f32 / 15.0, b as f32 / 15.0]
     }
 
@@ -304,33 +319,15 @@ impl Mesher<'_> {
         let same = |s: u16| matches!(s >> 4, 8 | 9) != lava && matches!(s >> 4, 8..=11);
         let pass = if lava { Pass::Opaque } else { Pass::Blend };
         let rgb = self.base_color(l, Tint::None);
-        let corner_h = |cx: i32, cz: i32| -> f32 {
-            let (mut f, mut n) = (0.0f32, 0.0f32);
-            for i in 0..4 {
-                let d = [cx - (i & 1), 0, cz - (i >> 1 & 1)];
-                if same(self.st(at, [d[0], 1, d[2]])) {
-                    return 1.0;
-                }
-                let s = self.st(at, d);
-                if same(s) {
-                    let m = s & 15;
-                    let pct = (if m >= 8 { 0 } else { m } + 1) as f32 / 9.0;
-                    if m >= 8 || m == 0 {
-                        f += pct * 10.0;
-                        n += 10.0;
-                    }
-                    f += pct;
-                    n += 1.0;
-                } else if !matches!(cached(s).kind, Kind::Opaque | Kind::Cutout | Kind::Shape) {
-                    f += 1.0;
-                    n += 1.0;
-                }
-            }
-            1.0 - f / n
-        };
         let h = [
-            [corner_h(0, 0), corner_h(0, 1)],
-            [corner_h(1, 0), corner_h(1, 1)],
+            [
+                self.corner_h(at, &same, 0, 0),
+                self.corner_h(at, &same, 0, 1),
+            ],
+            [
+                self.corner_h(at, &same, 1, 0),
+                self.corner_h(at, &same, 1, 1),
+            ],
         ];
         let own = self.light_at(at, [0; 3]);
         for f in 0..6 {
@@ -355,12 +352,7 @@ impl Mesher<'_> {
                     0.0
                 };
                 let p = [c[0], y, c[2]];
-                let mut uv = face_uv(f, p);
-                if f >= NORTH {
-                    uv = [uv[0] * 0.5, (1.0 - y) * 0.5];
-                } else if f == DOWN {
-                    uv = [c[0], c[2]];
-                }
+                let uv = liquid_uv(f, p);
                 let k = SHADE[f];
                 verts[i] = Vertex {
                     pos: [
@@ -378,6 +370,31 @@ impl Mesher<'_> {
         let _ = state;
     }
 
+    fn corner_h(&self, at: [i32; 3], same: &dyn Fn(u16) -> bool, cx: i32, cz: i32) -> f32 {
+        let (mut f, mut n) = (0.0f32, 0.0f32);
+        for i in 0..4 {
+            let d = [cx - (i & 1), 0, cz - (i >> 1 & 1)];
+            if same(self.st(at, [d[0], 1, d[2]])) {
+                return 1.0;
+            }
+            let s = self.st(at, d);
+            if same(s) {
+                let m = s & 15;
+                let pct = (if m >= 8 { 0 } else { m } + 1) as f32 / 9.0;
+                if m >= 8 || m == 0 {
+                    f += pct * 10.0;
+                    n += 10.0;
+                }
+                f += pct;
+                n += 1.0;
+            } else if !matches!(cached(s).kind, Kind::Opaque | Kind::Cutout | Kind::Shape) {
+                f += 1.0;
+                n += 1.0;
+            }
+        }
+        1.0 - f / n
+    }
+
     fn cross(&mut self, at: [i32; 3], state: u16, l: &Look) {
         let (id, meta) = (state >> 4, state & 15);
         let (mut tex, mut tint) = (l.tex[0], l.tint);
@@ -391,7 +408,7 @@ impl Mesher<'_> {
             self.hood.origin.1 * 16 + at[2],
         );
         let (ox, oz) = if matches!(id, 31 | 32 | 37 | 38 | 175) {
-            plant_offset(wx, at[1], wz)
+            plant_offset(wx, 0, wz)
         } else {
             (0.0, 0.0)
         };
@@ -444,14 +461,14 @@ impl Mesher<'_> {
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = match f {
-                0 => b.max[1] >= 1.0,
-                1 => b.min[1] <= 0.0,
-                2 => b.min[2] <= 0.0,
-                3 => b.max[2] >= 1.0,
-                4 => b.min[0] <= 0.0,
-                _ => b.max[0] >= 1.0,
-            };
+            let on_border = [
+                b.max[1] >= 1.0,
+                b.min[1] <= 0.0,
+                b.min[2] <= 0.0,
+                b.max[2] >= 1.0,
+                b.min[0] <= 0.0,
+                b.max[0] >= 1.0,
+            ][f];
             if b.cull && on_border && is_opaque_cube(self.st(at, DIRS[f])) {
                 continue;
             }
@@ -480,9 +497,20 @@ impl Mesher<'_> {
     }
 }
 
+fn liquid_uv(f: usize, p: [f32; 3]) -> [f32; 2] {
+    let uv = face_uv(f, p);
+    if f >= NORTH {
+        [uv[0] * 0.5, (1.0 - p[1]) * 0.5]
+    } else if f == DOWN {
+        [p[0], p[2]]
+    } else {
+        uv
+    }
+}
+
 /// Vanilla `Block.getOffset` for the XZ offset type: a stable pseudo-random shift of up to a quarter block.
 fn plant_offset(x: i32, y: i32, z: i32) -> (f32, f32) {
-    let mut i = (x as i64).wrapping_mul(3129871) ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
+    let mut i = x.wrapping_mul(3129871) as i64 ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
     i = i
         .wrapping_mul(i)
         .wrapping_mul(42317861)

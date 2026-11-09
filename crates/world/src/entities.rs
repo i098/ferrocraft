@@ -631,34 +631,43 @@ impl Entities {
         self.map.retain(|_, e| e.death_time <= DEATH_TICKS);
     }
 
-    /// The nearest living or solid entity along the view ray within `reach`, ignoring `skip`
-    /// (the local player). `block_dist` is the distance to the block the crosshair hits; an
-    /// entity behind it is not hit. Vanilla widens each hitbox by `collisionBorderSize` 0.1
-    /// (0 for most entities) and also accepts a ray that starts inside the box.
+    /// The nearest collidable entity along the view ray within `reach`, ignoring `skip`
+    /// (the local player). `vehicle` (the entity the local player rides) is hit only when no
+    /// other entity is. `block_dist` is the distance to the block the crosshair hits; an
+    /// entity behind it is not hit. Vanilla widens each hitbox by `getCollisionBorderSize`
+    /// and also accepts a ray that starts inside the box.
     pub fn pick(
         &self,
         eye: [f64; 3],
         dir: [f64; 3],
         reach: f64,
         skip: i32,
+        vehicle: Option<i32>,
         block_dist: Option<f64>,
-    ) -> Option<i32> {
+    ) -> Option<(i32, f64)> {
         let limit = block_dist.map_or(reach, |b| b.min(reach));
         self.map
             .values()
-            .filter(|e| e.id != skip && !e.is_dead() && e.vehicle != Some(skip))
-            .filter(|e| !matches!(e.kind, Kind::ExperienceOrb | Kind::Object(2 | 60)))
+            .filter(|e| e.id != skip)
+            .filter(|e| {
+                !matches!(
+                    e.kind,
+                    Kind::ExperienceOrb
+                        | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
+                )
+            })
             .filter_map(|e| {
+                let border = if e.kind == Kind::Object(63) { 1.0 } else { 0.1 };
                 let (mut lo, mut hi) = e.bounds();
                 for i in 0..3 {
-                    lo[i] -= 0.1;
-                    hi[i] += 0.1;
+                    lo[i] -= border;
+                    hi[i] += border;
                 }
-                ray_box(eye, dir, lo, hi).map(|d| (d, e.id))
+                ray_box(eye, dir, lo, hi).map(|d| (Some(e.id) == vehicle, d, e.id))
             })
-            .filter(|(d, _)| *d <= limit)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, id)| id)
+            .filter(|(_, d, _)| *d <= limit)
+            .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
+            .map(|(_, d, id)| (id, d))
     }
 }
 
@@ -760,11 +769,22 @@ mod tests {
         spawn(&mut es, 2, [0, 0, 3 * 32]);
         let eye = [0.0, 0.9, 0.0];
         let dir = look_vector(0.0, 0.0);
-        assert_eq!(es.pick(eye, dir, 6.0, 0, None), Some(2));
-        assert_eq!(es.pick(eye, dir, 2.0, 0, None), None);
-        assert_eq!(es.pick(eye, dir, 6.0, 2, Some(4.0)), None);
-        assert_eq!(es.pick(eye, dir, 6.0, 2, None), Some(1));
-        assert_eq!(es.pick(eye, look_vector(90.0, 0.0), 6.0, 0, None), None);
+        assert_eq!(es.pick(eye, dir, 6.0, 0, None, None).map(|h| h.0), Some(2));
+        assert_eq!(es.pick(eye, dir, 2.0, 0, None, None), None);
+        assert_eq!(es.pick(eye, dir, 6.0, 2, None, Some(4.0)), None);
+        assert_eq!(es.pick(eye, dir, 6.0, 2, None, None).map(|h| h.0), Some(1));
+        assert_eq!(
+            es.pick(eye, look_vector(90.0, 0.0), 6.0, 0, None, None),
+            None
+        );
+        assert_eq!(
+            es.pick(eye, dir, 6.0, 0, Some(2), None).map(|h| h.0),
+            Some(1)
+        );
+        assert_eq!(
+            es.pick(eye, dir, 6.0, 1, Some(2), None).map(|h| h.0),
+            Some(2)
+        );
     }
 
     #[test]

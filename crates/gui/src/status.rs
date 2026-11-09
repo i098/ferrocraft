@@ -108,11 +108,33 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
     let i = s.health.ceil() as i32;
     let flag = st.health_update_counter > update_counter
         && (st.health_update_counter - update_counter) / 3 % 2 == 1;
+    track_health(st, i, update_counter);
+    let j = st.last_player_health;
+    let mut rand = JavaRandom::new(i64::from(update_counter) * 312871);
+    let i1 = w / 2 - 91;
+    let j1 = w / 2 + 91;
+    let k1 = h - 39;
+    let l1 = ((s.max_health + s.absorption) / 2.0 / 10.0).ceil() as i32;
+    let i2 = (10 - (l1 - 2)).max(3);
+    let j2 = k1 - (l1 - 1) * i2 - 10;
+    gui.set_color(0xFFFF_FFFF);
+    draw_armor(gui, s.armor, i1, j2);
+    draw_hearts(gui, s, &mut rand, flag, (i, j), (i1, k1, i2));
+    match s.mount_health {
+        None => draw_food(gui, s, &mut rand, update_counter, j1, k1),
+        Some((health, max)) => draw_mount(gui, health, max, j1, k1),
+    }
+    if s.in_water {
+        draw_air(gui, s, j1, j2);
+    }
+}
+
+fn track_health(st: &mut StatusState, i: i32, update_counter: i32) {
     // Vanilla also needs `hurtResistantTime > 0`; a health change from the server stands in for it.
     if i < st.player_health {
         st.last_time = update_counter;
         st.health_update_counter = update_counter + 20;
-    } else if i > st.player_health {
+    } else if i > st.player_health && st.player_health > 0 {
         st.last_time = update_counter;
         st.health_update_counter = update_counter + 10;
     }
@@ -121,40 +143,58 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
         st.last_time = update_counter;
     }
     st.player_health = i;
-    let j = st.last_player_health;
-    let mut rand = JavaRandom::new(i64::from(update_counter) * 312871);
-    let k = s.food.clamp(0, 20);
-    let i1 = w / 2 - 91;
-    let j1 = w / 2 + 91;
-    let k1 = h - 39;
-    let (f, f1) = (s.max_health, s.absorption);
-    let l1 = ((f + f1) / 2.0 / 10.0).ceil() as i32;
-    let i2 = (10 - (l1 - 2)).max(3);
-    let j2 = k1 - (l1 - 1) * i2 - 10;
-    let mut f2 = f1;
-    let k2 = s.armor;
-    gui.set_color(0xFFFF_FFFF);
-    for i3 in 0..10 {
-        if k2 > 0 {
-            let u = match (i3 * 2 + 1).cmp(&k2) {
-                std::cmp::Ordering::Less => 34,
-                std::cmp::Ordering::Equal => 25,
-                std::cmp::Ordering::Greater => 16,
-            };
-            gui.blit(ICONS, i1 + i3 * 8, j2, u, 9, 9, 9);
-        }
+}
+
+/// Full icon at `full_u` while pip `n` is under `val`, half icon at `half_u` when it is the odd last one.
+#[allow(clippy::too_many_arguments)]
+fn pip(gui: &mut Gui, x: i32, y: i32, n: i32, val: i32, full_u: i32, half_u: i32, v: i32) {
+    if n * 2 + 1 < val {
+        gui.blit(ICONS, x, y, full_u, v, 9, 9);
+    } else if n * 2 + 1 == val {
+        gui.blit(ICONS, x, y, half_u, v, 9, 9);
     }
-    let mut i6 = ((f + f1) / 2.0).ceil() as i32 - 1;
-    while i6 >= 0 {
-        let j6 = 16
-            + if s.poisoned {
-                36
-            } else if s.withered {
-                72
-            } else {
-                0
-            };
-        let k3 = i32::from(flag);
+}
+
+fn draw_armor(gui: &mut Gui, armor: i32, x: i32, y: i32) {
+    if armor <= 0 {
+        return;
+    }
+    for i3 in 0..10 {
+        let u = match (i3 * 2 + 1).cmp(&armor) {
+            std::cmp::Ordering::Less => 34,
+            std::cmp::Ordering::Equal => 25,
+            std::cmp::Ordering::Greater => 16,
+        };
+        gui.blit(ICONS, x + i3 * 8, y, u, 9, 9, 9);
+    }
+}
+
+/// Heart sprite column offset (poison, wither) and row (hardcore).
+fn heart_uv(s: &Status) -> (i32, i32) {
+    let u = if s.poisoned {
+        36
+    } else if s.withered {
+        72
+    } else {
+        0
+    };
+    (16 + u, if s.hardcore { 45 } else { 0 })
+}
+
+/// `(i, j)` is current and last health; `(i1, k1, i2)` is left x, bottom y and row step.
+fn draw_hearts(
+    gui: &mut Gui,
+    s: &Status,
+    rand: &mut JavaRandom,
+    flag: bool,
+    (i, j): (i32, i32),
+    (i1, k1, i2): (i32, i32, i32),
+) {
+    let f1 = s.absorption;
+    let mut f2 = f1;
+    let (j6, v) = heart_uv(s);
+    let k3 = i32::from(flag);
+    for i6 in (0..((s.max_health + f1) / 2.0).ceil() as i32).rev() {
         let l3 = ((i6 + 1) as f32 / 10.0).ceil() as i32 - 1;
         let i4 = i1 + i6 % 10 * 8;
         let mut j4 = k1 - l3 * i2;
@@ -164,15 +204,9 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
         if i6 == s.regen_tick {
             j4 -= 2;
         }
-        let v = if s.hardcore { 45 } else { 0 };
         gui.blit(ICONS, i4, j4, 16 + k3 * 9, v, 9, 9);
         if flag {
-            if i6 * 2 + 1 < j {
-                gui.blit(ICONS, i4, j4, j6 + 54, v, 9, 9);
-            }
-            if i6 * 2 + 1 == j {
-                gui.blit(ICONS, i4, j4, j6 + 63, v, 9, 9);
-            }
+            pip(gui, i4, j4, i6, j, j6 + 54, j6 + 63, v);
         }
         if f2 > 0.0 {
             let u = if f2 == f1 && f1 % 2.0 == 1.0 {
@@ -183,65 +217,58 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
             gui.blit(ICONS, i4, j4, j6 + u, v, 9, 9);
             f2 -= 2.0;
         } else {
-            if i6 * 2 + 1 < i {
-                gui.blit(ICONS, i4, j4, j6 + 36, v, 9, 9);
-            }
-            if i6 * 2 + 1 == i {
-                gui.blit(ICONS, i4, j4, j6 + 45, v, 9, 9);
-            }
-        }
-        i6 -= 1;
-    }
-    match s.mount_health {
-        None => {
-            // shortcut: no Hunger effect sprites (u + 36, v 13); add when the engine tracks potion effects.
-            for k6 in 0..10 {
-                let mut l6 = k1;
-                if s.saturation <= 0.0 && update_counter % (k * 3 + 1) == 0 {
-                    l6 = k1 + (rand.next_int(3) - 1);
-                }
-                let k8 = j1 - k6 * 8 - 9;
-                gui.blit(ICONS, k8, l6, 16, 27, 9, 9);
-                if k6 * 2 + 1 < k {
-                    gui.blit(ICONS, k8, l6, 52, 27, 9, 9);
-                }
-                if k6 * 2 + 1 == k {
-                    gui.blit(ICONS, k8, l6, 61, 27, 9, 9);
-                }
-            }
-        }
-        Some((health, max)) => {
-            let i7 = health.ceil() as i32;
-            let mut j8 = ((max + 0.5) as i32 / 2).min(30);
-            let mut i9 = k1;
-            let mut j9 = 0;
-            while j8 > 0 {
-                let k9 = j8.min(10);
-                j8 -= k9;
-                for l9 in 0..k9 {
-                    let k10 = j1 - l9 * 8 - 9;
-                    gui.blit(ICONS, k10, i9, 52, 9, 9, 9);
-                    if l9 * 2 + 1 + j9 < i7 {
-                        gui.blit(ICONS, k10, i9, 88, 9, 9, 9);
-                    }
-                    if l9 * 2 + 1 + j9 == i7 {
-                        gui.blit(ICONS, k10, i9, 97, 9, 9, 9);
-                    }
-                }
-                i9 -= 10;
-                j9 += 20;
-            }
+            pip(gui, i4, j4, i6, i, j6 + 36, j6 + 45, v);
         }
     }
-    if s.in_water {
-        let max = f64::from(s.max_air.max(1));
-        let l6 = f64::from(s.air);
-        let k7 = ((l6 - 2.0) * 10.0 / max).ceil() as i32;
-        let i8 = (l6 * 10.0 / max).ceil() as i32 - k7;
-        for l8 in 0..k7 + i8 {
-            let u = if l8 < k7 { 16 } else { 25 };
-            gui.blit(ICONS, j1 - l8 * 8 - 9, k1 - 10, u, 18, 9, 9);
+}
+
+fn draw_food(
+    gui: &mut Gui,
+    s: &Status,
+    rand: &mut JavaRandom,
+    update_counter: i32,
+    j1: i32,
+    k1: i32,
+) {
+    let k = s.food.clamp(0, 20);
+    // shortcut: no Hunger effect sprites (u + 36, v 13); add when the engine tracks potion effects.
+    for k6 in 0..10 {
+        let mut l6 = k1;
+        if s.saturation <= 0.0 && update_counter % (k * 3 + 1) == 0 {
+            l6 = k1 + (rand.next_int(3) - 1);
         }
+        let k8 = j1 - k6 * 8 - 9;
+        gui.blit(ICONS, k8, l6, 16, 27, 9, 9);
+        pip(gui, k8, l6, k6, k, 52, 61, 27);
+    }
+}
+
+fn draw_mount(gui: &mut Gui, health: f32, max: f32, j1: i32, k1: i32) {
+    let i7 = health.ceil() as i32;
+    let mut j8 = ((max + 0.5) as i32 / 2).min(30);
+    let mut i9 = k1;
+    let mut j9 = 0;
+    while j8 > 0 {
+        let k9 = j8.min(10);
+        j8 -= k9;
+        for l9 in 0..k9 {
+            let k10 = j1 - l9 * 8 - 9;
+            gui.blit(ICONS, k10, i9, 52, 9, 9, 9);
+            pip(gui, k10, i9, l9, i7 - j9, 88, 97, 9);
+        }
+        i9 -= 10;
+        j9 += 20;
+    }
+}
+
+fn draw_air(gui: &mut Gui, s: &Status, j1: i32, j2: i32) {
+    let max = f64::from(s.max_air.max(1));
+    let l6 = f64::from(s.air);
+    let k7 = ((l6 - 2.0) * 10.0 / max).ceil() as i32;
+    let i8 = (l6 * 10.0 / max).ceil() as i32 - k7;
+    for l8 in 0..k7 + i8 {
+        let u = if l8 < k7 { 16 } else { 25 };
+        gui.blit(ICONS, j1 - l8 * 8 - 9, j2, u, 18, 9, 9);
     }
 }
 

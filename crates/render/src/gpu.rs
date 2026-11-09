@@ -46,6 +46,7 @@ struct GpuMesh {
 struct ChunkMesh {
     opaque: Option<GpuMesh>,
     water: Option<GpuMesh>,
+    light: Option<crate::light::Light>,
 }
 
 /// The resolved model of the held item.
@@ -510,6 +511,7 @@ impl Renderer {
         let mesh = ChunkMesh {
             opaque: self.upload_mesh(m.opaque, origin),
             water: self.upload_mesh(m.water, origin),
+            light: m.light,
         };
         self.meshes.insert((cx, cz), mesh);
     }
@@ -722,18 +724,22 @@ impl Renderer {
         sun_brightness: f32,
     ) -> Option<(GpuMesh, HandTex)> {
         let (mut draw, tex) = self.hand_draw()?;
-        // A block above the eye keeps the hand dark.
-        let covered = self
-            .rain_top(cam.pos[0].floor() as i32, cam.pos[2].floor() as i32)
-            .is_some_and(|top| top as f64 > cam.pos[1]);
-        let light = if covered { [0.0, 0.0] } else { [1.0, 0.0] };
+        let eye = cam.pos.map(|p| p.floor() as i32);
+        let light = self
+            .meshes
+            .get(&(eye[0] >> 4, eye[2] >> 4))
+            .and_then(|m| m.light.as_ref())
+            .map_or([1.0, 0.0], |l| {
+                let (s, b) = l.get(eye[0] & 15, eye[1], eye[2] & 15);
+                [s as f32 / 15.0, b as f32 / 15.0]
+            });
         for v in &mut draw.vertices {
             v.light = light;
         }
         let [w, h, ..] = world.screen;
         let globals = Globals {
             view_proj: mul(
-                projection(cam.fov_deg, w / h),
+                projection(70.0, w / h),
                 mul(bob_matrix(cam.bob), draw.model),
             ),
             eye: [0.0, 0.0, 0.0, self.environment.gamma],
@@ -812,9 +818,7 @@ impl Renderer {
             self.load_texture(PARTICLE_SHEET);
         }
 
-        for q in overlay {
-            self.load_texture(&q.tex);
-        }
+        overlay.iter().for_each(|q| self.load_texture(&q.tex));
         let verts: Vec<GuiVertex> = overlay.iter().flat_map(quad_vertices).collect();
         let gui_buf = (!verts.is_empty()).then(|| {
             self.device
@@ -865,18 +869,18 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.env_group, &[]);
             pass.set_pipeline(&self.sky_pipe);
-            for m in [&sky_solid, &sky_blend].into_iter().flatten() {
-                draw_mesh(&mut pass, m);
-            }
+            [&sky_solid, &sky_blend]
+                .into_iter()
+                .flatten()
+                .for_each(|m| draw_mesh(&mut pass, m));
             pass.set_pipeline(&self.sky_add_pipe);
-            if let Some(m) = &sky_add {
-                draw_mesh(&mut pass, m);
-            }
+            sky_add.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_bind_group(0, &self.world_group, &[]);
             pass.set_pipeline(&self.opaque_pipe);
-            for m in self.meshes.values().filter_map(|m| m.opaque.as_ref()) {
-                draw_mesh(&mut pass, m);
-            }
+            self.meshes
+                .values()
+                .filter_map(|m| m.opaque.as_ref())
+                .for_each(|m| draw_mesh(&mut pass, m));
             if let Some(m) = &self.entity_mesh {
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
@@ -884,17 +888,16 @@ impl Renderer {
             }
             // `EffectRenderer.renderParticles` runs after entities and before the translucent layer.
             pass.set_pipeline(&self.water_pipe);
-            if let Some(m) = &particle_block {
-                draw_mesh(&mut pass, m);
-            }
+            particle_block.iter().for_each(|m| draw_mesh(&mut pass, m));
             if let Some(m) = &particle_sheet {
                 pass.set_bind_group(0, &self.textures[PARTICLE_SHEET], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
-            for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {
-                draw_mesh(&mut pass, m);
-            }
+            self.meshes
+                .values()
+                .filter_map(|m| m.water.as_ref())
+                .for_each(|m| draw_mesh(&mut pass, m));
             if let Some(buf) = &sel_buf {
                 pass.set_bind_group(0, &self.world_group, &[]);
                 pass.set_pipeline(&self.line_pipe);
@@ -941,19 +944,28 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
             }
             if let Some(buf) = &gui_buf {
-                pass.set_vertex_buffer(0, buf.slice(..));
-                // Consecutive quads with the same texture and blend share one draw; order is kept.
-                let mut start = 0;
-                for run in overlay.chunk_by(|a, b| a.tex == b.tex && a.blend == b.blend) {
-                    pass.set_bind_group(0, &self.textures[&*run[0].tex], &[]);
-                    pass.set_pipeline(&self.gui_pipes[run[0].blend as usize]);
-                    let end = start + run.len() as u32 * 6;
-                    pass.draw(start..end, 0..1);
-                    start = end;
-                }
+                self.draw_gui(&mut pass, buf, overlay);
             }
         }
         self.queue.submit([enc.finish()]);
+    }
+
+    fn draw_gui<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        buf: &'a wgpu::Buffer,
+        overlay: &[Quad],
+    ) {
+        pass.set_vertex_buffer(0, buf.slice(..));
+        // Consecutive quads with the same texture and blend share one draw; order is kept.
+        let mut start = 0;
+        for run in overlay.chunk_by(|a, b| a.tex == b.tex && a.blend == b.blend) {
+            pass.set_bind_group(0, &self.textures[&*run[0].tex], &[]);
+            pass.set_pipeline(&self.gui_pipes[run[0].blend as usize]);
+            let end = start + run.len() as u32 * 6;
+            pass.draw(start..end, 0..1);
+            start = end;
+        }
     }
 
     /// Render one frame offscreen and return `(width, height, rgba8)`. Only valid for offscreen renderers.

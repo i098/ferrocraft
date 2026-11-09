@@ -59,14 +59,7 @@ impl TabList {
                 .then_with(|| a.name.cmp(&b.name))
         });
         let objective = sb.objective_in(SLOT_LIST);
-        let (mut i, mut j) = (0, 0);
-        for e in &list {
-            i = i.max(gui.width(&Self::name(e, sb)));
-            if let Some(o) = objective {
-                let s = sb.score(o, &e.name).unwrap_or(0);
-                j = j.max(gui.width(&format!(" {s}")));
-            }
-        }
+        let (i, j) = Self::widths(gui, &list, sb, objective);
         list.truncate(80);
         let l3 = list.len() as i32;
         let (mut i4, mut j4) = (l3, 1);
@@ -82,36 +75,16 @@ impl TabList {
         let j1 = width / 2 - (i1 * j4 + (j4 - 1) * 5) / 2;
         let mut k1 = 10;
         let mut l1 = i1 * j4 + (j4 - 1) * 5;
-        let wrap = |s: &str| -> Vec<String> {
-            if s.is_empty() {
-                Vec::new()
-            } else {
-                gui.metrics().wrap(s, width - 50)
-            }
-        };
-        let (list1, list2) = (wrap(&self.header), wrap(&self.footer));
+        let (list1, list2) = (
+            wrap(gui, &self.header, width),
+            wrap(gui, &self.footer, width),
+        );
         for s in list1.iter().chain(&list2) {
             l1 = l1.max(gui.width(s));
         }
         let (bx0, bx1) = (width / 2 - l1 / 2 - 1, width / 2 + l1 / 2 + 1);
         if !list1.is_empty() {
-            gui.fill(
-                bx0,
-                k1 - 1,
-                bx1,
-                k1 + list1.len() as i32 * FONT_HEIGHT,
-                i32::MIN as u32,
-            );
-            for s in &list1 {
-                gui.text(
-                    s,
-                    (width / 2 - gui.width(s) / 2) as f32,
-                    k1 as f32,
-                    0xFFFF_FFFF,
-                );
-                k1 += FONT_HEIGHT;
-            }
-            k1 += 1;
+            k1 = draw_lines(gui, &list1, (bx0, bx1), k1, width) + 1;
         }
         gui.fill(bx0, k1 - 1, bx1, k1 + i4 * 9, i32::MIN as u32);
         for (k4, e) in list.iter().enumerate() {
@@ -143,42 +116,92 @@ impl TabList {
                 );
                 j2 += 9;
             }
-            let name = Self::name(e, sb);
-            if e.gamemode == SPECTATOR {
-                gui.text(&format!("\u{a7}o{name}"), j2 as f32, k2 as f32, 0x90FF_FFFF);
-            } else {
-                gui.text(&name, j2 as f32, k2 as f32, 0xFFFF_FFFF);
-                if let Some(o) = objective {
-                    let k5 = j2 + i + 1;
-                    let l5 = k5 + l;
-                    if l5 - k5 > 5 {
-                        let s = format!("\u{a7}e{}", sb.score(o, &e.name).unwrap_or(0));
-                        gui.text(&s, (l5 - gui.width(&s)) as f32, k2 as f32, 0xFFFF_FFFF);
-                    }
-                }
-            }
+            Self::draw_name(gui, e, sb, objective, (j2, k2), (j2 + i + 1, l));
             draw_ping(gui, i1, j2 - head, k2, e.ping);
         }
         if !list2.is_empty() {
-            k1 += i4 * 9 + 1;
-            gui.fill(
-                bx0,
-                k1 - 1,
-                bx1,
-                k1 + list2.len() as i32 * FONT_HEIGHT,
-                i32::MIN as u32,
-            );
-            for s in &list2 {
-                gui.text(
-                    s,
-                    (width / 2 - gui.width(s) / 2) as f32,
-                    k1 as f32,
-                    0xFFFF_FFFF,
-                );
-                k1 += FONT_HEIGHT;
-            }
+            draw_lines(gui, &list2, (bx0, bx1), k1 + i4 * 9 + 1, width);
         }
     }
+
+    /// Widest name and widest ` <score>` of `list`.
+    fn widths(
+        gui: &Gui,
+        list: &[&TabEntry],
+        sb: &Scoreboard,
+        objective: Option<&str>,
+    ) -> (i32, i32) {
+        let (mut i, mut j) = (0, 0);
+        for e in list {
+            i = i.max(gui.width(&Self::name(e, sb)));
+            if let Some(o) = objective {
+                let s = sb.score(o, &e.name).unwrap_or(0);
+                j = j.max(gui.width(&format!(" {s}")));
+            }
+        }
+        (i, j)
+    }
+
+    /// The player name at `(x, y)` and its score right aligned in the `l` wide column at `score_x`.
+    fn draw_name(
+        gui: &mut Gui,
+        e: &TabEntry,
+        sb: &Scoreboard,
+        objective: Option<&str>,
+        (x, y): (i32, i32),
+        (score_x, l): (i32, i32),
+    ) {
+        let name = Self::name(e, sb);
+        if e.gamemode == SPECTATOR {
+            gui.text(&format!("\u{a7}o{name}"), x as f32, y as f32, 0x90FF_FFFF);
+            return;
+        }
+        gui.text(&name, x as f32, y as f32, 0xFFFF_FFFF);
+        if let Some(o) = objective.filter(|_| l > 5) {
+            let s = format!("\u{a7}e{}", sb.score(o, &e.name).unwrap_or(0));
+            gui.text(
+                &s,
+                (score_x + l - gui.width(&s)) as f32,
+                y as f32,
+                0xFFFF_FFFF,
+            );
+        }
+    }
+}
+
+fn wrap(gui: &Gui, s: &str, width: i32) -> Vec<String> {
+    if s.is_empty() {
+        Vec::new()
+    } else {
+        gui.metrics().wrap(s, width - 50)
+    }
+}
+
+/// Dark box behind `lines`, then the lines centered from `y`; returns the y below them.
+fn draw_lines(
+    gui: &mut Gui,
+    lines: &[String],
+    (bx0, bx1): (i32, i32),
+    mut y: i32,
+    width: i32,
+) -> i32 {
+    gui.fill(
+        bx0,
+        y - 1,
+        bx1,
+        y + lines.len() as i32 * FONT_HEIGHT,
+        i32::MIN as u32,
+    );
+    for s in lines {
+        gui.text(
+            s,
+            (width / 2 - gui.width(s) / 2) as f32,
+            y as f32,
+            0xFFFF_FFFF,
+        );
+        y += FONT_HEIGHT;
+    }
+    y
 }
 
 fn team<'a>(sb: &'a Scoreboard, e: &TabEntry) -> &'a str {

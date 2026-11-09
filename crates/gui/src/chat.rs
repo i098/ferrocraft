@@ -175,12 +175,7 @@ impl Chat {
             let line = &self.drawn[(i + self.scroll_pos) as usize];
             let age = counter - line.counter;
             if age < 200 || open {
-                let d = ((1.0 - age as f64 / 200.0) * 10.0).clamp(0.0, 1.0);
-                let mut alpha = (255.0 * d * d) as i32;
-                if open {
-                    alpha = 255;
-                }
-                alpha = (alpha as f32 * opacity) as i32;
+                let alpha = line_alpha(age, open, opacity);
                 shown += 1;
                 if alpha > 3 {
                     let y = -i * 9;
@@ -196,20 +191,30 @@ impl Chat {
             i += 1;
         }
         if open {
-            gui.translate(-3.0, 0.0);
-            let all = total * FONT_HEIGHT + total;
-            let visible = shown * FONT_HEIGHT + shown;
-            let top = self.scroll_pos * visible / total;
-            let bar = visible * visible / all;
-            if all != visible {
-                let a: u32 = if top > 0 { 170 } else { 96 };
-                let color = if self.scrolled { 0xCC3333 } else { 0x3333AA };
-                gui.fill(0, -top, 2, -top - bar, color + (a << 24));
-                gui.fill(2, -top, 1, -top - bar, 0xCCCCCC + (a << 24));
-            }
+            self.draw_bar(gui, total, shown);
         }
         gui.pop();
     }
+
+    fn draw_bar(&self, gui: &mut Gui, total: i32, shown: i32) {
+        gui.translate(-3.0, 0.0);
+        let all = total * FONT_HEIGHT + total;
+        let visible = shown * FONT_HEIGHT + shown;
+        let top = self.scroll_pos * visible / total;
+        let bar = visible * visible / all;
+        if all != visible {
+            let a: u32 = if top > 0 { 170 } else { 96 };
+            let color = if self.scrolled { 0xCC3333 } else { 0x3333AA };
+            gui.fill(0, -top, 2, -top - bar, color + (a << 24));
+            gui.fill(2, -top, 1, -top - bar, 0xCCCCCC + (a << 24));
+        }
+    }
+}
+
+fn line_alpha(age: i32, open: bool, opacity: f32) -> i32 {
+    let d = ((1.0 - age as f64 / 200.0) * 10.0).clamp(0.0, 1.0);
+    let alpha = if open { 255 } else { (255.0 * d * d) as i32 };
+    (alpha as f32 * opacity) as i32
 }
 
 /// `GuiUtilRenderComponents.splitText(component, width, font, false, false)`, each line as
@@ -238,23 +243,9 @@ fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<String> {
         let mut piece = s4.strip_suffix('\n').unwrap_or(&s4).to_owned();
         let mut w = m.width(&piece);
         if used + w > width {
-            let mut s2 = m.trim(&s4, width - used, false);
-            if s2.len() < s4.len() {
-                let mut s3 = s4[s2.len()..].to_owned();
-                if !s3.is_empty() {
-                    match s2.rfind(' ') {
-                        Some(l) if m.width(&s4[..l]) > 0 => {
-                            s2 = s4[..l].to_owned();
-                            s3 = s4[l..].to_owned();
-                        }
-                        _ if used > 0 && !s4.contains(' ') => {
-                            s2 = String::new();
-                            s3 = s4.clone();
-                        }
-                        _ => {}
-                    }
-                    queue.insert(j + 1, (format.clone(), s3));
-                }
+            let (s2, rest) = break_line(m, &s4, width - used, used > 0);
+            if let Some(s3) = rest {
+                queue.insert(j + 1, (format.clone(), s3));
             }
             w = m.width(&s2);
             piece = s2;
@@ -276,6 +267,22 @@ fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<String> {
     }
     lines.push(line);
     lines
+}
+
+/// The part of `s4` that fits `room`, and the rest to carry to the next line.
+fn break_line(m: Metrics, s4: &str, room: i32, line_used: bool) -> (String, Option<String>) {
+    let s2 = m.trim(s4, room, false);
+    if s2.len() >= s4.len() {
+        return (s2, None);
+    }
+    match s2.rfind(' ') {
+        Some(l) if m.width(&s4[..l]) > 0 => (s4[..l].to_owned(), Some(s4[l..].to_owned())),
+        _ if line_used && !s4.contains(' ') => (String::new(), Some(s4.to_owned())),
+        _ => {
+            let s3 = s4[s2.len()..].to_owned();
+            (s2, Some(s3))
+        }
+    }
 }
 
 /// `GuiChat.drawScreen` input line: the dark bar and the text field with its blinking `_`.

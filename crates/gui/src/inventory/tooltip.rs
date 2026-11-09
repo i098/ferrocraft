@@ -176,20 +176,7 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
     let hide = t.map_or(0, |t| int(t, "HideFlags"));
     let variant = items::variant(s.id, s.damage);
     if hide & 32 == 0 {
-        out.extend(
-            variant
-                .iter()
-                .flat_map(|v| v.info.iter())
-                .map(|l| (*l).to_string()),
-        );
-        // ItemEnchantedBook.addInformation lists the stored enchantments.
-        if let (true, Some(t)) = (s.id == ENCHANTED_BOOK, t) {
-            out.extend(
-                enchantments(t, "StoredEnchantments")
-                    .into_iter()
-                    .filter_map(|(id, l)| enchantment_name(id, l)),
-            );
-        }
+        info_lines(s, t, &mut out);
     }
     if let Some(t) = t {
         tag_lines(t, hide, advanced, &mut out);
@@ -212,11 +199,27 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
         ));
     }
     // GuiScreen.renderToolTip colors line 0 by rarity and the rest gray.
-    for (i, l) in out.iter_mut().enumerate() {
-        let color = if i == 0 { rarity(s) } else { GRAY };
-        l.insert_str(0, color);
-    }
+    out[0].insert_str(0, rarity(s));
+    out[1..].iter_mut().for_each(|l| l.insert_str(0, GRAY));
     out
+}
+
+/// `Item.addInformation`: the variant's info lines and a book's stored enchantments.
+fn info_lines(s: &ItemStack, t: Option<&Compound>, out: &mut Vec<String>) {
+    out.extend(
+        items::variant(s.id, s.damage)
+            .iter()
+            .flat_map(|v| v.info.iter())
+            .map(|l| (*l).to_string()),
+    );
+    // ItemEnchantedBook.addInformation lists the stored enchantments.
+    if let (true, Some(t)) = (s.id == ENCHANTED_BOOK, t) {
+        out.extend(
+            enchantments(t, "StoredEnchantments")
+                .into_iter()
+                .filter_map(|(id, l)| enchantment_name(id, l)),
+        );
+    }
 }
 
 /// `GuiScreen.drawHoveringText`.

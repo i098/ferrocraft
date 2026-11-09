@@ -225,30 +225,27 @@ fn slab_tex(meta: u16) -> (&'static str, &'static str, &'static str) {
 }
 
 /// The textured, shape-less look of every plank-like stair, wall and fence material.
+const STAIR_TEX: &[(&[u16], &str)] = &[
+    (&[53, 85, 107], "planks_oak"),
+    (&[67], "cobblestone"),
+    (&[108], "brick"),
+    (&[109], "stonebrick"),
+    (&[114, 113, 139], "nether_brick"),
+    (&[128], "sandstone_normal"),
+    (&[134, 188, 183], "planks_spruce"),
+    (&[135, 189, 184], "planks_birch"),
+    (&[136, 190, 185], "planks_jungle"),
+    (&[156], "quartz_block_side"),
+    (&[163, 192, 187], "planks_acacia"),
+    (&[164, 191, 186], "planks_big_oak"),
+    (&[180], "red_sandstone_normal"),
+];
+
 fn stair_tex(id: u16) -> [&'static str; 6] {
-    let t = match id {
-        53 => "planks_oak",
-        67 => "cobblestone",
-        108 => "brick",
-        109 => "stonebrick",
-        114 => "nether_brick",
-        128 => "sandstone_normal",
-        134 => "planks_spruce",
-        135 => "planks_birch",
-        136 => "planks_jungle",
-        156 => "quartz_block_side",
-        163 => "planks_acacia",
-        164 => "planks_big_oak",
-        180 => "red_sandstone_normal",
-        85 | 107 => "planks_oak",
-        188 | 183 => "planks_spruce",
-        189 | 184 => "planks_birch",
-        190 | 185 => "planks_jungle",
-        191 | 186 => "planks_big_oak",
-        192 | 187 => "planks_acacia",
-        113 | 139 => "nether_brick",
-        _ => "stone",
-    };
+    let t = STAIR_TEX
+        .iter()
+        .find(|(ids, _)| ids.contains(&id))
+        .map_or("stone", |&(_, t)| t);
     [t; 6]
 }
 
@@ -266,6 +263,10 @@ fn cross(color: u32, name: &'static str, tint: Tint) -> Look {
 /// Ids drawn by `shapes.rs` or as crosses (kept in sync with `look`).
 pub fn look(state: u16) -> Look {
     let (id, meta) = (state >> 4, state & 15);
+    look_0(id, meta)
+}
+
+fn look_0(id: u16, meta: u16) -> Look {
     match id {
         0 => mk(Kind::Skip, 0, ["stone"; 6]),
         1 => cube(
@@ -304,6 +305,12 @@ pub fn look(state: u16) -> Look {
             ][(meta as usize & 7) % 6],
             Tint::None,
         ),
+        _ => look_1(id, meta),
+    }
+}
+
+fn look_1(id: u16, meta: u16) -> Look {
+    match id {
         7 => cube(0x333333, "bedrock"),
         8 | 9 => mk(
             Kind::Water,
@@ -335,6 +342,12 @@ pub fn look(state: u16) -> Look {
         15 => cube(0x88807b, "iron_ore"),
         16 => cube(0x6c6c6c, "coal_ore"),
         17 => log(meta, false),
+        _ => look_2(id, meta),
+    }
+}
+
+fn look_2(id: u16, meta: u16) -> Look {
+    match id {
         18 => leaves(meta, false),
         19 => cube(0xc9c24a, if meta == 1 { "sponge_wet" } else { "sponge" }),
         20 => cutout(0xc0e8ee, "glass"),
@@ -365,6 +378,12 @@ pub fn look(state: u16) -> Look {
                 "bed_feet_side",
             ],
         ),
+        _ => look_3(id, meta),
+    }
+}
+
+fn look_3(id: u16, meta: u16) -> Look {
+    match id {
         27 => shape(
             0xa89061,
             [if meta & 8 != 0 {
@@ -395,6 +414,12 @@ pub fn look(state: u16) -> Look {
         },
         32 => cross(0x7a5a33, "deadbush", Tint::None),
         34 => mk(Kind::Skip, 0, ["stone"; 6]),
+        _ => look_4(id, meta),
+    }
+}
+
+fn look_4(id: u16, meta: u16) -> Look {
+    match id {
         35 => cube(0xe0e0e0, WOOL[meta as usize]),
         37 => cross(0xf0e020, "flower_dandelion", Tint::None),
         38 => cross(
@@ -424,6 +449,12 @@ pub fn look(state: u16) -> Look {
                 cube3(0xa8a8a8, t, b, s)
             }
         }
+        _ => look_5(id, meta),
+    }
+}
+
+fn look_5(id: u16, meta: u16) -> Look {
+    match id {
         44 | 126 | 182 => {
             let (t, b, s) = match id {
                 126 => (
@@ -446,6 +477,12 @@ pub fn look(state: u16) -> Look {
         48 => cube(0x5f7a5f, "cobblestone_mossy"),
         49 => cube(0x14121f, "obsidian"),
         50 => shape(0xf0c040, ["torch_on"; 6]),
+        _ => look_6(id, meta),
+    }
+}
+
+fn look_6(id: u16, meta: u16) -> Look {
+    match id {
         51 => cross(0xe06010, "fire_layer_0", Tint::None),
         52 => cutout(0x1a2a40, "mob_spawner"),
         53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 => {
@@ -478,6 +515,12 @@ pub fn look(state: u16) -> Look {
             ][meta as usize & 7],
             Tint::None,
         ),
+        _ => look_7(id, meta),
+    }
+}
+
+fn look_7(id: u16, meta: u16) -> Look {
+    match id {
         60 => shape(
             0x6b4a2a,
             [
@@ -504,6 +547,12 @@ pub fn look(state: u16) -> Look {
                 "furnace_front_off"
             },
         ),
+        _ => look_8(id, meta),
+    }
+}
+
+fn look_8(id: u16, meta: u16) -> Look {
+    match id {
         64 | 71 | 193..=197 => shape(
             0x9f8150,
             [match id {
@@ -525,6 +574,12 @@ pub fn look(state: u16) -> Look {
                 "rail_normal"
             }; 6],
         ),
+        _ => look_9(id, meta),
+    }
+}
+
+fn look_9(id: u16, meta: u16) -> Look {
+    match id {
         70 => shape(0x7d7d7d, ["stone"; 6]),
         72 => shape(0x9f8150, ["planks_oak"; 6]),
         73 => cube(0x8a6e6e, "redstone_ore"),
@@ -545,6 +600,12 @@ pub fn look(state: u16) -> Look {
                 "cactus_side",
             ],
         ),
+        _ => look_10(id, meta),
+    }
+}
+
+fn look_10(id: u16, meta: u16) -> Look {
+    match id {
         82 => cube(0xa0a6b3, "clay"),
         83 => cross(0x80b060, "reeds", Tint::Grass),
         84 => cube3(0x6d5636, "jukebox_top", "jukebox_side", "jukebox_side"),
@@ -577,22 +638,20 @@ pub fn look(state: u16) -> Look {
                 "cake_side",
             ],
         ),
+        _ => look_11(id, meta),
+    }
+}
+
+fn look_11(id: u16, meta: u16) -> Look {
+    match id {
         93 | 94 => shape(
             0x909090,
-            [if id == 94 {
-                "repeater_on"
-            } else {
-                "repeater_off"
-            }; 6],
+            [["repeater_off", "repeater_on"][usize::from(id == 94)]; 6],
         ),
         95 => cutout(0xc0e8ee, GLASS[meta as usize]),
         96 | 167 => shape(
             0x9f8150,
-            [if id == 96 {
-                "trapdoor"
-            } else {
-                "iron_trapdoor"
-            }; 6],
+            [["iron_trapdoor", "trapdoor"][usize::from(id == 96)]; 6],
         ),
         97 => cube(0x7d7d7d, "stone"),
         98 => cube(
@@ -604,17 +663,24 @@ pub fn look(state: u16) -> Look {
                 "stonebrick_carved",
             ][meta as usize & 3],
         ),
-        99 | 100 => cube(
-            0x967a64,
-            if meta == 0 {
-                "mushroom_block_inside"
-            } else if id == 99 {
-                "mushroom_block_skin_brown"
-            } else {
-                "mushroom_block_skin_red"
-            },
-        ),
+        99 | 100 => cube(0x967a64, mushroom_tex(id, meta)),
         101 => shape(0xa0a0a0, ["iron_bars"; 6]),
+        _ => look_12(id, meta),
+    }
+}
+
+fn mushroom_tex(id: u16, meta: u16) -> &'static str {
+    if meta == 0 {
+        "mushroom_block_inside"
+    } else if id == 99 {
+        "mushroom_block_skin_brown"
+    } else {
+        "mushroom_block_skin_red"
+    }
+}
+
+fn look_12(id: u16, meta: u16) -> Look {
+    match id {
         102 => shape(0xc0e8ee, ["glass"; 6]),
         103 => cube3(0x8aa030, "melon_top", "melon_top", "melon_side"),
         104 | 105 => cross(0x80a030, "melon_stem_disconnected", Tint::Foliage),
@@ -650,6 +716,12 @@ pub fn look(state: u16) -> Look {
                 "enchanting_table_side",
             ],
         ),
+        _ => look_13(id, meta),
+    }
+}
+
+fn look_13(id: u16, meta: u16) -> Look {
+    match id {
         120 => shape(
             0x7a8a60,
             [
@@ -676,6 +748,12 @@ pub fn look(state: u16) -> Look {
                 ["cobblestone"; 6]
             },
         ),
+        _ => look_14(id, meta),
+    }
+}
+
+fn look_14(id: u16, meta: u16) -> Look {
+    match id {
         140 => shape(0x7a3a2a, ["flower_pot"; 6]),
         141 => cross(
             0x80a030,
@@ -718,6 +796,12 @@ pub fn look(state: u16) -> Look {
         ),
         152 => cube(0xaa1010, "redstone_block"),
         153 => cube(0x7a4a4a, "quartz_ore"),
+        _ => look_15(id, meta),
+    }
+}
+
+fn look_15(id: u16, meta: u16) -> Look {
+    match id {
         155 => match meta {
             1 => cube3(
                 0xe8e2d8,
@@ -772,6 +856,12 @@ pub fn look(state: u16) -> Look {
         159 => cube(0x965e43, CLAY[meta as usize]),
         160 => shape(0xc0e8ee, [GLASS[meta as usize]; 6]),
         161 => leaves(meta, true),
+        _ => look_16(id, meta),
+    }
+}
+
+fn look_16(id: u16, meta: u16) -> Look {
+    match id {
         162 => log(meta, true),
         165 => cutout(0x80c070, "slime"),
         168 => cube(
@@ -813,6 +903,12 @@ pub fn look(state: u16) -> Look {
         },
         171 => shape(0xe0e0e0, [WOOL[meta as usize]; 6]),
         172 => cube(0x965e43, "hardened_clay"),
+        _ => look_17(id, meta),
+    }
+}
+
+fn look_17(id: u16, meta: u16) -> Look {
+    match id {
         173 => cube(0x131313, "coal_block"),
         174 => cube(0x9cc6ff, "ice_packed"),
         175 => match meta & 7 {
@@ -833,6 +929,12 @@ pub fn look(state: u16) -> Look {
                 "red_sandstone_smooth",
             ][(meta as usize).min(2)],
         ),
+        _ => look_18(id, meta),
+    }
+}
+
+fn look_18(id: u16, _meta: u16) -> Look {
+    match id {
         181 => cube3(
             0xa85a2a,
             "red_sandstone_top",
@@ -930,7 +1032,19 @@ pub fn light_opacity(state: u16) -> u8 {
         | 26
         | 54
         | 146
-        | 165 => 0,
+        | 165
+        | 63
+        | 68
+        | 69
+        | 77
+        | 143
+        | 132
+        | 176
+        | 177
+        | 145
+        | 154
+        | 118
+        | 52 => 0,
         18 | 161 | 30 => 1,
         8 | 9 | 79 | 174 => 3,
         10 | 11 => 255,
@@ -957,7 +1071,9 @@ pub fn light_opacity(state: u16) -> u8 {
 /// Block light emitted (0-15), as `Block.getLightValue` in 1.8.9.
 pub fn emission(state: u16) -> u8 {
     match state >> 4 {
-        10 | 11 | 89 | 91 | 169 | 124 | 51 => 15,
+        10 | 11 | 89 | 91 | 169 | 124 | 51 | 138 | 119 => 15,
+        62 => 13,
+        94 => 9,
         50 => 14,
         76 => 7,
         74 => 9,

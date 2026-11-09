@@ -34,7 +34,7 @@ fn vs_gui(v: GuiIn) -> GuiOut {
 @fragment
 fn fs_gui(i: GuiOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
-    if (t.a <= 0.1) {
+    if (t.a * i.color.a <= 0.1) {
         discard;
     }
     return t * i.color;

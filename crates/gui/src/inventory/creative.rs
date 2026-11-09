@@ -527,18 +527,22 @@ impl Creative {
             inv.cursor = Some(if shift { full } else { p });
             return;
         };
-        if c.id != p.id || c.damage != p.damage {
+        if c.id != p.id || c.damage != p.damage || !Self::grid_adjust(c, full.count, button, shift)
+        {
             inv.cursor = None;
-        } else if button != 0 {
+        }
+    }
+
+    /// Grows or shrinks a matching cursor stack; false when it empties.
+    fn grid_adjust(c: &mut ItemStack, full: i8, button: u8, shift: bool) -> bool {
+        if button != 0 {
             c.count -= 1;
-            if c.count <= 0 {
-                inv.cursor = None;
-            }
         } else if shift {
-            c.count = full.count;
-        } else if c.count < full.count {
+            c.count = full;
+        } else if c.count < full {
             c.count += 1;
         }
+        c.count > 0
     }
 
     /// `ContainerCreative.slotClick` on the hotbar row (screen slots 45..54 are player 36..45).
@@ -554,12 +558,13 @@ impl Creative {
         match (mode, slot) {
             (1, Some(s)) => inv.player[36 + s - GRID] = None,
             (1, None) => {}
-            (6, _) => Self::collect_hotbar(inv, button),
+            (6, Some(s)) => Self::collect_hotbar(inv, 36 + s - GRID, button),
+            (6, None) => {}
             _ => {
                 inv.slot_click(mapped, i32::from(button), mode);
             }
         }
-        if mode == 5 && button & 3 == 2 {
+        if button & 3 == 2 {
             for k in 36..45 {
                 out.push(Request::Creative {
                     slot: k as i16,
@@ -575,7 +580,10 @@ impl Creative {
     }
 
     /// `Container.slotClick` mode 6 on `ContainerCreative`: only the hotbar can merge.
-    fn collect_hotbar(inv: &mut Inventory, button: u8) {
+    fn collect_hotbar(inv: &mut Inventory, clicked: usize, button: u8) {
+        if inv.player[clicked].is_some() {
+            return;
+        }
         let Some(mut c) = inv.cursor.take() else {
             return;
         };

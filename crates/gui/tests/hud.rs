@@ -100,7 +100,7 @@ fn draws_hud_to_png() {
         &Frame {
             chat_input: Some("/say hi"),
             debug: Some((&left, &[])),
-            fancy: true,
+            fancy: false,
             brightness: 1.0,
             player_view: true,
             status: Some(&status),

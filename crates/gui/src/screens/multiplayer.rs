@@ -27,6 +27,23 @@ enum Ping {
     Done(ServerStatus),
 }
 
+impl Ping {
+    fn status(&self) -> Option<&ServerStatus> {
+        match self {
+            Ping::Done(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    fn motd(&self) -> String {
+        match self {
+            Ping::Pending => String::new(),
+            Ping::Failed(m) => format!("§4{m}"),
+            Ping::Done(s) => s.motd.clone(),
+        }
+    }
+}
+
 struct Row {
     entry: ServerEntry,
     ping: Ping,
@@ -188,90 +205,25 @@ impl Multiplayer {
     ) -> Option<String> {
         let (x, y) = (self.list.row_x(), self.list.row_y(i));
         let hovered = self.list.row_at(mx, my, self.row_count()) == Some(i);
-        let Some(row) = self.rows.get_mut(i) else {
-            let s = ctx.tr("lanServer.scanning");
-            let ty = y + 32 / 2 - 9 / 2;
-            let sw = c.width(&s);
-            text(c, &s, ctx.width / 2 - sw / 2, ty, WHITE);
-            let dots = match (ctx.now_ms / 300) % 4 {
-                1 | 3 => "o O o",
-                2 => "o o O",
-                _ => "O o o",
-            };
-            let dw = c.width(dots);
-            text(c, dots, ctx.width / 2 - dw / 2, ty + 9, 0x808080);
+        let Some(row) = self.rows.get(i) else {
+            draw_scanning(c, y, ctx);
             return None;
         };
-        let status = match &row.ping {
-            Ping::Done(s) => Some(s),
-            _ => None,
-        };
+        let status = row.ping.status();
         let protocol = status.map_or(PROTOCOL, |s| s.protocol);
         let incompatible = protocol != PROTOCOL;
         text(c, &row.entry.name, x + 32 + 3, y + 1, WHITE);
-        let motd = match &row.ping {
-            Ping::Pending => String::new(),
-            Ping::Failed(m) => format!("§4{m}"),
-            Ping::Done(s) => s.motd.clone(),
-        };
+        let motd = row.ping.motd();
         for (j, l) in wrap(c, &motd, ROW_W - 32 - 2).iter().take(2).enumerate() {
             text(c, l, x + 32 + 3, y + 12 + 9 * j as i32, 0x808080);
         }
-        let population = match status {
-            Some(s) if incompatible => format!("§c{}", s.version_name),
-            Some(s) if s.max >= 0 => format!("§7{}§8/§7{}", s.online, s.max),
-            Some(_) => "§8???".to_owned(),
-            None => String::new(),
-        };
+        let population = population(status, incompatible);
         let pw = c.width(&population);
         text(c, &population, x + ROW_W - pw - 15 - 2, y + 1, 0x808080);
-        let (mut u, v, ping_tip, players) = match (&row.ping, status) {
-            (_, Some(s)) if incompatible => {
-                let tip = if protocol > PROTOCOL {
-                    "Client out of date!"
-                } else {
-                    "Server out of date!"
-                };
-                (0, 5, tip.to_owned(), Some(player_list(s)))
-            }
-            (Ping::Failed(_), _) => (0, 5, "(no connection)".to_owned(), None),
-            (_, Some(s)) => {
-                let bars = match s.ping_ms {
-                    ..150 => 0,
-                    150..300 => 1,
-                    300..600 => 2,
-                    600..1000 => 3,
-                    _ => 4,
-                };
-                (0, bars, format!("{}ms", s.ping_ms), Some(player_list(s)))
-            }
-            _ => {
-                let l = ((ctx.now_ms / 100 + i as u64 * 2) & 7) as i32;
-                (
-                    1,
-                    if l > 4 { 8 - l } else { l },
-                    "Pinging...".to_owned(),
-                    None,
-                )
-            }
-        };
-        u *= 10;
-        blit256(c, ICONS, x + ROW_W - 15, y, u, 176 + v * 8, 10, 8);
+        let (u, v, ping_tip, players) = ping_icon(&row.ping, status, protocol, ctx.now_ms, i);
+        blit256(c, ICONS, x + ROW_W - 15, y, u * 10, 176 + v * 8, 10, 8);
         let tex = format!("servers/{}/icon", row.entry.ip);
-        if row.icon_shown != row.entry.icon {
-            row.icon_shown = row.entry.icon.clone();
-            let png = row
-                .entry
-                .icon
-                .as_deref()
-                .and_then(base64)
-                .filter(|p| is_64px_png(p));
-            match png {
-                Some(p) => c.texture(&tex, &p),
-                None => row.entry.icon = None,
-            }
-            self.save();
-        }
+        self.sync_icon(c, i, &tex);
         let row = &self.rows[i];
         let icon = if row.entry.icon.is_some() {
             tex.as_str()
@@ -295,16 +247,39 @@ impl Multiplayer {
             tip = players;
         }
         if ctx.settings.touchscreen || hovered {
-            c.fill(x, y, x + 32, y + 32, 0xa0909090);
-            blit_sel(c, x, y, 0, if rx < 32 && rx > 16 { 32 } else { 0 });
-            if i > 0 {
-                blit_sel(c, x, y, 96, if rx < 16 && ry < 16 { 32 } else { 0 });
-            }
-            if i + 1 < self.rows.len() {
-                blit_sel(c, x, y, 64, if rx < 16 && ry > 16 { 32 } else { 0 });
-            }
+            self.draw_row_buttons(c, x, y, i, rx, ry);
         }
         tip
+    }
+
+    fn sync_icon(&mut self, c: &mut dyn Canvas, i: usize, tex: &str) {
+        let row = &mut self.rows[i];
+        if row.icon_shown == row.entry.icon {
+            return;
+        }
+        row.icon_shown = row.entry.icon.clone();
+        let png = row
+            .entry
+            .icon
+            .as_deref()
+            .and_then(base64)
+            .filter(|p| is_64px_png(p));
+        match png {
+            Some(p) => c.texture(tex, &p),
+            None => row.entry.icon = None,
+        }
+        self.save();
+    }
+
+    fn draw_row_buttons(&self, c: &mut dyn Canvas, x: i32, y: i32, i: usize, rx: i32, ry: i32) {
+        c.fill(x, y, x + 32, y + 32, 0xa0909090);
+        blit_sel(c, x, y, 0, if rx < 32 && rx > 16 { 32 } else { 0 });
+        if i > 0 {
+            blit_sel(c, x, y, 96, if rx < 16 && ry < 16 { 32 } else { 0 });
+        }
+        if i + 1 < self.rows.len() {
+            blit_sel(c, x, y, 64, if rx < 16 && ry > 16 { 32 } else { 0 });
+        }
     }
 
     /// `ServerListEntryNormal.mousePressed`.
@@ -319,20 +294,14 @@ impl Multiplayer {
         if i >= self.rows.len() {
             return None;
         }
-        if rx <= 32 {
-            if rx < 32 && rx > 16 {
-                self.select(Some(i));
-                let e = self.rows[i].entry.clone();
-                return Some(self.join(&e));
-            }
-            if rx < 16 && ry < 16 && i > 0 {
-                self.swap(i, if shift { 0 } else { i - 1 });
-                return None;
-            }
-            if rx < 16 && ry > 16 && i + 1 < self.rows.len() {
-                self.swap(i, if shift { self.rows.len() - 1 } else { i + 1 });
-                return None;
-            }
+        if rx < 32 && rx > 16 {
+            self.select(Some(i));
+            let e = self.rows[i].entry.clone();
+            return Some(self.join(&e));
+        }
+        if let Some(j) = self.move_target(i, rx, ry, shift) {
+            self.swap(i, j);
+            return None;
         }
         self.select(Some(i));
         let double = ctx.now_ms - self.rows[i].last_click < 250;
@@ -342,6 +311,20 @@ impl Multiplayer {
             return Some(self.join(&e));
         }
         None
+    }
+
+    /// The row the up or down arrow at (`rx`, `ry`) moves row `i` to.
+    fn move_target(&self, i: usize, rx: i32, ry: i32, shift: bool) -> Option<usize> {
+        let last = self.rows.len() - 1;
+        if rx >= 16 {
+            None
+        } else if ry < 16 && i > 0 {
+            Some(if shift { 0 } else { i - 1 })
+        } else if ry > 16 && i < last {
+            Some(if shift { last } else { i + 1 })
+        } else {
+            None
+        }
     }
 }
 
@@ -366,6 +349,62 @@ fn player_list(s: &ServerStatus) -> String {
         out += &format!("\n... and {} more ...", s.online - shown);
     }
     out
+}
+
+fn draw_scanning(c: &mut dyn Canvas, y: i32, ctx: &Ctx) {
+    let s = ctx.tr("lanServer.scanning");
+    let ty = y + 32 / 2 - 9 / 2;
+    let sw = c.width(&s);
+    text(c, &s, ctx.width / 2 - sw / 2, ty, WHITE);
+    let dots = ["O o o", "o O o", "o o O", "o O o"][((ctx.now_ms / 300) % 4) as usize];
+    let dw = c.width(dots);
+    text(c, dots, ctx.width / 2 - dw / 2, ty + 9, 0x808080);
+}
+
+fn population(status: Option<&ServerStatus>, incompatible: bool) -> String {
+    match status {
+        Some(s) if incompatible => format!("§c{}", s.version_name),
+        Some(s) if s.max >= 0 => format!("§7{}§8/§7{}", s.online, s.max),
+        Some(_) => "§8???".to_owned(),
+        None => String::new(),
+    }
+}
+
+/// Ping icon column, row, tooltip and player list tooltip.
+fn ping_icon(
+    ping: &Ping,
+    status: Option<&ServerStatus>,
+    protocol: i32,
+    now_ms: u64,
+    i: usize,
+) -> (i32, i32, String, Option<String>) {
+    match (ping, status) {
+        (_, Some(s)) if protocol != PROTOCOL => {
+            let tip = if protocol > PROTOCOL {
+                "Client out of date!"
+            } else {
+                "Server out of date!"
+            };
+            (0, 5, tip.to_owned(), Some(player_list(s)))
+        }
+        (Ping::Failed(_), _) => (0, 5, "(no connection)".to_owned(), None),
+        (_, Some(s)) => {
+            let bars = [150, 300, 600, 1000]
+                .iter()
+                .filter(|&&t| s.ping_ms >= t)
+                .count() as i32;
+            (0, bars, format!("{}ms", s.ping_ms), Some(player_list(s)))
+        }
+        _ => {
+            let l = ((now_ms / 100 + i as u64 * 2) & 7) as i32;
+            (
+                1,
+                if l > 4 { 8 - l } else { l },
+                "Pinging...".to_owned(),
+                None,
+            )
+        }
+    }
 }
 
 /// The icon must be a 64x64 PNG; the IHDR width and height sit at bytes 16..24.

@@ -120,6 +120,13 @@ impl ContainerScreen {
         }
     }
 
+    /// `GuiContainerCreative.updateScreen`: once the player leaves creative, become `GuiInventory`.
+    pub fn sync_game_mode(&mut self, inv: &Inventory) {
+        if self.creative.is_some() && !inv.creative {
+            *self = ContainerScreen::new(inv, self.width, self.height);
+        }
+    }
+
     fn size(&self) -> (i32, i32) {
         match &self.creative {
             Some(_) => (creative::WIDTH, creative::HEIGHT),
@@ -405,14 +412,25 @@ impl ContainerScreen {
             }
             _ if inv.cursor.is_none() => {}
             _ if button == PICK_BUTTON => self.click(inv, slot, id, button, 3, out),
-            _ => {
-                let shift = id != OUTSIDE && mods.shift;
-                if shift {
-                    self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
-                }
-                self.click(inv, slot, id, button, if shift { 1 } else { 0 }, out);
-            }
+            _ => self.click_held(inv, slot, id, button, mods.shift, out),
         }
+    }
+
+    /// Click or shift click with the stack held since the press.
+    fn click_held(
+        &mut self,
+        inv: &mut Inventory,
+        slot: Option<usize>,
+        id: i16,
+        button: u8,
+        shift: bool,
+        out: &mut Vec<Request>,
+    ) {
+        let shift = id != OUTSIDE && shift;
+        if shift {
+            self.shift_clicked = slot.and_then(|s| self.stack(inv, s).clone());
+        }
+        self.click(inv, slot, id, button, if shift { 1 } else { 0 }, out);
     }
 
     /// Whether two screen slots belong to the same `IInventory` (shift double click).

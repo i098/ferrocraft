@@ -347,6 +347,144 @@ pub struct Settings {
     pub model_parts: u8,
 }
 
+type Field<T> = fn(&mut Settings) -> &mut T;
+
+const BOOL_KEYS: &[(&str, Field<bool>)] = &[
+    ("invertYMouse", |s| &mut s.invert_mouse),
+    ("bobView", |s| &mut s.view_bobbing),
+    ("anaglyph3d", |s| &mut s.anaglyph),
+    ("fboEnable", |s| &mut s.fbo),
+    ("fancyGraphics", |s| &mut s.fancy_graphics),
+    ("chatColors", |s| &mut s.chat_colors),
+    ("chatLinks", |s| &mut s.chat_links),
+    ("chatLinksPrompt", |s| &mut s.chat_links_prompt),
+    ("snooperEnabled", |s| &mut s.snooper),
+    ("fullscreen", |s| &mut s.fullscreen),
+    ("enableVsync", |s| &mut s.vsync),
+    ("useVbo", |s| &mut s.vbo),
+    ("hideServerAddress", |s| &mut s.hide_server_address),
+    ("advancedItemTooltips", |s| &mut s.advanced_item_tooltips),
+    ("pauseOnLostFocus", |s| &mut s.pause_on_lost_focus),
+    ("touchscreen", |s| &mut s.touchscreen),
+    ("heldItemTooltips", |s| &mut s.held_item_tooltips),
+    ("showInventoryAchievementHint", |s| {
+        &mut s.show_inventory_achievement_hint
+    }),
+    ("streamSendMetadata", |s| &mut s.stream_send_metadata),
+    ("forceUnicodeFont", |s| &mut s.force_unicode),
+    ("allowBlockAlternatives", |s| &mut s.block_alternatives),
+    ("reducedDebugInfo", |s| &mut s.reduced_debug_info),
+    ("useNativeTransport", |s| &mut s.use_native_transport),
+    ("entityShadows", |s| &mut s.entity_shadows),
+    ("realmsNotifications", |s| &mut s.realms_notifications),
+];
+
+const F32_KEYS: &[(&str, Field<f32>)] = &[
+    ("mouseSensitivity", |s| &mut s.mouse_sensitivity),
+    ("gamma", |s| &mut s.gamma),
+    ("saturation", |s| &mut s.saturation),
+    ("chatOpacity", |s| &mut s.chat_opacity),
+    ("chatHeightFocused", |s| &mut s.chat_height_focused),
+    ("chatHeightUnfocused", |s| &mut s.chat_height_unfocused),
+    ("chatScale", |s| &mut s.chat_scale),
+    ("chatWidth", |s| &mut s.chat_width),
+    ("streamBytesPerPixel", |s| &mut s.stream_bytes_per_pixel),
+    ("streamMicVolume", |s| &mut s.stream_mic_volume),
+    ("streamSystemVolume", |s| &mut s.stream_system_volume),
+    ("streamKbps", |s| &mut s.stream_kbps),
+    ("streamFps", |s| &mut s.stream_fps),
+];
+
+const I32_KEYS: &[(&str, Field<i32>)] = &[
+    ("renderDistance", |s| &mut s.render_distance),
+    ("particles", |s| &mut s.particles),
+    ("maxFps", |s| &mut s.max_fps),
+    ("overrideHeight", |s| &mut s.override_height),
+    ("overrideWidth", |s| &mut s.override_width),
+    ("mipmapLevels", |s| &mut s.mipmap_levels),
+    ("streamCompression", |s| &mut s.stream_compression),
+    ("streamChatEnabled", |s| &mut s.stream_chat_enabled),
+    ("streamChatUserFilter", |s| &mut s.stream_chat_user_filter),
+    ("streamMicToggleBehavior", |s| {
+        &mut s.stream_mic_toggle_behavior
+    }),
+];
+
+/// Key, whether an empty value is stored, field.
+const STRING_KEYS: &[(&str, bool, Field<String>)] = &[
+    ("resourcePacks", true, |s| &mut s.resource_packs),
+    ("incompatibleResourcePacks", true, |s| {
+        &mut s.incompatible_resource_packs
+    }),
+    ("lastServer", false, |s| &mut s.last_server),
+    ("streamPreferredServer", false, |s| {
+        &mut s.stream_preferred_server
+    }),
+];
+
+/// Button options backed by one `bool` field: getter and toggle target.
+const FLAGS: &[(Opt, fn(&Settings) -> bool, Field<bool>)] = &[
+    (
+        Opt::InvertMouse,
+        |s| s.invert_mouse,
+        |s| &mut s.invert_mouse,
+    ),
+    (
+        Opt::ViewBobbing,
+        |s| s.view_bobbing,
+        |s| &mut s.view_bobbing,
+    ),
+    (Opt::Anaglyph, |s| s.anaglyph, |s| &mut s.anaglyph),
+    (Opt::FboEnable, |s| s.fbo, |s| &mut s.fbo),
+    (Opt::ChatColor, |s| s.chat_colors, |s| &mut s.chat_colors),
+    (Opt::ChatLinks, |s| s.chat_links, |s| &mut s.chat_links),
+    (
+        Opt::ChatLinksPrompt,
+        |s| s.chat_links_prompt,
+        |s| &mut s.chat_links_prompt,
+    ),
+    (Opt::Fullscreen, |s| s.fullscreen, |s| &mut s.fullscreen),
+    (Opt::Vsync, |s| s.vsync, |s| &mut s.vsync),
+    (Opt::Vbo, |s| s.vbo, |s| &mut s.vbo),
+    (Opt::Touchscreen, |s| s.touchscreen, |s| &mut s.touchscreen),
+    (
+        Opt::BlockAlternatives,
+        |s| s.block_alternatives,
+        |s| &mut s.block_alternatives,
+    ),
+    (
+        Opt::ReducedDebugInfo,
+        |s| s.reduced_debug_info,
+        |s| &mut s.reduced_debug_info,
+    ),
+    (
+        Opt::EntityShadows,
+        |s| s.entity_shadows,
+        |s| &mut s.entity_shadows,
+    ),
+    (
+        Opt::RealmsNotifications,
+        |s| s.realms_notifications,
+        |s| &mut s.realms_notifications,
+    ),
+];
+
+fn parse_f(v: &str) -> Option<f32> {
+    match v {
+        "true" => Some(1.0),
+        "false" => Some(0.0),
+        _ => v.parse().ok(),
+    }
+}
+
+fn parse_ao(v: &str) -> Option<i32> {
+    match v {
+        "true" => Some(2),
+        "false" => Some(0),
+        _ => v.parse().ok(),
+    }
+}
+
 impl Settings {
     /// Vanilla defaults for `<game_dir>/options.txt`.
     pub fn new(game_dir: PathBuf) -> Settings {
@@ -440,103 +578,59 @@ impl Settings {
 
     fn apply(&mut self, line: &str) -> Option<()> {
         let (k, v) = line.split_once(':').unwrap_or((line, ""));
-        let f = || -> Option<f32> {
-            match v {
-                "true" => Some(1.0),
-                "false" => Some(0.0),
-                _ => v.parse().ok(),
+        if let Some((_, g)) = BOOL_KEYS.iter().find(|e| e.0 == k) {
+            *g(self) = v == "true";
+        } else if let Some((_, g)) = F32_KEYS.iter().find(|e| e.0 == k) {
+            *g(self) = parse_f(v)?;
+        } else if let Some((_, g)) = I32_KEYS.iter().find(|e| e.0 == k) {
+            *g(self) = v.parse().ok()?;
+        } else if let Some((_, keep_empty, g)) = STRING_KEYS.iter().find(|e| e.0 == k) {
+            if *keep_empty || !v.is_empty() {
+                *g(self) = v.to_owned();
             }
-        };
+        } else {
+            self.apply_special(k, v)?;
+        }
+        Some(())
+    }
+
+    fn apply_special(&mut self, k: &str, v: &str) -> Option<()> {
         let i = || v.parse::<i32>().ok();
-        let b = v == "true";
         match k {
-            "mouseSensitivity" => self.mouse_sensitivity = f()?,
-            "fov" => self.fov = f()? * 40.0 + 70.0,
-            "gamma" => self.gamma = f()?,
-            "saturation" => self.saturation = f()?,
-            "invertYMouse" => self.invert_mouse = b,
-            "renderDistance" => self.render_distance = i()?,
+            "fov" => self.fov = parse_f(v)? * 40.0 + 70.0,
             "guiScale" => self.gui_scale = i()?.clamp(0, 255) as u8,
-            "particles" => self.particles = i()?,
-            "bobView" => self.view_bobbing = b,
-            "anaglyph3d" => self.anaglyph = b,
-            "maxFps" => self.max_fps = i()?,
-            "fboEnable" => self.fbo = b,
             "difficulty" => self.difficulty = i()?.rem_euclid(4),
-            "fancyGraphics" => self.fancy_graphics = b,
-            "ao" => {
-                self.ao = match v {
-                    "true" => 2,
-                    "false" => 0,
-                    _ => i()?,
+            "chatVisibility" => self.chat_visibility = i()?.rem_euclid(3),
+            "ao" => self.ao = parse_ao(v)?,
+            "renderClouds" => {
+                let c = ["false", "fast", "true"].iter().position(|x| *x == v);
+                self.clouds = c.map_or(self.clouds, |c| c as i32);
+            }
+            "lang" => {
+                if !v.is_empty() {
+                    self.lang = v.split(':').next().unwrap_or(v).to_owned();
                 }
             }
-            "renderClouds" => match v {
-                "true" => self.clouds = 2,
-                "false" => self.clouds = 0,
-                "fast" => self.clouds = 1,
-                _ => {}
-            },
-            "resourcePacks" => self.resource_packs = v.to_owned(),
-            "incompatibleResourcePacks" => self.incompatible_resource_packs = v.to_owned(),
-            "lastServer" if !v.is_empty() => self.last_server = v.to_owned(),
-            "lang" if !v.is_empty() => self.lang = v.split(':').next().unwrap_or(v).to_owned(),
-            "chatVisibility" => self.chat_visibility = i()?.rem_euclid(3),
-            "chatColors" => self.chat_colors = b,
-            "chatLinks" => self.chat_links = b,
-            "chatLinksPrompt" => self.chat_links_prompt = b,
-            "chatOpacity" => self.chat_opacity = f()?,
-            "snooperEnabled" => self.snooper = b,
-            "fullscreen" => self.fullscreen = b,
-            "enableVsync" => self.vsync = b,
-            "useVbo" => self.vbo = b,
-            "hideServerAddress" => self.hide_server_address = b,
-            "advancedItemTooltips" => self.advanced_item_tooltips = b,
-            "pauseOnLostFocus" => self.pause_on_lost_focus = b,
-            "touchscreen" => self.touchscreen = b,
-            "overrideHeight" => self.override_height = i()?,
-            "overrideWidth" => self.override_width = i()?,
-            "heldItemTooltips" => self.held_item_tooltips = b,
-            "chatHeightFocused" => self.chat_height_focused = f()?,
-            "chatHeightUnfocused" => self.chat_height_unfocused = f()?,
-            "chatScale" => self.chat_scale = f()?,
-            "chatWidth" => self.chat_width = f()?,
-            "showInventoryAchievementHint" => self.show_inventory_achievement_hint = b,
-            "mipmapLevels" => self.mipmap_levels = i()?,
-            "streamBytesPerPixel" => self.stream_bytes_per_pixel = f()?,
-            "streamMicVolume" => self.stream_mic_volume = f()?,
-            "streamSystemVolume" => self.stream_system_volume = f()?,
-            "streamKbps" => self.stream_kbps = f()?,
-            "streamFps" => self.stream_fps = f()?,
-            "streamCompression" => self.stream_compression = i()?,
-            "streamSendMetadata" => self.stream_send_metadata = b,
-            "streamPreferredServer" if !v.is_empty() => self.stream_preferred_server = v.to_owned(),
-            "streamChatEnabled" => self.stream_chat_enabled = i()?,
-            "streamChatUserFilter" => self.stream_chat_user_filter = i()?,
-            "streamMicToggleBehavior" => self.stream_mic_toggle_behavior = i()?,
-            "forceUnicodeFont" => self.force_unicode = b,
-            "allowBlockAlternatives" => self.block_alternatives = b,
-            "reducedDebugInfo" => self.reduced_debug_info = b,
-            "useNativeTransport" => self.use_native_transport = b,
-            "entityShadows" => self.entity_shadows = b,
-            "realmsNotifications" => self.realms_notifications = b,
-            _ => {
-                if let Some(name) = k.strip_prefix("key_") {
-                    let code = i()?;
-                    self.keys
-                        .iter_mut()
-                        .filter(|kb| kb.desc == name)
-                        .for_each(|kb| kb.code = code);
-                } else if let Some(name) = k.strip_prefix("soundCategory_") {
-                    let vol = f()?;
-                    if let Some(c) = SoundCategory::ALL.iter().find(|c| c.name() == name) {
-                        self.volumes[*c as usize] = vol;
-                    }
-                } else if let Some(name) = k.strip_prefix("modelPart_") {
-                    if let Some(bit) = MODEL_PARTS.iter().position(|p| *p == name) {
-                        self.set_part(bit, b);
-                    }
-                }
+            _ => self.apply_prefixed(k, v)?,
+        }
+        Some(())
+    }
+
+    fn apply_prefixed(&mut self, k: &str, v: &str) -> Option<()> {
+        if let Some(name) = k.strip_prefix("key_") {
+            let code = v.parse::<i32>().ok()?;
+            self.keys
+                .iter_mut()
+                .filter(|kb| kb.desc == name)
+                .for_each(|kb| kb.code = code);
+        } else if let Some(name) = k.strip_prefix("soundCategory_") {
+            let vol = parse_f(v)?;
+            if let Some(c) = SoundCategory::ALL.iter().find(|c| c.name() == name) {
+                self.volumes[*c as usize] = vol;
+            }
+        } else if let Some(name) = k.strip_prefix("modelPart_") {
+            if let Some(bit) = MODEL_PARTS.iter().position(|p| *p == name) {
+                self.set_part(bit, v == "true");
             }
         }
         Some(())
@@ -686,98 +780,92 @@ impl Settings {
 
     /// `getOptionOrdinalValue`.
     pub fn flag(&self, o: Opt) -> bool {
-        use Opt::*;
-        match o {
-            InvertMouse => self.invert_mouse,
-            ViewBobbing => self.view_bobbing,
-            Anaglyph => self.anaglyph,
-            FboEnable => self.fbo,
-            ChatColor => self.chat_colors,
-            ChatLinks => self.chat_links,
-            ChatLinksPrompt => self.chat_links_prompt,
-            Fullscreen => self.fullscreen,
-            Vsync => self.vsync,
-            Vbo => self.vbo,
-            Touchscreen => self.touchscreen,
-            BlockAlternatives => self.block_alternatives,
-            ReducedDebugInfo => self.reduced_debug_info,
-            EntityShadows => self.entity_shadows,
-            RealmsNotifications => self.realms_notifications,
-            _ => false,
-        }
+        FLAGS.iter().find(|e| e.0 == o).is_some_and(|e| (e.1)(self))
     }
 
     /// `setOptionValue(option, 1)`: toggle or step a button option.
     pub fn cycle(&mut self, o: Opt) {
         use Opt::*;
+        if let Some(e) = FLAGS.iter().find(|e| e.0 == o) {
+            *(e.2)(self) ^= true;
+            return;
+        }
         match o {
-            InvertMouse => self.invert_mouse ^= true,
             GuiScale => self.gui_scale = self.gui_scale.wrapping_add(1) & 3,
             Particles => self.particles = (self.particles + 1) % 3,
-            ViewBobbing => self.view_bobbing ^= true,
             RenderClouds => self.clouds = (self.clouds + 1) % 3,
-            FboEnable => self.fbo ^= true,
-            Anaglyph => self.anaglyph ^= true,
             Graphics => self.fancy_graphics ^= true,
             Ao => self.ao = (self.ao + 1) % 3,
             ChatVisibility => self.chat_visibility = (self.chat_visibility + 1) % 3,
-            ChatColor => self.chat_colors ^= true,
-            ChatLinks => self.chat_links ^= true,
-            ChatLinksPrompt => self.chat_links_prompt ^= true,
-            Touchscreen => self.touchscreen ^= true,
-            Fullscreen => self.fullscreen ^= true,
-            Vsync => self.vsync ^= true,
-            Vbo => self.vbo ^= true,
-            BlockAlternatives => self.block_alternatives ^= true,
-            ReducedDebugInfo => self.reduced_debug_info ^= true,
-            EntityShadows => self.entity_shadows ^= true,
-            RealmsNotifications => self.realms_notifications ^= true,
             _ => {}
         }
     }
 
     /// `getKeyBinding`: the button label, such as `FOV: Quake Pro`.
     pub fn label(&self, o: Opt, t: &Texts) -> String {
-        use Opt::*;
         let head = format!("{}: ", t.tr(o.key()));
+        let tail = if o.range().is_some() {
+            self.float_label(o, t)
+        } else if o.bool_opt() {
+            t.tr(if self.flag(o) {
+                "options.on"
+            } else {
+                "options.off"
+            })
+        } else {
+            self.choice_label(o, t)
+        };
+        head + &tail
+    }
+
+    fn float_label(&self, o: Opt, t: &Texts) -> String {
+        use Opt::*;
+        let v = self.float(o);
+        let n = o.norm(v);
+        let ends = |key: &str, at_min: bool, at_max: bool, other: String| {
+            [(at_min, "min"), (at_max, "max")]
+                .into_iter()
+                .find(|e| e.0)
+                .map_or(other, |(_, end)| t.tr(&format!("{key}.{end}")))
+        };
+        let or_off = |off: bool, other: String| {
+            ends("options", off, false, other).replace("options.min", "options.off")
+        };
+        match o {
+            Sensitivity => ends(
+                "options.sensitivity",
+                n == 0.0,
+                n == 1.0,
+                format!("{}%", (n * 200.0) as i32),
+            ),
+            Fov => ends("options.fov", v == 70.0, v == 110.0, (v as i32).to_string()),
+            FramerateLimit => ends(
+                "options.framerateLimit",
+                false,
+                v == 260.0,
+                format!("{} fps", v as i32),
+            ),
+            Gamma => ends(
+                "options.gamma",
+                n == 0.0,
+                n == 1.0,
+                format!("+{}%", (n * 100.0) as i32),
+            ),
+            ChatOpacity => format!("{}%", (n * 90.0 + 10.0) as i32),
+            ChatHeightUnfocused | ChatHeightFocused => {
+                format!("{}px", (n * 160.0 + 20.0).floor() as i32)
+            }
+            ChatWidth => format!("{}px", (n * 280.0 + 40.0).floor() as i32),
+            RenderDistance => format!("{} chunks", v as i32),
+            MipmapLevels => or_off(v == 0.0, (v as i32).to_string()),
+            _ => or_off(n == 0.0, format!("{}%", (n * 100.0) as i32)),
+        }
+    }
+
+    fn choice_label(&self, o: Opt, t: &Texts) -> String {
+        use Opt::*;
         let pick = |keys: &[&str], i: i32| t.tr(keys.get(i as usize).unwrap_or(&keys[0]));
-        if o.range().is_some() {
-            let v = self.float(o);
-            let n = o.norm(v);
-            let tail = match o {
-                Sensitivity if n == 0.0 => t.tr("options.sensitivity.min"),
-                Sensitivity if n == 1.0 => t.tr("options.sensitivity.max"),
-                Sensitivity => format!("{}%", (n * 200.0) as i32),
-                Fov if v == 70.0 => t.tr("options.fov.min"),
-                Fov if v == 110.0 => t.tr("options.fov.max"),
-                Fov => (v as i32).to_string(),
-                FramerateLimit if v == 260.0 => t.tr("options.framerateLimit.max"),
-                FramerateLimit => format!("{} fps", v as i32),
-                Gamma if n == 0.0 => t.tr("options.gamma.min"),
-                Gamma if n == 1.0 => t.tr("options.gamma.max"),
-                Gamma => format!("+{}%", (n * 100.0) as i32),
-                ChatOpacity => format!("{}%", (n * 90.0 + 10.0) as i32),
-                ChatHeightUnfocused | ChatHeightFocused => {
-                    format!("{}px", (n * 160.0 + 20.0).floor() as i32)
-                }
-                ChatWidth => format!("{}px", (n * 280.0 + 40.0).floor() as i32),
-                RenderDistance => format!("{} chunks", v as i32),
-                MipmapLevels if v == 0.0 => t.tr("options.off"),
-                MipmapLevels => (v as i32).to_string(),
-                _ if n == 0.0 => t.tr("options.off"),
-                _ => format!("{}%", (n * 100.0) as i32),
-            };
-            return head + &tail;
-        }
-        if o.bool_opt() {
-            return head
-                + &t.tr(if self.flag(o) {
-                    "options.on"
-                } else {
-                    "options.off"
-                });
-        }
-        let tail = match o {
+        match o {
             GuiScale => pick(
                 &[
                     "options.guiScale.auto",
@@ -821,8 +909,7 @@ impl Settings {
                 "options.graphics.fast"
             }),
             _ => String::new(),
-        };
-        head + &tail
+        }
     }
 
     /// `KeyBinding.compareTo` order for the controls list: category, then name, both translated.

@@ -88,7 +88,7 @@ impl App {
         self.perspective = 0;
         self.sneak_sent = false;
         self.sprint_sent = false;
-        self.using_item = false;
+        self.use_ticks = 0;
         if let Some(r) = &mut self.renderer {
             r.clear_chunks();
         }
@@ -162,6 +162,7 @@ impl App {
                 let m = metrics!(self);
                 let q = self.ui.joined(&m);
                 self.run_effects(q);
+                self.send_client_settings();
             }
             NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
@@ -195,17 +196,27 @@ impl App {
                 .particles
                 .spawn_packet(id, pos, offset, speed, count, &data),
             NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
-            NetEvent::Explosion { pos, records, .. } => self.explode(pos, &records, dirty),
+            NetEvent::Explosion {
+                pos,
+                records,
+                motion,
+                ..
+            } => self.explode(pos, &records, motion, dirty),
             other => return Err(other),
         }
         Ok(())
     }
 
-    fn explode(&mut self, pos: [f32; 3], records: &[[i8; 3]], dirty: &mut Dirty) {
+    fn explode(&mut self, pos: [f32; 3], records: &[[i8; 3]], motion: [f32; 3], dirty: &mut Dirty) {
+        if let Some(p) = &mut self.game.player {
+            for (v, m) in p.vel.iter_mut().zip(motion) {
+                *v += f64::from(m);
+            }
+        }
         if let Some(s) = &mut self.sound {
             s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
         }
-        let base = pos.map(|v| v.floor() as i32);
+        let base = pos.map(|v| v as i32);
         for r in records {
             let at = [0, 1, 2].map(|i| base[i] + i32::from(r[i]));
             if self.game.store.get(at[0] >> 4, at[2] >> 4).is_some() {
@@ -311,6 +322,7 @@ impl App {
             }
             Effect::Died => {
                 self.container = None;
+                self.game.inv.close_window();
                 let m = metrics!(self);
                 let q = self
                     .ui

@@ -33,8 +33,19 @@ fn formatted(json: &str) -> String {
 
 /// The events of one packet; empty for packets handled elsewhere.
 pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
+    if let cb::Packet::PlayerListItem(p) = packet {
+        return player_list(&p.action);
+    }
+    window_event(packet)
+        .or_else(|| score_event(packet))
+        .or_else(|| world_event(packet))
+        .into_iter()
+        .collect()
+}
+
+fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
     use cb::Packet as P;
-    let e = match packet {
+    Some(match packet {
         P::UpdateHealth(p) => NetEvent::Health {
             health: p.health,
             food: p.food.0,
@@ -72,7 +83,13 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
             action: p.action,
             accepted: p.accepted,
         },
-        P::PlayerListItem(p) => return player_list(&p.action),
+        _ => return None,
+    })
+}
+
+fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
+    use cb::Packet as P;
+    Some(match packet {
         P::PlayerListHeaderFooter(p) => NetEvent::TabHeaderFooter {
             header: formatted(&p.header),
             footer: formatted(&p.footer),
@@ -109,6 +126,13 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
                 .map_or_else(String::new, |i| i.suffix.clone()),
             members: p.players.clone().unwrap_or_default(),
         },
+        _ => return None,
+    })
+}
+
+fn world_event(packet: &cb::Packet) -> Option<NetEvent> {
+    use cb::Packet as P;
+    Some(match packet {
         P::SoundEffect(p) => NetEvent::Sound {
             name: p.name.clone(),
             pos: [p.x, p.y, p.z].map(|v| f64::from(v) / 8.0),
@@ -147,9 +171,8 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
             pos: [p.location.x, p.location.y, p.location.z],
             stage: p.destroy_stage,
         },
-        _ => return vec![],
-    };
-    vec![e]
+        _ => return None,
+    })
 }
 
 fn title(action: &TitleAction) -> NetEvent {

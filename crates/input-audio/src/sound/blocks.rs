@@ -13,6 +13,7 @@ pub enum BlockSound {
     Snow,
     Ladder,
     Anvil,
+    Slime,
 }
 
 impl BlockSound {
@@ -25,7 +26,6 @@ impl BlockSound {
             12 | 88 => Self::Sand,
             5
             | 17
-            | 25
             | 47
             | 53
             | 54
@@ -35,7 +35,6 @@ impl BlockSound {
             | 68
             | 69
             | 72
-            | 84
             | 85
             | 86
             | 91
@@ -62,14 +61,25 @@ impl BlockSound {
             | 26
             | 50
             | 75
-            | 76 => Self::Wood,
+            | 76
+            | 93
+            | 94
+            | 125
+            | 147
+            | 148
+            | 149
+            | 150
+            | 176
+            | 177 => Self::Wood,
             65 => Self::Ladder,
-            20 | 95 | 102 | 160 | 89 | 169 | 138 | 123 | 124 | 79 | 174 => Self::Glass,
-            35 | 171 | 30 | 81 | 92 | 51 => Self::Cloth,
+            20 | 95 | 102 | 160 | 89 | 169 | 138 | 123 | 124 | 79 | 174 | 90 | 120 => Self::Glass,
+            35 | 171 | 81 | 92 | 51 => Self::Cloth,
+            165 => Self::Slime,
             78 | 80 => Self::Snow,
             145 => Self::Anvil,
-            41 | 42 | 57 | 101 | 66 | 27 | 28 | 157 | 71 | 133 | 148 | 147 | 152 | 154 | 167
-            | 52 => Self::Metal,
+            41 | 42 | 57 | 101 | 66 | 27 | 28 | 157 | 71 | 133 | 152 | 154 | 167 | 52 => {
+                Self::Metal
+            }
             _ => Self::Stone,
         }
     }
@@ -85,6 +95,7 @@ impl BlockSound {
             Self::Ladder => "ladder",
             Self::Glass => "glass",
             Self::Stone | Self::Metal | Self::Anvil => "stone",
+            Self::Slime => unreachable!(),
         }
     }
 
@@ -99,34 +110,41 @@ impl BlockSound {
     fn pitch(self) -> f32 {
         match self {
             Self::Metal => 1.5,
-            Self::Anvil => 0.5,
             _ => 1.0,
         }
     }
 
     /// Footstep: `(event, volume, pitch)`. Vanilla plays it at 0.15x block volume.
     pub fn step(self) -> (String, f32, f32) {
-        let s = if self == Self::Glass {
-            "stone"
-        } else {
-            self.suffix()
-        };
-        (format!("step.{s}"), self.volume() * 0.15, self.pitch())
+        (self.step_event(), self.volume() * 0.15, self.pitch())
+    }
+
+    fn step_event(self) -> String {
+        match self {
+            Self::Slime => "mob.slime.small".into(),
+            Self::Glass => "step.stone".into(),
+            _ => format!("step.{}", self.suffix()),
+        }
+    }
+
+    /// `PlayerControllerMP` dig hit, every 4 ticks while breaking: step sound at `(v+1)/8`, `p*0.5`.
+    pub fn dig_hit(self) -> (String, f32, f32) {
+        (
+            self.step_event(),
+            (self.volume() + 1.0) / 8.0,
+            self.pitch() * 0.5,
+        )
     }
 
     /// Break (aux effect 2001) and place share one sound: `(event, volume, pitch)`.
     /// Ladder breaks with `dig.wood` like vanilla `soundTypeLadder`.
     pub fn dig(self) -> (String, f32, f32) {
-        let s = if self == Self::Ladder {
-            "wood"
-        } else {
-            self.suffix()
+        let e = match self {
+            Self::Slime => "mob.slime.big".into(),
+            Self::Ladder => "dig.wood".into(),
+            _ => format!("dig.{}", self.suffix()),
         };
-        (
-            format!("dig.{s}"),
-            (self.volume() + 1.0) / 2.0,
-            self.pitch() * 0.8,
-        )
+        (e, (self.volume() + 1.0) / 2.0, self.pitch() * 0.8)
     }
 }
 
@@ -135,24 +153,51 @@ pub fn wire_pitch(byte: u8) -> f32 {
     (byte as f32 / 63.0).max(0.5)
 }
 
-/// Aux effect (0x28) ids that play a sound: `(event, volume, pitch)`; `random` is in `[0,1)`.
-pub fn effect_sound(id: i32, random: f32) -> Option<(&'static str, f32, f32)> {
-    match id {
-        1000 => Some(("random.click", 1.0, 1.0)),
-        1001 => Some(("random.click", 1.0, 1.2)),
-        1002 => Some(("random.bow", 1.0, 1.2)),
-        1003 => Some((
-            if random < 0.5 {
-                "random.door_open"
-            } else {
-                "random.door_close"
-            },
-            1.0,
-            random * 0.1 + 0.9,
-        )),
-        1004 => Some(("random.fizz", 0.5, 2.6)),
-        _ => None,
+/// Aux effect (0x28) ids that play a sound: `(event, volume, pitch)`; `random`, `random2` are in `[0,1)`.
+pub fn effect_sound(id: i32, random: f32, random2: f32) -> Option<(&'static str, f32, f32)> {
+    let mob = (random - random2) * 0.2 + 1.0;
+    let anvil = random * 0.1 + 0.9;
+    if id == 1003 {
+        let door = if random < 0.5 {
+            "random.door_open"
+        } else {
+            "random.door_close"
+        };
+        return Some((door, 1.0, anvil));
     }
+    const FIXED: &[(i32, &str, f32, f32)] = &[
+        (1000, "random.click", 1.0, 1.0),
+        (1001, "random.click", 1.0, 1.2),
+        (1002, "random.bow", 1.0, 1.2),
+        (1004, "random.fizz", 0.5, 2.6),
+    ];
+    const MOB: &[(i32, &str, f32)] = &[
+        (1007, "mob.ghast.charge", 10.0),
+        (1008, "mob.ghast.fireball", 10.0),
+        (1009, "mob.ghast.fireball", 2.0),
+        (1010, "mob.zombie.wood", 2.0),
+        (1011, "mob.zombie.metal", 2.0),
+        (1012, "mob.zombie.woodbreak", 2.0),
+        (1014, "mob.wither.shoot", 2.0),
+        (1015, "mob.bat.takeoff", 0.05),
+        (1016, "mob.zombie.infect", 2.0),
+        (1017, "mob.zombie.unfect", 2.0),
+    ];
+    const ANVIL: &[(i32, &str, f32)] = &[
+        (1020, "random.anvil_break", 1.0),
+        (1021, "random.anvil_use", 1.0),
+        (1022, "random.anvil_land", 0.3),
+        (2002, "game.potion.smash", 1.0),
+    ];
+    let scaled = |t: &[(i32, &'static str, f32)], pitch: f32| {
+        t.iter().find(|e| e.0 == id).map(|&(_, n, v)| (n, v, pitch))
+    };
+    FIXED
+        .iter()
+        .find(|e| e.0 == id)
+        .map(|&(_, n, v, p)| (n, v, p))
+        .or_else(|| scaled(MOB, mob))
+        .or_else(|| scaled(ANVIL, anvil))
 }
 
 #[cfg(test)]
@@ -188,11 +233,20 @@ mod tests {
             (92, Cloth),
             (51, Cloth),
             (65, Ladder),
+            (25, Stone),
+            (30, Stone),
+            (84, Stone),
+            (147, Wood),
+            (90, Glass),
+            (120, Glass),
+            (165, Slime),
         ];
         for (id, ty) in table {
             assert_eq!(BlockSound::of(id), ty, "block {id}");
         }
         assert_eq!(Ladder.dig().0, "dig.wood");
         assert_eq!(Ladder.step().0, "step.ladder");
+        assert_eq!(Slime.dig().0, "mob.slime.big");
+        assert_eq!(Anvil.dig_hit(), ("step.stone".into(), 0.1625, 0.5));
     }
 }

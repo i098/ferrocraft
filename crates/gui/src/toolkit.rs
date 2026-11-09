@@ -183,22 +183,7 @@ impl Metrics<'_> {
             if i >= width {
                 break;
             }
-            let w = self.char_width(c);
-            if code {
-                code = false;
-                match c {
-                    'l' | 'L' => bold = true,
-                    'r' | 'R' => bold = false,
-                    _ => {}
-                }
-            } else if w < 0 {
-                code = true;
-            } else {
-                i += w;
-                if bold {
-                    i += 1;
-                }
-            }
+            i += self.trim_step(c, &mut code, &mut bold);
             if i > width {
                 break;
             }
@@ -208,6 +193,24 @@ impl Metrics<'_> {
             kept.reverse();
         }
         kept.into_iter().collect()
+    }
+
+    fn trim_step(&self, c: char, code: &mut bool, bold: &mut bool) -> i32 {
+        let w = self.char_width(c);
+        if *code {
+            *code = false;
+            match c {
+                'l' | 'L' => *bold = true,
+                'r' | 'R' => *bold = false,
+                _ => {}
+            }
+            0
+        } else if w < 0 {
+            *code = true;
+            0
+        } else {
+            w + i32::from(*bold)
+        }
     }
 
     /// `listFormattedStringToWidth`: word-wrapped lines that carry the active format codes over.
@@ -240,26 +243,18 @@ impl Metrics<'_> {
         let (mut j, mut k, mut space, mut bold) = (0, 0usize, None, false);
         while k < len {
             let c = s[k];
-            match c {
-                '\n' => {}
-                '\u{a7}' if k < len - 1 => {
-                    k += 1;
-                    bold = bold_after(s[k], bold);
-                }
-                '\u{a7}' => {}
-                _ => {
-                    if c == ' ' {
-                        space = Some(k);
-                    }
-                    j += self.char_width(c);
-                    if bold {
-                        j += 1;
-                    }
-                }
-            }
             if c == '\n' {
                 space = Some(k);
                 break;
+            }
+            if c != '\u{a7}' {
+                if c == ' ' {
+                    space = Some(k);
+                }
+                j += self.char_width(c) + i32::from(bold);
+            } else if k < len - 1 {
+                k += 1;
+                bold = bold_after(s[k], bold);
             }
             if j > width {
                 break;

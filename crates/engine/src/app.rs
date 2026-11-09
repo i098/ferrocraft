@@ -13,7 +13,7 @@ mod input;
 mod play;
 
 use crate::args::Args;
-use crate::game::{Game, EYE_HEIGHT};
+use crate::game::{eye_height, Game};
 use crate::link::Link;
 use crate::ui::{Fm, Ui};
 use gui::inventory::icons::Icons;
@@ -83,8 +83,9 @@ pub struct App {
     synced_held: u8,
     /// `rightClickDelayTimer`.
     use_delay: i32,
-    /// An item use that the server ends with a release (`C07` status 5).
-    using_item: bool,
+    /// `EntityPlayer.itemInUseCount`: ticks left of an item use that a release (`C07` status 5)
+    /// ends early; 0 while no item is in use.
+    use_ticks: i32,
     sneak_sent: bool,
     sprint_sent: bool,
     /// Ticks the left button has dug at one block, for hit sounds and shards every 4 ticks.
@@ -140,7 +141,7 @@ impl App {
             perspective: 0,
             synced_held: 0,
             use_delay: 0,
-            using_item: false,
+            use_ticks: 0,
             sneak_sent: false,
             sprint_sent: false,
             dig_ticks: 0,
@@ -236,13 +237,7 @@ impl App {
             height_unfocused: s.chat_height_unfocused,
         };
         let (fullscreen, vsync) = (s.fullscreen, s.vsync);
-        let (lang, distance, chat, colors, parts) = (
-            s.lang.clone(),
-            s.render_distance as i8,
-            s.chat_visibility as i8,
-            s.chat_colors,
-            s.model_parts,
-        );
+        let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
         if self.hud.chat.settings != chat_settings {
             self.hud.chat.settings = chat_settings;
             let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
@@ -256,6 +251,19 @@ impl App {
         if let Some(r) = &mut self.renderer {
             r.set_vsync(vsync);
         }
+        self.send_client_settings();
+    }
+
+    /// `GameSettings.sendSettingsToServer`: C15 with the locale, view distance, chat and skin parts.
+    fn send_client_settings(&mut self) {
+        let s = &self.ui.settings;
+        let (lang, distance, chat, colors, parts) = (
+            s.lang.clone(),
+            s.render_distance as i8,
+            s.chat_visibility as i8,
+            s.chat_colors,
+            s.model_parts,
+        );
         if let Some(sess) = self.link.session() {
             let r = sess.client_settings(&lang, distance, chat, colors, parts);
             self.send_result(r);
@@ -322,12 +330,13 @@ impl App {
         let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
         let [px, py, pz] = p.pos;
         let [qx, qy, qz] = self.game.prev_pos;
-        let height = if self.input.sneaking() {
-            EYE_HEIGHT - 0.08
-        } else {
-            EYE_HEIGHT
-        };
+        let height = eye_height(self.input.sneaking());
         Some([lerp(qx, px), lerp(qy, py) + height, lerp(qz, pz)])
+    }
+
+    /// `Minecraft.isReducedDebug`: the player's game rule flag or the option.
+    fn reduced_debug(&self) -> bool {
+        self.game.reduced_debug || self.ui.settings.reduced_debug_info
     }
 
     fn camera(&self, frac: f64) -> Camera {
@@ -340,7 +349,7 @@ impl App {
 
     fn view_camera(&self, frac: f64) -> Camera {
         let fov = self.ui.settings.fov
-            * (self.fov_mod.0 + (self.fov_mod.1 - self.fov_mod.0) * frac as f32);
+            * (self.fov_mod.1 + (self.fov_mod.0 - self.fov_mod.1) * frac as f32);
         let (Some(p), Some(eye)) = (&self.game.player, self.eye(frac)) else {
             return Camera {
                 pos: [0.0; 3],
@@ -419,7 +428,8 @@ impl App {
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let cam = self.camera(frac);
-        let (quads, textures, effects) = self.overlay(frac, &cam);
+        let eye = self.eye(frac);
+        let (quads, textures, effects) = self.overlay(frac, eye);
         self.run_effects(effects);
         let held = self
             .game
@@ -466,7 +476,7 @@ impl App {
             .collect();
         draws.extend(self_model);
         r.set_entities(&draws);
-        r.set_selection(self.game.selection(cam.pos));
+        r.set_selection(eye.and_then(|e| self.game.selection(e)));
         let verts = self
             .particles
             .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32);
@@ -478,7 +488,7 @@ impl App {
     }
 
     /// The F3 left column, `None` without a player.
-    fn debug_lines(&self, cam: &Camera) -> Option<Vec<String>> {
+    fn debug_lines(&self, eye: Option<[f64; 3]>) -> Option<Vec<String>> {
         self.game.player.as_ref().map(|p| {
             gui::debug::left_lines(&gui::debug::DebugInfo {
                 fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
@@ -490,8 +500,8 @@ impl App {
                 pos: p.pos,
                 yaw: p.yaw,
                 pitch: self.game.pitch,
-                looking_at: self.game.target(cam.pos).map(|h| h.pos),
-                reduced: self.ui.settings.reduced_debug_info,
+                looking_at: eye.and_then(|e| self.game.target(e)).map(|h| h.pos),
+                reduced: self.reduced_debug(),
                 ..Default::default()
             })
         })
@@ -499,7 +509,7 @@ impl App {
 
     /// The HUD, the open container and the menu screens as quads, plus the textures they
     /// registered and the effects they raised.
-    fn overlay(&mut self, frac: f64, cam: &Camera) -> Overlay {
+    fn overlay(&mut self, frac: f64, eye: Option<[f64; 3]>) -> Overlay {
         let Some(r) = &self.renderer else {
             return (Vec::new(), Vec::new(), Vec::new());
         };
@@ -520,7 +530,7 @@ impl App {
         let screen_open = self.ui.is_open() || self.container.is_some();
         let in_world = self.ui.in_world && self.game.player.is_some();
         if in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none()) {
-            let debug = self.debug_lines(cam);
+            let debug = self.debug_lines(eye);
             let status = status_of(&self.game, self.input.sneaking());
             self.hud.selected_slot = i32::from(self.game.inv.held);
             let inv = &self.game.inv;
@@ -538,7 +548,7 @@ impl App {
                         .as_deref()
                         .filter(|_| self.show_debug)
                         .map(|l| (l, &[][..])),
-                    reduced_debug: self.ui.settings.reduced_debug_info,
+                    reduced_debug: self.reduced_debug(),
                     fancy: self.ui.settings.fancy_graphics,
                     brightness: 1.0,
                     player_view: self.game.gamemode != 3,

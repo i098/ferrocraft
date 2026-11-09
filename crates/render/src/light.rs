@@ -30,14 +30,7 @@ impl Light {
         let mut opacity = vec![0u8; n];
         let mut sky = vec![0u8; n];
         let mut block = vec![0u8; n];
-        let loaded = |x: i32, z: i32| match (x, z) {
-            (0..=15, 0..=15) => true,
-            (-1, 0..=15) => hood.neighbors[0].is_some(),
-            (16, 0..=15) => hood.neighbors[1].is_some(),
-            (0..=15, -1) => hood.neighbors[2].is_some(),
-            (0..=15, 16) => hood.neighbors[3].is_some(),
-            _ => false,
-        };
+        let loaded = |x: i32, z: i32| loaded(hood, x, z);
         let mut queue = VecDeque::new();
         for z in -1..=16 {
             for x in -1..=16 {
@@ -56,25 +49,13 @@ impl Light {
                         block[i] = em;
                         queue.push_back(i);
                     }
-                    if op > 0 {
-                        level = level.saturating_sub(op);
-                    }
+                    level = level.saturating_sub(op);
                     sky[i] = level;
                 }
             }
         }
         // Sky light that stays 15 straight down the column only needs to spread sideways where the neighbour is darker.
-        let mut sky_queue = VecDeque::new();
-        for z in -1..=16 {
-            for x in -1..=16 {
-                for y in 0..HEIGHT {
-                    let i = idx(x, y, z);
-                    if sky[i] > 1 && has_darker_neighbor(&sky, i) {
-                        sky_queue.push_back(i);
-                    }
-                }
-            }
-        }
+        let sky_queue = darker_edges(&sky);
         spread(&opacity, &mut sky, sky_queue);
         spread(&opacity, &mut block, queue);
 
@@ -106,6 +87,32 @@ impl Light {
         let c = self.cells[idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
         (c >> 4, c & 15)
     }
+}
+
+fn loaded(hood: &Neighborhood, x: i32, z: i32) -> bool {
+    match (x, z) {
+        (0..=15, 0..=15) => true,
+        (-1, 0..=15) => hood.neighbors[0].is_some(),
+        (16, 0..=15) => hood.neighbors[1].is_some(),
+        (0..=15, -1) => hood.neighbors[2].is_some(),
+        (0..=15, 16) => hood.neighbors[3].is_some(),
+        _ => false,
+    }
+}
+
+fn darker_edges(sky: &[u8]) -> VecDeque<usize> {
+    let mut sky_queue = VecDeque::new();
+    for z in -1..=16 {
+        for x in -1..=16 {
+            for y in 0..HEIGHT {
+                let i = idx(x, y, z);
+                if sky[i] > 1 && has_darker_neighbor(sky, i) {
+                    sky_queue.push_back(i);
+                }
+            }
+        }
+    }
+    sky_queue
 }
 
 fn has_darker_neighbor(light: &[u8], i: usize) -> bool {

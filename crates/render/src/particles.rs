@@ -536,7 +536,29 @@ impl Particles {
         spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
     ) -> bool {
         p.prev = p.pos;
-        match p.behavior {
+        if let Some(alive) = self.tick_special(p, solid, spawned) {
+            return alive;
+        }
+        if p.age >= p.max_age {
+            return false;
+        }
+        p.age += 1;
+        move_generic(p, solid);
+        if p.on_ground {
+            p.vel[0] *= f64::from(0.7_f32);
+            p.vel[2] *= f64::from(0.7_f32);
+        }
+        true
+    }
+
+    /// Behaviors with their own lifetime rule; `None` for those that use the generic age check.
+    fn tick_special(
+        &mut self,
+        p: &mut Particle,
+        solid: &impl Fn(i32, i32, i32) -> bool,
+        spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
+    ) -> Option<bool> {
+        Some(match p.behavior {
             Behavior::Portal => {
                 // No collision: the position follows a curve of age/lifetime and `y` rises by `1 - t`.
                 let t = p.age as f32 / p.max_age as f32;
@@ -548,15 +570,15 @@ impl Particles {
                 ];
                 let alive = p.age < p.max_age;
                 p.age += 1;
-                return alive;
+                alive
             }
             Behavior::LargeExplosion => {
                 p.age += 1;
-                return p.age < p.max_age;
+                p.age < p.max_age
             }
             Behavior::HugeEmitter => {
                 if p.age >= p.max_age {
-                    return false;
+                    return Some(false);
                 }
                 for _ in 0..6 {
                     let at = [0, 1, 2].map(|i| p.pos[i] + (self.rand() - self.rand()) * 4.0);
@@ -564,56 +586,11 @@ impl Particles {
                     spawned.push((Kind::LargeExplode, at, [t, 0.0, 0.0]));
                 }
                 p.age += 1;
-                return true;
+                true
             }
-            Behavior::Rain => return self.tick_rain(p, solid),
-            _ => {}
-        }
-        if p.age >= p.max_age {
-            return false;
-        }
-        p.age += 1;
-        match p.behavior {
-            Behavior::Smoke | Behavior::Explosion => {
-                p.vel[1] += 0.004;
-                step(p, solid);
-                let drag = if p.behavior == Behavior::Smoke {
-                    if p.pos[1] == p.prev[1] {
-                        p.vel[0] *= 1.1;
-                        p.vel[2] *= 1.1;
-                    }
-                    0.96_f32
-                } else {
-                    0.9_f32
-                };
-                p.vel = p.vel.map(|v| v * f64::from(drag));
-            }
-            Behavior::RedDust => {
-                step(p, solid);
-                if p.pos[1] == p.prev[1] {
-                    p.vel[0] *= 1.1;
-                    p.vel[2] *= 1.1;
-                }
-                p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
-            }
-            Behavior::Crit => {
-                step(p, solid);
-                p.color[1] = (f64::from(p.color[1]) * 0.96) as f32;
-                p.color[2] = (f64::from(p.color[2]) * 0.9) as f32;
-                p.vel = p.vel.map(|v| v * f64::from(0.7_f32));
-                p.vel[1] -= f64::from(0.02_f32);
-            }
-            _ => {
-                p.vel[1] -= 0.04 * p.gravity;
-                step(p, solid);
-                p.vel = p.vel.map(|v| v * p.drag);
-            }
-        }
-        if p.on_ground {
-            p.vel[0] *= f64::from(0.7_f32);
-            p.vel[2] *= f64::from(0.7_f32);
-        }
-        true
+            Behavior::Rain => self.tick_rain(p, solid),
+            _ => return None,
+        })
     }
 
     /// `RainSplashParticle.onUpdate`: gravity is subtracted whole, and a landed drop dies half the time.
@@ -736,6 +713,48 @@ fn push_quad(
             color,
             light: [1.0, 1.0],
         });
+    }
+}
+
+/// The per-behavior motion of one tick (`onUpdate` after the age check).
+fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
+    match p.behavior {
+        Behavior::Smoke | Behavior::Explosion => {
+            p.vel[1] += 0.004;
+            step(p, solid);
+            let drag = if p.behavior == Behavior::Smoke {
+                creep_on_floor(p);
+                0.96_f32
+            } else {
+                0.9_f32
+            };
+            p.vel = p.vel.map(|v| v * f64::from(drag));
+        }
+        Behavior::RedDust => {
+            step(p, solid);
+            creep_on_floor(p);
+            p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
+        }
+        Behavior::Crit => {
+            step(p, solid);
+            p.color[1] = (f64::from(p.color[1]) * 0.96) as f32;
+            p.color[2] = (f64::from(p.color[2]) * 0.9) as f32;
+            p.vel = p.vel.map(|v| v * f64::from(0.7_f32));
+            p.vel[1] -= f64::from(0.02_f32);
+        }
+        _ => {
+            p.vel[1] -= 0.04 * p.gravity;
+            step(p, solid);
+            p.vel = p.vel.map(|v| v * p.drag);
+        }
+    }
+}
+
+/// A particle that did not move vertically (it hit a floor or ceiling) speeds up sideways by 1.1.
+fn creep_on_floor(p: &mut Particle) {
+    if p.pos[1] == p.prev[1] {
+        p.vel[0] *= 1.1;
+        p.vel[2] *= 1.1;
     }
 }
 

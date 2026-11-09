@@ -25,6 +25,7 @@ const SELECTION_VERTICES: u32 = 24;
 /// alpha is raised to keep it as visible.
 const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 const PARTICLE_SHEET: &str = "textures/particle/particles.png";
+const EXPLOSION_SHEET: &str = "textures/entity/explosion.png";
 /// Outstanding mesh tasks (queued, running or waiting for upload); `ChunkRenderDispatcher.pendingTasks` holds 100.
 const MAX_PENDING_MESHES: usize = 100;
 /// Time per frame for uploading finished meshes, at least one; vanilla `runTasksUntil` stops at the frame's finish time.
@@ -901,6 +902,10 @@ impl Renderer {
         let quads = std::mem::take(&mut self.particles);
         let particle_block = self.upload_mesh(quad_mesh(quads.block), offset);
         let particle_sheet = self.upload_mesh(quad_mesh(quads.sheet), offset);
+        let particle_explosion = self.upload_mesh(quad_mesh(quads.explosion), offset);
+        if particle_explosion.is_some() {
+            self.load_texture(EXPLOSION_SHEET);
+        }
         if particle_sheet.is_some() {
             self.load_texture(PARTICLE_SHEET);
         }
@@ -978,6 +983,11 @@ impl Renderer {
             particle_block.iter().for_each(|m| draw_mesh(&mut pass, m));
             if let Some(m) = &particle_sheet {
                 pass.set_bind_group(0, &self.textures[PARTICLE_SHEET], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &particle_explosion {
+                pass.set_bind_group(0, &self.textures[EXPLOSION_SHEET], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }

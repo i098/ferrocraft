@@ -675,16 +675,16 @@ mod tests {
             (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) | (4, 61, 4) => 1 << 4,
             _ => 0,
         });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         assert_eq!(m.water.vertices.len(), 4);
     }
 
     #[test]
     fn stained_glass_pane_blends_and_packed_ice_does_not() {
         let at = |id: u16| flat(move |x, y, z| if (x, y, z) == (4, 70, 4) { id << 4 } else { 0 });
-        let pane = mesh(&at(160), [None; 4]);
+        let pane = mesh(&at(160), [None; 8]);
         assert!(pane.opaque.is_empty() && !pane.water.is_empty());
-        let ice = mesh(&at(174), [None; 4]);
+        let ice = mesh(&at(174), [None; 8]);
         assert!(ice.water.is_empty() && !ice.opaque.is_empty());
     }
 }

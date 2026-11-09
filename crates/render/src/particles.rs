@@ -15,6 +15,7 @@ const MAX_PARTICLES: usize = 4000;
 pub enum Kind {
     Explode,
     LargeExplode,
+    HugeExplode,
     Bubble,
     Splash,
     Crit,
@@ -40,7 +41,7 @@ impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
         const IDS: [(i32, i32, Kind); 21] = [
             (0, 0, Kind::Explode),
-            (2, 2, Kind::Explode),
+            (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
             (4, 4, Kind::Bubble),
             (5, 6, Kind::Splash),
@@ -73,6 +74,22 @@ enum Sprite {
     Block { state: u16, jitter: [f32; 2] },
     /// Sheet tile `base`; `anim` picks `base + 7 - age*8/max_age` like vanilla's generic particles.
     Sheet { base: u32, anim: bool },
+    /// 4x4 frames of `textures/entity/explosion.png`, picked by age (`LargeExplosionParticle`).
+    Explosion,
+}
+
+/// Which vanilla `onUpdate` and size rule a particle follows; `Generic` is `EntityFX.onUpdate`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Behavior {
+    Generic,
+    Smoke,
+    Explosion,
+    RedDust,
+    Crit,
+    Portal,
+    Rain,
+    HugeEmitter,
+    LargeExplosion,
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +106,13 @@ struct Particle {
     max_age: u32,
     on_ground: bool,
     sprite: Sprite,
+    behavior: Behavior,
+    /// Size before the grow-in or fade rule of `behavior` applies.
+    init_scale: f32,
+    /// Spawn point; portal particles move along a curve from it.
+    origin: [f64; 3],
+    /// Half the width of the collision box (`setSize(0.2)` is 0.1).
+    half: f64,
 }
 
 #[derive(Default)]
@@ -97,11 +121,13 @@ pub struct Particles {
     rng: u64,
 }
 
-/// Quads split by texture: `block` samples the block atlas, `sheet` samples `particles.png`.
+/// Quads split by texture: `block` samples the block atlas, `sheet` samples `particles.png`,
+/// `explosion` samples `textures/entity/explosion.png`.
 #[derive(Default)]
 pub struct Quads {
     pub block: Vec<Vertex>,
     pub sheet: Vec<Vertex>,
+    pub explosion: Vec<Vertex>,
 }
 
 impl Particles {
@@ -149,19 +175,24 @@ impl Particles {
             v[1] / len * speed * 0.4 + 0.1,
             v[2] / len * speed * 0.4,
         ];
+        let scale = ((self.rand() * 0.5 + 0.5) * 2.0) as f32;
         Particle {
             pos,
             prev: pos,
             vel,
             color: [1.0; 3],
             alpha: 1.0,
-            scale: ((self.rand() * 0.5 + 0.5) * 2.0) as f32,
+            scale,
             gravity: 0.0,
             drag: 0.98,
             age: 0,
             max_age: (4.0 / (self.rand() * 0.9 + 0.1)) as u32,
             on_ground: false,
             sprite,
+            behavior: Behavior::Generic,
+            init_scale: scale,
+            origin: pos,
+            half: 0.1,
         }
     }
 
@@ -178,10 +209,39 @@ impl Particles {
             .spawn_motion(kind, pos, motion, data)
             .or_else(|| self.spawn_timed(kind, pos, motion))
             .or_else(|| self.spawn_icon(kind, pos, motion));
-        if let Some(mut p) = made {
-            p.prev = p.pos;
+        if let Some(p) = made {
             self.push(p);
         }
+    }
+
+    /// `Particle(world, x, y, z, 0, 0, 0)` with its motion scaled by 0.1 and `motion * factor` added: the
+    /// shared constructor start of `SmokeParticle`, `RedstoneParticle` and `CriticalHitParticle`.
+    fn damped(&mut self, pos: [f64; 3], sprite: Sprite, factor: f64, motion: [f64; 3]) -> Particle {
+        let mut p = self.base(pos, [0.0; 3], sprite);
+        p.vel = [0, 1, 2].map(|i| p.vel[i] * 0.1 + motion[i] * factor);
+        p.scale *= 0.75;
+        p.init_scale = p.scale;
+        p
+    }
+
+    /// `RainSplashParticle(world, x, y, z)`: also the base of `WaterSplashParticle`.
+    fn rain(&mut self, pos: [f64; 3], tile: u32) -> Particle {
+        let mut p = self.base(
+            pos,
+            [0.0; 3],
+            Sprite::Sheet {
+                base: tile,
+                anim: false,
+            },
+        );
+        p.vel[0] *= 0.3;
+        p.vel[1] = self.rand() * 0.2 + 0.1;
+        p.vel[2] *= 0.3;
+        p.half = 0.005;
+        p.gravity = 0.06;
+        p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        p.behavior = Behavior::Rain;
+        p
     }
 
     fn spawn_motion(
@@ -209,28 +269,39 @@ impl Particles {
                 p.scale /= 2.0;
             }
             Kind::Smoke | Kind::LargeSmoke => {
-                p = self.base(pos, [0.0; 3], sheet(0, true));
-                p.vel = [
-                    motion[0] + (self.rand() * 2.0 - 1.0) * 0.001,
-                    motion[1] + 0.1,
-                    motion[2],
-                ];
+                // `SmokeParticle`: the lifetime is cut to an int before the scale multiplies it.
+                let s = if kind == Kind::LargeSmoke { 2.5 } else { 1.0 };
+                p = self.damped(pos, sheet(0, true), 1.0, motion);
                 let g = (self.rand() * 0.3) as f32;
                 p.color = [g; 3];
-                p.scale *= if kind == Kind::LargeSmoke { 2.5 } else { 0.75 };
-                p.max_age = ((8.0 / (self.rand() * 0.8 + 0.2)) as u32).max(1);
-                p.gravity = -0.0;
-                p.drag = 0.96;
+                p.scale *= s;
+                p.init_scale = p.scale;
+                p.max_age = ((8.0 / (self.rand() * 0.8 + 0.2)) as u32 as f32 * s) as u32;
+                p.behavior = Behavior::Smoke;
             }
-            Kind::Explode | Kind::LargeExplode => {
+            Kind::Explode => {
                 p = self.base(pos, motion, sheet(0, true));
-                p.vel = motion;
-                p.scale = if kind == Kind::LargeExplode { 5.0 } else { 2.0 };
-                p.max_age = 6 + (self.rand() * 4.0) as u32;
-                p.drag = 0.9;
-                p.gravity = -0.1;
+                p.vel = [0, 1, 2].map(|i| motion[i] + (self.rand() * 2.0 - 1.0) * 0.05);
                 let g = (self.rand() * 0.3 + 0.7) as f32;
                 p.color = [g; 3];
+                p.scale = (self.rand() * self.rand() * 6.0 + 1.0) as f32;
+                p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32 + 2;
+                p.behavior = Behavior::Explosion;
+            }
+            Kind::LargeExplode => {
+                p = self.base(pos, [0.0; 3], Sprite::Explosion);
+                p.vel = [0.0; 3];
+                p.max_age = 6 + (self.rand() * 4.0) as u32;
+                let g = (self.rand() * 0.6 + 0.4) as f32;
+                p.color = [g; 3];
+                // The x motion is the emitter's `age / maxAge`; the quad is `2 * scaleFactor` wide each side.
+                p.scale = 20.0 * (1.0 - motion[0] as f32 * 0.5);
+                p.behavior = Behavior::LargeExplosion;
+            }
+            Kind::HugeExplode => {
+                p = self.base(pos, [0.0; 3], sheet(0, false));
+                p.max_age = 8;
+                p.behavior = Behavior::HugeEmitter;
             }
             _ => return None,
         }
@@ -250,11 +321,23 @@ impl Particles {
                 p.gravity = 0.75;
                 p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32;
             }
-            Kind::Splash | Kind::Droplet | Kind::Bubble => {
-                let base = if kind == Kind::Bubble { 32 } else { 19 };
-                p = self.base(pos, motion, sheet(base, false));
-                p.gravity = if kind == Kind::Bubble { -0.02 } else { 0.04 };
-                p.drag = if kind == Kind::Bubble { 0.85 } else { 0.98 };
+            Kind::Droplet => {
+                let tile = 19 + (self.rand() * 4.0) as u32;
+                p = self.rain(pos, tile);
+            }
+            Kind::Splash => {
+                // `WaterSplashParticle`: the tile right of the rain tile, a slower fall.
+                let tile = 20 + (self.rand() * 4.0) as u32;
+                p = self.rain(pos, tile);
+                p.gravity = 0.04;
+                if motion[1] == 0.0 && (motion[0] != 0.0 || motion[2] != 0.0) {
+                    p.vel = [motion[0], motion[1] + 0.1, motion[2]];
+                }
+            }
+            Kind::Bubble => {
+                p = self.base(pos, motion, sheet(32, false));
+                p.gravity = -0.02;
+                p.drag = 0.85;
                 p.scale *= 0.5;
                 p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
             }
@@ -264,10 +347,18 @@ impl Particles {
                 p.max_age = (8.0 / (self.rand() * 0.8 + 0.3)) as u32;
             }
             Kind::RedDust => {
-                p = self.base(pos, motion, sheet(0, true));
-                p.color = [1.0, 0.0, 0.0];
+                // `RedstoneParticle`: the packet motion carries the colour; a zero red channel means 1.
+                p = self.damped(pos, sheet(0, true), 0.0, [0.0; 3]);
+                let r = if motion[0] == 0.0 {
+                    1.0
+                } else {
+                    motion[0] as f32
+                };
+                let f = (self.rand() * 0.4 + 0.6) as f32;
+                let mut tint = |c: f32| ((self.rand() * 0.2) as f32 + 0.8) * c * f;
+                p.color = [tint(r), tint(motion[1] as f32), tint(motion[2] as f32)];
                 p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.scale *= 0.8;
+                p.behavior = Behavior::RedDust;
             }
             Kind::Spell => {
                 p = self.base(pos, motion, sheet(128, true));
@@ -284,13 +375,16 @@ impl Particles {
         let mut p;
         match kind {
             Kind::Crit | Kind::MagicCrit => {
-                p = self.base(pos, [0.0; 3], sheet(65, false));
-                p.vel = [motion[0] * 0.4, motion[1] * 0.4 + 0.2, motion[2] * 0.4];
-                p.max_age = 20;
-                p.drag = 0.7;
-                p.gravity = 0.5;
+                p = self.damped(pos, sheet(65, false), 0.4, motion);
+                let g = (self.rand() * 0.3 + 0.6) as f32;
+                p.color = [g; 3];
+                p.max_age = (6.0 / (self.rand() * 0.8 + 0.6)) as u32;
+                p.behavior = Behavior::Crit;
+                // The vanilla constructor ends with one `tick()`; the world is not at hand here.
+                self.tick_one(&mut p, &|_, _, _| false, &mut Vec::new());
                 if kind == Kind::MagicCrit {
-                    p.color = [0.3, 0.8, 1.0];
+                    p.color = [p.color[0] * 0.3, p.color[1] * 0.8, p.color[2]];
+                    p.sprite = sheet(66, false);
                 }
             }
             Kind::Flame => {
@@ -320,10 +414,16 @@ impl Particles {
                 p.drag = 0.66;
             }
             Kind::Portal => {
-                p = self.base(pos, motion, sheet(160, false));
-                p.color = [0.9, 0.3, 1.0];
-                p.max_age = (4.0 / (self.rand() * 0.9 + 0.1)) as u32 + 40;
-                p.drag = 1.0;
+                // `PortalParticle`: a fixed curve from the spawn point along `motion`; tiles 0..8 tinted purple.
+                p = self.base(pos, motion, sheet(0, false));
+                p.vel = motion;
+                let f = (self.rand() * 0.6 + 0.4) as f32;
+                p.scale = (self.rand() * 0.2 + 0.5) as f32;
+                p.init_scale = p.scale;
+                p.color = [f * 0.9, f * 0.3, f];
+                p.max_age = (self.rand() * 10.0) as u32 + 40;
+                p.sprite = sheet((self.rand() * 8.0) as u32, false);
+                p.behavior = Behavior::Portal;
             }
             _ => return None,
         }
@@ -394,61 +494,122 @@ impl Particles {
     }
 
     /// `EffectRenderer.addBlockHitEffects`: one shard on the hit `face` (0 down .. 5 east) while mining.
-    pub fn dig_hit(&mut self, [x, y, z]: [i32; 3], face: u8, state: u16) {
-        let r = |s: &mut Self| s.rand();
-        let mut c = [
-            f64::from(x) + r(self) * 0.8 + 0.1,
-            f64::from(y) + r(self) * 0.8 + 0.1,
-            f64::from(z) + r(self) * 0.8 + 0.1,
-        ];
-        let e = 0.1;
+    /// `bounds` is the block's `[min x, y, z, max x, y, z]` inside its cell, as vanilla `getMinX()`..`getMaxZ()`.
+    pub fn dig_hit(&mut self, [x, y, z]: [i32; 3], face: u8, state: u16, bounds: [f64; 6]) {
+        let o = [x, y, z].map(f64::from);
+        // Vanilla `float f = 0.1F` widened to double.
+        let e = f64::from(0.1_f32);
+        let mut c = [0, 1, 2]
+            .map(|i| o[i] + self.rand() * (bounds[i + 3] - bounds[i] - e * 2.0) + e + bounds[i]);
         match face {
-            0 => c[1] = f64::from(y) - e,
-            1 => c[1] = f64::from(y) + 1.0 + e,
-            2 => c[2] = f64::from(z) - e,
-            3 => c[2] = f64::from(z) + 1.0 + e,
-            4 => c[0] = f64::from(x) - e,
-            _ => c[0] = f64::from(x) + 1.0 + e,
+            0 => c[1] = o[1] + bounds[1] - e,
+            1 => c[1] = o[1] + bounds[4] + e,
+            2 => c[2] = o[2] + bounds[2] - e,
+            3 => c[2] = o[2] + bounds[5] + e,
+            4 => c[0] = o[0] + bounds[0] - e,
+            _ => c[0] = o[0] + bounds[3] + e,
         }
         self.spawn(Kind::BlockCrack, c, [0.0; 3], i32::from(state));
         if let Some(p) = self.list.last_mut() {
-            p.vel = p.vel.map(|v| v * 0.6);
+            // `multiplyVelocity(0.2)` keeps the 0.1 upward offset; `multiplySize(0.6)` also shrinks the box.
+            p.vel = [p.vel[0] * 0.2, (p.vel[1] - 0.1) * 0.2 + 0.1, p.vel[2] * 0.2];
             p.scale *= 0.6;
+            p.half = 0.06;
         }
     }
 
     /// One 20 Hz tick (`EntityFX.onUpdate`); `solid(x, y, z)` reports blocks that stop particles.
     pub fn tick(&mut self, solid: impl Fn(i32, i32, i32) -> bool) {
-        self.list.retain_mut(|p| {
-            p.prev = p.pos;
-            if p.age >= p.max_age {
-                return false;
+        let mut list = std::mem::take(&mut self.list);
+        let mut spawned = Vec::new();
+        list.retain_mut(|p| self.tick_one(p, &solid, &mut spawned));
+        self.list = list;
+        for (kind, pos, motion) in spawned {
+            self.spawn(kind, pos, motion, 0);
+        }
+    }
+
+    /// Ticks one particle; false removes it. `spawned` collects what the particle emits.
+    fn tick_one(
+        &mut self,
+        p: &mut Particle,
+        solid: &impl Fn(i32, i32, i32) -> bool,
+        spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
+    ) -> bool {
+        p.prev = p.pos;
+        if let Some(alive) = self.tick_special(p, solid, spawned) {
+            return alive;
+        }
+        if p.age >= p.max_age {
+            return false;
+        }
+        p.age += 1;
+        move_generic(p, solid);
+        if p.on_ground {
+            p.vel[0] *= f64::from(0.7_f32);
+            p.vel[2] *= f64::from(0.7_f32);
+        }
+        true
+    }
+
+    /// Behaviors with their own lifetime rule; `None` for those that use the generic age check.
+    fn tick_special(
+        &mut self,
+        p: &mut Particle,
+        solid: &impl Fn(i32, i32, i32) -> bool,
+        spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
+    ) -> Option<bool> {
+        Some(match p.behavior {
+            Behavior::Portal => {
+                // No collision: the position follows a curve of age/lifetime and `y` rises by `1 - t`.
+                let t = p.age as f32 / p.max_age as f32;
+                let f = f64::from(1.0 - (-t + t * t * 2.0));
+                p.pos = [
+                    p.origin[0] + p.vel[0] * f,
+                    p.origin[1] + p.vel[1] * f + f64::from(1.0 - t),
+                    p.origin[2] + p.vel[2] * f,
+                ];
+                let alive = p.age < p.max_age;
+                p.age += 1;
+                alive
             }
-            p.age += 1;
-            p.vel[1] -= 0.04 * p.gravity;
-            let want = p.vel;
-            for axis in [1, 0, 2] {
-                let mut next = p.pos;
-                next[axis] += want[axis];
-                if blocked(&solid, next) {
-                    if axis == 1 {
-                        p.on_ground = want[1] < 0.0;
-                    }
-                    p.vel[axis] = 0.0;
-                } else {
-                    p.pos = next;
-                    if axis == 1 {
-                        p.on_ground = false;
-                    }
+            Behavior::LargeExplosion => {
+                p.age += 1;
+                p.age < p.max_age
+            }
+            Behavior::HugeEmitter => {
+                if p.age >= p.max_age {
+                    return Some(false);
                 }
+                for _ in 0..6 {
+                    let at = [0, 1, 2].map(|i| p.pos[i] + (self.rand() - self.rand()) * 4.0);
+                    let t = f64::from(p.age as f32 / p.max_age as f32);
+                    spawned.push((Kind::LargeExplode, at, [t, 0.0, 0.0]));
+                }
+                p.age += 1;
+                true
             }
-            p.vel = p.vel.map(|v| v * p.drag);
-            if p.on_ground {
-                p.vel[0] *= 0.7;
-                p.vel[2] *= 0.7;
-            }
-            true
-        });
+            Behavior::Rain => self.tick_rain(p, solid),
+            _ => return None,
+        })
+    }
+
+    /// `RainSplashParticle.onUpdate`: gravity is subtracted whole, and a landed drop dies half the time.
+    fn tick_rain(&mut self, p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) -> bool {
+        p.vel[1] -= p.gravity;
+        step(p, solid);
+        p.vel = p.vel.map(|v| v * f64::from(0.98_f32));
+        let mut dead = p.age >= p.max_age;
+        p.age += 1;
+        if p.on_ground {
+            dead |= self.rand() < 0.5;
+            p.vel[0] *= f64::from(0.7_f32);
+            p.vel[2] *= f64::from(0.7_f32);
+        }
+        // shortcut: only solid full cubes are known here, not the liquid level or the real block top.
+        let cell = p.pos.map(f64::floor);
+        dead |= solid(cell[0] as i32, cell[1] as i32, cell[2] as i32) && p.pos[1] < cell[1] + 1.0;
+        !dead
     }
 
     /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`.
@@ -463,47 +624,82 @@ impl Particles {
         let (right, up) = basis(cam_yaw, cam_pitch);
         let mut out = Quads::default();
         for p in &self.list {
+            if p.behavior == Behavior::HugeEmitter {
+                continue;
+            }
             let t = f64::from(partial);
             let c = [0, 1, 2].map(|i| (p.prev[i] + (p.pos[i] - p.prev[i]) * t - cam_pos[i]) as f32);
-            let (is_block, uv) = sprite_uv(p, atlas);
-            let target = if is_block {
-                &mut out.block
-            } else {
-                &mut out.sheet
+            let Some((layer, uv)) = sprite_uv(p, atlas, partial) else {
+                continue;
             };
-            push_quad(target, p, c, uv, right, up);
+            let target = match layer {
+                Layer::Block => &mut out.block,
+                Layer::Sheet => &mut out.sheet,
+                Layer::Explosion => &mut out.explosion,
+            };
+            push_quad(target, p, render_scale(p, partial), c, uv, right, up);
         }
         out
     }
 }
 
-/// Whether the sprite samples the block atlas, and its two corner uvs.
-fn sprite_uv(p: &Particle, atlas: &Atlas) -> (bool, [[f32; 2]; 2]) {
-    match p.sprite {
+#[derive(Clone, Copy)]
+enum Layer {
+    Block,
+    Sheet,
+    Explosion,
+}
+
+/// Particle size at draw time: smoke, redstone and crit grow in over the first 1/32 of their life,
+/// portal particles follow `1 - (1 - t)^2`.
+fn render_scale(p: &Particle, partial: f32) -> f32 {
+    let t = (p.age as f32 + partial) / p.max_age.max(1) as f32;
+    match p.behavior {
+        Behavior::Smoke | Behavior::RedDust | Behavior::Crit => {
+            p.init_scale * (t * 32.0).clamp(0.0, 1.0)
+        }
+        Behavior::Portal => p.init_scale * (1.0 - (1.0 - t) * (1.0 - t)),
+        _ => p.scale,
+    }
+}
+
+/// Which texture the sprite samples, and its two corner uvs; `None` when nothing is drawn.
+fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32; 2]; 2])> {
+    Some(match p.sprite {
         Sprite::Block { state, jitter } => {
             let name = crate::blocks::look(state).tex[crate::blocks::NORTH];
             let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
             let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
-            (true, [a, b])
+            (Layer::Block, [a, b])
         }
         Sprite::Sheet { base, anim } => {
             let frame = 7u32.saturating_sub(p.age * 8 / p.max_age.max(1));
             let tile = base + if anim { frame } else { 0 };
             let (u, v) = ((tile % 16) as f32 / 16.0, (tile / 16) as f32 / 16.0);
-            (false, [[u, v], [u + 1.0 / 16.0, v + 1.0 / 16.0]])
+            (Layer::Sheet, [[u, v], [u + 1.0 / 16.0, v + 1.0 / 16.0]])
         }
-    }
+        Sprite::Explosion => {
+            // `LargeExplosionParticle`: 4x4 frames over its life; the quad is mirrored in u.
+            let n = ((p.age as f32 + partial) * 15.0 / p.max_age as f32) as u32;
+            if n > 15 {
+                return None;
+            }
+            let (u, v) = ((n % 4) as f32 / 4.0, (n / 4) as f32 / 4.0);
+            (Layer::Explosion, [[u + 0.24975, v], [u, v + 0.24975]])
+        }
+    })
 }
 
 fn push_quad(
     target: &mut Vec<Vertex>,
     p: &Particle,
+    scale: f32,
     c: [f32; 3],
     uv: [[f32; 2]; 2],
     right: [f32; 3],
     up: [f32; 3],
 ) {
-    let half = 0.1 * p.scale;
+    let half = 0.1 * scale;
     let color = [p.color[0], p.color[1], p.color[2], p.alpha];
     for (dx, dy, u, v) in [
         (-1.0, -1.0, 0, 1),
@@ -521,9 +717,70 @@ fn push_quad(
     }
 }
 
-/// Whether a 0.2-wide particle box centred on `pos` touches a solid block (checked by its eight corners).
-fn blocked(solid: &impl Fn(i32, i32, i32) -> bool, pos: [f64; 3]) -> bool {
-    let h = 0.1;
+/// The per-behavior motion of one tick (`onUpdate` after the age check).
+fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
+    match p.behavior {
+        Behavior::Smoke | Behavior::Explosion => {
+            p.vel[1] += 0.004;
+            step(p, solid);
+            let drag = if p.behavior == Behavior::Smoke {
+                creep_on_floor(p);
+                0.96_f32
+            } else {
+                0.9_f32
+            };
+            p.vel = p.vel.map(|v| v * f64::from(drag));
+        }
+        Behavior::RedDust => {
+            step(p, solid);
+            creep_on_floor(p);
+            p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
+        }
+        Behavior::Crit => {
+            step(p, solid);
+            p.color[1] = (f64::from(p.color[1]) * 0.96) as f32;
+            p.color[2] = (f64::from(p.color[2]) * 0.9) as f32;
+            p.vel = p.vel.map(|v| v * f64::from(0.7_f32));
+            p.vel[1] -= f64::from(0.02_f32);
+        }
+        _ => {
+            p.vel[1] -= 0.04 * p.gravity;
+            step(p, solid);
+            p.vel = p.vel.map(|v| v * p.drag);
+        }
+    }
+}
+
+/// A particle that did not move vertically (it hit a floor or ceiling) speeds up sideways by 1.1.
+fn creep_on_floor(p: &mut Particle) {
+    if p.pos[1] == p.prev[1] {
+        p.vel[0] *= 1.1;
+        p.vel[2] *= 1.1;
+    }
+}
+
+/// Moves by `vel` one axis at a time (y, x, z); a blocked axis zeroes its velocity.
+fn step(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
+    let want = p.vel;
+    for axis in [1, 0, 2] {
+        let mut next = p.pos;
+        next[axis] += want[axis];
+        if blocked(solid, next, p.half) {
+            if axis == 1 {
+                p.on_ground = want[1] < 0.0;
+            }
+            p.vel[axis] = 0.0;
+        } else {
+            p.pos = next;
+            if axis == 1 {
+                p.on_ground = false;
+            }
+        }
+    }
+}
+
+/// Whether a box of half-width `h` centred on `pos` touches a solid block (checked by its eight corners).
+fn blocked(solid: &impl Fn(i32, i32, i32) -> bool, pos: [f64; 3], h: f64) -> bool {
     [-h, h].iter().any(|dx| {
         [-h, h].iter().any(|dy| {
             [-h, h].iter().any(|dz| {
@@ -588,5 +845,86 @@ mod tests {
         assert_eq!(ps.len(), 11);
         ps.spawn_packet(99, [0.0; 3], [0.0; 3], 0.0, 5, &[]);
         assert_eq!(ps.len(), 11);
+    }
+
+    #[test]
+    fn mining_shard_on_a_lower_slab_top_sits_just_above_its_surface() {
+        let mut ps = Particles::new();
+        for _ in 0..50 {
+            ps.dig_hit([3, 10, 4], 1, 44 << 4, [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]);
+        }
+        for p in &ps.list {
+            // Vanilla `maxY + (double) 0.1F`: the float widens to 0.10000000149, not 0.1.
+            assert!(
+                (p.pos[1] - (10.5 + f64::from(0.1_f32))).abs() < 1e-12,
+                "y {}",
+                p.pos[1]
+            );
+            assert!((3.1..=3.9).contains(&p.pos[0]) && (4.1..=4.9).contains(&p.pos[2]));
+        }
+    }
+
+    #[test]
+    fn mining_shard_velocity_uses_0_2_around_the_upward_offset() {
+        let mut ps = Particles::new();
+        for _ in 0..200 {
+            ps.dig_hit([0, 0, 0], 4, 1 << 4, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        }
+        // Fresh `EntityFX` motion is at most 0.45 * 0.4 per axis, so x and z stay within 0.2 * that.
+        for p in &ps.list {
+            assert!(
+                p.vel[0].abs() <= 0.036 && p.vel[2].abs() <= 0.036,
+                "{:?}",
+                p.vel
+            );
+            assert!((0.064..=0.136).contains(&p.vel[1]), "{:?}", p.vel);
+            // Vanilla size is 1..2, halved by the shard and cut to 0.6 by `multiplySize`.
+            assert!((0.3..=0.6).contains(&p.scale), "{}", p.scale);
+        }
+    }
+
+    #[test]
+    fn portal_particle_follows_its_curve_and_dies_after_its_lifetime() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::Portal, [0.0; 3], [1.0, 0.0, 0.0], 0);
+        let life = ps.list[0].max_age;
+        assert!((40..50).contains(&life));
+        ps.tick(|_, _, _| false);
+        // t = 0: f = 1, so the particle sits at origin + motion and 1 block above.
+        assert_eq!(ps.list[0].pos, [1.0, 1.0, 0.0]);
+        for _ in 0..life {
+            ps.tick(|_, _, _| false);
+        }
+        assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn huge_explosion_emits_six_large_explosions_for_eight_ticks() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::HugeExplode, [0.0; 3], [0.0; 3], 0);
+        for _ in 0..8 {
+            ps.tick(|_, _, _| false);
+        }
+        let large = ps
+            .list
+            .iter()
+            .filter(|p| p.behavior == Behavior::LargeExplosion)
+            .count();
+        assert!(large > 0 && large <= 48);
+        ps.tick(|_, _, _| false);
+        assert!(ps.list.iter().all(|p| p.behavior != Behavior::HugeEmitter));
+    }
+
+    #[test]
+    fn red_dust_without_red_motion_tints_red() {
+        let mut ps = Particles::new();
+        for _ in 0..20 {
+            ps.spawn(Kind::RedDust, [0.0; 3], [0.0; 3], 0);
+        }
+        // red = (0.8..1.0) * 1 * (0.6..1.0); green and blue are 0.
+        for p in &ps.list {
+            assert!((0.48..=1.0).contains(&p.color[0]));
+            assert_eq!(p.color[1..], [0.0, 0.0]);
+        }
     }
 }

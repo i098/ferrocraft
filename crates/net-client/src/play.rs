@@ -1,7 +1,7 @@
 //! Reader thread: play packets in, [`NetEvent`] values out.
 
 use crate::link::{Reader, Writer};
-use crate::{chat, entity, send, NetEvent};
+use crate::{chat, entity, events, send, NetEvent};
 use ferrocraft_protocol::play::{clientbound as cb, serverbound as sb};
 use std::io;
 use std::sync::mpsc::Sender;
@@ -62,6 +62,7 @@ fn handle(
                 NetEvent::Respawn,
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
+                NetEvent::Difficulty(r.difficulty),
             ]
         }
         // Reason 3 is "change game mode"; the value is the mode as a float.
@@ -82,6 +83,9 @@ fn handle(
             vec![NetEvent::JoinGame {
                 entity_id: j.entity_id,
                 gamemode: j.gamemode & 7,
+                hardcore: j.gamemode & 8 != 0,
+                difficulty: j.difficulty,
+                max_players: j.max_players,
             }]
         }
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
@@ -114,9 +118,11 @@ fn handle(
         cb::Packet::MultiBlockChange(m) => multi_block_change(&m),
         cb::Packet::ChunkData(c) => chunk_data(&c, *dimension == 0)?,
         cb::Packet::MapChunkBulk(b) => chunk_bulk(&b)?,
+        // The player list feeds both entity names and the tab list.
         other => entity::events(&other)
             .into_iter()
             .map(NetEvent::Entity)
+            .chain(events::events(&other))
             .collect(),
     })
 }

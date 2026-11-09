@@ -2,8 +2,9 @@
 
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::entity::{self, EntityDraw, Skins};
-use crate::hand::{self, Hand};
+use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
+use crate::particles::Quads;
 use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
 use crate::weather::{build_rain, precipitation_height};
 use crate::{Camera, ChunkBlocks, Quad};
@@ -22,6 +23,7 @@ const SELECTION_VERTICES: u32 = 24;
 /// Vanilla draws the outline black at 40% alpha with 2 px lines; wgpu lines are 1 px, so the
 /// alpha is raised to keep it as visible.
 const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
+const PARTICLE_SHEET: &str = "textures/particle/particles.png";
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -44,6 +46,23 @@ struct GpuMesh {
 struct ChunkMesh {
     opaque: Option<GpuMesh>,
     water: Option<GpuMesh>,
+}
+
+/// The resolved model of the held item.
+enum Held {
+    Block(MeshData),
+    /// Extruded sprite and its item texture, bound with the hand globals.
+    Flat(hand::Flat, wgpu::BindGroup),
+    /// No model (unknown item, entity models such as skulls): nothing is drawn.
+    Nothing,
+}
+
+/// Which texture the hand geometry samples.
+#[derive(Clone, Copy)]
+enum HandTex {
+    Skin,
+    Atlas,
+    Item,
 }
 
 enum Target {
@@ -85,7 +104,9 @@ pub struct Renderer {
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
-    held_mesh: Option<(u16, MeshData)>,
+    held: Option<(HeldKind, Held)>,
+    /// Camera-relative particle quads for the next frame.
+    particles: Quads,
     /// Indexed by `Blend as usize`.
     gui_pipes: [wgpu::RenderPipeline; 4],
     /// GUI textures by path, loaded on first use.
@@ -292,7 +313,8 @@ impl Renderer {
             hand_skin,
             rain_group,
             hand: None,
-            held_mesh: None,
+            held: None,
+            particles: Quads::default(),
             gui_pipes,
             textures: HashMap::new(),
             source,
@@ -535,6 +557,41 @@ impl Renderer {
         self.hand = hand;
     }
 
+    /// Particle quads for the next frame only, from [`crate::Particles::vertices`] with
+    /// [`Renderer::atlas`] and the camera of that frame (the quads are relative to `Camera.pos`).
+    pub fn set_particles(&mut self, quads: Quads) {
+        self.particles = quads;
+    }
+
+    /// The block atlas that [`crate::Particles::vertices`] samples.
+    pub fn atlas(&self) -> &Atlas {
+        &self.atlas
+    }
+
+    /// Registers (or replaces) a GUI texture that quads name by `name` in `Quad.tex`, such as a
+    /// server icon. A PNG that does not decode shows the missing tile.
+    pub fn register_texture(&mut self, name: &str, png: &[u8]) {
+        let image = decode_png(png).unwrap_or_else(|| {
+            eprintln!("ferrocraft-render: {name} is not a PNG");
+            missing_tile()
+        });
+        let view = upload_texture(
+            &self.device,
+            &self.queue,
+            image.width as u32,
+            image.height as u32,
+            &image.rgba,
+        );
+        let group = bind_group(
+            &self.device,
+            &self.layout_bg,
+            &self.globals,
+            &self.sampler,
+            &view,
+        );
+        self.textures.insert(name.to_owned(), group);
+    }
+
     /// Highest block that stops rain in a loaded column, as `World.getPrecipitationHeight`.
     fn rain_top(&self, x: i32, z: i32) -> Option<i32> {
         let blocks = self.blocks.get(&(x >> 4, z >> 4))?;
@@ -545,18 +602,71 @@ impl Renderer {
         ))
     }
 
-    /// Hand geometry for this frame and whether it samples the skin; `None` when no hand or texture exists.
-    fn hand_draw(&mut self) -> Option<(hand::Draw, bool)> {
+    /// Hand geometry for this frame and the texture it samples; `None` when no hand or texture exists.
+    fn hand_draw(&mut self) -> Option<(hand::Draw, HandTex)> {
         let hand = self.hand?;
-        let Some(state) = hand.held else {
+        let Some(kind) = hand.held else {
             let (_, height) = self.hand_skin.as_ref()?;
-            return Some((hand::arm(&hand, *height), true));
+            return Some((hand::arm(&hand, *height), HandTex::Skin));
         };
-        if self.held_mesh.as_ref().map(|m| m.0) != Some(state) {
-            self.held_mesh = Some((state, hand::held_mesh(state, &self.atlas)));
+        if self.held.as_ref().map(|h| h.0) != Some(kind) {
+            let held = self.resolve_held(kind);
+            self.held = Some((kind, held));
         }
-        let mesh = &self.held_mesh.as_ref()?.1;
-        Some((hand::block(&hand, mesh), false))
+        match &self.held.as_ref()?.1 {
+            Held::Block(mesh) => Some((hand::block(&hand, mesh), HandTex::Atlas)),
+            Held::Flat(flat, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
+            Held::Nothing => None,
+        }
+    }
+
+    fn resolve_held(&mut self, kind: HeldKind) -> Held {
+        let state = match kind {
+            HeldKind::Block(state) => state,
+            HeldKind::Item { id, damage } => {
+                if let Some(flat) = self.flat_item(id, damage) {
+                    return flat;
+                }
+                if !(1..256).contains(&id) {
+                    return Held::Nothing;
+                }
+                ((id as u16) << 4) | (damage as u16 & 15)
+            }
+        };
+        Held::Block(hand::held_mesh(state, &self.atlas))
+    }
+
+    /// The extruded sprite of a `builtin/generated` item model, with its `layer0` texture uploaded.
+    /// shortcut: only `layer0`, untinted (leather armor, potions, spawn eggs lose color and overlay).
+    fn flat_item(&mut self, id: i16, damage: i16) -> Option<Held> {
+        let name = world::inventory::items::model(id, damage)?;
+        let source = self.source.as_mut()?;
+        let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+        let (texture, display) = hand::flat_model(&mut read, name)?;
+        let image = decode_png(&read(&texture)?)?;
+        let view = upload_texture(
+            &self.device,
+            &self.queue,
+            image.width as u32,
+            image.height as u32,
+            &image.rgba,
+        );
+        let group = bind_group(
+            &self.device,
+            &self.layout_bg,
+            &self.hand_globals,
+            &self.sampler,
+            &view,
+        );
+        Some(Held::Flat(hand::Flat::new(&image, display), group))
+    }
+
+    fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
+        match (tex, &self.hand_skin, &self.held) {
+            (HandTex::Skin, Some((group, _)), _) => group,
+            (HandTex::Item, _, Some((_, Held::Flat(_, group)))) => group,
+            _ => &self.hand_atlas_group,
+        }
     }
 
     fn rain_mesh(&self, env: &Environment, cam: &Camera) -> Option<GpuMesh> {
@@ -566,14 +676,14 @@ impl Renderer {
         self.upload_geometry(&rain)
     }
 
-    /// Uploads the hand and its own projection; the flag says whether it samples the skin.
+    /// Uploads the hand and its own projection, with the texture it samples.
     fn hand_mesh(
         &mut self,
         cam: &Camera,
         world: &Globals,
         sun_brightness: f32,
-    ) -> Option<(GpuMesh, bool)> {
-        let (mut draw, skin) = self.hand_draw()?;
+    ) -> Option<(GpuMesh, HandTex)> {
+        let (mut draw, tex) = self.hand_draw()?;
         // A block above the eye keeps the hand dark.
         let covered = self
             .rain_top(cam.pos[0].floor() as i32, cam.pos[2].floor() as i32)
@@ -596,7 +706,7 @@ impl Renderer {
             vertices: draw.vertices,
             indices: draw.indices,
         };
-        Some((self.upload_geometry(&geometry)?, skin))
+        Some((self.upload_geometry(&geometry)?, tex))
     }
 
     fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
@@ -648,6 +758,13 @@ impl Renderer {
 
         let rain = self.rain_mesh(&env, cam);
         let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
+        let offset = cam.pos.map(|c| c as f32);
+        let quads = std::mem::take(&mut self.particles);
+        let particle_block = self.upload_mesh(quad_mesh(quads.block), offset);
+        let particle_sheet = self.upload_mesh(quad_mesh(quads.sheet), offset);
+        if particle_sheet.is_some() {
+            self.load_texture(PARTICLE_SHEET);
+        }
 
         for q in overlay {
             self.load_texture(&q.tex);
@@ -719,7 +836,16 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            // `EffectRenderer.renderParticles` runs after entities and before the translucent layer.
             pass.set_pipeline(&self.water_pipe);
+            if let Some(m) = &particle_block {
+                draw_mesh(&mut pass, m);
+            }
+            if let Some(m) = &particle_sheet {
+                pass.set_bind_group(0, &self.textures[PARTICLE_SHEET], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
             for m in self.meshes.values().filter_map(|m| m.water.as_ref()) {
                 draw_mesh(&mut pass, m);
             }
@@ -763,12 +889,8 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if let Some((m, skin)) = &hand {
-                let group = match (&self.hand_skin, skin) {
-                    (Some((g, _)), true) => g,
-                    _ => &self.hand_atlas_group,
-                };
-                pass.set_bind_group(0, group, &[]);
+            if let Some((m, tex)) = &hand {
+                pass.set_bind_group(0, self.hand_group(*tex), &[]);
                 pass.set_pipeline(&self.hand_pipe);
                 draw_mesh(&mut pass, m);
             }
@@ -1121,6 +1243,14 @@ fn selection_lines(b: [f64; 6]) -> [Vertex; SELECTION_VERTICES as usize] {
         }
     }
     v
+}
+
+/// Indexed triangles for vertices that come four per quad.
+fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
+    let indices = (0..vertices.len() as u32 / 4)
+        .flat_map(|q| [0, 1, 2, 0, 2, 3].map(|i| q * 4 + i))
+        .collect();
+    MeshData { vertices, indices }
 }
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

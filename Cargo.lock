@@ -839,6 +839,7 @@ dependencies = [
  "render",
  "serde_json",
  "world",
+ "zip",
 ]
 
 [[package]]
@@ -1844,8 +1845,10 @@ dependencies = [
  "bytemuck",
  "png",
  "pollster",
+ "serde_json",
  "wgpu",
  "winit",
+ "world",
  "zip",
 ]
 

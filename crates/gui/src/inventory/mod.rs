@@ -8,7 +8,7 @@
 mod creative;
 pub mod icons;
 pub mod layout;
-mod tooltip;
+pub(crate) mod tooltip;
 
 use crate::screens::blit256 as modal;
 pub use crate::screens::{Canvas, Metrics};

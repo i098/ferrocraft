@@ -42,7 +42,7 @@ pub trait World {
 }
 
 /// Player input for one tick, as the client sets it before `onLivingUpdate`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Input {
     pub forward: f32,
     pub strafe: f32,

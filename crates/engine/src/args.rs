@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 pub struct Args {
     pub username: String,
     pub assets_dir: Option<PathBuf>,
-    pub server: String,
+    /// `--server`/`--port`/`FERROCRAFT_SERVER`: join this server at once; without it the title screen opens.
+    pub server: Option<String>,
+    /// `--gameDir`, else `~/.minecraft`: holds `options.txt`, `servers.dat` and the sound assets.
+    pub game_dir: PathBuf,
 }
-
-const DEFAULT_SERVER: &str = "127.0.0.1:25565";
 
 /// Parse `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server` and `--port`; other
 /// vanilla flags (`--accessToken`, ...) are ignored. A flag takes the next token as its value
@@ -40,16 +41,23 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
         }
     }
     let server = match (host.or(env_server), port) {
-        (Some(h), Some(p)) => format!("{}:{p}", h.split(':').next().unwrap_or(&h)),
-        (Some(h), None) if h.contains(':') => h,
-        (Some(h), None) => format!("{h}:25565"),
-        (None, Some(p)) => format!("127.0.0.1:{p}"),
-        (None, None) => DEFAULT_SERVER.to_string(),
+        (Some(h), Some(p)) => Some(format!("{}:{p}", h.split(':').next().unwrap_or(&h))),
+        (Some(h), None) if h.contains(':') => Some(h),
+        (Some(h), None) => Some(format!("{h}:25565")),
+        (None, Some(p)) => Some(format!("127.0.0.1:{p}")),
+        (None, None) => None,
     };
+    let game_dir = game_dir.clone().unwrap_or_else(|| {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("APPDATA"))
+            .map_or_else(|| PathBuf::from("."), PathBuf::from)
+            .join(".minecraft")
+    });
     Ok(Args {
         username,
-        assets_dir: resolve_assets(assets_dir, game_dir.as_deref(), version.as_deref()),
+        assets_dir: resolve_assets(assets_dir, Some(&game_dir), version.as_deref()),
         server,
+        game_dir,
     })
 }
 
@@ -119,19 +127,22 @@ mod tests {
         std::fs::remove_dir_all(mc).unwrap();
         let a = parse(&v("--fullscreen --username Foo --demo"), None).unwrap();
         assert_eq!(a.username, "Foo");
-        assert_eq!(a.server, DEFAULT_SERVER);
+        assert_eq!(a.server, None);
         assert!(parse(&v("--username"), None).is_err());
         assert_eq!(
             parse(&v("--server mc.local"), None).unwrap().server,
-            "mc.local:25565"
+            Some("mc.local:25565".into())
         );
         assert_eq!(
             parse(&v("--server mc.local:1 --port 2"), None)
                 .unwrap()
                 .server,
-            "mc.local:2"
+            Some("mc.local:2".into())
         );
-        assert_eq!(parse(&[], Some("h:9".into())).unwrap().server, "h:9");
+        assert_eq!(
+            parse(&[], Some("h:9".into())).unwrap().server,
+            Some("h:9".into())
+        );
         assert!(parse(&v("--port x"), None).is_err());
     }
 }

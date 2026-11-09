@@ -1,18 +1,29 @@
-//! First-person hand and held block, ported from vanilla 1.8.9 `ItemRenderer.renderItemInFirstPerson`
-//! (`transformFirstPersonItem`, the empty-hand arm of `RenderPlayer.renderRightArm`).
-//! Flat items need the item atlas and the held stack, which the engine does not track yet, so only blocks and the bare arm are drawn.
+//! First-person hand and held item, ported from vanilla 1.8.9 `ItemRenderer.renderItemInFirstPerson`
+//! (`transformFirstPersonItem`, the empty-hand arm of `RenderPlayer.renderRightArm`, and
+//! `ItemModelGenerator` for the extruded sprite of flat items).
 
-use crate::assets::Atlas;
+use crate::assets::{Atlas, Image};
 use crate::mesh::{mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
+use serde_json::Value;
 use std::f32::consts::PI;
 
 pub type Mat = [[f32; 4]; 4];
 
+/// What the hand holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldKind {
+    /// Block state id (`id << 4 | meta`) drawn as a cube.
+    Block(u16),
+    /// An item stack: `builtin/generated` models (tools, food, torches, saplings...) draw as the
+    /// extruded sprite, other ids below 256 as the block `id << 4 | damage & 15`.
+    Item { id: i16, damage: i16 },
+}
+
 /// What the engine tells the renderer about the player's hand for one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hand {
-    /// Block state id in the hand (`id << 4 | meta`); `None` draws the bare arm.
-    pub held: Option<u16>,
+    /// `None` draws the bare arm.
+    pub held: Option<HeldKind>,
     /// `getSwingProgress(partial)`, `0..1`.
     pub swing: f32,
     /// `1 - equippedProgress`: 0 with the item fully raised, 1 fully lowered.
@@ -51,9 +62,13 @@ fn translate(x: f32, y: f32, z: f32) -> Mat {
 }
 
 fn scale(s: f32) -> Mat {
+    scale3([s; 3])
+}
+
+fn scale3(s: [f32; 3]) -> Mat {
     let mut m = ident();
     for (i, c) in m.iter_mut().enumerate().take(3) {
-        c[i] = s;
+        c[i] = s[i];
     }
     m
 }
@@ -118,6 +133,155 @@ pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
         vertices: mesh.vertices.clone(),
         indices: mesh.indices.clone(),
         model: mul(item_transform(hand.swing, hand.lowered), scale(0.5)),
+    }
+}
+
+/// A flat item: the extruded sprite with one normal per quad, and its `firstperson` display transform.
+pub struct Flat {
+    mesh: MeshData,
+    normals: Vec<[f32; 3]>,
+    display: Mat,
+}
+
+/// Reads `models/item/<name>.json` and its parents through `read` (paths below `assets/minecraft/`).
+/// Returns the `layer0` texture path and the `firstperson` display transform when the chain ends
+/// in a `builtin/generated` (or clock/compass) model; `None` for block and entity models.
+pub fn flat_model(
+    read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    name: &str,
+) -> Option<(String, Mat)> {
+    let mut models = Vec::new();
+    let mut next = format!("item/{name}");
+    loop {
+        if matches!(
+            next.as_str(),
+            "builtin/generated" | "builtin/compass" | "builtin/clock"
+        ) {
+            break;
+        }
+        if next.starts_with("builtin/") || models.len() > 16 {
+            return None;
+        }
+        let v: Value = serde_json::from_slice(&read(&format!("models/{next}.json"))?).ok()?;
+        next = v["parent"].as_str()?.to_string();
+        models.push(v);
+    }
+    let layer = models
+        .iter()
+        .find_map(|v| v["textures"]["layer0"].as_str())?;
+    let v3 = |v: &Value| -> Option<[f32; 3]> {
+        let a = v.as_array()?;
+        Some([0, 1, 2].map(|i| a.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32))
+    };
+    // `ItemTransformVec3f.Deserializer`: translation in 1/16 clamped to 1.5, scale clamped to 4.
+    let display = models
+        .iter()
+        .find_map(|v| v["display"].get("firstperson"))
+        .map_or(ident(), |d| {
+            let t = d.get("translation").and_then(v3).unwrap_or([0.0; 3]);
+            let [t0, t1, t2] = t.map(|c| (c / 16.0).clamp(-1.5, 1.5));
+            let r = d.get("rotation").and_then(v3).unwrap_or([0.0; 3]);
+            let s = d.get("scale").and_then(v3).unwrap_or([1.0; 3]);
+            // `ItemCameraTransforms.applyTransform`: translate, rotate y, x, z, then scale.
+            chain(&[
+                translate(t0, t1, t2),
+                rotate(r[1], 1),
+                rotate(r[0], 0),
+                rotate(r[2], 2),
+                scale3(s.map(|c| c.clamp(-4.0, 4.0))),
+            ])
+        });
+    Some((format!("textures/{layer}.png"), display))
+}
+
+impl Flat {
+    /// `ItemModelGenerator`: front and back faces 1/16 apart plus a side face on every opaque
+    /// pixel edge that borders a transparent pixel, in `0..1` model units. Animated strips use frame 0.
+    pub fn new(img: &Image, display: Mat) -> Flat {
+        let (w, th) = (img.width, img.height);
+        let h = w.min(th);
+        let opaque = |x: isize, y: isize| {
+            (0..w as isize).contains(&x)
+                && (0..h as isize).contains(&y)
+                && img.rgba[(y as usize * w + x as usize) * 4 + 3] != 0
+        };
+        let (z0, z1) = (7.5 / 16.0, 8.5 / 16.0);
+        let vmax = h as f32 / th as f32;
+        let mut mesh = MeshData::default();
+        let mut normals = Vec::new();
+        let mut quad = |corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], normal: [f32; 3]| {
+            let base = mesh.vertices.len() as u32;
+            for (pos, uv) in corners.into_iter().zip(uv) {
+                mesh.vertices.push(Vertex {
+                    pos,
+                    uv,
+                    color: [1.0; 4],
+                    light: [1.0, 0.0],
+                });
+            }
+            mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+            normals.push(normal);
+        };
+        let full = [[0.0, 0.0], [1.0, 0.0], [1.0, vmax], [0.0, vmax]];
+        for (z, n) in [(z1, 1.0), (z0, -1.0)] {
+            let c = [[0.0, 1.0, z], [1.0, 1.0, z], [1.0, 0.0, z], [0.0, 0.0, z]];
+            quad(c, full, [0.0, 0.0, n]);
+        }
+        let (fw, fh) = (w as f32, h as f32);
+        for y in 0..h as isize {
+            for x in 0..w as isize {
+                if !opaque(x, y) {
+                    continue;
+                }
+                let uv = [[(x as f32 + 0.5) / fw, (y as f32 + 0.5) / th as f32]; 4];
+                let (x0, x1) = (x as f32 / fw, (x + 1) as f32 / fw);
+                let (y1, y0) = (1.0 - y as f32 / fh, 1.0 - (y + 1) as f32 / fh);
+                if !opaque(x - 1, y) {
+                    let c = [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]];
+                    quad(c, uv, [-1.0, 0.0, 0.0]);
+                }
+                if !opaque(x + 1, y) {
+                    let c = [[x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0]];
+                    quad(c, uv, [1.0, 0.0, 0.0]);
+                }
+                if !opaque(x, y - 1) {
+                    let c = [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+                    quad(c, uv, [0.0, 1.0, 0.0]);
+                }
+                if !opaque(x, y + 1) {
+                    let c = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]];
+                    quad(c, uv, [0.0, -1.0, 0.0]);
+                }
+            }
+        }
+        Flat {
+            mesh,
+            normals,
+            display,
+        }
+    }
+}
+
+/// `transformFirstPersonItem`, the model's `firstperson` transform, then `RenderItem.renderItem`
+/// (`scale(0.5)`, `translate(-0.5)`), lit per face like the arm.
+pub fn flat(hand: &Hand, f: &Flat) -> Draw {
+    let model = chain(&[
+        item_transform(hand.swing, hand.lowered),
+        f.display,
+        scale(0.5),
+        translate(-0.5, -0.5, -0.5),
+    ]);
+    let mut vertices = f.mesh.vertices.clone();
+    for (quad, n) in vertices.chunks_mut(4).zip(&f.normals) {
+        let shade = item_light(&model, *n);
+        for v in quad {
+            v.color = [shade, shade, shade, 1.0];
+        }
+    }
+    Draw {
+        vertices,
+        indices: f.mesh.indices.clone(),
+        model,
     }
 }
 
@@ -248,5 +412,23 @@ mod tests {
         let n = eye.len() as f32;
         let mean: [f32; 3] = std::array::from_fn(|i| eye.iter().map(|p| p[i]).sum::<f32>() / n);
         assert!(mean[0] > 0.2 && mean[1] < 0.0 && mean[2] < -0.2, "{mean:?}");
+    }
+
+    /// One opaque pixel in a 2x2 sprite: front, back and its four edges.
+    #[test]
+    fn flat_sprite_extrudes_opaque_pixel_edges() {
+        let mut rgba = vec![0u8; 16];
+        rgba[3] = 255;
+        let f = Flat::new(
+            &Image {
+                width: 2,
+                height: 2,
+                rgba,
+            },
+            ident(),
+        );
+        assert_eq!(f.normals.len(), 6);
+        assert_eq!(f.mesh.vertices.len(), 24);
+        assert_eq!(f.mesh.indices.len(), 36);
     }
 }

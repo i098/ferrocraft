@@ -3,8 +3,10 @@
 //!
 //! Only for servers with `online-mode=false`: no encryption, no Microsoft sign-in.
 
+mod actions;
 mod chat;
 mod entity;
+mod events;
 mod link;
 mod play;
 mod screens;
@@ -20,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use chat::{formatted_text, plain_text, styled, Styled};
+pub use events::{PlayerInfo, PlayerListEvent};
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
@@ -31,6 +34,9 @@ pub enum NetEvent {
     JoinGame {
         entity_id: i32,
         gamemode: u8,
+        hardcore: bool,
+        difficulty: u8,
+        max_players: u8,
     },
     Chunk(Chunk),
     UnloadChunk(i32, i32),
@@ -69,6 +75,141 @@ pub enum NetEvent {
     GameMode(u8),
     /// Spawn, move, metadata or destroy of a remote entity.
     Entity(world::entities::EntityEvent),
+    /// S06 UpdateHealth.
+    Health {
+        health: f32,
+        food: i32,
+        saturation: f32,
+    },
+    /// S1F SetExperience.
+    Experience {
+        bar: f32,
+        level: i32,
+        total: i32,
+    },
+    /// S09: the selected hotbar slot, 0 to 8.
+    HeldItem(u8),
+    /// S2F: window -1 and slot -1 is the cursor stack.
+    SetSlot {
+        window: i8,
+        slot: i16,
+        item: world::inventory::Slot,
+    },
+    /// S30: every slot of a window.
+    WindowItems {
+        window: u8,
+        items: Vec<world::inventory::Slot>,
+    },
+    /// S2D: `title` is plain text; an untranslated key such as `container.chest` stays the key.
+    OpenWindow {
+        id: u8,
+        kind: String,
+        title: String,
+        slots: u8,
+    },
+    /// S2E.
+    CloseWindow,
+    /// S31.
+    WindowProperty {
+        window: u8,
+        property: i16,
+        value: i16,
+    },
+    /// S32: not answered by the reader; send [`Session::confirm_transaction`] when `!accepted`.
+    Transaction {
+        window: u8,
+        action: i16,
+        accepted: bool,
+    },
+    /// S38 tab list change.
+    PlayerList {
+        action: PlayerListEvent,
+    },
+    /// S47: formatted text (§ codes).
+    TabHeaderFooter {
+        header: String,
+        footer: String,
+    },
+    /// S45: `action` 0 title, 1 subtitle (`text` is formatted text), 2 times, 3 hide, 4 reset.
+    Title {
+        action: u8,
+        text: Option<String>,
+        fade_in: i32,
+        stay: i32,
+        fade_out: i32,
+    },
+    /// S3B: `mode` 0 create, 1 remove, 2 update display text.
+    ScoreboardObjective {
+        name: String,
+        display: String,
+        mode: u8,
+    },
+    /// S3C.
+    ScoreUpdate {
+        name: String,
+        objective: String,
+        value: i32,
+        remove: bool,
+    },
+    /// S3D: `position` 0 list, 1 sidebar, 2 below name.
+    DisplayScoreboard {
+        position: u8,
+        name: String,
+    },
+    /// S3E: `mode` 0 create, 1 remove, 2 update info, 3 add members, 4 remove members.
+    /// `prefix`/`suffix` are empty in modes 1, 3 and 4.
+    Team {
+        name: String,
+        mode: u8,
+        prefix: String,
+        suffix: String,
+        members: Vec<String>,
+    },
+    /// S29: `pos` in blocks.
+    Sound {
+        name: String,
+        pos: [f64; 3],
+        volume: f32,
+        pitch: u8,
+    },
+    /// S2A.
+    Particle {
+        id: i32,
+        long_distance: bool,
+        pos: [f32; 3],
+        offset: [f32; 3],
+        speed: f32,
+        count: i32,
+        data: Vec<i32>,
+    },
+    /// S28: world effect such as a door sound or a record.
+    Effect {
+        id: i32,
+        pos: [i32; 3],
+        data: i32,
+        global: bool,
+    },
+    /// S27.
+    Explosion {
+        pos: [f32; 3],
+        radius: f32,
+        records: Vec<[i8; 3]>,
+        motion: [f32; 3],
+    },
+    /// S39.
+    Abilities {
+        flags: u8,
+        fly_speed: f32,
+        walk_speed: f32,
+    },
+    /// S41.
+    Difficulty(u8),
+    /// S25.
+    BlockBreakAnim {
+        id: i32,
+        pos: [i32; 3],
+        stage: i8,
+    },
     /// The server kicked the client or the connection ended. Always the last event.
     Disconnect(String),
 }

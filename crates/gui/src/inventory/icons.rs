@@ -49,6 +49,7 @@ enum Model {
     },
 }
 
+#[derive(Debug)]
 pub struct Icons {
     models: HashMap<&'static str, Model>,
     /// Frame height over texture height for animated (vertical strip) textures.

@@ -1,6 +1,9 @@
 //! Meshes a synthetic terrain chunk, renders it offscreen and writes a PNG (`RENDER_PNG` overrides the path).
 
-use render::{encode_png, Camera, ChunkBlocks, Environment, Hand, Renderer};
+use render::{
+    encode_png, Blend, Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, HeldKind,
+    Particles, Quad, Renderer,
+};
 
 struct Synthetic(i32, i32);
 
@@ -64,7 +67,8 @@ fn renders_synthetic_chunks_to_png() {
     encode_png(path.as_ref(), w, h, &rgba).expect("write png");
 }
 
-/// Rain and the first-person hand: each changes the frame, and a held block differs from the bare arm.
+/// Rain, the first-person hand, a flat held item, particles, the local player model (third person)
+/// and a runtime-registered GUI texture: each changes the frame.
 #[test]
 fn rain_and_hand_draw_on_top_of_the_world() {
     let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
@@ -105,13 +109,83 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         &mut r,
         0.0,
         Some(Hand {
-            held: Some(1 << 4),
+            held: Some(HeldKind::Block(1 << 4)),
+            ..bare
+        }),
+    );
+    let sword = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            ..bare
+        }),
+    );
+    let torch = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 50, damage: 0 }),
             ..bare
         }),
     );
     assert_ne!(clear, rainy, "rain must change the frame");
     assert_ne!(clear, armed, "the arm must change the frame");
     assert_ne!(armed, holding, "a held block must differ from the arm");
+    assert_ne!(holding, sword, "a flat sword must differ from a held block");
+    assert_ne!(sword, torch, "a flat torch must differ from the sword");
+
+    let mut ps = Particles::new();
+    ps.break_block([7, 66, 12], 1 << 4);
+    ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
+    ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
+    r.set_particles(ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0));
+    let particles = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            ..bare
+        }),
+    );
+    assert_ne!(sword, particles, "particles must change the frame");
+
+    // Third person: the engine pushes the local player as an entity; nothing culls it.
+    r.set_entities(&[EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [7.5, 64.0, 11.5],
+        yaw: 180.0,
+        head_yaw: 180.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        size: (0.6, 1.8),
+        held: 276,
+        armor: [0; 4],
+        name: None,
+    }]);
+    let third = frame(&mut r, 0.0, None);
+    r.set_entities(&[]);
+    assert_ne!(clear, third, "the local player model must draw");
+
+    r.register_texture("ferrocraft/server-icon", &tiny_png());
+    let icon = Quad {
+        tex: "ferrocraft/server-icon".into(),
+        blend: Blend::Alpha,
+        pos: [[10.0, 10.0], [74.0, 10.0], [74.0, 74.0], [10.0, 74.0]],
+        uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        color: [0xFFFF_FFFF; 4],
+    };
+    r.set_hand(None);
+    let gui = r.render_to_rgba(&cam, &[icon]).2;
+    assert_eq!(&gui[(20 * 854 + 20) * 4..][..4], &[255, 0, 0, 255]);
+
     if let Some(dir) = std::env::var_os("RENDER_DIR") {
         let dir = std::path::Path::new(&dir);
         for (name, px) in [
@@ -119,8 +193,22 @@ fn rain_and_hand_draw_on_top_of_the_world() {
             ("rain", &rainy),
             ("arm", &armed),
             ("block", &holding),
+            ("sword", &sword),
+            ("torch", &torch),
+            ("particles", &particles),
+            ("third", &third),
+            ("icon", &gui),
         ] {
             encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
         }
     }
+}
+
+/// A 2x2 solid red PNG.
+fn tiny_png() -> Vec<u8> {
+    let path = std::env::temp_dir().join(format!("ferrocraft-icon-{}.png", std::process::id()));
+    encode_png(&path, 2, 2, &[255, 0, 0, 255].repeat(4)).expect("write png");
+    let bytes = std::fs::read(&path).expect("read png");
+    let _ = std::fs::remove_file(path);
+    bytes
 }

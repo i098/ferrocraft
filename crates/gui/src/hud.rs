@@ -1,9 +1,17 @@
 //! `GuiIngame.renderGameOverlay`: the in-game HUD in vanilla draw order.
 
+use crate::bossbar::BossStatus;
+use crate::canvas::GuiCanvas;
 use crate::chat::{self, Chat};
 use crate::debug;
+use crate::inventory::{icons::Icons, tooltip};
+use crate::scoreboard::Scoreboard;
+use crate::status::{self, Status, StatusState};
+use crate::tablist::TabList;
+use crate::title::TitleState;
 use crate::toolkit::{Gui, ICONS, WIDGETS};
 use render::Blend;
+use world::inventory::{items, ItemStack, Slot};
 
 const VIGNETTE: &str = "textures/misc/vignette.png";
 
@@ -15,10 +23,27 @@ pub struct Hud {
     pub update_counter: i32,
     /// Hotbar slot 0..9 (`inventory.currentItem`).
     pub selected_slot: i32,
+    pub status_state: StatusState,
+    pub tablist: TabList,
+    pub scoreboard: Scoreboard,
+    pub title: TitleState,
+    pub boss: BossStatus,
     record: String,
     record_up_for: i32,
     /// `prevVignetteBrightness`, eased toward the light level each frame.
     vignette: f32,
+    /// `highlightingItemStack` and `remainingHighlightTicks`.
+    highlight: Option<ItemStack>,
+    highlight_ticks: i32,
+}
+
+/// The hotbar's items (`renderHotbarItem`).
+#[derive(Clone, Copy, Debug)]
+pub struct HotbarItems<'a> {
+    pub slots: [&'a Slot; 9],
+    pub icons: &'a Icons,
+    /// `ItemStack.animationsToGo` of each slot (the pick-up pop).
+    pub bob: [i32; 9],
 }
 
 /// Per-frame inputs of the overlay.
@@ -37,6 +62,13 @@ pub struct Frame<'a> {
     pub brightness: f32,
     /// The camera is the player (not spectating another entity): the hotbar is drawn.
     pub player_view: bool,
+    /// Health, food, armor, air and XP; `None` hides them.
+    pub status: Option<&'a Status>,
+    pub hotbar: Option<HotbarItems<'a>>,
+    /// The player list key is held.
+    pub player_list: bool,
+    /// `gameSettings.heldItemTooltips`.
+    pub held_item_tooltips: bool,
 }
 
 impl Hud {
@@ -45,13 +77,37 @@ impl Hud {
         if self.record_up_for > 0 {
             self.record_up_for -= 1;
         }
+        self.title.tick();
         self.update_counter += 1;
+    }
+
+    /// The held-item part of `updateTick`: call once per tick with the selected hotbar stack.
+    pub fn update_held(&mut self, held: &Slot) {
+        match (held, &self.highlight) {
+            (None, _) => self.highlight_ticks = 0,
+            (Some(s), Some(h))
+                if s.id == h.id
+                    && s.nbt == h.nbt
+                    && (items::item(s.id).max_damage > 0 || s.damage == h.damage) =>
+            {
+                if self.highlight_ticks > 0 {
+                    self.highlight_ticks -= 1;
+                }
+            }
+            _ => self.highlight_ticks = 40,
+        }
+        self.highlight = held.clone();
     }
 
     /// `setRecordPlaying(message, false)`: the action bar text for 3 seconds.
     pub fn set_action_bar(&mut self, text: String) {
         self.record = text;
         self.record_up_for = 60;
+    }
+
+    /// `BossStatus.setBossStatus`: call each frame a boss is in view.
+    pub fn set_boss(&mut self, name: String, ratio: f32) {
+        self.boss.set(name, ratio);
     }
 
     /// `renderGameOverlay`.
@@ -66,6 +122,9 @@ impl Hud {
             gui.blit(WIDGETS, w / 2 - 91, h - 22, 0, 0, 182, 22);
             let x = w / 2 - 91 - 1 + self.selected_slot * 20;
             gui.blit(WIDGETS, x, h - 22 - 1, 0, 22, 24, 22);
+            if let Some(items) = &f.hotbar {
+                draw_hotbar_items(gui, items, f.partial_ticks);
+            }
         }
         gui.set_color(0xFFFF_FFFF);
         if f.debug.is_none() || f.reduced_debug {
@@ -73,6 +132,22 @@ impl Hud {
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
         }
         gui.set_blend(Blend::Alpha);
+        self.boss.draw(gui);
+        let survival = f.status.is_some_and(Status::survival);
+        if let Some(s) = f.status.filter(|s| s.survival()) {
+            status::draw_stats(gui, s, &mut self.status_state, self.update_counter);
+        }
+        if let Some(s) = f.status {
+            match s.horse_jump {
+                Some(p) => status::draw_jump(gui, p),
+                None if s.survival() => status::draw_xp(gui, s),
+                None => {}
+            }
+        }
+        let spectator = f.status.is_some_and(|s| s.spectator);
+        if f.held_item_tooltips && !spectator {
+            self.draw_selected_item(gui, survival);
+        }
         if let Some((left, right)) = f.debug {
             debug::draw(gui, left, right);
         }
@@ -92,15 +167,39 @@ impl Hud {
                 gui.pop();
             }
         }
+        self.title.draw(gui, f.partial_ticks);
+        self.scoreboard.draw_sidebar(gui);
         let open = f.chat_input.is_some();
         gui.push();
         gui.translate(0.0, (h - 48) as f32);
         self.chat.draw(gui, self.update_counter, open);
         gui.pop();
+        if f.player_list {
+            self.tablist.draw(gui, &self.scoreboard);
+        }
         if let Some(text) = f.chat_input {
             chat::draw_input(gui, text, self.update_counter);
         }
         gui.set_color(0xFFFF_FFFF);
+    }
+
+    /// `renderSelectedItem`: the held item's name above the hotbar, fading out.
+    fn draw_selected_item(&self, gui: &mut Gui, survival: bool) {
+        let Some(s) = self.highlight.as_ref().filter(|_| self.highlight_ticks > 0) else {
+            return;
+        };
+        let (name, custom) = tooltip::name(s);
+        let name = if custom {
+            format!("\u{a7}o{name}")
+        } else {
+            name
+        };
+        let i = (gui.scale.width - gui.width(&name)) / 2;
+        let j = gui.scale.height - 59 + if survival { 0 } else { 14 };
+        let k = ((self.highlight_ticks as f32 * 256.0 / 10.0) as u32).min(255);
+        if k > 0 {
+            gui.text(&name, i as f32, j as f32, 0xFF_FFFF | k << 24);
+        }
     }
 
     /// `renderVignette`: darkens the screen edges more the darker the player's spot is.
@@ -120,6 +219,29 @@ impl Hud {
             0xFF00_0000 | (v * 0x010101),
         );
         gui.set_blend(Blend::Alpha);
+    }
+}
+
+/// `renderHotbarItem` for all nine slots: the pop squash, the icon and the count.
+fn draw_hotbar_items(gui: &mut Gui, items: &HotbarItems, partial_ticks: f32) {
+    for (i, slot) in items.slots.iter().enumerate() {
+        let Some(s) = slot else { continue };
+        let (x, y) = hotbar_item_pos(gui, i as i32);
+        let f = items.bob[i] as f32 - partial_ticks;
+        if f > 0.0 {
+            let f1 = 1.0 + f / 5.0;
+            let (cx, cy) = ((x + 8) as f32, (y + 12) as f32);
+            gui.push();
+            gui.translate(cx, cy);
+            gui.scale(1.0 / f1, (f1 + 1.0) / 2.0);
+            gui.translate(-cx, -cy);
+        }
+        let mut c = GuiCanvas::new(gui);
+        items.icons.draw(&mut c, s, x, y);
+        if f > 0.0 {
+            c.gui.pop();
+        }
+        items.icons.overlay(&mut c, s, x, y, None);
     }
 }
 

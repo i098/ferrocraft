@@ -1,0 +1,348 @@
+//! Server events and menu effects: what the network and the screens ask the client to do.
+
+use super::{boxed, App, View};
+use crate::game::Effect;
+use crate::game::Game;
+use crate::link::Link;
+use ferrocraft_net_client::{split_address, NetEvent, PlayerListEvent};
+use gui::inventory::ContainerScreen;
+use gui::screens::{Connecting, Death, Effect as UiEffect};
+use gui::tablist::TabEntry;
+use input_audio::sound::blocks::wire_pitch;
+use render::Renderer;
+use std::collections::HashMap;
+
+type Dirty = HashMap<(i32, i32), Effect>;
+
+impl App {
+    /// The title screen, or the login screen when `--server` names a server.
+    pub(super) fn start_screen(&mut self) {
+        self.resize_screens();
+        let m = metrics!(self);
+        let mut q = self.ui.close(&m);
+        if let Some(addr) = self.args.server.clone() {
+            let (host, port) = split_address(&addr);
+            let title = self.ui.title(&m);
+            q.extend(self.ui.open(&m, boxed(Connecting::new(title, host, port))));
+        }
+        self.run_effects(q);
+    }
+
+    pub(super) fn resize_screens(&mut self) {
+        let Some(r) = &self.renderer else { return };
+        let px = r.size();
+        let m = metrics!(self);
+        let q = self.ui.resize(&m, px);
+        let (w, h) = (self.ui.width, self.ui.height);
+        if let Some(c) = &mut self.container {
+            c.resize(w, h);
+        }
+        self.run_effects(q);
+    }
+
+    pub(super) fn run_effects(&mut self, mut q: Vec<UiEffect>) {
+        let mut i = 0;
+        while i < q.len() {
+            match q[i].clone() {
+                UiEffect::Sound(name) => {
+                    if let Some(s) = &mut self.sound {
+                        s.play_ui(name);
+                    }
+                }
+                UiEffect::Connect { host, port } => {
+                    self.game = Game::new();
+                    self.link = Link::connect(format!("{host}:{port}"), self.args.username.clone());
+                }
+                UiEffect::CancelConnect => self.link = Link::Offline,
+                UiEffect::Disconnect => {
+                    self.leave_world();
+                    let m = metrics!(self);
+                    q.extend(self.ui.close(&m));
+                }
+                UiEffect::Respawn => {
+                    if let Some(s) = self.link.session() {
+                        let r = s.respawn();
+                        self.send_result(r);
+                    }
+                }
+                UiEffect::Quit => self.quit = true,
+                UiEffect::SettingsSaved => self.apply_settings(),
+            }
+            i += 1;
+        }
+    }
+
+    /// Back to the menus: forget the world and the connection.
+    fn leave_world(&mut self) {
+        self.link = Link::Offline;
+        self.game = Game::new();
+        self.hud = gui::Hud::default();
+        self.container = None;
+        self.particles.clear();
+        self.ui.in_world = false;
+        self.ui.difficulty = None;
+        self.awaiting_terrain = false;
+        self.perspective = 0;
+        self.sneak_sent = false;
+        self.sprint_sent = false;
+        self.using_item = false;
+        if let Some(r) = &mut self.renderer {
+            r.clear_chunks();
+        }
+    }
+
+    pub(super) fn pump_network(&mut self) {
+        if let Some(e) = self.link.poll_login() {
+            let m = metrics!(self);
+            let q = self.ui.connect_failed(&m, &e.to_string());
+            self.run_effects(q);
+        }
+        let events = self.link.session().map(|s| s.poll()).unwrap_or_default();
+        let mut clear = false;
+        let mut dirty = Dirty::new();
+        for ev in events {
+            self.on_event(ev, &mut clear, &mut dirty);
+        }
+        if std::mem::take(&mut self.game.teleported) {
+            self.send_pose();
+        }
+        if let Some(r) = &mut self.renderer {
+            if clear {
+                r.clear_chunks();
+            }
+            upload(r, &self.game, dirty);
+        }
+        if self.awaiting_terrain && self.game.player.is_some() {
+            self.awaiting_terrain = false;
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+        }
+        if let Some(reason) = self.game.disconnected.take() {
+            self.leave_world();
+            let m = metrics!(self);
+            let q = self.ui.disconnected(&m, &reason);
+            self.run_effects(q);
+        }
+    }
+
+    fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
+        match &ev {
+            NetEvent::JoinGame {
+                difficulty,
+                hardcore,
+                ..
+            } => {
+                self.hud = gui::Hud::default();
+                self.container = None;
+                self.ui.difficulty = Some(*difficulty);
+                self.ui.hardcore = *hardcore;
+                self.ui.in_world = true;
+                self.awaiting_terrain = true;
+                self.synced_held = 0;
+                let m = metrics!(self);
+                let q = self.ui.joined(&m);
+                self.run_effects(q);
+            }
+            NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
+            NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
+            _ => {}
+        }
+        match ev {
+            NetEvent::Sound {
+                name,
+                pos,
+                volume,
+                pitch,
+            } => {
+                if let Some(s) = &mut self.sound {
+                    s.play(&name, Some(pos), volume, wire_pitch(pitch));
+                }
+            }
+            NetEvent::Particle {
+                id,
+                pos,
+                offset,
+                speed,
+                count,
+                data,
+                ..
+            } => self
+                .particles
+                .spawn_packet(id, pos, offset, speed, count, &data),
+            NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
+            NetEvent::Explosion { pos, records, .. } => {
+                if let Some(s) = &mut self.sound {
+                    s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
+                }
+                let base = pos.map(|v| v.floor() as i32);
+                for r in records {
+                    let at = [0, 1, 2].map(|i| base[i] + i32::from(r[i]));
+                    if self.game.store.get(at[0] >> 4, at[2] >> 4).is_some() {
+                        self.game.store.set_block(at[0], at[1], at[2], 0);
+                        dirty.insert(
+                            (at[0] >> 4, at[2] >> 4),
+                            Effect::Upload(at[0] >> 4, at[2] >> 4),
+                        );
+                    }
+                }
+            }
+            NetEvent::PlayerList { action } => self.player_list(action),
+            NetEvent::TabHeaderFooter { header, footer } => {
+                self.hud.tablist.header = header;
+                self.hud.tablist.footer = footer;
+            }
+            NetEvent::Title {
+                action,
+                text,
+                fade_in,
+                stay,
+                fade_out,
+            } => self
+                .hud
+                .title
+                .set_title(action, text, fade_in, stay, fade_out),
+            NetEvent::ScoreboardObjective {
+                name,
+                display,
+                mode,
+            } => {
+                self.hud.scoreboard.set_objective(&name, &display, mode);
+            }
+            NetEvent::ScoreUpdate {
+                name,
+                objective,
+                value,
+                remove,
+            } => self
+                .hud
+                .scoreboard
+                .set_score(&name, &objective, value, remove),
+            NetEvent::DisplayScoreboard { position, name } => {
+                self.hud.scoreboard.set_display(position, &name);
+            }
+            NetEvent::Team {
+                name,
+                mode,
+                prefix,
+                suffix,
+                members,
+            } => self
+                .hud
+                .scoreboard
+                .set_team(&name, mode, &prefix, &suffix, &members),
+            NetEvent::BlockBreakAnim { .. } => {}
+            other => {
+                if let Some(e) = self.game.apply(other) {
+                    self.game_effect(e, clear, dirty);
+                }
+            }
+        }
+    }
+
+    fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {
+        match e {
+            Effect::Clear => {
+                *clear = true;
+                dirty.clear();
+            }
+            e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
+                dirty.insert((x, z), e);
+            }
+            Effect::Chat(runs) => {
+                let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+                let open = self.input.chat_input().is_some();
+                self.hud
+                    .chat
+                    .print(runs, 0, self.hud.update_counter, open, m);
+            }
+            Effect::ActionBar(text) => self.hud.set_action_bar(text),
+            Effect::OpenWindow => {
+                self.container = Some(ContainerScreen::new(
+                    &self.game.inv,
+                    self.ui.width,
+                    self.ui.height,
+                ));
+            }
+            Effect::CloseWindow => self.container = None,
+            Effect::Confirm { window, action } => {
+                if let Some(s) = self.link.session() {
+                    let r = s.confirm_transaction(window, action, true);
+                    self.send_result(r);
+                }
+            }
+            Effect::Died => {
+                self.container = None;
+                let m = metrics!(self);
+                let q = self
+                    .ui
+                    .open(&m, boxed(Death::new(None, self.game.xp_total)));
+                self.run_effects(q);
+            }
+        }
+    }
+
+    /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.
+    fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
+        let at = pos.map(|v| f64::from(v) + 0.5);
+        if let Some(s) = &mut self.sound {
+            s.play_effect(id, data, at);
+        }
+        if id == 2001 {
+            let state = (((data & 0xfff) << 4) | ((data >> 12) & 0xf)) as u16;
+            self.particles.break_block(pos, state);
+        }
+    }
+
+    fn player_list(&mut self, action: PlayerListEvent) {
+        let list = &mut self.hud.tablist;
+        match action {
+            PlayerListEvent::Add(players) => {
+                for p in players {
+                    list.add(TabEntry {
+                        uuid: p.uuid,
+                        name: p.name,
+                        ping: p.ping,
+                        gamemode: p.gamemode,
+                        display: p.display,
+                    });
+                }
+            }
+            PlayerListEvent::Gamemode(u, g) => {
+                if let Some(e) = list.entry_mut(u) {
+                    e.gamemode = g;
+                }
+            }
+            PlayerListEvent::Latency(u, ping) => {
+                if let Some(e) = list.entry_mut(u) {
+                    e.ping = ping;
+                }
+            }
+            PlayerListEvent::DisplayName(u, d) => {
+                if let Some(e) = list.entry_mut(u) {
+                    e.display = d;
+                }
+            }
+            PlayerListEvent::Remove(ids) => {
+                for u in ids {
+                    list.remove(u);
+                }
+            }
+        }
+    }
+}
+
+/// Mirror chunk changes into the renderer once per chunk per poll: a burst of block
+/// changes would otherwise copy and remesh the same chunk once per block.
+pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
+    for ((x, z), effect) in dirty {
+        match effect {
+            Effect::Upload(..) => {
+                if let Some(c) = game.store.get(x, z) {
+                    r.upload_chunk(&View(c));
+                }
+            }
+            _ => r.remove_chunk(x, z),
+        }
+    }
+}

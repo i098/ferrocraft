@@ -4,8 +4,9 @@ use crate::swing::Swing;
 use crate::weather::Weather;
 use ferrocraft_net_client::{NetEvent, Styled};
 use world::chunk::ChunkStore;
-use world::entities::Entities;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
+use world::entities::Entities;
+use world::inventory::Inventory;
 use world::{Block, Input, Player, World};
 
 pub const EYE_HEIGHT: f64 = 1.62;
@@ -26,6 +27,15 @@ pub enum Effect {
     Clear,
     Chat(Vec<Styled>),
     ActionBar(String),
+    OpenWindow,
+    CloseWindow,
+    /// A server reply that must be answered with `confirm_transaction`.
+    Confirm {
+        window: u8,
+        action: i16,
+    },
+    /// Health fell to zero or below: the death screen.
+    Died,
 }
 
 /// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
@@ -51,6 +61,8 @@ impl World for Collision<'_> {
 struct Local<'a> {
     store: &'a mut ChunkStore,
     touched: &'a mut Vec<(i32, i32)>,
+    /// Position and old state of every block removed, for break sounds and particles.
+    broken: &'a mut Vec<([i32; 3], u16)>,
 }
 
 impl DigWorld for Local<'_> {
@@ -59,6 +71,7 @@ impl DigWorld for Local<'_> {
     }
 
     fn remove(&mut self, [x, y, z]: [i32; 3]) {
+        self.broken.push(([x, y, z], self.store.get_block(x, y, z)));
         self.store.set_block(x, y, z, 0);
         self.touched.push((x >> 4, z >> 4));
     }
@@ -87,6 +100,19 @@ pub struct Game {
     pub world_time: i64,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
     pub ticks: u64,
+    pub inv: Inventory,
+    /// Blocks the player broke locally since the app last drained this.
+    pub broken: Vec<([i32; 3], u16)>,
+    pub xp_total: i32,
+    pub hardcore: bool,
+    pub difficulty: u8,
+    pub health: f32,
+    pub food: i32,
+    pub saturation: f32,
+    pub xp_bar: f32,
+    pub xp_level: i32,
+    /// `PlayerCapabilities`: bit 0 invulnerable, 1 flying, 2 allow flying, 3 creative.
+    pub abilities: u8,
 }
 
 impl Game {
@@ -107,6 +133,17 @@ impl Game {
             swing: Swing::default(),
             world_time: 6000,
             ticks: 0,
+            inv: Inventory::default(),
+            broken: Vec::new(),
+            xp_total: 0,
+            hardcore: false,
+            difficulty: 1,
+            health: 20.0,
+            food: 20,
+            saturation: 5.0,
+            xp_bar: 0.0,
+            xp_level: 0,
+            abilities: 0,
         }
     }
 
@@ -115,9 +152,77 @@ impl Game {
             NetEvent::JoinGame {
                 entity_id,
                 gamemode,
+                hardcore,
+                difficulty,
+                ..
             } => {
                 self.entity_id = entity_id;
+                self.hardcore = hardcore;
+                self.difficulty = difficulty;
+                self.inv = Inventory::default();
                 self.set_gamemode(gamemode);
+                None
+            }
+            NetEvent::Difficulty(d) => {
+                self.difficulty = d;
+                None
+            }
+            NetEvent::Health {
+                health,
+                food,
+                saturation,
+            } => {
+                let was_alive = self.health > 0.0;
+                (self.health, self.food, self.saturation) = (health, food, saturation);
+                (was_alive && health <= 0.0).then_some(Effect::Died)
+            }
+            NetEvent::Experience { bar, level, total } => {
+                (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
+                None
+            }
+            NetEvent::HeldItem(slot) => {
+                self.inv.held = slot.min(8);
+                None
+            }
+            NetEvent::SetSlot { window, slot, item } => {
+                self.inv.set_slot(window, slot, item);
+                None
+            }
+            NetEvent::WindowItems { window, items } => {
+                self.inv.set_items(window, items);
+                None
+            }
+            NetEvent::OpenWindow {
+                id,
+                kind,
+                title,
+                slots,
+            } => {
+                if self.inv.open_window(id, &kind, title, slots) {
+                    Some(Effect::OpenWindow)
+                } else {
+                    Some(Effect::CloseWindow)
+                }
+            }
+            NetEvent::CloseWindow => {
+                self.inv.close_window();
+                Some(Effect::CloseWindow)
+            }
+            NetEvent::WindowProperty {
+                window,
+                property,
+                value,
+            } => {
+                self.inv.set_property(window, property, value);
+                None
+            }
+            NetEvent::Transaction {
+                window,
+                action,
+                accepted,
+            } => (!accepted).then_some(Effect::Confirm { window, action }),
+            NetEvent::Abilities { flags, .. } => {
+                self.abilities = flags;
                 None
             }
             NetEvent::GameMode(mode) => {
@@ -172,6 +277,7 @@ impl Game {
                 self.disconnected = Some(r);
                 None
             }
+            _ => None,
         }
     }
 
@@ -225,6 +331,7 @@ impl Game {
     fn set_gamemode(&mut self, mode: u8) {
         self.gamemode = mode;
         self.creative = mode == CREATIVE;
+        self.inv.creative = self.creative;
     }
 
     /// World-space outline box of the targeted block, grown by 0.002 like vanilla.
@@ -254,7 +361,11 @@ impl Game {
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
     /// blocks the player removed locally. `entity_in_front` hides the block, as in vanilla's
     /// `objectMouseOver`. Only survival and creative can dig.
-    pub fn dig_tick(&mut self, attack: Attack, entity_in_front: bool) -> (Vec<Action>, Vec<Effect>) {
+    pub fn dig_tick(
+        &mut self,
+        attack: Attack,
+        entity_in_front: bool,
+    ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
         let Some(p) = &self.player else {
             return (actions, Vec::new());
@@ -267,11 +378,16 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
-            target: if entity_in_front { None } else { self.target(eye) },
+            target: if entity_in_front {
+                None
+            } else {
+                self.target(eye)
+            },
         };
         let mut local = Local {
             store: &mut self.store,
             touched: &mut touched,
+            broken: &mut self.broken,
         };
         self.digger.tick(&frame, &mut local, &mut actions);
         touched.sort_unstable();

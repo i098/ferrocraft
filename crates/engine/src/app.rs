@@ -1,35 +1,74 @@
 //! winit glue: window, event routing, the 20 TPS clock and the render call.
 
+/// Font measurement over the renderer's font, for `gui` screens. A macro so the borrow stays
+/// on `renderer` alone and `ui` can be borrowed mutably beside it.
+macro_rules! metrics {
+    ($s:expr) => {
+        $crate::ui::Fm(gui::Metrics($s.renderer.as_ref().and_then(|r| r.font())))
+    };
+}
+
+mod events;
+mod input;
+mod play;
+
 use crate::args::Args;
-use crate::game::{Attack, Effect, Game, EYE_HEIGHT};
-use ferrocraft_net_client::Session;
-use input_audio::{apply_cursor_grab, scroll_slot, Action, InputState};
-use render::{Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, Renderer};
-use std::collections::HashMap;
+use crate::game::{Game, EYE_HEIGHT};
+use crate::link::Link;
+use crate::ui::{Fm, Ui};
+use gui::inventory::icons::Icons;
+use gui::inventory::ContainerScreen;
+use gui::screens::{Screen, Texts};
+use gui::status::Status;
+use input_audio::sound::Sound;
+use input_audio::InputState;
+use render::{
+    AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, HeldKind, Particles,
+    Renderer,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{Window, WindowId};
 use world::chunk::Chunk;
-use world::dig::Action as DigAction;
 use world::entities::{look_vector, Entity, Kind};
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
-/// Matches the view distance sent in Client Settings.
-const RENDER_DISTANCE: u32 = 8;
 const MAX_TICKS_PER_FRAME: u32 = 10;
+/// `EntityRenderer.thirdPersonDistance`.
+const THIRD_PERSON_DISTANCE: f64 = 4.0;
+
+/// Quads, textures they registered and effects they raised.
+type Overlay = (
+    Vec<render::Quad>,
+    Vec<(String, Vec<u8>)>,
+    Vec<gui::screens::Effect>,
+);
+
+/// `EntityPlayer.limbSwing` for the local player, so the third-person model walks.
+#[derive(Default)]
+struct Limbs {
+    swing: f32,
+    amount: f32,
+    prev_amount: f32,
+}
 
 pub struct App {
     args: Args,
-    session: Session,
+    link: Link,
     game: Game,
     input: InputState,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     hud: gui::Hud,
+    ui: Ui,
+    icons: Option<Icons>,
+    container: Option<ContainerScreen>,
+    particles: Particles,
+    sound: Option<Sound>,
     /// Rendered frames in the last second, for the F3 `fps` line.
     fps: (u32, u32, Instant),
     next_tick: Instant,
@@ -38,110 +77,150 @@ pub struct App {
     attack_presses: u32,
     show_debug: bool,
     hide_hud: bool,
+    /// F5: 0 first person, 1 behind the player, 2 in front of the player.
+    perspective: u8,
+    /// The hotbar slot the server last heard of.
+    synced_held: u8,
+    /// `rightClickDelayTimer`.
+    use_delay: i32,
+    /// An item use that the server ends with a release (`C07` status 5).
+    using_item: bool,
+    sneak_sent: bool,
+    sprint_sent: bool,
+    /// Ticks the left button has dug at one block, for hit sounds and shards every 4 ticks.
+    dig_ticks: u32,
+    limbs: Limbs,
+    /// `EntityRenderer.fovModifierHand` and its previous tick value.
+    fov_mod: (f32, f32),
+    /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
+    equip: (f32, f32, Option<(i16, i16)>),
+    /// `GuiDownloadingTerrain` stays until the first position packet.
+    awaiting_terrain: bool,
+    cursor: (f64, f64),
+    ctrl: bool,
+    shift: bool,
+    mouse_down: bool,
+    /// Whether `input` was last told a screen is open.
+    input_modal: bool,
+    quit: bool,
+    started: Instant,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
     deadline: Option<Instant>,
 }
 
 impl App {
-    pub fn new(args: Args, session: Session) -> App {
-        App {
-            args,
-            session,
+    pub fn new(args: Args) -> App {
+        let ui = Ui::new(args.game_dir.clone(), Texts::default());
+        let mut app = App {
+            input: InputState::new(ui.settings.mouse_sensitivity),
+            link: Link::Offline,
             game: Game::new(),
-            input: InputState::new(0.5),
             window: None,
             renderer: None,
             hud: gui::Hud::default(),
+            ui,
+            icons: None,
+            container: None,
+            particles: Particles::new(),
+            sound: None,
             fps: (0, 0, Instant::now()),
             next_tick: Instant::now(),
             grabbed: false,
             attack_presses: 0,
             show_debug: false,
             hide_hud: false,
+            perspective: 0,
+            synced_held: 0,
+            use_delay: 0,
+            using_item: false,
+            sneak_sent: false,
+            sprint_sent: false,
+            dig_ticks: 0,
+            limbs: Limbs::default(),
+            fov_mod: (1.0, 1.0),
+            equip: (1.0, 1.0, None),
+            awaiting_terrain: false,
+            cursor: (0.0, 0.0),
+            ctrl: false,
+            shift: false,
+            mouse_down: false,
+            input_modal: false,
+            quit: false,
+            started: Instant::now(),
             deadline: std::env::var("FERROCRAFT_WINDOW_SECS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
                 .map(|s| Instant::now() + Duration::from_secs(s)),
-        }
+            args,
+        };
+        app.apply_settings();
+        app
     }
 
-    pub fn exit_reason(&self) -> Option<&str> {
-        self.game.disconnected.as_deref()
+    /// Loads language texts, item icons and sounds once the window and its assets exist.
+    fn load_assets(&mut self) {
+        let Some(mut src) = self.args.assets_dir.as_deref().and_then(AssetSource::open) else {
+            return;
+        };
+        let mut text = |name: &str| {
+            src.read(&format!("assets/minecraft/{name}"))
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default()
+        };
+        let lang = text(&format!("lang/{}.lang", self.ui.settings.lang));
+        let lang = if lang.is_empty() {
+            text("lang/en_US.lang")
+        } else {
+            lang
+        };
+        self.ui.texts = Texts::parse(&lang, &text("texts/splashes.txt"));
+        self.icons = Some(Icons::new(|name| {
+            src.read(&format!("assets/minecraft/{name}"))
+        }));
     }
 
-    /// Mirror chunk changes into the renderer once per chunk per poll: a burst of block
-    /// changes would otherwise copy and remesh the same chunk once per block.
-    fn pump_network(&mut self) {
-        let mut clear = false;
-        let mut dirty = HashMap::new();
-        for ev in self.session.poll() {
-            match self.game.apply(ev) {
-                Some(Effect::Clear) => {
-                    clear = true;
-                    dirty.clear();
-                }
-                Some(e @ (Effect::Upload(x, z) | Effect::Remove(x, z))) => {
-                    dirty.insert((x, z), e);
-                }
-                Some(Effect::Chat(runs)) => {
-                    let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
-                    let open = self.input.chat_input().is_some();
-                    self.hud
-                        .chat
-                        .print(runs, 0, self.hud.update_counter, open, m);
-                }
-                Some(Effect::ActionBar(text)) => self.hud.set_action_bar(text),
-                None => {}
+    fn load_sound(&mut self) {
+        let dirs = [
+            Some(self.args.game_dir.clone()),
+            self.args.game_dir.parent().map(|p| p.to_path_buf()),
+        ];
+        for dir in dirs.into_iter().flatten() {
+            if let Ok(s) = Sound::new(&dir, "1.8.9") {
+                self.sound = Some(s);
+                self.apply_settings();
+                return;
             }
         }
-        if std::mem::take(&mut self.game.teleported) {
-            self.send_pose();
-        }
-        let Some(r) = &mut self.renderer else { return };
-        if clear {
-            r.clear_chunks();
-        }
-        for ((x, z), effect) in dirty {
-            match effect {
-                Effect::Upload(..) => {
-                    if let Some(c) = self.game.store.get(x, z) {
-                        r.upload_chunk(&View(c));
-                    }
-                }
-                _ => r.remove_chunk(x, z),
+        crate::log::line("no sound: assets index or output device not found");
+    }
+
+    /// Pushes `options.txt` values into the parts that read them.
+    fn apply_settings(&mut self) {
+        let s = &self.ui.settings;
+        self.input.set_sensitivity(s.mouse_sensitivity);
+        self.input
+            .set_bindings(input_audio::KeyBindings::from_options_txt(&s.to_text()));
+        if let Some(sound) = &mut self.sound {
+            for (cat, v) in input_audio::sound::index::Category::ALL
+                .iter()
+                .zip(s.volumes)
+            {
+                sound.set_volume(*cat, v);
             }
+        }
+        let (lang, distance, chat, colors, parts) = (
+            s.lang.clone(),
+            s.render_distance as i8,
+            s.chat_visibility as i8,
+            s.chat_colors,
+            s.model_parts,
+        );
+        if let Some(sess) = self.link.session() {
+            let r = sess.client_settings(&lang, distance, chat, colors, parts);
+            self.send_result(r);
         }
     }
 
-    fn run_ticks(&mut self) {
-        let now = Instant::now();
-        let mut ran = 0;
-        while self.next_tick <= now && ran < MAX_TICKS_PER_FRAME {
-            self.next_tick += TICK;
-            ran += 1;
-            if let Some(line) = self.input.take_chat_submit() {
-                self.hud.chat.add_sent(&line);
-                let r = self.session.send_chat(&line);
-                self.send_result(r);
-            }
-            self.hud.tick();
-            self.dig();
-            self.game.tick(self.input.movement());
-            self.send_pose();
-        }
-        if ran == MAX_TICKS_PER_FRAME {
-            self.next_tick = now + TICK;
-        }
-    }
-
-    fn send_pose(&mut self) {
-        let Some(p) = &self.game.player else { return };
-        let [x, y, z] = p.pos;
-        let r = self
-            .session
-            .send_position_look(x, y, z, p.yaw, self.game.pitch, p.on_ground);
-        self.send_result(r);
-    }
     fn send_result(&mut self, r: std::io::Result<()>) {
         if let Err(e) = r {
             self.game
@@ -150,129 +229,119 @@ impl App {
         }
     }
 
-    /// The entity under the crosshair (`EntityRenderer.getMouseOver`, entity part). Reach is 3
-    /// blocks in survival, 6 in creative.
-    // shortcut: a block in front of the entity does not hide it; the dig `Hit` has no distance.
-    fn entity_target(&self) -> Option<i32> {
+    /// The local player's eye position, lerped between ticks.
+    fn eye(&self, frac: f64) -> Option<[f64; 3]> {
         let p = self.game.player.as_ref()?;
-        let eye = [p.pos[0], p.pos[1] + EYE_HEIGHT, p.pos[2]];
-        let dir = look_vector(p.yaw, self.game.pitch);
-        let reach = if self.game.creative { 6.0 } else { 3.0 };
-        self.game
-            .entities
-            .pick(eye, dir, reach, self.game.entity_id, None)
-    }
-
-    /// Left click: attack the entity under the crosshair, else count a press for block breaking.
-    fn attack(&mut self) {
-        match self.entity_target() {
-            Some(id) => {
-                let r = self.session.attack_entity(id);
-                self.send_result(r);
-            }
-            None => self.attack_presses += 1,
-        }
-    }
-
-    /// One tick of block breaking: send its packets and mirror the local removal.
-    fn dig(&mut self) {
-        let attack = Attack {
-            held: self.input.attack_held(),
-            presses: std::mem::take(&mut self.attack_presses),
+        let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
+        let [px, py, pz] = p.pos;
+        let [qx, qy, qz] = self.game.prev_pos;
+        let height = if self.input.sneaking() {
+            EYE_HEIGHT - 0.08
+        } else {
+            EYE_HEIGHT
         };
-        let blocked = self.entity_target().is_some();
-        let (actions, effects) = self.game.dig_tick(attack, blocked);
-        for action in actions {
-            let sent = match action {
-                DigAction::Dig { status, pos, face } => {
-                    self.session.send_dig(status as u8, pos, face)
-                }
-                DigAction::Swing => self.session.send_swing(),
+        Some([lerp(qx, px), lerp(qy, py) + height, lerp(qz, pz)])
+    }
+
+    fn camera(&self, frac: f64) -> Camera {
+        let fov = self.ui.settings.fov
+            * (self.fov_mod.0 + (self.fov_mod.1 - self.fov_mod.0) * frac as f32);
+        let (Some(p), Some(eye)) = (&self.game.player, self.eye(frac)) else {
+            return Camera {
+                pos: [0.0; 3],
+                yaw: 0.0,
+                pitch: 0.0,
+                fov_deg: fov,
             };
-            self.send_result(sent);
+        };
+        if self.perspective == 0 {
+            return Camera {
+                pos: eye,
+                yaw: p.yaw,
+                pitch: self.game.pitch,
+                fov_deg: fov,
+            };
         }
-        for effect in effects {
-            if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {
-                if let Some(c) = self.game.store.get(x, z) {
-                    r.upload_chunk(&View(c));
-                }
+        let (yaw, pitch) = if self.perspective == 2 {
+            (p.yaw + 180.0, -self.game.pitch)
+        } else {
+            (p.yaw, self.game.pitch)
+        };
+        let dir = look_vector(yaw, pitch);
+        let mut dist = 0.0;
+        while dist < THIRD_PERSON_DISTANCE {
+            let next = dist + 0.1;
+            let at = [0, 1, 2].map(|i| (eye[i] - dir[i] * next).floor() as i32);
+            if render::is_solid(self.game.store.get_block(at[0], at[1], at[2])) {
+                break;
             }
+            dist = next;
+        }
+        Camera {
+            pos: [0, 1, 2].map(|i| eye[i] - dir[i] * dist),
+            yaw,
+            pitch,
+            fov_deg: fov,
         }
     }
 
-    fn sync_cursor(&mut self) {
-        let want = self.input.wants_cursor_grab();
-        if want == self.grabbed {
-            return;
-        }
-        let Some(w) = &self.window else { return };
-        self.grabbed = apply_cursor_grab(w, want);
-    }
-
-    fn handle_actions(&mut self) {
-        for action in self.input.take_actions() {
-            match action {
-                Action::Attack => {
-                    self.game.swing.start();
-                    self.attack();
-                }
-                Action::ToggleDebug => self.show_debug = !self.show_debug,
-                Action::ToggleHud => self.hide_hud = !self.hide_hud,
-                Action::ToggleFullscreen => {
-                    if let Some(w) = &self.window {
-                        let on = w.fullscreen().is_none();
-                        w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
-                    }
-                }
-                other => self.hud_action(other),
-            }
-        }
-    }
-
-    fn hud_action(&mut self, action: Action) {
-        match action {
-            Action::Hotbar(n) => self.hud.selected_slot = i32::from(n),
-            Action::HotbarScroll(step) => {
-                let slot = scroll_slot(self.hud.selected_slot as u8, step);
-                self.hud.selected_slot = i32::from(slot);
-            }
-            // shortcut: vanilla scrolls 1 line with Shift held; the action carries no Shift state.
-            Action::ChatScroll(step) => {
-                let open = self.input.chat_input().is_some();
-                self.hud.chat.scroll(step * 7, open);
-            }
-            _ => {}
-        }
+    /// The local player as a model, for F5 views.
+    fn self_draw(&self, frac: f64) -> Option<EntityDraw> {
+        let p = self.game.player.as_ref()?;
+        let f = frac as f32;
+        let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
+        let slot = |i: usize| self.game.inv.player[i].as_ref().map_or(0, |s| s.id);
+        Some(EntityDraw {
+            class: Class::Player { slim: false },
+            pos: [
+                lerp(self.game.prev_pos[0], p.pos[0]),
+                lerp(self.game.prev_pos[1], p.pos[1]),
+                lerp(self.game.prev_pos[2], p.pos[2]),
+            ],
+            yaw: p.yaw,
+            head_yaw: p.yaw,
+            pitch: self.game.pitch,
+            limb_swing: self.limbs.swing - self.limbs.amount * (1.0 - f),
+            limb_swing_amount: self.limbs.prev_amount
+                + (self.limbs.amount - self.limbs.prev_amount) * f,
+            swing: self.game.swing.progress(f),
+            age: self.game.ticks as f32 + f,
+            sneaking: self.input.sneaking(),
+            hurt: false,
+            death_time: 0.0,
+            invisible: false,
+            size: (0.6, 1.8),
+            held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
+            armor: [slot(8), slot(7), slot(6), slot(5)],
+            name: None,
+        })
     }
 
     fn draw(&mut self) {
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
-        let quads = self.overlay(frac);
+        let cam = self.camera(frac);
+        let (quads, textures, effects) = self.overlay(frac, &cam);
+        self.run_effects(effects);
+        let held = self
+            .game
+            .inv
+            .held_stack()
+            .as_ref()
+            .map(|s| (s.id, s.damage));
+        let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
+        let swing = self.game.swing.progress(frac as f32);
+        let self_model = (self.perspective != 0)
+            .then(|| self.self_draw(frac))
+            .flatten();
         let Some(r) = &mut self.renderer else { return };
+        for (name, png) in textures {
+            r.register_texture(&name, &png);
+        }
         self.fps.0 += 1;
         if self.fps.2.elapsed() >= Duration::from_secs(1) {
             self.fps = (0, self.fps.0, Instant::now());
         }
-        let cam = match &self.game.player {
-            Some(p) => {
-                let [px, py, pz] = p.pos;
-                let [qx, qy, qz] = self.game.prev_pos;
-                let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
-                Camera {
-                    pos: [lerp(qx, px), lerp(qy, py) + EYE_HEIGHT, lerp(qz, pz)],
-                    yaw: p.yaw,
-                    pitch: self.game.pitch,
-                    fov_deg: 70.0,
-                }
-            }
-            None => Camera {
-                pos: [0.0; 3],
-                yaw: 0.0,
-                pitch: 0.0,
-                fov_deg: 70.0,
-            },
-        };
         let (rain, thunder) = self.game.weather.strengths(frac as f32);
         r.set_environment(Environment {
             world_time: self.game.world_time,
@@ -280,66 +349,139 @@ impl App {
             partial: frac as f32,
             rain,
             thunder,
-            render_distance_chunks: RENDER_DISTANCE,
+            render_distance_chunks: self.ui.settings.render_distance as u32,
         });
-        r.set_hand((!self.hide_hud).then(|| Hand {
-            held: None,
-            swing: self.game.swing.progress(frac as f32),
-            lowered: 0.0,
-        }));
-        let draws: Vec<EntityDraw> = self
+        let hand_item = self.equip.2.or(held);
+        r.set_hand(
+            (!self.hide_hud && self.perspective == 0 && self.game.player.is_some()).then(|| Hand {
+                held: hand_item.map(|(id, damage)| HeldKind::Item { id, damage }),
+                swing,
+                lowered,
+            }),
+        );
+        let mut draws: Vec<EntityDraw> = self
             .game
             .entities
             .iter()
             .map(|e| entity_draw(e, frac))
             .collect();
+        draws.extend(self_model);
         r.set_entities(&draws);
         r.set_selection(self.game.selection(cam.pos));
+        let verts = self
+            .particles
+            .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32);
+        r.set_particles(verts);
         r.render(&cam, &quads);
     }
 
-    /// `GuiIngame.renderGameOverlay` laid out as quads; F1 (`hideGUI`) skips it unless a
-    /// screen (chat) is open, as in `EntityRenderer`.
-    fn overlay(&mut self, frac: f64) -> Vec<render::Quad> {
+    /// The HUD, the open container and the menu screens as quads, plus the textures they
+    /// registered and the effects they raised.
+    fn overlay(&mut self, frac: f64, cam: &Camera) -> Overlay {
         let Some(r) = &self.renderer else {
-            return Vec::new();
+            return (Vec::new(), Vec::new(), Vec::new());
         };
-        if self.hide_hud && self.input.chat_input().is_none() {
-            return Vec::new();
-        }
-        let left = self.game.player.as_ref().map(|p| {
-            gui::debug::left_lines(&gui::debug::DebugInfo {
-                fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
-                provider: format!(
-                    "MultiplayerChunkCache: {}, {}",
-                    self.game.store.len(),
-                    self.game.store.len()
-                ),
-                pos: p.pos,
-                yaw: p.yaw,
-                pitch: self.game.pitch,
-                ..Default::default()
-            })
-        });
         let (w, h) = r.size();
-        let mut g = gui::Gui::new(gui::GuiScale::new(w, h, 0), r.font(), 0);
-        self.hud.draw(
-            &mut g,
-            &gui::Frame {
-                partial_ticks: frac as f32,
-                chat_input: self.input.chat_input(),
-                debug: left
-                    .as_deref()
-                    .filter(|_| self.show_debug)
-                    .map(|l| (l, &[][..])),
-                fancy: true,
-                brightness: 1.0,
-                player_view: self.game.player.is_some(),
-                ..Default::default()
-            },
+        let scale = gui::GuiScale::new(w, h, u32::from(self.ui.settings.gui_scale));
+        let factor = scale.factor.max(1) as f64;
+        let (mx, my) = (
+            (self.cursor.0 / factor) as i32,
+            (self.cursor.1 / factor) as i32,
         );
-        g.into_quads()
+        let mut g = gui::Gui::new(scale, r.font(), 0);
+        let m = Fm(g.metrics());
+        let screen_open = self.ui.is_open() || self.container.is_some();
+        let in_world = self.ui.in_world && self.game.player.is_some();
+        if in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none()) {
+            let debug = self.game.player.as_ref().map(|p| {
+                gui::debug::left_lines(&gui::debug::DebugInfo {
+                    fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
+                    provider: format!(
+                        "MultiplayerChunkCache: {}, {}",
+                        self.game.store.len(),
+                        self.game.store.len()
+                    ),
+                    pos: p.pos,
+                    yaw: p.yaw,
+                    pitch: self.game.pitch,
+                    looking_at: self.game.target(cam.pos).map(|h| h.pos),
+                    reduced: self.ui.settings.reduced_debug_info,
+                    ..Default::default()
+                })
+            });
+            let status = status_of(&self.game, self.input.sneaking());
+            self.hud.selected_slot = i32::from(self.game.inv.held);
+            let inv = &self.game.inv;
+            let hotbar = self.icons.as_ref().map(|icons| gui::HotbarItems {
+                slots: std::array::from_fn(|i| &inv.player[36 + i]),
+                icons,
+                bob: [0; 9],
+            });
+            self.hud.draw(
+                &mut g,
+                &gui::Frame {
+                    partial_ticks: frac as f32,
+                    chat_input: self.input.chat_input(),
+                    debug: debug
+                        .as_deref()
+                        .filter(|_| self.show_debug)
+                        .map(|l| (l, &[][..])),
+                    reduced_debug: self.ui.settings.reduced_debug_info,
+                    fancy: self.ui.settings.fancy_graphics,
+                    brightness: 1.0,
+                    player_view: true,
+                    status: Some(&status),
+                    hotbar,
+                    player_list: self.input.player_list_held(),
+                    held_item_tooltips: self.ui.settings.held_item_tooltips,
+                },
+            );
+        }
+        let mut c = gui::GuiCanvas::new(&mut g);
+        if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
+            cs.draw(
+                &mut c,
+                &self.game.inv,
+                icons,
+                mx,
+                my,
+                self.ui.settings.advanced_item_tooltips,
+            );
+        }
+        let effects = self.ui.draw(&m, &mut c, mx, my);
+        let textures = std::mem::take(&mut c.pending_textures);
+        (g.into_quads(), textures, effects)
     }
+}
+
+/// `GuiIngame.renderPlayerStats` inputs from the local player.
+fn status_of(game: &Game, _sneaking: bool) -> Status {
+    let armor_points: i32 = (5..9)
+        .filter_map(|i| game.inv.player[i].as_ref())
+        .map(|s| armor_points(s.id))
+        .sum();
+    Status {
+        health: game.health,
+        food: game.food,
+        saturation: game.saturation,
+        armor: armor_points,
+        xp_bar: game.xp_bar,
+        xp_level: game.xp_level,
+        hardcore: game.hardcore,
+        creative: game.gamemode == 1,
+        spectator: game.gamemode == 3,
+        ..Status::default()
+    }
+}
+
+/// Armor bar points of an armor item (`ItemArmor.damageReduceAmount`); 0 for anything else.
+/// Ids 298 to 317 are leather, chain, iron, diamond and gold: helmet, chestplate, leggings, boots.
+fn armor_points(id: i16) -> i32 {
+    const POINTS: [i32; 20] = [1, 3, 2, 1, 2, 5, 4, 1, 2, 6, 5, 2, 3, 8, 6, 3, 2, 5, 3, 1];
+    usize::try_from(id - 298)
+        .ok()
+        .and_then(|i| POINTS.get(i).copied())
+        .unwrap_or(0)
 }
 
 impl ApplicationHandler for App {
@@ -347,19 +489,22 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Ferrocraft 1.8.9");
+        let attrs = Window::default_attributes().with_title("Minecraft 1.8.9");
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.renderer = Some(Renderer::new(
             window.clone(),
             self.args.assets_dir.as_deref(),
         ));
+        self.load_assets();
+        self.load_sound();
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
+        self.start_screen();
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        self.input.on_window_event(&event);
+        self.route_window_event(&event);
         match event {
             WindowEvent::CloseRequested => {
                 crate::log::line("window close requested");
@@ -369,6 +514,7 @@ impl ApplicationHandler for App {
                 if let Some(r) = &mut self.renderer {
                     r.resize(s.width, s.height);
                 }
+                self.resize_screens();
             }
             WindowEvent::RedrawRequested => self.draw(),
             _ => {}
@@ -384,11 +530,16 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.pump_network();
         let (dx, dy) = self.input.take_look_delta();
+        let dy = if self.ui.settings.invert_mouse {
+            -dy
+        } else {
+            dy
+        };
         self.game.look(dx, dy);
         self.handle_actions();
         self.run_ticks();
         self.sync_cursor();
-        if self.game.disconnected.is_some() || self.deadline.is_some_and(|d| Instant::now() >= d) {
+        if self.quit || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();
         }
         if let Some(w) = &self.window {
@@ -448,4 +599,9 @@ impl ChunkBlocks for View<'_> {
     fn block(&self, x: usize, y: usize, z: usize) -> u16 {
         self.0.block(x, y, z)
     }
+}
+
+/// Builds a screen with no arguments, for effects that open one.
+fn boxed<S: Screen + 'static>(s: S) -> Box<dyn Screen> {
+    Box::new(s)
 }

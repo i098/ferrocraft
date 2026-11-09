@@ -15,10 +15,10 @@ mod shapes;
 mod sky;
 mod weather;
 
-pub use hand::Hand;
+pub use hand::{Hand, HeldKind};
 pub use sky::Environment;
 
-pub use assets::{encode_png, Font};
+pub use assets::{encode_png, AssetSource, Font};
 pub use entity::{nametags, Class, EntityDraw};
 pub use gpu::Renderer;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

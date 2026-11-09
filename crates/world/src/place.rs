@@ -71,9 +71,34 @@ fn is_slab(id: u16) -> bool {
 }
 
 /// `Block.isNormalCube`: opaque full cube that cannot power (redstone ore, redstone block).
+/// Torches use `World.isBlockNormalCube(pos, true)` instead: plain `opaque_cube`.
 fn normal_cube(state: u16) -> bool {
     let id = state >> 4;
     opaque_cube(id) && !matches!(id, 73 | 74 | 152)
+}
+
+/// `Material.circuits`: torches, redstone parts, levers, buttons, rails, hooks and ladders.
+fn circuits(id: u16) -> bool {
+    matches!(
+        id,
+        27 | 28
+            | 50
+            | 55
+            | 65
+            | 66
+            | 69
+            | 75
+            | 76
+            | 77
+            | 93
+            | 94
+            | 131
+            | 132
+            | 143
+            | 149
+            | 150
+            | 157
+    )
 }
 
 /// `World.doesBlockHaveSolidTopSurface`.
@@ -151,7 +176,7 @@ fn torch_can_place(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3], face: u8) -> boo
         let id = support >> 4;
         solid_top(support) || matches!(id, 85 | 113 | 188..=192 | 20 | 95 | 139)
     } else {
-        face != 0 && normal_cube(support)
+        face != 0 && opaque_cube(support >> 4)
     }
 }
 
@@ -217,7 +242,7 @@ fn torch_meta(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3], face: u8) -> u16 {
     } else {
         HORIZONTAL
             .into_iter()
-            .find(|&f| normal_cube(at(offset(pos, opposite(f)))))
+            .find(|&f| opaque_cube(at(offset(pos, opposite(f))) >> 4))
             .unwrap_or(UP)
     };
     [0_u16, 5, 4, 3, 2, 1][usize::from(facing)]
@@ -292,6 +317,10 @@ fn can_block_be_placed(
 ) -> bool {
     if collision(block).is_some_and(|b| blocked_by_player(b, pos, body)) {
         return false;
+    }
+    // An anvil lands on circuits before `isReplaceable` and `canReplace` are asked.
+    if block == 145 && circuits(at(pos) >> 4) {
+        return true;
     }
     material_replaceable(at(pos) >> 4) && supported(at, block, pos)
 }
@@ -517,6 +546,29 @@ mod tests {
         };
         let s = placed(use_item(&at, 44, 0, side, 0.0, FAR));
         assert_eq!(s, vec![([0, 4, 1], 44 << 4 | 8)]);
+    }
+
+    #[test]
+    fn anvils_replace_circuits_and_torches_stand_on_redstone_blocks() {
+        let rail = flat(&[([0, 4, 0], 66 << 4)]);
+        assert!(matches!(
+            use_item(&rail, 145, 0, top_of_ground(), 0.0, FAR),
+            Outcome::Placed(_)
+        ));
+        assert_eq!(
+            use_item(&rail, 1, 0, top_of_ground(), 0.0, FAR),
+            Outcome::Refused
+        );
+        let block = flat(&[([0, 4, 5], 152 << 4)]);
+        let side = Click {
+            pos: [0, 4, 5],
+            face: 2,
+            cursor: [0.5, 0.5, 0.0],
+        };
+        assert!(matches!(
+            use_item(&block, 50, 0, side, 0.0, FAR),
+            Outcome::Placed(_)
+        ));
     }
 
     #[test]

@@ -20,8 +20,10 @@ static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
 });
 
 pub struct Light {
-    /// `sky << 4 | block` per cell, `x` and `z` in `-1..=16`.
+    /// `sky << 4 | block` per cell, `x` and `z` in `-1..=16`, `y` below `height`.
     cells: Vec<u8>,
+    /// Layers computed; above them the air is sky 15 with no block light.
+    height: usize,
 }
 
 fn idx(x: i32, y: usize, z: i32) -> usize {
@@ -35,7 +37,14 @@ fn ring_idx(x: i32, y: usize, z: i32) -> usize {
 
 impl Light {
     pub fn compute(hood: &Neighborhood) -> Light {
-        let n = HEIGHT * W * W;
+        // Above the highest block the column is open air at sky 15; block light reaches at most 14 cells above its source.
+        let top = std::iter::once(hood.center)
+            .chain(hood.neighbors.iter().flatten().copied())
+            .filter_map(|b| b.iter().rposition(|&s| s != 0))
+            .max()
+            .map_or(0, |i| i / 256 + 1);
+        let height = (top + 15).min(HEIGHT);
+        let n = height * W * W;
         let mut opacity = vec![0u8; n];
         let mut sky = vec![0u8; n];
         let mut block = vec![0u8; n];
@@ -45,7 +54,7 @@ impl Light {
             for x in -OFF..W as i32 - OFF {
                 let known = loaded(x, z);
                 let mut level = 15u8;
-                for y in (0..HEIGHT).rev() {
+                for y in (0..height).rev() {
                     let i = idx(x, y, z);
                     if !known {
                         // Unloaded columns block light; the border ring copies its light from the chunk edge below.
@@ -66,12 +75,12 @@ impl Light {
             }
         }
         // Sky light that stays 15 straight down the column only needs to spread sideways where the neighbour is darker.
-        let sky_queue = darker_edges(&sky);
-        spread(&opacity, &mut sky, sky_queue);
-        spread(&opacity, &mut block, queue);
+        let sky_queue = darker_edges(&sky, height);
+        spread(&opacity, &mut sky, sky_queue, height);
+        spread(&opacity, &mut block, queue, height);
 
-        let mut cells = vec![0u8; HEIGHT * 18 * 18];
-        for y in 0..HEIGHT {
+        let mut cells = vec![0u8; height * 18 * 18];
+        for y in 0..height {
             for z in -1..=16 {
                 for x in -1..=16 {
                     let (sx, sz) = if loaded(x, z) {
@@ -84,12 +93,12 @@ impl Light {
                 }
             }
         }
-        Light { cells }
+        Light { cells, height }
     }
 
     /// `(sky, block)` light levels; `x` and `z` in `-1..=16`.
     pub fn get(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
-        if y >= HEIGHT as i32 {
+        if y >= self.height as i32 {
             return (15, 0);
         }
         if y < 0 {
@@ -100,11 +109,11 @@ impl Light {
     }
 }
 
-fn darker_edges(sky: &[u8]) -> VecDeque<usize> {
+fn darker_edges(sky: &[u8], height: usize) -> VecDeque<usize> {
     let mut sky_queue = VecDeque::new();
     for z in -OFF..W as i32 - OFF {
         for x in -OFF..W as i32 - OFF {
-            for y in 0..HEIGHT {
+            for y in 0..height {
                 let i = idx(x, y, z);
                 if sky[i] > 1 && has_darker_neighbor(sky, i) {
                     sky_queue.push_back(i);
@@ -127,7 +136,7 @@ fn has_darker_neighbor(light: &[u8], i: usize) -> bool {
         || (y > 0 && light[i - W * W] + 1 < l)
 }
 
-fn spread(opacity: &[u8], light: &mut [u8], mut queue: VecDeque<usize>) {
+fn spread(opacity: &[u8], light: &mut [u8], mut queue: VecDeque<usize>, height: usize) {
     while let Some(i) = queue.pop_front() {
         let l = light[i];
         if l <= 1 {
@@ -151,7 +160,7 @@ fn spread(opacity: &[u8], light: &mut [u8], mut queue: VecDeque<usize>) {
         visit(z > 0, i.wrapping_sub(W));
         visit(z + 1 < W, i + W);
         visit(y > 0, i.wrapping_sub(W * W));
-        visit(y + 1 < HEIGHT, i + W * W);
+        visit(y + 1 < height, i + W * W);
     }
 }
 

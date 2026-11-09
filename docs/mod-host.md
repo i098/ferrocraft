@@ -67,3 +67,5 @@ Non-rendering mods must work; stand-in classes route Gui/FontRenderer/overlay dr
 - Body-dependent Mixin points need mode B then mode C.
 - Mirror state must stay coherent for real bodies (write barrier + harness diff).
 - LWJGL shim fidelity for mods that call odd GL functions.
+
+Step 1 of that acceptance is a static check, `java/modhost-accept`. It lists, per mod jar, the vanilla 1.8.9 classes and `func_`/`field_` members the mod names, and checks they exist. It does not run the mods. See its README.

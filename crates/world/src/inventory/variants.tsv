@@ -8,7 +8,7 @@
 1	4	Polished Diorite	0	0	0	0	ffffff	ffffff		
 1	5	Andesite	0	0	0	0	ffffff	ffffff		
 1	6	Polished Andesite	0	0	0	0	ffffff	ffffff		
-2	0	Grass Block	0	0	0	0	0	0		
+2	0	Grass Block	0	0	0	0	7cbd6b	7cbd6b		
 3	0	Dirt	0	0	0	0	ffffff	ffffff		
 3	1	Coarse Dirt	0	0	0	0	ffffff	ffffff		
 3	2	Podzol	0	0	0	0	ffffff	ffffff		
@@ -54,8 +54,8 @@
 28	0	Detector Rail	0	0	0	0	ffffff	ffffff		
 29	0	Sticky Piston	0	0	0	0	ffffff	ffffff		
 30	0	Cobweb	0	0	0	0	ffffff	ffffff		
-31	1	Grass	0	0	0	0	0	0		
-31	2	Fern	0	0	0	0	0	0		
+31	1	Grass	0	0	0	0	7cbd6b	7cbd6b		
+31	2	Fern	0	0	0	0	7cbd6b	7cbd6b		
 32	0	Dead Bush	0	0	0	0	ffffff	ffffff		
 33	0	Piston	0	0	0	0	ffffff	ffffff		
 35	0	Wool	0	0	0	0	ffffff	ffffff		
@@ -279,8 +279,8 @@
 174	0	Packed Ice	0	0	0	0	ffffff	ffffff		
 175	0	Sunflower	0	0	0	0	ffffff	ffffff		
 175	1	Lilac	0	0	0	0	ffffff	ffffff		
-175	2	Double Tallgrass	0	0	0	0	0	0		
-175	3	Large Fern	0	0	0	0	0	0		
+175	2	Double Tallgrass	0	0	0	0	7cbd6b	7cbd6b		
+175	3	Large Fern	0	0	0	0	7cbd6b	7cbd6b		
 175	4	Rose Bush	0	0	0	0	ffffff	ffffff		
 175	5	Peony	0	0	0	0	ffffff	ffffff		
 179	0	Red Sandstone	0	0	0	0	ffffff	ffffff		

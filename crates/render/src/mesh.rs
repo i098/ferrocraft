@@ -3,7 +3,8 @@
 
 use crate::assets::Atlas;
 use crate::blocks::{
-    cached, double_plant_top, is_opaque_cube, tint_color, Kind, Look, Tint, DOWN, NORTH, UP,
+    cached, double_plant_top, is_opaque_cube, tint_color, uses_neighbor_light, Kind, Look, Tint,
+    DOWN, NORTH, UP,
 };
 use crate::light::Light;
 use crate::shapes::{boxes, Bx};
@@ -50,29 +51,54 @@ pub struct Meshes {
     pub light: Option<Light>,
 }
 
-/// The chunk to mesh plus the neighbours in -x, +x, -z, +z order (when loaded).
+/// The chunk to mesh plus its eight neighbours (when loaded), row by row over `dz` then `dx` in `-1..=1`, skipping the chunk itself.
 pub struct Neighborhood<'a> {
     /// Chunk coordinates of `center`.
     pub origin: (i32, i32),
     pub center: &'a Blocks,
-    pub neighbors: [Option<&'a Blocks>; 4],
+    pub neighbors: [Option<&'a Blocks>; 8],
 }
 
+/// Chunk offsets `(dx, dz)` of `Neighborhood::neighbors`.
+pub const AROUND: [(i32, i32); 8] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+];
+
 impl Neighborhood<'_> {
-    /// Block state id at chunk-local `x`, `z` in `-1..=16` and any `y`; 0 (air) outside the loaded data.
+    /// Block state id at chunk-local `x`, `z` in `-16..=31` and any `y`; 0 (air) outside the loaded data.
     pub(crate) fn block(&self, x: i32, y: i32, z: i32) -> u16 {
         if !(0..HEIGHT as i32).contains(&y) {
             return 0;
         }
-        let (data, lx, lz) = match (x, z) {
-            (0..=15, 0..=15) => (Some(self.center), x, z),
-            (-1, 0..=15) => (self.neighbors[0], 15, z),
-            (16, 0..=15) => (self.neighbors[1], 0, z),
-            (0..=15, -1) => (self.neighbors[2], x, 15),
-            (0..=15, 16) => (self.neighbors[3], x, 0),
-            _ => (None, 0, 0),
+        let (dx, dz) = (x.div_euclid(16), z.div_euclid(16));
+        let data = match (dx, dz) {
+            (0, 0) => Some(self.center),
+            (-1..=1, -1..=1) => {
+                let slot = ((dz + 1) * 3 + dx + 1) as usize;
+                self.neighbors[slot - usize::from(slot > 4)]
+            }
+            _ => None,
         };
-        data.map_or(0, |d| d[index(lx as usize, y as usize, lz as usize)])
+        data.map_or(0, |d| {
+            d[index(
+                x.rem_euclid(16) as usize,
+                y as usize,
+                z.rem_euclid(16) as usize,
+            )]
+        })
+    }
+
+    /// Whether the chunk at offset `dx`, `dz` is loaded, for `dx` and `dz` in `-1..=1`.
+    pub(crate) fn loaded(&self, dx: i32, dz: i32) -> bool {
+        let slot = ((dz + 1) * 3 + dx + 1) as usize;
+        slot == 4 || self.neighbors[slot - usize::from(slot > 4)].is_some()
     }
 }
 
@@ -155,11 +181,7 @@ impl Mesher<'_> {
 
     fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
         let p = [at[0] + d[0], at[1] + d[1], at[2] + d[2]];
-        let (s, b) = if matches!(
-            self.hood.block(p[0], p[1], p[2]) >> 4,
-            44 | 126 | 182 | 53 | 67 | 108 | 109 | 114 | 128 | 134
-                ..=136 | 156 | 163 | 164 | 180 | 60
-        ) {
+        let (s, b) = if uses_neighbor_light(self.hood.block(p[0], p[1], p[2])) {
             [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
                 .iter()
                 .map(|o| self.light.get(p[0] + o[0], p[1] + o[1], p[2] + o[2]))
@@ -187,7 +209,7 @@ impl Mesher<'_> {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
                 let list = boxes(state, &nb);
                 for b in &list {
-                    self.boxed(at, b);
+                    self.boxed(at, b, Self::pass_of(state));
                 }
             }
         }
@@ -195,7 +217,7 @@ impl Mesher<'_> {
 
     fn pass_of(state: u16) -> Pass {
         match state >> 4 {
-            8 | 9 | 79 | 95 | 165 | 174 => Pass::Blend,
+            8 | 9 | 79 | 95 | 160 | 165 => Pass::Blend,
             _ => Pass::Opaque,
         }
     }
@@ -332,7 +354,8 @@ impl Mesher<'_> {
         let own = self.light_at(at, [0; 3]);
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
-            if same(n) || is_opaque_cube(n) {
+            // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
+            if same(n) || (f != UP && is_opaque_cube(n)) {
                 continue;
             }
             let mut light = if f == UP {
@@ -449,7 +472,7 @@ impl Mesher<'_> {
         }
     }
 
-    fn boxed(&mut self, at: [i32; 3], b: &Bx) {
+    fn boxed(&mut self, at: [i32; 3], b: &Bx, pass: Pass) {
         let l = Look {
             kind: Kind::Shape,
             tint: b.tint,
@@ -492,7 +515,7 @@ impl Mesher<'_> {
                     light,
                 };
             }
-            self.push_quad(Pass::Opaque, verts, false);
+            self.push_quad(pass, verts, false);
         }
     }
 }
@@ -535,7 +558,7 @@ mod tests {
         v
     }
 
-    fn mesh(c: &[u16], neighbors: [Option<&[u16]>; 4]) -> Meshes {
+    fn mesh(c: &[u16], neighbors: [Option<&[u16]>; 8]) -> Meshes {
         mesh_chunk(
             &Neighborhood {
                 origin: (0, 0),
@@ -549,7 +572,7 @@ mod tests {
     #[test]
     fn single_block_has_six_faces() {
         let c = flat(|x, y, z| if (x, y, z) == (4, 70, 4) { 1 << 4 } else { 0 });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         assert_eq!(m.opaque.vertices.len(), 24);
         assert_eq!(m.opaque.indices.len(), 36);
     }
@@ -563,15 +586,15 @@ mod tests {
                 0
             }
         });
-        assert_eq!(mesh(&c, [None; 4]).opaque.vertices.len(), 10 * 4);
+        assert_eq!(mesh(&c, [None; 8]).opaque.vertices.len(), 10 * 4);
     }
 
     #[test]
     fn neighbor_chunk_hides_border_face() {
         let a = flat(|x, y, z| if (x, y, z) == (15, 70, 4) { 1 << 4 } else { 0 });
         let b = flat(|x, y, z| if (x, y, z) == (0, 70, 4) { 1 << 4 } else { 0 });
-        let alone = mesh(&a, [None; 4]);
-        let next = mesh(&a, [None, Some(&b), None, None]);
+        let alone = mesh(&a, [None; 8]);
+        let next = mesh(&a, [None, None, None, None, Some(&b), None, None, None]);
         assert_eq!(alone.opaque.vertices.len() - next.opaque.vertices.len(), 4);
     }
 
@@ -584,7 +607,7 @@ mod tests {
                 0
             }
         });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         assert!(m.opaque.is_empty());
         assert_eq!(m.water.vertices.len(), 10 * 4);
         // Corners average with the empty neighbours, so a lone source block is lower than 8/9.
@@ -601,7 +624,7 @@ mod tests {
                 0
             }
         });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         assert!(m
             .water
             .vertices
@@ -619,7 +642,7 @@ mod tests {
             (5, 60, 4) => 1 << 4,
             _ => 0,
         });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         let at = |x: f32, z: f32| {
             m.opaque
                 .vertices
@@ -634,7 +657,7 @@ mod tests {
     #[test]
     fn bottom_slab_is_half_height() {
         let c = flat(|x, y, z| if (x, y, z) == (4, 70, 4) { 44 << 4 } else { 0 });
-        let m = mesh(&c, [None; 4]);
+        let m = mesh(&c, [None; 8]);
         assert!(m.opaque.vertices.iter().all(|v| v.pos[1] <= 70.5));
         assert!(m.opaque.vertices.iter().any(|v| v.pos[1] == 70.5));
     }
@@ -642,6 +665,26 @@ mod tests {
     #[test]
     fn plant_is_two_crossed_quads_drawn_from_both_sides() {
         let c = flat(|x, y, z| if (x, y, z) == (4, 70, 4) { 37 << 4 } else { 0 });
-        assert_eq!(mesh(&c, [None; 4]).opaque.vertices.len(), 16);
+        assert_eq!(mesh(&c, [None; 8]).opaque.vertices.len(), 16);
+    }
+
+    #[test]
+    fn water_top_shows_under_a_solid_block() {
+        let c = flat(|x, y, z| match (x, y, z) {
+            (4, 60, 4) => 9 << 4,
+            (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) | (4, 61, 4) => 1 << 4,
+            _ => 0,
+        });
+        let m = mesh(&c, [None; 8]);
+        assert_eq!(m.water.vertices.len(), 4);
+    }
+
+    #[test]
+    fn stained_glass_pane_blends_and_packed_ice_does_not() {
+        let at = |id: u16| flat(move |x, y, z| if (x, y, z) == (4, 70, 4) { id << 4 } else { 0 });
+        let pane = mesh(&at(160), [None; 8]);
+        assert!(pane.opaque.is_empty() && !pane.water.is_empty());
+        let ice = mesh(&at(174), [None; 8]);
+        assert!(ice.water.is_empty() && !ice.opaque.is_empty());
     }
 }

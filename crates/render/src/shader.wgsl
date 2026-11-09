@@ -47,7 +47,7 @@ fn lightmap(sky: f32, block: f32) -> vec3<f32> {
     let sun = g.fog.z * 0.95 + 0.05;
     let f1 = brightness(sky) * sun;
     let f2 = brightness(block) * g.fog.w;
-    let f3 = f1 * (sun * 0.65 + 0.35);
+    let f3 = f1 * (g.fog.z * 0.65 + 0.35);
     let f6 = f2 * ((f2 * 0.6 + 0.4) * 0.6 + 0.4);
     let f7 = f2 * (f2 * f2 * 0.6 + 0.4);
     let c = clamp(vec3<f32>(f3 + f2, f3 + f6, f1 + f7) * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));

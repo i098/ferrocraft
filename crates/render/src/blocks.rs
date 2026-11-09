@@ -524,7 +524,7 @@ fn look_7(id: u16, meta: u16) -> Look {
         60 => shape(
             0x6b4a2a,
             [
-                if meta > 0 {
+                if meta == 7 {
                     "farmland_wet"
                 } else {
                     "farmland_dry"
@@ -653,7 +653,17 @@ fn look_11(id: u16, meta: u16) -> Look {
             0x9f8150,
             [["iron_trapdoor", "trapdoor"][usize::from(id == 96)]; 6],
         ),
-        97 => cube(0x7d7d7d, "stone"),
+        97 => cube(
+            0x7d7d7d,
+            [
+                "stone",
+                "cobblestone",
+                "stonebrick",
+                "stonebrick_mossy",
+                "stonebrick_cracked",
+                "stonebrick_carved",
+            ][meta.min(5) as usize],
+        ),
         98 => cube(
             0x7b7b7b,
             [
@@ -663,20 +673,53 @@ fn look_11(id: u16, meta: u16) -> Look {
                 "stonebrick_carved",
             ][meta as usize & 3],
         ),
-        99 | 100 => cube(0x967a64, mushroom_tex(id, meta)),
+        99 | 100 => {
+            let tex = mushroom_tex(id, meta);
+            let mut l = cube(0x967a64, "mushroom_block_inside");
+            l.tex = tex;
+            l
+        }
         101 => shape(0xa0a0a0, ["iron_bars"; 6]),
         _ => look_12(id, meta),
     }
 }
 
-fn mushroom_tex(id: u16, meta: u16) -> &'static str {
-    if meta == 0 {
-        "mushroom_block_inside"
-    } else if id == 99 {
+/// Vanilla `BlockHugeMushroom` variants: 1-9 are cap corners/edges/centre, 10 stem sides, 14 all cap, 15 all stem.
+fn mushroom_tex(id: u16, meta: u16) -> [&'static str; 6] {
+    const INSIDE: &str = "mushroom_block_inside";
+    let skin = if id == 99 {
         "mushroom_block_skin_brown"
     } else {
         "mushroom_block_skin_red"
+    };
+    let stem = "mushroom_block_skin_stem";
+    let mut t = [INSIDE; 6];
+    match meta {
+        1..=9 => {
+            t[UP] = skin;
+            let (row, col) = ((meta - 1) / 3, (meta - 1) % 3);
+            // Rows 0-2 are north, middle, south; columns 0-2 are west, middle, east.
+            match row {
+                0 => t[NORTH] = skin,
+                2 => t[SOUTH] = skin,
+                _ => {}
+            }
+            match col {
+                0 => t[WEST] = skin,
+                2 => t[EAST] = skin,
+                _ => {}
+            }
+        }
+        10 => {
+            for f in [NORTH, SOUTH, WEST, EAST] {
+                t[f] = stem;
+            }
+        }
+        14 => t = [skin; 6],
+        15 => t = [stem; 6],
+        _ => {}
     }
+    t
 }
 
 fn look_12(id: u16, meta: u16) -> Look {
@@ -971,101 +1014,57 @@ fn pumpkin_front(meta: u16) -> usize {
     }
 }
 
-/// Light blocked by the block (0 transparent, 15 opaque), as `Block.getLightOpacity` in 1.8.9.
+/// Light blocked by the block (0 transparent, 15 opaque), as `Block.getLightOpacity` in 1.8.9 (255 reads as 15).
 pub fn light_opacity(state: u16) -> u8 {
-    let id = state >> 4;
-    match id {
+    match state >> 4 {
         0
-        | 20
-        | 95
-        | 102
-        | 160
-        | 101
         | 6
-        | 31
-        | 32
-        | 37..=40
-        | 50
-        | 51
-        | 55
+        | 10..=11
+        | 20
+        | 26..=29
+        | 31..=34
+        | 36..=40
+        | 50..=52
+        | 54..=55
         | 59
-        | 65
-        | 66
-        | 75
-        | 76
-        | 83
-        | 175
-        | 27
-        | 28
-        | 157
-        | 141
-        | 142
-        | 104
-        | 105
-        | 115
-        | 111
-        | 78
-        | 171
-        | 70
-        | 72
-        | 85
-        | 113
-        | 139
-        | 188..=192
-        | 107
-        | 183..=187
+        | 63..=66
+        | 68..=72
+        | 75..=78
         | 81
-        | 64
-        | 71
-        | 193..=197
-        | 96
-        | 167
-        | 140
-        | 151
-        | 116
-        | 92
-        | 93
-        | 94
-        | 106
-        | 130
-        | 120
-        | 26
-        | 54
-        | 146
-        | 165
-        | 63
-        | 68
-        | 69
-        | 77
-        | 143
-        | 132
-        | 176
-        | 177
-        | 145
+        | 83
+        | 85
+        | 90
+        | 92..=96
+        | 101..=102
+        | 104..=107
+        | 111
+        | 115..=120
+        | 122
+        | 127
+        | 130..=132
+        | 138..=151
         | 154
-        | 118
-        | 52 => 0,
-        18 | 161 | 30 => 1,
-        8 | 9 | 79 | 174 => 3,
-        10 | 11 => 255,
-        44
-        | 126
-        | 182
-        | 53
-        | 67
-        | 108
-        | 109
-        | 114
-        | 128
-        | 134..=136
-        | 156
-        | 163
-        | 164
-        | 180
-        | 60 => 255,
-        _ => 255,
+        | 157
+        | 160
+        | 165..=167
+        | 171
+        | 175..=178
+        | 183..=197 => 0,
+        18 | 30 | 161 => 1,
+        8..=9 | 79 => 3,
+        _ => 15,
     }
-    .min(15)
+}
+
+/// Whether the block shows the light of its neighbours, as `Block.getUseNeighborBrightness` in 1.8.9.
+pub fn uses_neighbor_light(state: u16) -> bool {
+    matches!(
+        state >> 4,
+        6 | 10..=11 | 20 | 26..=29 | 31..=34 | 36..=40 | 43..=44 | 50..=55 | 59..=60 | 63..=72
+            | 75..=78 | 81 | 83 | 85 | 90 | 92..=96 | 101..=102 | 104..=109 | 111 | 113..=120
+            | 122 | 125..=128 | 130..=132 | 134..=136 | 138..=151 | 154 | 156..=157 | 160
+            | 163..=167 | 171 | 175..=178 | 180..=197
+    )
 }
 
 /// Block light emitted (0-15), as `Block.getLightValue` in 1.8.9.
@@ -1073,14 +1072,11 @@ pub fn emission(state: u16) -> u8 {
     match state >> 4 {
         10 | 11 | 89 | 91 | 169 | 124 | 51 | 138 | 119 => 15,
         62 => 13,
-        94 => 9,
         50 => 14,
-        76 => 7,
-        74 => 9,
         90 => 11,
-        130 => 7,
-        117 | 120 | 122 => 1,
-        99 | 100 => 0,
+        74 | 150 => 9,
+        76 | 130 => 7,
+        39 | 117 | 120 | 122 => 1,
         _ => 0,
     }
 }
@@ -1146,6 +1142,24 @@ pub fn texture_names() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mushroom_and_infested_blocks_pick_texture_by_meta() {
+        let t = look(99 << 4 | 1).tex;
+        assert_eq!(
+            [t[UP], t[NORTH], t[WEST], t[SOUTH]],
+            [
+                "mushroom_block_skin_brown",
+                "mushroom_block_skin_brown",
+                "mushroom_block_skin_brown",
+                "mushroom_block_inside"
+            ]
+        );
+        assert_eq!(look(100 << 4 | 10).tex[EAST], "mushroom_block_skin_stem");
+        assert_eq!(look(100 << 4 | 15).tex[UP], "mushroom_block_skin_stem");
+        assert_eq!(look(97 << 4 | 1).tex[UP], "cobblestone");
+        assert_eq!(look(97 << 4 | 5).tex[UP], "stonebrick_carved");
+    }
 
     #[test]
     fn colored_blocks_pick_texture_by_meta() {

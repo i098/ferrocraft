@@ -59,7 +59,7 @@ impl App {
                 if let PhysicalKey::Code(code) = k.physical_key {
                     if k.state.is_pressed() {
                         let typed = k.text.as_deref().and_then(|t| t.chars().next());
-                        self.screen_key(code, typed);
+                        self.screen_key(code, typed, k.repeat);
                     }
                 }
             }
@@ -149,7 +149,10 @@ impl App {
         }
     }
 
-    fn screen_key(&mut self, code: KeyCode, typed: Option<char>) {
+    fn screen_key(&mut self, code: KeyCode, typed: Option<char>, repeat: bool) {
+        if self.input.screenshot_key(code, !repeat) {
+            return;
+        }
         if self.container.is_some() {
             let key = self.container_key(code);
             let mods = self.mods();
@@ -183,18 +186,14 @@ impl App {
         if code == KeyCode::Backspace {
             return Key::Backspace;
         }
-        let b = self.input.bindings();
-        let is = |bind: Bind| b.get(bind) == Control::Key(code);
-        [
-            (Bind::Inventory, Key::Inventory),
-            (Bind::Drop, Key::Drop),
-            (Bind::PickBlock, Key::PickBlock),
-            (Bind::Chat, Key::Chat),
-        ]
-        .into_iter()
-        .find_map(|(bind, k)| is(bind).then_some(k))
-        .or_else(|| (0..9).find(|n| is(Bind::Hotbar(*n))).map(Key::Hotbar))
-        .unwrap_or(Key::Other)
+        match self.input.bindings().lookup(Control::Key(code)) {
+            Some(Bind::Inventory) => Key::Inventory,
+            Some(Bind::Drop) => Key::Drop,
+            Some(Bind::PickBlock) => Key::PickBlock,
+            Some(Bind::Chat) => Key::Chat,
+            Some(Bind::Hotbar(n)) => Key::Hotbar(n),
+            _ => Key::Other,
+        }
     }
 
     fn send_requests(&mut self, reqs: Vec<Request>) {
@@ -227,5 +226,28 @@ impl App {
             ),
             None => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::Args;
+    use gui::inventory::ContainerScreen;
+    use input_audio::Action;
+
+    #[test]
+    fn f2_screenshots_while_a_container_is_open() {
+        let mut app = App::new(Args {
+            username: "Player".into(),
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
+        app.screen_key(KeyCode::F2, None, true);
+        assert_eq!(app.input.take_actions(), vec![]);
+        app.screen_key(KeyCode::F2, None, false);
+        assert_eq!(app.input.take_actions(), vec![Action::Screenshot]);
     }
 }

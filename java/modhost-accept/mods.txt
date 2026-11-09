@@ -1,0 +1,6 @@
+# role | file | pinned Modrinth URL (1.8.9 Forge)
+OneConfig bootstrap|oneconfig-bootstrap-1.0.3.jar|https://cdn.modrinth.com/data/AibBIVmj/versions/TcuRDj1R/Aoneconfigbootstrap-1.8.9-forge-1.0.3.jar
+EvergreenHUD (CPS, keystrokes, HUD)|EvergreenHUD-2.1.7.jar|https://cdn.modrinth.com/data/1yIQcc2b/versions/YAwKwEPz/EvergreenHUD-1.8.9-forge-2.1.7.jar
+Keystrokes|Keystrokes-1.0.0.jar|https://cdn.modrinth.com/data/G2Hmyf0G/versions/70oHEIpB/Keystrokes-1.8.9-forge-1.0.0.jar
+PolySprint (toggle sprint)|PolySprint-1.0.2.jar|https://cdn.modrinth.com/data/i9xRThb3/versions/95qrJcnP/PolySprint-1.8.9-forge-1.0.2.jar
+VanillaHUD|VanillaHUD-2.2.12.jar|https://cdn.modrinth.com/data/pWXJaKrX/versions/hvJoY3aU/VanillaHUD-1.8.9-forge-2.2.12.jar

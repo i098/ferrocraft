@@ -419,9 +419,12 @@ impl App {
             return;
         };
         if let Some(h) = self.game.target(eye) {
-            let state = self.game.store.get_block(h.pos[0], h.pos[1], h.pos[2]);
+            let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
+            let state = at(h.pos);
             if state != 0 {
-                self.particles.dig_hit(h.pos, h.face, state);
+                let bounds =
+                    world::dig::selection_box(&at, h.pos).unwrap_or([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+                self.particles.dig_hit(h.pos, h.face, state, bounds);
                 if let Some(s) = &mut self.sound {
                     s.dig_hit(state >> 4, h.pos.map(|v| f64::from(v) + 0.5));
                 }

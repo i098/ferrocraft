@@ -319,12 +319,13 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
         a *= a;
         let col = [f3 * 0.3 + 0.7, f3 * f3 * 0.7 + 0.2, 0.2, a];
         let flip = (s.angle * PI * 2.0).sin() < 0.0;
+        // GL post-multiplies, so the last `glRotatef` of `renderSky` (z 90) hits the vertex first.
         let place = |v: [f32; 3]| {
-            let mut v = rot(v, 90.0, 0);
+            let mut v = rot(v, 90.0, 2);
             if flip {
                 v = rot(v, 180.0, 2);
             }
-            add(rot(v, 90.0, 2), eye)
+            add(rot(v, 90.0, 0), eye)
         };
         let rim: Vec<_> = (0..=16)
             .map(|l| {
@@ -529,6 +530,21 @@ mod tests {
         assert!(night.sky.iter().all(|c| *c < 0.05));
         assert!(night.sun_brightness < 0.3 && day.sun_brightness > 0.99);
         assert!(night.star_alpha > 0.4 && day.star_alpha == 0.0);
+    }
+
+    #[test]
+    fn sunrise_glow_sits_east_and_sunset_glow_west() {
+        // `renderSky` flips the glow with the sun angle; the sun itself rises in +x.
+        let glow_x = |world_time| {
+            let env = Environment {
+                world_time,
+                ..Environment::default()
+            };
+            let layers = build_sky(&env, &env.sky_state(), [0.0; 3]);
+            layers.blend.vertices[0].pos[0]
+        };
+        assert!(glow_x(0) > 90.0, "sunrise {}", glow_x(0));
+        assert!(glow_x(12000) < -90.0, "sunset {}", glow_x(12000));
     }
 
     #[test]

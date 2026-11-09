@@ -524,7 +524,7 @@ fn look_7(id: u16, meta: u16) -> Look {
         60 => shape(
             0x6b4a2a,
             [
-                if meta > 0 {
+                if meta == 7 {
                     "farmland_wet"
                 } else {
                     "farmland_dry"

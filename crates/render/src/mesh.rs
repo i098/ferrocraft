@@ -352,8 +352,9 @@ impl Mesher<'_> {
             ],
         ];
         let own = self.light_at(at, [0; 3]);
-        for f in 0..6 {
-            let n = self.st(at, DIRS[f]);
+        let gap = self.liquid_gap_above(at, &same);
+        for (f, &dir) in DIRS.iter().enumerate() {
+            let n = self.st(at, dir);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
             if same(n) || (f != UP && is_opaque_cube(n)) {
                 continue;
@@ -362,35 +363,60 @@ impl Mesher<'_> {
                 let up = self.light_at(at, [0, 1, 0]);
                 [own[0].max(up[0]), own[1].max(up[1])]
             } else {
-                self.flat_light(at, DIRS[f])
+                self.flat_light(at, dir)
             };
             if lava {
                 light[1] = 1.0;
             }
-            let mut verts = [Vertex::zeroed(); 4];
-            for (i, c) in CORNERS[f].iter().enumerate() {
-                let y = if c[1] > 0.5 {
-                    h[c[0] as usize][c[2] as usize]
-                } else {
-                    0.0
-                };
-                let p = [c[0], y, c[2]];
-                let uv = liquid_uv(f, p);
-                let k = SHADE[f];
-                verts[i] = Vertex {
-                    pos: [
-                        at[0] as f32 + p[0],
-                        at[1] as f32 + p[1],
-                        at[2] as f32 + p[2],
-                    ],
-                    uv: self.atlas.uv(l.tex[f], uv),
-                    color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
-                    light,
-                };
-            }
+            let mut verts = self.liquid_face(at, f, &h, l, rgb, light);
             self.push_quad(pass, verts, false);
+            if f >= NORTH || (f == UP && gap) {
+                verts.reverse();
+                self.push_quad(pass, verts, false);
+            }
         }
         let _ = state;
+    }
+
+    /// `LiquidRenderer` draws sides from both sides, and the top too while a cell above is open
+    /// (`isNeighboringGap`).
+    fn liquid_gap_above(&self, at: [i32; 3], same: &dyn Fn(u16) -> bool) -> bool {
+        (-1..=1).any(|dx| {
+            (-1..=1).any(|dz| {
+                let s = self.st(at, [dx, 1, dz]);
+                !same(s) && !is_opaque_cube(s)
+            })
+        })
+    }
+
+    fn liquid_face(
+        &self,
+        at: [i32; 3],
+        f: usize,
+        h: &[[f32; 2]; 2],
+        l: &Look,
+        rgb: [f32; 3],
+        light: [f32; 2],
+    ) -> [Vertex; 4] {
+        let k = SHADE[f];
+        CORNERS[f].map(|c| {
+            let y = if c[1] > 0.5 {
+                h[c[0] as usize][c[2] as usize]
+            } else {
+                0.0
+            };
+            let p = [c[0], y, c[2]];
+            Vertex {
+                pos: [
+                    at[0] as f32 + p[0],
+                    at[1] as f32 + p[1],
+                    at[2] as f32 + p[2],
+                ],
+                uv: self.atlas.uv(l.tex[f], liquid_uv(f, p)),
+                color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
+                light,
+            }
+        })
     }
 
     fn corner_h(&self, at: [i32; 3], same: &dyn Fn(u16) -> bool, cx: i32, cz: i32) -> f32 {
@@ -609,7 +635,8 @@ mod tests {
         });
         let m = mesh(&c, [None; 8]);
         assert!(m.opaque.is_empty());
-        assert_eq!(m.water.vertices.len(), 10 * 4);
+        // 2 tops and 2 bottoms, plus 6 open sides drawn from both sides and 2 top back faces (air above).
+        assert_eq!(m.water.vertices.len(), 18 * 4);
         // Corners average with the empty neighbours, so a lone source block is lower than 8/9.
         assert!(m.water.vertices.iter().all(|v| v.pos[1] < 60.89));
         assert!(m.water.vertices.iter().any(|v| v.pos[1] > 60.6));
@@ -669,14 +696,19 @@ mod tests {
     }
 
     #[test]
-    fn water_top_shows_under_a_solid_block() {
-        let c = flat(|x, y, z| match (x, y, z) {
-            (4, 60, 4) => 9 << 4,
-            (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) | (4, 61, 4) => 1 << 4,
-            _ => 0,
-        });
-        let m = mesh(&c, [None; 8]);
-        assert_eq!(m.water.vertices.len(), 4);
+    fn water_top_back_face_needs_a_gap_above() {
+        // `LiquidRenderer` draws the top's underside only while `isNeighboringGap` sees a non-opaque cell above.
+        let walled = |gap: bool| {
+            flat(move |x, y, z| match (x, y, z) {
+                (4, 60, 4) => 9 << 4,
+                (5, 61, 5) if gap => 0,
+                (3..=5, 61, 3..=5) => 1 << 4,
+                (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) => 1 << 4,
+                _ => 0,
+            })
+        };
+        assert_eq!(mesh(&walled(false), [None; 8]).water.vertices.len(), 4);
+        assert_eq!(mesh(&walled(true), [None; 8]).water.vertices.len(), 8);
     }
 
     #[test]

@@ -464,6 +464,22 @@ impl Game {
         [x - 0.3, y, z - 0.3, x + 0.3, y + 1.8, z + 0.3]
     }
 
+    /// Every box `World.checkNoEntityCollision` tests: the local player and each entity with
+    /// `preventEntitySpawning`.
+    pub fn bodies(&self) -> Vec<[f64; 6]> {
+        let mut v = vec![self.body()];
+        v.extend(
+            self.entities
+                .iter()
+                .filter(|e| e.blocks_placement())
+                .map(|e| {
+                    let (min, max) = e.bounds();
+                    [min[0], min[1], min[2], max[0], max[1], max[2]]
+                }),
+        );
+        v
+    }
+
     /// The client half of `ItemBlock.onItemUse`: set the blocks and use up one item outside
     /// creative mode. Unloaded chunks are skipped.
     pub fn place_blocks(&mut self, blocks: &[([i32; 3], u16)]) -> Vec<Effect> {

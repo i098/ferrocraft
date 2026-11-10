@@ -607,16 +607,16 @@ impl App {
             return Some(Outcome::Refused);
         };
         let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
-        let body = self.game.body();
+        let bodies = self.game.bodies();
         let item_block = (1..=255).contains(&s.id);
-        if item_block && !place::can_place_on_side(&at, s.id, s.damage, click, body) {
+        if item_block && !place::can_place_on_side(&at, s.id, s.damage, click, &bodies) {
             return None;
         }
         if gamemode == 2 {
             return Some(Outcome::Refused);
         }
         let yaw = self.game.player.as_ref().map_or(0.0, |p| p.yaw);
-        Some(place::use_item(&at, s.id, s.damage, click, yaw, body))
+        Some(place::use_item(&at, s.id, s.damage, click, yaw, &bodies))
     }
 
     /// The client half of `ItemBlock.onItemUse`: set the blocks, play the place sound, use up

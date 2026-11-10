@@ -176,6 +176,53 @@ fn blocker_and_box_cases() -> Vec<Case> {
     c.inside = true;
     c.px = 1.1;
     v.push(c);
+    // The armor stand status byte sets the box: a marker has none, a small stand is half high.
+    for (name, nbt, y, item) in [
+        ("cube into a marker armor stand", "Marker:1b", "4", 1),
+        ("cube over a small armor stand", "Small:1b", "3.0", 1),
+        ("cube into a large armor stand", "Small:0b", "3.0", 1),
+    ] {
+        let mut c = case(name, item, 0, 0.0, ground([8, 16, 8]));
+        c.setup = vec![format!("summon ArmorStand {{x}}.5 {y} {{z}}.5 {{{nbt}}}")];
+        v.push(c);
+    }
+    // `BlockLilyPad` fills the cell floor 0..1; one snow layer is a zero-height box at the floor.
+    let mut c = case(
+        "lily pad beside a body sliver",
+        111,
+        0,
+        0.0,
+        ([0, 4, -1], 3, [8, 8, 16]),
+    );
+    c.setup = vec![
+        "setblock {x} 3 {z} water".into(),
+        "setblock {x} 4 {zn} stone".into(),
+    ];
+    c.inside = true;
+    c.px = 1.1;
+    v.push(c);
+    let mut c = case(
+        "snow layer into a straddling body",
+        78,
+        0,
+        0.0,
+        ground([8, 16, 8]),
+    );
+    c.inside = true;
+    c.feet = 3.5;
+    v.push(c);
+    // Baby and slime sizes come from metadata; a mob centred 0.3 west of the cell reaches into
+    // it only with its adult half width (pig 0.45, slime 0.255 at size 1 and 0.765 at size 3).
+    for (name, summon) in [
+        ("cube beside a baby pig", "Pig {xw}.7 4 {z}.5 {NoAI:1b,Age:-24000}"),
+        ("cube into an adult pig", "Pig {xw}.7 4 {z}.5 {NoAI:1b}"),
+        ("cube beside a small slime", "Slime {xw}.7 4 {z}.5 {NoAI:1b,Size:0}"),
+        ("cube into a big slime", "Slime {xw}.7 4 {z}.5 {NoAI:1b,Size:2}"),
+    ] {
+        let mut c = case(name, 1, 0, 0.0, ground([8, 16, 8]));
+        c.setup = vec![format!("summon {summon}")];
+        v.push(c);
+    }
     v
 }
 
@@ -454,6 +501,7 @@ fn client_prediction_equals_the_server() {
         let fill = |l: &str| {
             l.replace("{x1}", &(bx + 1).to_string())
                 .replace("{x}", &bx.to_string())
+                .replace("{xw}", &(bx - 1).to_string())
                 .replace("{zn}", &(bz - 1).to_string())
                 .replace("{zs}", &stand.to_string())
                 .replace("{z}", &bz.to_string())

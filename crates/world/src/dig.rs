@@ -352,7 +352,7 @@ fn flat_box(id: u16, meta: u16) -> Option<[f64; 6]> {
             0.5,
             0.9375,
         ],
-        111 => inset(0.0625, 0.015625),
+        111 => top(0.015625),
         _ => return fixed_height(id).map(top),
     })
 }

@@ -87,6 +87,29 @@ pub mod flag {
     pub const INVISIBLE: u8 = 1 << 5;
 }
 
+/// `EntityArmorStand` status byte (metadata index 10).
+pub mod stand {
+    pub const SMALL: u8 = 1;
+    pub const MARKER: u8 = 16;
+}
+
+/// The metadata bytes that set a hitbox: armor stand status (index 10), age of ageable mobs
+/// (12, a zombie's child flag) and slime size (16).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SizeMeta {
+    pub stand: Option<u8>,
+    pub age: Option<u8>,
+    pub slime: Option<u8>,
+}
+
+impl SizeMeta {
+    fn merge(&mut self, new: SizeMeta) {
+        self.stand = new.stand.or(self.stand);
+        self.age = new.age.or(self.age);
+        self.slime = new.slime.or(self.slime);
+    }
+}
+
 /// Equipment slots of `S04`: 0 held item, 1..=4 boots to helmet.
 pub const EQUIPMENT_SLOTS: usize = 5;
 
@@ -127,6 +150,8 @@ pub struct Entity {
     pub hurt_time: i32,
     /// Ticks since death status; the model tips over for 20 ticks, then the entity is removed.
     pub death_time: i32,
+    /// Metadata that sets the hitbox.
+    pub meta: SizeMeta,
     pub equipment: [Option<ItemRef>; EQUIPMENT_SLOTS],
     /// Item entities: the stack they show.
     pub stack: Option<ItemRef>,
@@ -189,6 +214,7 @@ impl Entity {
             swinging: false,
             hurt_time: 0,
             death_time: 0,
+            meta: SizeMeta::default(),
             equipment: [None; EQUIPMENT_SLOTS],
             stack: None,
             vehicle: None,
@@ -224,7 +250,31 @@ impl Entity {
 
     /// Axis-aligned hitbox `(min, max)` at the current position.
     pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
-        bounds_at(self.pos, self.kind)
+        bounds_at(self.pos, self.size())
+    }
+
+    /// Hitbox `(width, height)`: armor stands, baby mobs and slimes size themselves from
+    /// metadata (`EntityArmorStand`, `EntityAgeable.setScaleForAge`, `EntitySlime.setSlimeSize`).
+    pub fn size(&self) -> (f32, f32) {
+        let (w, h) = self.kind.size();
+        let m = self.meta;
+        let half = |baby: bool| if baby { (w * 0.5, h * 0.5) } else { (w, h) };
+        match self.kind {
+            Kind::Object(78) => match m.stand.unwrap_or(0) {
+                s if s & stand::MARKER != 0 => (0.0, 0.0),
+                s if s & stand::SMALL != 0 => (0.25, 0.9875),
+                _ => (w, h),
+            },
+            Kind::Mob(55 | 62) => {
+                let s = 0.51000005 * f32::from(m.slime.unwrap_or(1).max(1));
+                (s, s)
+            }
+            Kind::Mob(54 | 57) => half(m.age.is_some_and(|a| a != 0)),
+            Kind::Mob(90..=93 | 95 | 96 | 98 | 101 | 120) => {
+                half(m.age.is_some_and(|a| (a as i8) < 0))
+            }
+            _ => (w, h),
+        }
     }
 
     fn set_target(&mut self, raw: [i32; 3], yaw: f32, pitch: f32) {
@@ -282,6 +332,7 @@ impl Entity {
         name: Option<String>,
         stack: Option<ItemRef>,
         health: Option<f32>,
+        meta: SizeMeta,
     ) {
         if let Some(f) = flags {
             self.flags = f;
@@ -295,6 +346,7 @@ impl Entity {
         if health.is_some() {
             self.health = health;
         }
+        self.meta.merge(meta);
     }
 
     fn animate(&mut self, animation: u8) {
@@ -344,8 +396,7 @@ fn wrap(mut d: f32) -> f32 {
     d
 }
 
-fn bounds_at(pos: [f64; 3], kind: Kind) -> ([f64; 3], [f64; 3]) {
-    let (w, h) = kind.size();
+fn bounds_at(pos: [f64; 3], (w, h): (f32, f32)) -> ([f64; 3], [f64; 3]) {
     let half = f64::from(w) / 2.0;
     (
         [pos[0] - half, pos[1], pos[2] - half],
@@ -377,6 +428,7 @@ pub enum EntityEvent {
         flags: Option<u8>,
         name: Option<String>,
         health: Option<f32>,
+        size: SizeMeta,
     },
     SpawnObject {
         id: i32,
@@ -424,6 +476,7 @@ pub enum EntityEvent {
         name: Option<String>,
         health: Option<f32>,
         stack: Option<ItemRef>,
+        size: SizeMeta,
     },
     Equipment {
         id: i32,
@@ -577,12 +630,14 @@ impl Entities {
                 flags,
                 name,
                 health,
+                size,
             } => {
                 let mut e = Entity::new(id, Kind::Mob(kind), pos, yaw, pitch);
                 e.head_yaw = angle(head_yaw);
                 e.target.head_yaw = e.head_yaw;
                 e.vel = velocity(vel);
                 e.flags = flags.unwrap_or(0);
+                e.meta = size;
                 e.name = name.filter(|n| !n.is_empty());
                 e.health = health;
                 (id, e)
@@ -614,7 +669,8 @@ impl Entities {
                 name,
                 health,
                 stack,
-            } => self.with(id, |e| e.set_metadata(flags, name, stack, health)),
+                size,
+            } => self.with(id, |e| e.set_metadata(flags, name, stack, health, size)),
             E::Equipment { id, slot, item } => self.with(id, |e| {
                 if let Some(s) = e.equipment.get_mut(slot as usize) {
                     *s = item;
@@ -729,6 +785,7 @@ mod tests {
             flags: None,
             name: None,
             health: None,
+            size: SizeMeta::default(),
         });
     }
 
@@ -796,6 +853,76 @@ mod tests {
         es.tick();
         assert!(es.get(3).unwrap().is_dead());
         assert!(es.get(3).unwrap().blocks_placement());
+    }
+
+    #[test]
+    fn an_armor_stand_hitbox_follows_its_status_byte() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnObject {
+            id: 5,
+            kind: 78,
+            pos: [0; 3],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+        });
+        let size = |es: &Entities| es.get(5).unwrap().size();
+        assert_eq!(size(&es), (0.5, 1.975));
+        for (status, want) in [
+            (stand::SMALL, (0.25, 0.9875)),
+            (stand::MARKER, (0.0, 0.0)),
+            (stand::MARKER | stand::SMALL, (0.0, 0.0)),
+            (4 | 8, (0.5, 1.975)),
+        ] {
+            es.apply(EntityEvent::Metadata {
+                id: 5,
+                flags: None,
+                name: None,
+                health: None,
+                stack: None,
+                size: SizeMeta {
+                    stand: Some(status),
+                    ..SizeMeta::default()
+                },
+            });
+            assert_eq!(size(&es), want, "{status}");
+        }
+    }
+
+    #[test]
+    fn baby_mobs_and_slimes_size_themselves_from_metadata() {
+        let mut es = Entities::default();
+        let mut mob = |id: i32, kind: u8, size: SizeMeta| {
+            es.apply(EntityEvent::SpawnMob {
+                id,
+                kind,
+                pos: [0; 3],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size,
+            });
+            es.get(id).unwrap().size()
+        };
+        let age = |a: u8| SizeMeta {
+            age: Some(a),
+            ..SizeMeta::default()
+        };
+        let slime = |s: u8| SizeMeta {
+            slime: Some(s),
+            ..SizeMeta::default()
+        };
+        assert_eq!(mob(1, 90, age(0)), (0.9, 0.9));
+        assert_eq!(mob(2, 90, age(255)), (0.45, 0.45));
+        assert_eq!(mob(3, 54, age(1)), (0.3, 0.9));
+        assert_eq!(mob(4, 54, age(0)), (0.6, 1.8));
+        assert_eq!(mob(5, 55, slime(1)), (0.51000005, 0.51000005));
+        assert_eq!(mob(6, 62, slime(4)), (0.51000005 * 4.0, 0.51000005 * 4.0));
+        assert_eq!(mob(7, 50, age(255)), (0.6, 1.7));
     }
 
     #[test]

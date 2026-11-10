@@ -5,7 +5,7 @@ use ferrocraft_protocol::codec::{MetaEntry, MetaValue, Metadata, Slot, VarInt};
 use ferrocraft_protocol::play::clientbound as cb;
 use ferrocraft_protocol::play::{serverbound as sb, PlayerListAction, UseAction};
 use std::io;
-use world::entities::{EntityEvent, ItemRef};
+use world::entities::{EntityEvent, ItemRef, SizeMeta};
 
 fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
@@ -49,6 +49,18 @@ fn stack(meta: &Metadata) -> Option<ItemRef> {
     }
 }
 
+fn size_meta(meta: &Metadata) -> SizeMeta {
+    let byte = |index| match find(meta, index) {
+        Some(MetaValue::Byte(b)) => Some(*b as u8),
+        _ => None,
+    };
+    SizeMeta {
+        stand: byte(10),
+        age: byte(12),
+        slime: byte(16),
+    }
+}
+
 /// The events of an entity packet; empty for every other packet.
 pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
     if let cb::Packet::PlayerListItem(p) = packet {
@@ -84,6 +96,7 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
             flags: flags(&p.metadata),
             name: name(&p.metadata),
             health: health(&p.metadata),
+            size: size_meta(&p.metadata),
         },
         P::SpawnObject(p) => EntityEvent::SpawnObject {
             id: p.entity_id.0,
@@ -151,6 +164,7 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             name: name(&p.metadata),
             stack: stack(&p.metadata),
             health: health(&p.metadata),
+            size: size_meta(&p.metadata),
         },
         P::EntityEquipment(p) => EntityEvent::Equipment {
             id: p.entity_id.0,

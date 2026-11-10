@@ -143,9 +143,9 @@ fn material_replaceable(id: u16) -> bool {
 }
 
 /// Blocks whose `getCollisionBoundingBox` is null: no entity ever blocks them.
-const NO_COLLISION: [u16; 39] = [
-    6, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 55, 59, 63, 66, 68, 69, 70, 72, 75, 76, 77, 78, 83,
-    90, 93, 94, 104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
+const NO_COLLISION: [u16; 36] = [
+    6, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 55, 59, 63, 66, 68, 69, 70, 72, 75, 76, 77, 83, 90,
+    104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
 ];
 
 /// Trapdoors and anvils: vanilla answers `getCollisionBoundingBox` from the bounds the last
@@ -164,7 +164,9 @@ const FIXED: &[(&[u16], [f64; 6])] = &[
     ),
     (&[81], [0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375]),
     (&[88], [0.0, 0.0, 0.0, 1.0, 0.875, 1.0]),
-    (&[111], [0.4375, 0.0, 0.4375, 0.5625, 0.015625, 0.5625]),
+    (&[93, 94, 149, 150], [0.0, 0.0, 0.0, 1.0, 0.125, 1.0]),
+    (&[111], [0.0, 0.0, 0.0, 1.0, 0.015625, 1.0]),
+    (&[78], [0.0, 0.0, 0.0, 1.0, 0.0, 1.0]),
     (&[116], [0.0, 0.0, 0.0, 1.0, 0.75, 1.0]),
     (&[120], [0.0, 0.0, 0.0, 1.0, 0.8125, 1.0]),
     (&[122], [0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375]),
@@ -758,6 +760,23 @@ mod tests {
                 Outcome::Placed(_)
             ));
         }
+    }
+
+    #[test]
+    fn a_lily_pad_fills_the_cell_floor_and_one_snow_layer_is_a_zero_height_slice() {
+        let pond = flat(&[([0, 3, 0], 9 << 4), ([1, 4, 0], 1 << 4)]);
+        let side = Click {
+            pos: [1, 4, 0],
+            face: WEST,
+            cursor: [0.0, 0.5, 0.5],
+        };
+        let edge = [0.1, 4.0, 0.1, 0.3, 5.8, 0.3];
+        assert!(!can_place_on_side(&pond, 111, 0, side, &[edge]));
+        assert_eq!(use_item(&pond, 111, 0, side, 0.0, &[edge]), Outcome::Refused);
+        assert!(can_place_on_side(&pond, 111, 0, side, &[FAR]));
+        let at = flat(&[]);
+        assert!(!placed_with(&at, 78, [0.1, 3.5, 0.1, 0.3, 5.3, 0.3]));
+        assert!(placed_with(&at, 78, [0.1, 4.0, 0.1, 0.3, 5.8, 0.3]));
     }
 
     #[test]

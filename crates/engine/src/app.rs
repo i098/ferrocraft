@@ -708,7 +708,7 @@ fn entity_draw(e: &Entity, partial: f64) -> EntityDraw {
             0.0
         },
         invisible: e.invisible(),
-        size: e.kind.size(),
+        size: e.size(),
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
         name: e.name.clone(),

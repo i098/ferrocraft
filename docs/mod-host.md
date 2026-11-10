@@ -54,7 +54,7 @@ ASM coremods are designed to run unchanged through FML. A transformer that match
 
 - Hook table: Rust ports are annotated `#[vanilla_method("net/minecraft/client/Minecraft.func_71411_J()V")]`. If a mod or Mixin changed that method, Rust calls Java; otherwise the flag is unset.
 - Forge events (render, input, tick, chat, world, GUI) are planned to fire from Rust at the patched call sites, to be tested against the oracle's trace.
-- Java draws through a small LWJGL 2 / GL shim that writes a command stream into shared memory; Rust replays it on the wgpu renderer.
+- Java draws through a small LWJGL 2 / GL shim that writes a command stream. It goes to Rust over a loopback socket, and Rust replays it on the wgpu renderer.
 - Rust owns the window and feeds `Keyboard`/`Mouse` shim events so `GuiScreen.handleInput` and Forge `KeyInputEvent` are designed to work unchanged.
 
 ## Acceptance
@@ -69,3 +69,4 @@ Non-rendering mods must work; stand-in classes route Gui/FontRenderer/overlay dr
 - LWJGL shim fidelity for mods that call odd GL functions.
 
 Step 1 of that acceptance is a static check, `java/modhost-accept`. It lists, per mod jar, the vanilla 1.8.9 classes and `func_`/`field_` members the mod names, and checks they exist. It does not run the mods. See its README.
+Step 2 runs the mods: `crates/modhost` and `java/modhost` start the JVM, load the mods and draw their rectangles, gradients, text, images, SVG files and clip rectangles on the Rust renderer. They patch the vanilla classes at load time; the generated stand-in jar is not built yet. Shown to run: Keystrokes and OneConfig. CPS and Toggle sprint are not shown yet; Toggle sprint needs a read-back of player input state from the JVM. See their READMEs for limits.

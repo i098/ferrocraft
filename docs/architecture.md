@@ -16,7 +16,7 @@ The Rust process owns the game and every subsystem that matters for play.
 - `crates/render` - wgpu renderer with GUI, font and overlay draw targets.
 - `crates/input-audio` - input and audio.
 - `crates/launcher` - drop-in install and boot.
-- `crates/modhost-api` - stable, versioned Rust-to-Java API used by every loader and adapter.
+- `crates/modhost` - Rust side of the Java mod host: starts the JVM, feeds it input, draws its commands.
 
 ## Java mod host
 
@@ -25,7 +25,7 @@ This is the planned way to load original mod packs unchanged. See [mod-host.md](
 
 ## Communication
 
-- A shared-memory ring buffer carries bulk data (render commands, chat lines, ticks).
+- Planned: a shared-memory ring buffer carries bulk data (render commands, chat lines, ticks). The mod host step 2 uses a loopback TCP socket instead (see `crates/modhost`).
 - Synchronous hook calls (cancellable events, Mixin redirects) use spin-then-futex on shared memory.
 - A per-method hook table decides when Rust hands execution to Java; unhooked methods cost one relaxed atomic load.
 

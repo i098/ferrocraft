@@ -11,7 +11,7 @@ flowchart TB
         W["world: chunks, blocks, entities, physics"]
         D["render: wgpu, GUI/font/overlay targets"]
         I["input-audio"]
-        M["modhost-api: stable Rust-to-Java API"]
+        M["modhost: Rust side of the Java mod host"]
     end
     subgraph J["Java 8 process: Forge mod host"]
         LW["LaunchWrapper"]
@@ -34,7 +34,7 @@ flowchart TB
     E --> D
     E --> I
     E --> M
-    J <-->|"shared-memory ring + sync hook calls"| M
+    J <-->|"loopback TCP (step 2); shared-memory ring + sync hook calls planned"| M
     SH -->|"GL command stream"| D
     SI --> MX
     FJ --> LW

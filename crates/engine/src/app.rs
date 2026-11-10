@@ -64,6 +64,8 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     hud: gui::Hud,
+    /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set.
+    mods: Option<ferrocraft_modhost::ModHost>,
     ui: Ui,
     icons: Option<Icons>,
     container: Option<ContainerScreen>,
@@ -127,6 +129,7 @@ impl App {
             window: None,
             renderer: None,
             hud: gui::Hud::default(),
+            mods: None,
             ui,
             icons: None,
             container: None,
@@ -491,6 +494,26 @@ impl App {
         }
     }
 
+    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor. Only in a world,
+    /// where the mod frame is drawn.
+    fn mod_screen(&self) -> bool {
+        self.in_world() && self.mods.as_ref().is_some_and(|m| m.screen_open())
+    }
+
+    fn in_world(&self) -> bool {
+        self.ui.in_world && self.game.player.is_some()
+    }
+
+    /// A menu, the container or a mod screen is open: input goes to it, and the cursor is free.
+    fn modal(&self) -> bool {
+        self.ui.is_open() || self.container.is_some() || self.mod_screen()
+    }
+
+    /// A menu, the container, a mod screen or chat is open: vanilla routes input to it, not to the game.
+    fn screen_open(&self) -> bool {
+        self.modal() || self.input.chat_input().is_some()
+    }
+
     /// The F3 left column, `None` without a player.
     fn debug_lines(&self, eye: Option<[f64; 3]>) -> Option<Vec<String>> {
         self.game.player.as_ref().map(|p| {
@@ -531,9 +554,11 @@ impl App {
         );
         let mut g = gui::Gui::new(scale, r.font(), 0);
         let m = Fm(g.metrics());
-        let screen_open = self.ui.is_open() || self.container.is_some();
-        let in_world = self.ui.in_world && self.game.player.is_some();
-        if in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none()) {
+        let screen_open = self.modal();
+        let in_world = self.in_world();
+        let show_hud =
+            in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
+        if show_hud {
             let debug = self.debug_lines(eye);
             let status = status_of(&self.game, self.input.sneaking());
             self.hud.selected_slot = i32::from(self.game.inv.held);
@@ -563,6 +588,20 @@ impl App {
                 },
             );
         }
+        let mut mod_textures = Vec::new();
+        if let Some(mods) = &self.mods {
+            mods.set_view(
+                w as i32,
+                h as i32,
+                i32::from(self.ui.settings.gui_scale),
+                self.ui.settings.force_unicode,
+                self.screen_open(),
+                (self.cursor.0 as i32, self.cursor.1 as i32),
+            );
+            if show_hud {
+                mods.draw(&mut g, &mut mod_textures);
+            }
+        }
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
             cs.draw(
@@ -575,7 +614,8 @@ impl App {
             );
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
-        let textures = std::mem::take(&mut c.pending_textures);
+        let mut textures = std::mem::take(&mut c.pending_textures);
+        textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
     }
 }
@@ -623,6 +663,12 @@ impl ApplicationHandler for App {
         ));
         self.load_assets();
         self.load_sound();
+        if let Some(cfg) = ferrocraft_modhost::Config::from_env() {
+            match ferrocraft_modhost::ModHost::start(&cfg) {
+                Ok(host) => self.mods = Some(host),
+                Err(e) => crate::log::line(&format!("mod host did not start: {e}")),
+            }
+        }
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
@@ -631,7 +677,15 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        let screen = self.screen_open();
         self.route_window_event(&event);
+        if let Some(mods) = self
+            .mods
+            .as_ref()
+            .filter(|m| self.in_world() || !m.screen_open())
+        {
+            mods.window_event(&event, screen);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 crate::log::line("window close requested");

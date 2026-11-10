@@ -352,15 +352,9 @@ impl Mesher<'_> {
             ],
         ];
         let own = self.light_at(at, [0; 3]);
-        // `LiquidRenderer`: sides are drawn from both sides; the top too while a gap is above (`isNeighboringGap`).
-        let gap = (-1..=1).any(|dx| {
-            (-1..=1).any(|dz| {
-                let s = self.st(at, [dx, 1, dz]);
-                !same(s) && !is_opaque_cube(s)
-            })
-        });
-        for f in 0..6 {
-            let n = self.st(at, DIRS[f]);
+        let gap = self.liquid_gap_above(at, &same);
+        for (f, &dir) in DIRS.iter().enumerate() {
+            let n = self.st(at, dir);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
             if same(n) || (f != UP && is_opaque_cube(n)) {
                 continue;
@@ -369,32 +363,12 @@ impl Mesher<'_> {
                 let up = self.light_at(at, [0, 1, 0]);
                 [own[0].max(up[0]), own[1].max(up[1])]
             } else {
-                self.flat_light(at, DIRS[f])
+                self.flat_light(at, dir)
             };
             if lava {
                 light[1] = 1.0;
             }
-            let mut verts = [Vertex::zeroed(); 4];
-            for (i, c) in CORNERS[f].iter().enumerate() {
-                let y = if c[1] > 0.5 {
-                    h[c[0] as usize][c[2] as usize]
-                } else {
-                    0.0
-                };
-                let p = [c[0], y, c[2]];
-                let uv = liquid_uv(f, p);
-                let k = SHADE[f];
-                verts[i] = Vertex {
-                    pos: [
-                        at[0] as f32 + p[0],
-                        at[1] as f32 + p[1],
-                        at[2] as f32 + p[2],
-                    ],
-                    uv: self.atlas.uv(l.tex[f], uv),
-                    color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
-                    light,
-                };
-            }
+            let mut verts = self.liquid_face(at, f, &h, l, rgb, light);
             self.push_quad(pass, verts, false);
             if f >= NORTH || (f == UP && gap) {
                 verts.reverse();
@@ -402,6 +376,47 @@ impl Mesher<'_> {
             }
         }
         let _ = state;
+    }
+
+    /// `LiquidRenderer` draws sides from both sides, and the top too while a cell above is open
+    /// (`isNeighboringGap`).
+    fn liquid_gap_above(&self, at: [i32; 3], same: &dyn Fn(u16) -> bool) -> bool {
+        (-1..=1).any(|dx| {
+            (-1..=1).any(|dz| {
+                let s = self.st(at, [dx, 1, dz]);
+                !same(s) && !is_opaque_cube(s)
+            })
+        })
+    }
+
+    fn liquid_face(
+        &self,
+        at: [i32; 3],
+        f: usize,
+        h: &[[f32; 2]; 2],
+        l: &Look,
+        rgb: [f32; 3],
+        light: [f32; 2],
+    ) -> [Vertex; 4] {
+        let k = SHADE[f];
+        CORNERS[f].map(|c| {
+            let y = if c[1] > 0.5 {
+                h[c[0] as usize][c[2] as usize]
+            } else {
+                0.0
+            };
+            let p = [c[0], y, c[2]];
+            Vertex {
+                pos: [
+                    at[0] as f32 + p[0],
+                    at[1] as f32 + p[1],
+                    at[2] as f32 + p[2],
+                ],
+                uv: self.atlas.uv(l.tex[f], liquid_uv(f, p)),
+                color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
+                light,
+            }
+        })
     }
 
     fn corner_h(&self, at: [i32; 3], same: &dyn Fn(u16) -> bool, cx: i32, cz: i32) -> f32 {

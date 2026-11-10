@@ -195,6 +195,11 @@ impl Entity {
         self.death_time > 0
     }
 
+    /// `EntityLivingBase.preventEntitySpawning`: a living entity refuses a block placed into its box.
+    pub fn blocks_placement(&self) -> bool {
+        !self.is_dead() && matches!(self.kind, Kind::Player | Kind::Mob(_) | Kind::Object(78))
+    }
+
     pub fn sneaking(&self) -> bool {
         self.flags & flag::SNEAKING != 0
     }

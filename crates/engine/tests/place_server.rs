@@ -8,12 +8,14 @@ use ferrocraft_net_client::{NetEvent, Session};
 use std::io::Write;
 use std::time::{Duration, Instant};
 use world::chunk::ChunkStore;
+use world::entities::Entities;
 use world::inventory::ItemStack;
 use world::place::{self, Click, Outcome};
 
 struct Bot {
     s: Session,
     store: ChunkStore,
+    entities: Entities,
     changes: Vec<([i32; 3], u16)>,
     pos: [f64; 3],
 }
@@ -30,6 +32,7 @@ impl Bot {
                         self.changes.push(([x, y, z], state));
                     }
                     NetEvent::PlayerPosLook { x, y, z, .. } => self.pos = [x, y, z],
+                    NetEvent::Entity(ev) => self.entities.apply(ev),
                     _ => {}
                 }
             }
@@ -66,6 +69,12 @@ struct Case {
     click: ([i32; 3], u8, [u8; 3]),
     /// Stand in the target column instead of two blocks south of it.
     inside: bool,
+    /// Player feet height (`tp` y).
+    feet: f64,
+    /// Player x offset inside its column.
+    px: f64,
+    /// Further server changes the click causes, relative to the column.
+    extra: Vec<([i32; 3], u16)>,
 }
 
 fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8; 3])) -> Case {
@@ -77,6 +86,9 @@ fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8;
         setup: vec![],
         click,
         inside: false,
+        feet: 4.0,
+        px: 0.5,
+        extra: vec![],
     }
 }
 
@@ -233,6 +245,99 @@ fn cases() -> Vec<Case> {
     let mut c = case("door on slab top", 324, 0, 0.0, ([0, 4, 0], 1, [8, 16, 8]));
     c.setup = vec!["setblock {x} 4 {z} stone_slab 8".into()];
     v.push(c);
+    // R9-1: `Material.snow` is replaceable, so the block lands in the snow cell beside the stone.
+    let mut c = case(
+        "cube beside a 3-layer snow block",
+        1,
+        0,
+        0.0,
+        ([0, 4, 0], 2, [8, 8, 0]),
+    );
+    c.setup = vec![
+        "setblock {x} 4 {z} stone".into(),
+        "setblock {x} 4 {zn} snow_layer 2".into(),
+    ];
+    v.push(c);
+    // R9-1: the sunflower top is not replaceable (its variant comes from the lower half).
+    let mut c = case(
+        "cube on a sunflower top",
+        1,
+        0,
+        0.0,
+        ([0, 5, 0], 1, [8, 16, 8]),
+    );
+    c.setup = vec![
+        "setblock {x} 4 {z} double_plant 0".into(),
+        "setblock {x} 5 {z} double_plant 10".into(),
+    ];
+    v.push(c);
+    // R9-2: a web has no collision box, so the player's own cell does not refuse it.
+    let mut c = case(
+        "web in the player's own cell",
+        30,
+        0,
+        0.0,
+        ground([8, 16, 8]),
+    );
+    c.inside = true;
+    v.push(c);
+    // R9-2: the dragon egg box ends at x + 0.9375; a body on that outer sliver keeps the cell free.
+    let mut c = case(
+        "dragon egg beside a body sliver",
+        122,
+        0,
+        0.0,
+        ground([8, 16, 8]),
+    );
+    c.inside = true;
+    c.px = 1.25;
+    v.push(c);
+    // R9-3: a pressure plate stands on a fence post.
+    let mut c = case("plate on fence", 70, 0, 0.0, ([0, 4, 0], 1, [8, 16, 8]));
+    c.setup = vec!["setblock {x} 4 {z} fence".into()];
+    v.push(c);
+    // R9-5: 1.8.9 has no y=255 refusal, so both land on top of the y=254 block.
+    for (name, item) in [("cube on y=254", 1), ("torch on y=254", 50)] {
+        let mut c = case(name, item, 0, 0.0, ([0, 254, 0], 1, [8, 16, 8]));
+        c.feet = 255.0;
+        c.setup = vec![
+            "setblock {x} 254 {z} stone".into(),
+            "setblock {x} 254 {zs} stone".into(),
+        ];
+        v.push(c);
+    }
+    let mut c = case(
+        "button on redstone block",
+        143,
+        0,
+        0.0,
+        ([0, 5, 0], 5, [16, 8, 8]),
+    );
+    c.setup = vec!["setblock {x} 5 {z} redstone_block".into()];
+    v.push(c);
+    // R9-6: a living entity in the target cell refuses the block.
+    let mut c = case(
+        "cube into a standing armor stand",
+        1,
+        0,
+        0.0,
+        ground([8, 16, 8]),
+    );
+    c.setup = vec!["summon ArmorStand {x} 4 {z}".into()];
+    v.push(c);
+    // R9-7: redstone ore is a normal cube (`BlockRedstoneOre` cannot provide power), so a
+    // ladder and a button hold on it. These stay last: the lit ore's revert tick must not reach
+    // another case.
+    for (name, item) in [
+        ("ladder on redstone ore", 65),
+        ("button on redstone ore", 143),
+    ] {
+        let mut c = case(name, item, 0, 0.0, ([0, 5, 0], 5, [16, 8, 8]));
+        c.setup = vec!["setblock {x} 5 {z} redstone_ore".into()];
+        // `BlockRedstoneOre.onBlockActivated` also lights the ore.
+        c.extra = vec![([0, 5, 0], 74 << 4)];
+        v.push(c);
+    }
     v
 }
 
@@ -243,6 +348,7 @@ fn client_prediction_equals_the_server() {
     let mut b = Bot {
         s: Session::connect(&addr, "Ferro").expect("login"),
         store: ChunkStore::default(),
+        entities: Entities::default(),
         changes: vec![],
         pos: [0.0; 3],
     };
@@ -256,20 +362,22 @@ fn client_prediction_equals_the_server() {
             continue;
         }
         let (bx, bz) = (sx + 2 + (i as i32 % 8) * 3, sz + 4 + (i as i32 / 8) * 3);
+        let stand = if c.inside { bz } else { bz - 2 };
         let fill = |l: &str| {
             l.replace("{x1}", &(bx + 1).to_string())
                 .replace("{x}", &bx.to_string())
+                .replace("{zn}", &(bz - 1).to_string())
+                .replace("{zs}", &stand.to_string())
                 .replace("{z}", &bz.to_string())
         };
         for l in &c.setup {
             b.cmd(&fill(l));
         }
-        let stand = if c.inside { bz } else { bz - 2 };
-        let (px, pz) = (f64::from(bx) + 0.5, f64::from(stand) + 0.5);
+        let (px, pz) = (f64::from(bx) + c.px, f64::from(stand) + 0.5);
         b.pos = [0.0; 3];
-        b.cmd(&format!("tp Ferro {px} 4 {pz} {} 0", c.yaw));
+        b.cmd(&format!("tp Ferro {px} {} {pz} {} 0", c.feet, c.yaw));
         b.until(|b| b.pos[1] != 0.0);
-        b.s.send_position_look(px, 4.0, pz, c.yaw, 0.0, true)
+        b.s.send_position_look(px, c.feet, pz, c.yaw, 0.0, true)
             .unwrap();
         b.drain(300);
         let stack = Some(ItemStack {
@@ -289,11 +397,15 @@ fn client_prediction_equals_the_server() {
             face,
             cursor: cur.map(|v| f32::from(v) / 16.0),
         };
-        let body = [px - 0.3, 4.0, pz - 0.3, px + 0.3, 5.8, pz + 0.3];
+        let mut bodies = vec![[px - 0.3, c.feet, pz - 0.3, px + 0.3, c.feet + 1.8, pz + 0.3]];
+        bodies.extend(b.entities.iter().filter(|e| e.blocks_placement()).map(|e| {
+            let (lo, hi) = e.bounds();
+            [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]]
+        }));
         let at = |p: [i32; 3]| b.store.get_block(p[0], p[1], p[2]);
-        let gate = place::can_place_on_side(&at, c.item, c.damage, click, body)
+        let gate = place::can_place_on_side(&at, c.item, c.damage, click, &bodies)
             || !(1..=255).contains(&c.item);
-        let outcome = place::use_item(&at, c.item, c.damage, click, c.yaw, body);
+        let outcome = place::use_item(&at, c.item, c.damage, click, c.yaw, &bodies);
         b.changes.clear();
         let before: Vec<([i32; 3], u16)> = (-1..=1)
             .flat_map(|dx| (-1..=3).flat_map(move |dy| (-1..=1).map(move |dz| [dx, dy, dz])))
@@ -310,15 +422,23 @@ fn client_prediction_equals_the_server() {
         }
         got.retain(|(p, st)| before.iter().any(|(q, old)| q == p && old != st));
         got.sort_unstable();
-        let verdict = match &outcome {
+        let placed = match &outcome {
             Outcome::Placed(w) => {
                 let mut w = w.clone();
+                w.extend(
+                    c.extra
+                        .iter()
+                        .map(|(rel, st)| ([bx + rel[0], rel[1], bz + rel[2]], *st)),
+                );
                 w.sort_unstable();
                 got == w
             }
             Outcome::Refused => got.is_empty(),
             Outcome::Used => got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68)),
         };
+        // The client gate and the server must agree: a gate that refuses a click the server
+        // honours would drop the placement in the real client.
+        let verdict = placed && (gate || got.is_empty());
         eprintln!(
             "{} {:<34} gate={gate} predicted={outcome:?} server={got:?}",
             if verdict { "ok  " } else { "FAIL" },

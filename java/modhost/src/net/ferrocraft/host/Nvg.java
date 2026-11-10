@@ -19,13 +19,15 @@ public final class Nvg {
     }
 
     /**
-     * A NanoVGHelper whose methods call the static method of this class with the same name and argument
-     * count. Methods this class does not have do nothing and return zero.
+     * A proxy of the OneConfig renderer interface {@code iface} whose methods call the static method of this class
+     * with the same name and argument count. Methods this class does not have do nothing and return zero. OneConfig's
+     * own implementations run in an isolated LWJGL 3 class loader that cannot start here, so every accessor of
+     * its LwjglManager returns one of these.
      */
-    public static Object helper() throws ClassNotFoundException {
+    public static Object stand(String iface) throws ClassNotFoundException {
         ClassLoader cl = Nvg.class.getClassLoader();
-        Class<?> iface = Class.forName("cc.polyfrost.oneconfig.renderer.NanoVGHelper", false, cl);
-        return Proxy.newProxyInstance(cl, new Class<?>[] {iface}, (proxy, m, args) -> {
+        Class<?> c = Class.forName(iface, false, cl);
+        return Proxy.newProxyInstance(cl, new Class<?>[] {c}, (proxy, m, args) -> {
             for (Method own : Nvg.class.getDeclaredMethods()) {
                 if (own.getName().equals(m.getName()) && own.getParameterCount() == m.getParameterCount()) {
                     return own.invoke(null, args);
@@ -41,23 +43,28 @@ public final class Nvg {
         });
     }
 
+    /** NanoVGHelper.setupAndDraw(body): a frame in window pixels. */
     public static void setupAndDraw(Object body) {
+        setupAndDraw(false, body);
+    }
 
+    /** A frame in scaled GUI units when {@code mc}, in window pixels otherwise; the Sink takes GUI units. */
+    public static void setupAndDraw(boolean mc, Object body) {
         Sink.matrixMode(MODELVIEW);
         Sink.push();
         try {
+            if (!mc) {
+                Object size = R.neu("net.minecraft.client.gui.ScaledResolution", R.get(R.cls("net.minecraft.client.Minecraft"), "field_71432_P"));
+                Sink.scale(1f / (Integer) R.call(size, "func_78325_e")); // ScaledResolution.getScaleFactor
+            }
             ((LongConsumer) body).accept(1L);
         } finally {
             Sink.pop();
         }
     }
 
-    public static void setupAndDraw(boolean mc, Object body) {
-        setupAndDraw(body);
-    }
-
     public static void setupAndDraw(int flags, boolean mc, Object body) {
-        setupAndDraw(body);
+        setupAndDraw(mc, body);
     }
 
     public static void drawRect(long vg, float x, float y, float w, float h, int argb) {
@@ -114,5 +121,11 @@ public final class Nvg {
     public static void glRect(float x0, float y0, float x1, float y1, int argb) {
         Sink.matrixMode(MODELVIEW);
         Sink.rect(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1), argb);
+    }
+
+    /** ScissorHelper.scissor: the wire has no clip rectangle yet, so nothing clips; the caller still gets its Scissor. */
+    public static Object scissor(long vg, float x, float y, float w, float h) throws ReflectiveOperationException {
+        Class<?> c = Class.forName("cc.polyfrost.oneconfig.renderer.scissor.Scissor", true, Nvg.class.getClassLoader());
+        return c.getConstructor(float.class, float.class, float.class, float.class).newInstance(x, y, w, h);
     }
 }

@@ -198,13 +198,21 @@ public final class Host {
         R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu(cls, args));
     }
 
+    /** OneConfig's RenderEvent, which its mixin posts around each frame; GuiUtils reads the mouse button and the frame time from it. */
+    private static void postRender(String stage, float partial) {
+        Object s = R.get(R.cls("cc.polyfrost.oneconfig.events.event.Stage"), stage);
+        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu("cc.polyfrost.oneconfig.events.event.RenderEvent", s, partial));
+    }
+
     /** GuiIngameForge.renderGameOverlay, which posts the overlay events and runs mixins hooked into it. */
     private void renderOverlay(float partial) {
+        postRender("START", partial);
         R.call(fml, "onRenderTickStart", partial);
         Minecraft.renderOverlay(mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(fml, "onRenderTickEnd", partial);
+        postRender("END", partial);
     }
 
     /** Called in place of Minecraft.displayGuiScreen, see {@link BridgeTransformer}. */

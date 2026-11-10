@@ -382,14 +382,19 @@ public class BridgeTransformer implements IClassTransformer {
     }
 
     /**
-     * OneConfig defines NanoVGHelperImpl in its own class loader, out of reach of transformers, so the
-     * manager's accessor returns {@link Nvg#helper()} instead.
+     * OneConfig defines its renderer implementations in its own class loader, out of reach of transformers, and
+     * that loader's LWJGL 3 cannot start here: the manager's accessors return {@link Nvg#stand} proxies instead.
      */
     private static InsnList lwjglManagerMethod(MethodNode m) {
-        if (!(m.name + m.desc).equals("getNanoVGHelper()Lcc/polyfrost/oneconfig/renderer/NanoVGHelper;")) return null;
+        Type ret = Type.getReturnType(m.desc);
+        boolean accessor = m.desc.startsWith("()") && ret.getSort() == Type.OBJECT
+                && ret.getInternalName().startsWith("cc/polyfrost/oneconfig/renderer/")
+                && m.name.matches("get(NanoVGHelper|ScissorHelper|AssetHelper|FontHelper|TinyFD)");
+        if (!accessor) return null;
         InsnList l = new InsnList();
-        call(l, "net/ferrocraft/host/Nvg", "helper", "()Ljava/lang/Object;");
-        l.add(new TypeInsnNode(Opcodes.CHECKCAST, "cc/polyfrost/oneconfig/renderer/NanoVGHelper"));
+        l.add(new org.objectweb.asm.tree.LdcInsnNode(ret.getClassName()));
+        call(l, "net/ferrocraft/host/Nvg", "stand", "(Ljava/lang/String;)Ljava/lang/Object;");
+        l.add(new TypeInsnNode(Opcodes.CHECKCAST, ret.getInternalName()));
         l.add(new InsnNode(Opcodes.ARETURN));
         return l;
     }

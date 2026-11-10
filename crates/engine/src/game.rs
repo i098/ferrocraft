@@ -461,6 +461,11 @@ impl Game {
             (p.pos[2].floor() as i32) >> 4,
         );
         if self.store.get(cx, cz).is_some() {
+            let flying = self.abilities & 2 != 0;
+            let input = world::Input {
+                fly_speed: flying.then_some(self.fly_speed),
+                ..input
+            };
             p.tick(&Collision(&self.store), input);
         }
     }
@@ -606,6 +611,8 @@ mod tests {
         strafe: 0.0,
         jump: false,
         sprint: false,
+        sneak: false,
+        fly_speed: None,
     };
 
     #[test]
@@ -863,6 +870,28 @@ mod tests {
         g.player.as_mut().unwrap().on_ground = true;
         assert!(!g.fly_land());
         assert_eq!(g.abilities, 6);
+    }
+
+    #[test]
+    fn a_flying_player_hovers_and_is_not_landed() {
+        // Oracle: decompiled 1.8.9 `EntityPlayer.moveEntityWithHeading` keeps 0.6 of the vertical speed while
+        // `isFlying`, so with no key held a player at rest stays in the air; `fly_land` then never fires.
+        let mut g = flier(6, 1);
+        g.store.insert(floor_chunk());
+        g.player = Some(world::Player::new([0.5, 70.0, 0.5], 0.0));
+        for _ in 0..40 {
+            g.tick(IDLE);
+            assert!(!g.fly_land());
+        }
+        let y = g.player.as_ref().unwrap().pos[1];
+        assert_eq!(y, 70.0, "no gravity while flying");
+        assert_eq!(g.abilities, 6);
+        g.abilities = 4;
+        for _ in 0..40 {
+            g.tick(IDLE);
+        }
+        assert!(g.player.as_ref().unwrap().on_ground, "a walking player falls to the floor");
+        assert!(g.player.as_ref().unwrap().pos[1] < y);
     }
 
     #[test]

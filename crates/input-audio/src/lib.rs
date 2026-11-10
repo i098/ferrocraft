@@ -454,6 +454,8 @@ impl InputState {
             strafe: axis(self.is_held(Bind::Left), self.is_held(Bind::Right)),
             jump: self.is_held(Bind::Jump),
             sprint: self.sprinting,
+            sneak,
+            fly_speed: None,
         }
     }
 
@@ -470,6 +472,8 @@ impl InputState {
             strafe: axis(self.is_held(Bind::Left), self.is_held(Bind::Right)),
             jump: self.is_held(Bind::Jump),
             sprint,
+            sneak,
+            fly_speed: None,
         }
     }
 

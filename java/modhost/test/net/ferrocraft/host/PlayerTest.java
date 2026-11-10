@@ -18,6 +18,7 @@ public final class PlayerTest {
         int code = 1;
         try {
             doubleTapJumpTogglesFlightWhenFlyingIsAllowed();
+            heldSneakKeyIsReadBackAsSneaking();
             System.out.println("PlayerTest passed");
             code = 0;
         } catch (Throwable t) {
@@ -42,7 +43,21 @@ public final class PlayerTest {
         check(Boolean.TRUE.equals(R.get(caps, "field_75100_b")), "the second press of jump must start flying");
     }
 
-    private static void tick(Player player, int flags) throws IOException {
+    private static void heldSneakKeyIsReadBackAsSneaking() throws IOException {
+        Object mc = Minecraft.create(Launch.minecraftHome);
+        Object settings = R.get(mc, "field_71474_y");
+        Player player = new Player(mc, R.get(mc, "field_71439_g"), settings);
+        int sneak = (Integer) R.call(R.get(settings, "field_74311_E"), "func_151463_i"); // keyBindSneak.getKeyCode
+        Class<?> keyBinding = R.cls("net.minecraft.client.settings.KeyBinding");
+
+        R.call(keyBinding, "func_74510_a", sneak, false);
+        check(tick(player, 0)[1] == 0, "sneak is not read back while the key is up");
+        R.call(keyBinding, "func_74510_a", sneak, true);
+        check(tick(player, 0)[1] == 1, "sneak is read back while the key is held");
+    }
+
+    /** Runs one tick and returns the reply: the sprint and sneak bytes. */
+    private static byte[] tick(Player player, int flags) throws IOException {
         ByteArrayOutputStream request = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(request);
         w.writeByte(0); // onGround
@@ -52,6 +67,7 @@ public final class PlayerTest {
         ByteArrayOutputStream reply = new ByteArrayOutputStream();
         player.tick(new DataInputStream(new ByteArrayInputStream(request.toByteArray())), new DataOutputStream(reply));
         check(reply.size() == 2, "the reply is the sprint and sneak bytes");
+        return reply.toByteArray();
     }
 
     private static void check(boolean ok, String what) {

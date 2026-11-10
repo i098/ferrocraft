@@ -54,7 +54,7 @@ final class Player {
         R.set(player, "field_71074_e", (flags & 4) != 0 ? R.alloc("net.minecraft.item.ItemStack") : null); // itemInUse
         R.call(player, "func_70636_d");
         out.writeByte(Boolean.TRUE.equals(R.call(player, "func_70051_ag")) ? 1 : 0); // isSprinting
-        out.writeByte(R.get(input, "field_78899_d") == Boolean.TRUE ? 1 : 0); // MovementInput.sneak
+        out.writeByte(Boolean.TRUE.equals(R.get(input, "field_78899_d")) ? 1 : 0); // MovementInput.sneak
         out.flush();
     }
 }

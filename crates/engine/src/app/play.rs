@@ -188,7 +188,12 @@ impl App {
             self.input.set_host_sneak(host.map(|h| h.sneaking));
             world::Input::default()
         };
+        let mut abilities = self.game.fly_toggle(input.jump);
         self.game.tick(input);
+        abilities |= self.game.fly_land();
+        if abilities {
+            self.send_abilities();
+        }
         if std::mem::take(&mut self.game.held_replaced) {
             self.use_ticks = 0;
         }
@@ -201,6 +206,14 @@ impl App {
         self.send_state();
         self.send_pose();
         self.sound_tick();
+    }
+
+    /// `EntityPlayerSP.sendPlayerAbilities`: C13 with the flags, fly speed and walk speed.
+    fn send_abilities(&mut self) {
+        let g = &self.game;
+        let (flags, fly, walk) = (g.abilities, g.fly_speed, g.walk_speed);
+        let r = self.session_send(|s| s.abilities(flags, fly, walk));
+        self.send_result(r);
     }
 
     /// One tick of the mod host's stand-in `EntityPlayerSP.onLivingUpdate`, where mods hook sprint and sneak.

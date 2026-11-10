@@ -6,6 +6,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import net.minecraft.launchwrapper.Launch;
 
 /**
@@ -87,6 +88,7 @@ public final class Host {
 
     private void serve(DataInputStream in, DataOutputStream out) throws IOException {
         out.writeByte('H');
+        out.write(System.getenv("FERROCRAFT_BRIDGE_TOKEN").getBytes(StandardCharsets.US_ASCII));
         out.flush();
         while (true) {
             int tag = in.read();

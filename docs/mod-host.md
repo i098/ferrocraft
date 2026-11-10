@@ -69,4 +69,4 @@ Non-rendering mods must work; stand-in classes route Gui/FontRenderer/overlay dr
 - LWJGL shim fidelity for mods that call odd GL functions.
 
 Step 1 of that acceptance is a static check, `java/modhost-accept`. It lists, per mod jar, the vanilla 1.8.9 classes and `func_`/`field_` members the mod names, and checks they exist. It does not run the mods. See its README.
-Step 2 runs the mods: `crates/modhost` and `java/modhost` start the JVM, load the mods and draw their rectangles, gradients and text on the Rust renderer. They patch the vanilla classes at load time; the generated stand-in jar is not built yet. See their READMEs for limits.
+Step 2 runs the mods: `crates/modhost` and `java/modhost` start the JVM, load the mods and draw their rectangles, gradients, text, images, SVG files and clip rectangles on the Rust renderer. They patch the vanilla classes at load time; the generated stand-in jar is not built yet. Shown to run: Keystrokes and OneConfig. CPS and Toggle sprint are not shown yet; Toggle sprint needs a read-back of player input state from the JVM. See their READMEs for limits.

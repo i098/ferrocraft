@@ -48,8 +48,6 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::keyboardMethod);
             case "org/lwjgl/input/Mouse":
                 return patch(bytes, BridgeTransformer::mouseMethod);
-            case "org/lwjgl/opengl/Display":
-                return patch(bytes, BridgeTransformer::displayMethod);
             case "net/minecraftforge/fml/client/SplashProgress":
                 return patch(bytes, BridgeTransformer::splashMethod);
             case "org/lwjgl/Sys":
@@ -254,28 +252,6 @@ public class BridgeTransformer implements IClassTransformer {
         InsnList l = new InsnList();
         returnDefault(l, Type.getReturnType(m.desc));
         return l;
-    }
-
-    private static InsnList displayMethod(MethodNode m) {
-        switch (m.name + m.desc) {
-            case "<clinit>()V": {
-                InsnList l = new InsnList();
-                l.add(new InsnNode(Opcodes.RETURN));
-                return l;
-            }
-            case "getWidth()I":
-                return forward(m, INPUT, "width", "()I");
-            case "getHeight()I":
-                return forward(m, INPUT, "height", "()I");
-            case "isCreated()Z":
-            case "isActive()Z":
-            case "isVisible()Z":
-                return constant(true);
-            case "isCloseRequested()Z":
-                return constant(false);
-            default:
-                return null;
-        }
     }
 
     private static InsnList guiMethod(MethodNode m) {

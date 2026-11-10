@@ -494,9 +494,14 @@ impl App {
         }
     }
 
-    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor.
+    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor. Only in a world,
+    /// where the mod frame is drawn.
     fn mod_screen(&self) -> bool {
-        self.mods.as_ref().is_some_and(|m| m.screen_open())
+        self.in_world() && self.mods.as_ref().is_some_and(|m| m.screen_open())
+    }
+
+    fn in_world(&self) -> bool {
+        self.ui.in_world && self.game.player.is_some()
     }
 
     /// A menu, the container or a mod screen is open: input goes to it, and the cursor is free.
@@ -550,7 +555,7 @@ impl App {
         let mut g = gui::Gui::new(scale, r.font(), 0);
         let m = Fm(g.metrics());
         let screen_open = self.modal();
-        let in_world = self.ui.in_world && self.game.player.is_some();
+        let in_world = self.in_world();
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
         if show_hud {

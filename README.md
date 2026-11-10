@@ -3,7 +3,7 @@
 A Minecraft 1.8.9 client rewritten in Rust. Goal: vanilla behavior on PvP servers like Hypixel, and original Forge mod packs run through a Java 8 mod host.
 
 ## Status
-In development. The engine joins a local offline 1.8.9 server, renders the world, moves, breaks and places blocks, and chats. The mod host runs Forge mods that draw HUDs (Keystrokes, CPS, OneConfig); see [Mod host](docs/mod-host.md).
+In development. The engine joins a local offline 1.8.9 server, renders the world, moves, breaks and places blocks, and chats. The mod host runs Forge mods that draw HUDs and screens (Keystrokes, OneConfig); see [Mod host](docs/mod-host.md).
 
 ## Install
 

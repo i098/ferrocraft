@@ -17,6 +17,14 @@ use winit::keyboard::PhysicalKey;
 
 pub use wire::{DrawCmd, Event, Input};
 
+/// A random secret for one JVM: only the process that got it can say hello.
+fn token() -> String {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+    (0..2)
+        .map(|_| format!("{:016x}", RandomState::new().build_hasher().finish()))
+        .collect()
+}
+
 /// What the JVM needs to start.
 pub struct Config {
     /// `bin/java` of a Java 8 runtime.
@@ -76,7 +84,9 @@ impl ModHost {
             .map(|p| p.to_string_lossy())
             .collect::<Vec<_>>()
             .join(sep);
+        let token = token();
         let child = Command::new(&cfg.java)
+            .env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"))
             .args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
             .args([
@@ -106,7 +116,7 @@ impl ModHost {
             }),
         };
         let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
-        thread::spawn(move || run(&listener, &child, &link));
+        thread::spawn(move || run(&listener, &child, &link, &token));
         Ok(host)
     }
 
@@ -136,9 +146,12 @@ impl ModHost {
     /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
     /// `screen` is whether a screen was open when the event arrived: the game does not see those.
     pub fn window_event(&self, event: &WindowEvent, screen: bool) {
-        let Some(e) = transition(event) else {
-            return;
-        };
+        if let Some(e) = transition(event) {
+            self.queue(e, screen);
+        }
+    }
+
+    fn queue(&self, e: Event, screen: bool) {
         let mut s = self.link.state.lock().unwrap();
         if s.phase != Phase::Done {
             s.input.events.push((e, screen));
@@ -202,7 +215,10 @@ impl ModHost {
                 } => {
                     let (w, h) = (x1 - x0, y1 - y0);
                     if let (Some(data), true) = (sources.get(name), w > 0.0 && h > 0.0) {
-                        let px = |v: f32| (v * factor as f32).round().clamp(1.0, MAX_SVG_PX) as u32;
+                        let px = |v: f32| {
+                            ((v * factor as f32).round().clamp(1.0, MAX_SVG_PX) as u32)
+                                .next_multiple_of(16)
+                        };
                         if let Some((tex, tint)) = texture(
                             name,
                             data,
@@ -281,8 +297,8 @@ fn transition(event: &WindowEvent) -> Option<Event> {
 }
 
 /// Connect, then serve frames until the JVM goes away; then leave no stale commands behind.
-fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link) {
-    let result = connect(listener, child, link).and_then(|stream| pump(stream, link));
+fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str) {
+    let result = connect(listener, child, link, token).and_then(|stream| pump(stream, link));
     let mut s = link.state.lock().unwrap();
     if let (Err(e), false) = (result, s.phase == Phase::Done) {
         eprintln!("mod host stopped: {e}");
@@ -292,10 +308,19 @@ fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link) {
     s.screen = false;
 }
 
-fn connect(listener: &TcpListener, child: &Mutex<Child>, link: &Link) -> io::Result<TcpStream> {
-    let mut stream = loop {
+/// Accept connections until one sends the hello with the token; the others are closed. Gives up when the JVM exits.
+fn connect(
+    listener: &TcpListener,
+    child: &Mutex<Child>,
+    link: &Link,
+    token: &str,
+) -> io::Result<TcpStream> {
+    let stream = loop {
         match listener.accept() {
-            Ok((stream, _)) => break stream,
+            Ok((stream, _)) => match hello(stream, token) {
+                Ok(stream) => break stream,
+                Err(e) => eprintln!("mod host: connection refused: {e}"),
+            },
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 if let Some(status) = child.lock().unwrap().try_wait()? {
                     return Err(io::Error::other(format!(
@@ -307,20 +332,25 @@ fn connect(listener: &TcpListener, child: &Mutex<Child>, link: &Link) -> io::Res
             Err(e) => return Err(e),
         }
     };
-    stream.set_nonblocking(false)?;
-    stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut hello = [0; 1];
-    stream.read_exact(&mut hello)?;
-    if hello[0] != b'H' {
-        return Err(io::Error::other("the JVM sent no hello"));
-    }
-    stream.set_read_timeout(None)?;
     let mut s = link.state.lock().unwrap();
     if s.phase != Phase::Starting {
         return Err(io::Error::other("stopped"));
     }
     s.phase = Phase::Live;
+    Ok(stream)
+}
+
+/// Read `'H'` and the token the JVM got through its environment.
+fn hello(mut stream: TcpStream, token: &str) -> io::Result<TcpStream> {
+    stream.set_nonblocking(false)?;
+    stream.set_nodelay(true)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let mut got = vec![0; 1 + token.len()];
+    stream.read_exact(&mut got)?;
+    if got[0] != b'H' || &got[1..] != token.as_bytes() {
+        return Err(io::Error::other("bad hello"));
+    }
+    stream.set_read_timeout(None)?;
     Ok(stream)
 }
 
@@ -377,7 +407,8 @@ impl Config {
 const MAX_SVG_PX: f32 = 2048.0;
 
 /// The texture name and the tint to blit an image with, registering the texture on first use. An SVG is rasterized
-/// at `size` pixels, in the tint's color when `recolor`. `None` when the file does not decode (logged once).
+/// at `size` pixels, in white when `recolor` so that the tint gives its color. `None` when the file does not
+/// decode (logged once).
 fn texture(
     name: &str,
     data: &[u8],
@@ -387,15 +418,14 @@ fn texture(
     textures: &mut Vec<(String, Vec<u8>)>,
 ) -> Option<(String, u32)> {
     let svg = data.trim_ascii_start().starts_with(b"<");
-    let color = (svg && recolor).then_some(argb & 0x00FF_FFFF);
-    let key = match (svg, color) {
+    let key = match (svg, recolor) {
         (false, _) => format!("modhost/{name}"),
-        (true, None) => format!("modhost/{name}@{}x{}", size.0, size.1),
-        (true, Some(c)) => format!("modhost/{name}@{}x{}#{c:06x}", size.0, size.1),
+        (true, false) => format!("modhost/{name}@{}x{}", size.0, size.1),
+        (true, true) => format!("modhost/{name}@{}x{}#white", size.0, size.1),
     };
     let ok = *known.entry(key.clone()).or_insert_with(|| {
         let png = if svg {
-            rasterize(data, size, color)
+            rasterize(data, size, recolor)
         } else {
             Ok(data.to_vec())
         };
@@ -410,20 +440,11 @@ fn texture(
             }
         }
     });
-    ok.then(|| {
-        (
-            key,
-            if color.is_some() {
-                argb | 0x00FF_FFFF
-            } else {
-                argb
-            },
-        )
-    })
+    ok.then_some((key, argb))
 }
 
-/// An SVG file as a PNG of `w` x `h` pixels; with `color` every pixel takes that RGB and keeps its alpha.
-fn rasterize(svg: &[u8], (w, h): (u32, u32), color: Option<u32>) -> Result<Vec<u8>, String> {
+/// An SVG file as a PNG of `w` x `h` pixels; when `white` every pixel is white and keeps its alpha.
+fn rasterize(svg: &[u8], (w, h): (u32, u32), white: bool) -> Result<Vec<u8>, String> {
     let tree = resvg::usvg::Tree::from_data(svg, &resvg::usvg::Options::default())
         .map_err(|e| e.to_string())?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h).ok_or("empty image")?;
@@ -434,8 +455,8 @@ fn rasterize(svg: &[u8], (w, h): (u32, u32), color: Option<u32>) -> Result<Vec<u
     let mut rgba = pixmap.take();
     for p in rgba.as_chunks_mut::<4>().0 {
         let a = u32::from(p[3]);
-        if let Some(c) = color {
-            p[..3].copy_from_slice(&c.to_be_bytes()[1..]);
+        if white {
+            p[..3].fill(255);
         } else {
             // tiny-skia stores premultiplied colors; PNG wants straight ones
             for v in &mut p[..3] {
@@ -453,4 +474,168 @@ fn rasterize(svg: &[u8], (w, h): (u32, u32), color: Option<u32>) -> Result<Vec<u
         .and_then(|mut wr| wr.write_image_data(&rgba))
         .map_err(|e| e.to_string())?;
     Ok(out)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::Instant;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;
+
+    fn link() -> Arc<Link> {
+        Arc::new(Link {
+            state: Mutex::new(Shared {
+                phase: Phase::Starting,
+                fresh: false,
+                input: Input::default(),
+                commands: Vec::new(),
+                screen: false,
+                sources: HashMap::new(),
+                textures: HashMap::new(),
+            }),
+            view: Condvar::new(),
+        })
+    }
+
+    fn listener() -> (TcpListener, u16) {
+        let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        l.set_nonblocking(true).unwrap();
+        let port = l.local_addr().unwrap().port();
+        (l, port)
+    }
+
+    fn jvm(port: u16, token: &str) -> TcpStream {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(b"H").unwrap();
+        s.write_all(token.as_bytes()).unwrap();
+        s
+    }
+
+    fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+        let start = Instant::now();
+        while !done() {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "timed out: {what}"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn decode(png: &[u8]) -> Vec<u8> {
+        let mut reader = png::Decoder::new(png).read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        reader.next_frame(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn input_queued_while_starting_goes_out_in_order_and_the_reply_is_kept() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let key = |pressed| Event::Key {
+            code: 54,
+            pressed,
+            repeat: false,
+        };
+        host.queue(key(true), false);
+        host.queue(key(false), false);
+        host.set_view(854, 480, 2, false, false, (5, 6));
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+
+        let mut stream = jvm(port, TOKEN);
+        let mut frame = [0; 25 + 2 * 6];
+        stream.read_exact(&mut frame).unwrap();
+        assert_eq!(frame[0], b'F');
+        assert_eq!(frame[23..25], [0, 2]);
+        assert_eq!(frame[25..31], [b'K', 0, 0, 0, 54, 0b01]);
+        assert_eq!(frame[31..37], [b'K', 0, 0, 0, 54, 0]);
+
+        let mut reply = vec![
+            1, 0, 0, 0, 2, b'D', 0, 0, 0, 1, b'a', 0, 0, 0, 2, 7, 8, b'R',
+        ];
+        for v in [1.0f32, 2.0, 3.0, 4.0] {
+            reply.extend(v.to_be_bytes());
+        }
+        reply.extend(0xFF00_FF00u32.to_be_bytes());
+        stream.write_all(&reply).unwrap();
+        wait_until("the reply", || host.screen_open());
+        {
+            let s = link.state.lock().unwrap();
+            assert_eq!(
+                s.commands,
+                vec![DrawCmd::Rect {
+                    rect: [1.0, 2.0, 3.0, 4.0],
+                    argb: 0xFF00_FF00
+                }]
+            );
+            assert_eq!(s.sources["a"], [7, 8]);
+        }
+
+        drop(stream);
+        host.set_view(854, 480, 2, false, false, (5, 6));
+        worker.join().unwrap();
+        let s = link.state.lock().unwrap();
+        assert!(s.phase == Phase::Done && s.commands.is_empty() && !s.screen);
+        drop(s);
+        host.queue(key(true), false);
+        assert!(link.state.lock().unwrap().input.events.is_empty());
+        let _ = child.lock().unwrap().kill();
+    }
+
+    #[test]
+    fn connect_gives_up_when_the_jvm_exits_first() {
+        let (l, _) = listener();
+        let child = Mutex::new(Command::new("true").spawn().unwrap());
+        let e = connect(&l, &child, &link(), TOKEN).unwrap_err();
+        assert!(e.to_string().contains("exited"), "{e}");
+    }
+
+    #[test]
+    fn connect_closes_a_hello_with_the_wrong_token_and_waits_for_the_right_one() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Mutex::new(Command::new("sleep").arg("10").spawn().unwrap());
+        let client = thread::spawn(move || {
+            let mut bad = jvm(port, &"x".repeat(TOKEN.len()));
+            let closed = matches!(bad.read(&mut [0; 1]), Ok(0) | Err(_));
+            (closed, jvm(port, TOKEN))
+        });
+        let stream = connect(&l, &child, &link, TOKEN);
+        let (closed, _good) = client.join().unwrap();
+        let _ = child.lock().unwrap().kill();
+        assert!(stream.is_ok() && closed);
+        assert!(link.state.lock().unwrap().phase == Phase::Live);
+    }
+
+    #[test]
+    fn a_recolored_svg_is_one_white_texture_and_the_tint_carries_the_color() {
+        let (mut known, mut textures) = (HashMap::new(), Vec::new());
+        let mut get = |argb, recolor, size| {
+            texture("i", SVG, size, (argb, recolor), &mut known, &mut textures).unwrap()
+        };
+        let (red, red_tint) = get(0xFFFF_0000, true, (16, 16));
+        let (green, green_tint) = get(0xFF00_FF00, true, (16, 16));
+        let (plain, _) = get(0xFFFF_FFFF, false, (16, 16));
+        let (bigger, _) = get(0xFFFF_0000, true, (32, 32));
+        assert_eq!(red, green);
+        assert_eq!((red_tint, green_tint), (0xFFFF_0000, 0xFF00_FF00));
+        assert!(plain != red && bigger != red);
+        assert_eq!(textures.len(), 3);
+        let white = textures.iter().find(|(k, _)| *k == red).unwrap();
+        assert_eq!(decode(&white.1)[..4], [255, 255, 255, 255]);
+        let own = textures.iter().find(|(k, _)| *k == plain).unwrap();
+        assert_eq!(decode(&own.1)[..4], [255, 0, 0, 255]);
+    }
 }

@@ -1,5 +1,8 @@
 //! The loopback protocol with `net.ferrocraft.host.Host`. All numbers are big-endian.
 //!
+//! Java to Rust at connect: `'H'`, then the 32 ASCII bytes of the token that Rust gave the JVM in its
+//! environment (`FERROCRAFT_BRIDGE_TOKEN`); a connection with another token is closed.
+//!
 //! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
 //! u8 force unicode, u8 screen open, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event
 //! count, then per event: u8 kind, i32 argument, u8 state. Kinds: `'K'` key (LWJGL code; state bit 0

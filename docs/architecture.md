@@ -16,7 +16,7 @@ The Rust process owns the game and every subsystem that matters for play.
 - `crates/render` - wgpu renderer with GUI, font and overlay draw targets.
 - `crates/input-audio` - input and audio.
 - `crates/launcher` - drop-in install and boot.
-- `crates/modhost-api` - stable, versioned Rust-to-Java API used by every loader and adapter.
+- `crates/modhost` - Rust side of the Java mod host: starts the JVM, feeds it input, draws its commands.
 
 ## Java mod host
 

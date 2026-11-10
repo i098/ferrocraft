@@ -13,7 +13,8 @@ import net.minecraft.launchwrapper.Launch;
  * Boots Forge's FML around Minecraft state that Rust owns, then answers one frame message at a time.
  *
  * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
- * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. Any other first byte ends the host.
+ * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
+ * player tick request, see {@link Player}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {
@@ -24,12 +25,14 @@ public final class Host {
     private final Object forgeBus;
     private final Object fml;
     private long lastTick = System.nanoTime();
+    private final Player player;
     private boolean screenOpen;
 
     private Host(Object mc) {
         this.mc = mc;
         this.forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
         this.fml = R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance");
+        this.player = new Player(mc, R.get(mc, "field_71439_g"), R.get(mc, "field_71474_y"));
     }
 
     /** Entry point; the JVM never exits on its own because mods start non-daemon threads. */
@@ -92,6 +95,10 @@ public final class Host {
         out.flush();
         while (true) {
             int tag = in.read();
+            if (tag == 'P') {
+                player.tick(in, out);
+                continue;
+            }
             if (tag != 'F') return;
             int w = in.readInt();
             int h = in.readInt();

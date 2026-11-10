@@ -23,6 +23,8 @@ final class Minecraft {
         R.set(mc, "field_71412_D", gameDir); // mcDataDir
 
         Object settings = R.neu("net.minecraft.client.settings.GameSettings");
+        R.set(settings, "field_74354_ai", new File(gameDir, "options.txt")); // optionsFile
+        R.call(settings, "func_74300_a"); // loadOptions: the key binds the player set, which Rust reads too
         R.set(mc, "field_71474_y", settings); // gameSettings
 
         Object metadata = R.neu("net.minecraft.client.resources.data.IMetadataSerializer");

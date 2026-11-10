@@ -52,6 +52,10 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::splashMethod);
             case "org/lwjgl/Sys":
                 return patch(bytes, BridgeTransformer::sysMethod);
+            case "net/minecraft/client/entity/EntityPlayerSP":
+                return patch(bytes, BridgeTransformer::playerSpMethod);
+            case "net/minecraft/entity/player/EntityPlayer":
+                return patch(bytes, BridgeTransformer::entityPlayerMethod);
             case "net/minecraft/client/gui/Gui":
                 return patch(bytes, BridgeTransformer::guiMethod);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":
@@ -341,6 +345,22 @@ public class BridgeTransformer implements IClassTransformer {
         InsnList l = new InsnList();
         l.add(new InsnNode(Opcodes.FCONST_1));
         l.add(new InsnNode(Opcodes.FRETURN));
+        return l;
+    }
+
+    /**
+     * EntityPlayerSP.onLivingUpdate runs for real on the stand-in player (see {@link Player}), but Rust moves the
+     * player: the block push-out, which reads the world, does nothing.
+     */
+    private static InsnList playerSpMethod(MethodNode m) {
+        return (m.name + m.desc).equals("func_145771_j(DDD)Z") ? constant(false) : null;
+    }
+
+    /** The super call of EntityPlayerSP.onLivingUpdate moves and animates the entity; Rust does that. */
+    private static InsnList entityPlayerMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_70636_d()V")) return null;
+        InsnList l = new InsnList();
+        l.add(new InsnNode(Opcodes.RETURN));
         return l;
     }
 

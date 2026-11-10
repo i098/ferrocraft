@@ -85,6 +85,8 @@ pub struct InputState {
     f3_down: bool,
     sprinting: bool,
     sprint_timer: u8,
+    /// Sneak as the mod host's `EntityPlayerSP` left it this tick; `None` without a host.
+    host_sneak: Option<bool>,
     was_full_forward: bool,
     was_sneaking: bool,
     scroll_px: f64,
@@ -118,6 +120,7 @@ impl InputState {
             f3_down: false,
             sprinting: false,
             sprint_timer: 0,
+            host_sneak: None,
             was_full_forward: false,
             was_sneaking: false,
             scroll_px: 0.0,
@@ -435,6 +438,7 @@ impl InputState {
     pub fn movement(&mut self, on_ground: bool, collided: bool, can_sprint: bool) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
         let forward = axis(self.is_held(Bind::Forward), self.is_held(Bind::Back));
+        self.host_sneak = None;
         let sneak = self.sneaking();
         let full = forward > 0.0 && !sneak;
         let sprint_key = self.is_held(Bind::Sprint);
@@ -453,6 +457,27 @@ impl InputState {
         }
     }
 
+    /// The same tick when the mod host runs `EntityPlayerSP.onLivingUpdate`: mods hook the sprint and sneak
+    /// key reads there, so sprint and sneak are the host's. The movement keys are still read here.
+    pub fn movement_from_host(&mut self, sprint: bool, sneak: bool) -> world::Input {
+        let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
+        self.host_sneak = Some(sneak);
+        self.sprinting = sprint;
+        self.was_full_forward = self.is_held(Bind::Forward) && !self.is_held(Bind::Back) && !sneak;
+        self.was_sneaking = sneak;
+        world::Input {
+            forward: axis(self.is_held(Bind::Forward), self.is_held(Bind::Back)),
+            strafe: axis(self.is_held(Bind::Left), self.is_held(Bind::Right)),
+            jump: self.is_held(Bind::Jump),
+            sprint,
+        }
+    }
+
+    /// Sneak from the mod host while a screen is open; `None` returns to the key.
+    pub fn set_host_sneak(&mut self, sneak: Option<bool>) {
+        self.host_sneak = sneak;
+    }
+
     fn update_sprint(&mut self, on_ground: bool, can_start: bool, sprint_key: bool) {
         let fresh = on_ground && !self.was_sneaking && !self.was_full_forward;
         if fresh && can_start && !self.sprinting {
@@ -468,7 +493,7 @@ impl InputState {
     }
 
     pub fn sneaking(&self) -> bool {
-        self.is_held(Bind::Sneak)
+        self.host_sneak.unwrap_or_else(|| self.is_held(Bind::Sneak))
     }
 
     /// Attack button held: vanilla keeps breaking blocks while it stays down.

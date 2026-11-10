@@ -15,7 +15,7 @@ use std::time::Duration;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
-pub use wire::{DrawCmd, Event, Input};
+pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
 
 /// A random secret for one JVM: only the process that got it can say hello.
 fn token() -> String {
@@ -57,12 +57,19 @@ struct Shared {
     sources: HashMap<String, Vec<u8>>,
     /// Texture names handed to the renderer, and whether the file decoded.
     textures: HashMap<String, bool>,
+    /// A player tick the game thread waits on, and the JVM's answer.
+    player: Option<PlayerState>,
+    answer: Option<PlayerInput>,
 }
 
 struct Link {
     state: Mutex<Shared>,
     view: Condvar,
+    answered: Condvar,
 }
+
+/// How long the game tick waits for the JVM's answer to a player tick.
+const PLAYER_TICK_WAIT: Duration = Duration::from_millis(100);
 
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
@@ -111,8 +118,11 @@ impl ModHost {
                     screen: false,
                     sources: HashMap::new(),
                     textures: HashMap::new(),
+                    player: None,
+                    answer: None,
                 }),
                 view: Condvar::new(),
+                answered: Condvar::new(),
             }),
         };
         let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
@@ -238,6 +248,28 @@ impl ModHost {
         g.set_clip(None);
     }
 
+    /// One tick of the stand-in `EntityPlayerSP.onLivingUpdate` in the JVM, which the mods hook, and the sprint
+    /// and sneak it leaves. `None` while the JVM is not live, or when it does not answer in time: the engine then
+    /// uses its own input.
+    pub fn player_tick(&self, state: PlayerState) -> Option<PlayerInput> {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live {
+            return None;
+        }
+        s.player = Some(state);
+        s.answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.player = None;
+        s.answer.take()
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -250,6 +282,7 @@ impl ModHost {
             s.commands.clear();
             s.screen = false;
             self.link.view.notify_all();
+            self.link.answered.notify_all();
         }
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
@@ -314,6 +347,7 @@ fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str) {
     s.phase = Phase::Done;
     s.commands.clear();
     s.screen = false;
+    link.answered.notify_all();
 }
 
 /// Accept connections until one sends the hello with the token; the others are closed. Gives up when the JVM exits.
@@ -367,11 +401,20 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
         let input = {
             let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live && !s.fresh {
+            while s.phase == Phase::Live && !s.fresh && s.player.is_none() {
                 s = link.view.wait(s).unwrap();
             }
             if s.phase != Phase::Live {
                 return Ok(());
+            }
+            if let Some(p) = s.player.take() {
+                drop(s);
+                wire::write_player(&mut stream, &p)?;
+                let answer = wire::read_player(&mut stream)?;
+                let mut s = link.state.lock().unwrap();
+                s.answer = Some(answer);
+                link.answered.notify_all();
+                continue;
             }
             s.fresh = false;
             let input = s.input.clone();

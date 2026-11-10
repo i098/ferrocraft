@@ -208,7 +208,12 @@ impl Player {
         } else {
             self.jump_ticks = 0;
         }
-        self.move_with_heading(world, input.strafe * 0.98, input.forward * 0.98, input.fly_speed);
+        self.move_with_heading(
+            world,
+            input.strafe * 0.98,
+            input.forward * 0.98,
+            input.fly_speed,
+        );
 
         self.jump_movement_factor = FLYING_SPEED;
         if self.sprinting {
@@ -239,7 +244,13 @@ impl Player {
     /// `EntityPlayer.moveEntityWithHeading` without the water, lava and ladder branches. A flying player
     /// (`fly` is the fly speed) accelerates in the air by that speed, doubled while sprinting, and keeps
     /// 0.6 of its vertical speed instead of gravity.
-    fn move_with_heading(&mut self, world: &dyn World, strafe: f32, forward: f32, fly: Option<f32>) {
+    fn move_with_heading(
+        &mut self,
+        world: &dyn World,
+        strafe: f32,
+        forward: f32,
+        fly: Option<f32>,
+    ) {
         let (kept_y, kept_factor) = (self.vel[1], self.jump_movement_factor);
         if let Some(fly) = fly {
             self.jump_movement_factor = fly * if self.sprinting { 2.0 } else { 1.0 };

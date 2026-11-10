@@ -145,7 +145,11 @@ pub struct PlayerInput {
 }
 
 pub fn write_player(w: &mut impl Write, p: &PlayerState) -> io::Result<()> {
-    let mut b = vec![b'P', u8::from(p.on_ground), u8::from(p.collided_horizontally)];
+    let mut b = vec![
+        b'P',
+        u8::from(p.on_ground),
+        u8::from(p.collided_horizontally),
+    ];
     b.extend(p.food.to_be_bytes());
     b.push(u8::from(p.allow_flying) | u8::from(p.flying) << 1 | u8::from(p.using_item) << 2);
     w.write_all(&b)?;

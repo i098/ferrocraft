@@ -680,7 +680,10 @@ mod tests {
         assert_eq!(host.player_tick(state), None);
         let start = Instant::now();
         assert_eq!(host.player_tick(state), None);
-        assert!(start.elapsed() < PLAYER_TICK_WAIT / 2, "a stalled tick must not wait");
+        assert!(
+            start.elapsed() < PLAYER_TICK_WAIT / 2,
+            "a stalled tick must not wait"
+        );
         let mut request = [0; 8];
         stream.read_exact(&mut request).unwrap();
         assert_eq!(request[0], b'P');

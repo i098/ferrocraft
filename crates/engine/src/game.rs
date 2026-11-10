@@ -890,7 +890,10 @@ mod tests {
         for _ in 0..40 {
             g.tick(IDLE);
         }
-        assert!(g.player.as_ref().unwrap().on_ground, "a walking player falls to the floor");
+        assert!(
+            g.player.as_ref().unwrap().on_ground,
+            "a walking player falls to the floor"
+        );
         assert!(g.player.as_ref().unwrap().pos[1] < y);
     }
 

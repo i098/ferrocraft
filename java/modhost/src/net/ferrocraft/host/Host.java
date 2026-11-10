@@ -13,7 +13,7 @@ import net.minecraft.launchwrapper.Launch;
  *
  * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. Any other first byte ends the host.
- * Frame out: the bytes of {@link Sink#take()}.
+ * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {
     private static final long TICK_NANOS = 50_000_000L;
@@ -104,7 +104,7 @@ public final class Host {
                 Input.event(kind, arg, in.readUnsignedByte());
             }
             frame(w, h, scale, unicode, screen);
-            out.write(Sink.take());
+            out.write(Sink.take(Minecraft.modScreen(mc) != null));
             out.flush();
         }
     }

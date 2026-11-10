@@ -7,9 +7,9 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * The draw commands of one frame. The patched Gui and FontRenderer methods and the GL11 matrix calls
- * land here; {@link #take()} returns them in the wire format that crates/modhost reads.
+ * land here; {@link #take(boolean)} returns them in the wire format that crates/modhost reads.
  *
- * <p>Wire: a frame is u32 count, then per command a tag byte. 'R' rect: 4 f32 (x0 y0 x1 y1) i32 argb.
+ * <p>Wire: a frame is u8 mod screen open, u32 count, then per command a tag byte. 'R' rect: 4 f32 (x0 y0 x1 y1) i32 argb.
  * 'G' gradient: 4 f32, i32 top, i32 bottom. 'T' text: f32 x y, i32 argb, u8 shadow, f32 tx ty scale,
  * u32 byte length, UTF-8 bytes. Rect and gradient coordinates already include the GL matrix.
  */
@@ -120,11 +120,12 @@ public final class Sink {
         out.writeFloat(m[0] * y1 + m[2]);
     }
 
-    /** Returns the frame's commands and resets the buffer and the matrix. */
-    static synchronized byte[] take() {
+    /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
+    static synchronized byte[] take(boolean modScreen) {
         byte[] body = bytes.toByteArray();
-        ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 4);
+        ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {
+            framed.write(modScreen ? 1 : 0);
             new DataOutputStream(framed).writeInt(count);
             framed.write(body);
         } catch (IOException e) {

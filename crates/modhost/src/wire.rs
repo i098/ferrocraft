@@ -6,7 +6,8 @@
 //! down, bit 1 repeat), `'B'` mouse button (LWJGL number 0 left, 1 right, 2 middle; state bit 0 down),
 //! `'W'` wheel (argument is the LWJGL delta, 120 per notch). State bit 2 on any kind: a screen was open
 //! when the event arrived.
-//! Java to Rust, per frame: u32 command count, then the commands of `Sink.java`.
+//! Java to Rust, per frame: u8 mod screen open (a screen a mod opened is current), u32 command count,
+//! then the commands of `Sink.java`.
 
 use std::io::{self, Read, Write};
 
@@ -97,12 +98,15 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     w.flush()
 }
 
-pub fn read_commands(r: &mut impl Read) -> io::Result<Vec<DrawCmd>> {
+/// Read one frame from Java: whether a mod screen is open, and the draw commands.
+pub fn read_frame(r: &mut impl Read) -> io::Result<(bool, Vec<DrawCmd>)> {
+    let screen = u8_(r)? != 0;
     let n = u32_(r)?;
     if n > MAX_COMMANDS {
         return Err(io::Error::other(format!("{n} commands in one frame")));
     }
-    (0..n).map(|_| read_command(r)).collect()
+    let cmds = (0..n).map(|_| read_command(r)).collect::<io::Result<_>>()?;
+    Ok((screen, cmds))
 }
 
 fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
@@ -165,9 +169,10 @@ fn f32_(r: &mut impl Read) -> io::Result<f32> {
 mod tests {
     use super::*;
 
-    /// Bytes as `Sink.take` writes them: one rect and one text with a scaled matrix.
+    /// Bytes as `Sink.take(true)` writes them: the screen flag, one rect and one text with a scaled matrix.
     fn frame() -> Vec<u8> {
-        let mut b = 2u32.to_be_bytes().to_vec();
+        let mut b = vec![1];
+        b.extend(2u32.to_be_bytes());
         b.push(b'R');
         for v in [1.0f32, 2.0, 21.0, 22.0] {
             b.extend(v.to_be_bytes());
@@ -189,7 +194,8 @@ mod tests {
 
     #[test]
     fn reads_the_java_frame_layout() {
-        let cmds = read_commands(&mut frame().as_slice()).unwrap();
+        let (screen, cmds) = read_frame(&mut frame().as_slice()).unwrap();
+        assert!(screen);
         assert_eq!(
             cmds,
             vec![
@@ -212,10 +218,11 @@ mod tests {
     #[test]
     fn rejects_a_cut_frame_and_an_unknown_tag() {
         let f = frame();
-        assert!(read_commands(&mut &f[..f.len() - 1]).is_err());
-        let mut bad = 1u32.to_be_bytes().to_vec();
+        assert!(read_frame(&mut &f[..f.len() - 1]).is_err());
+        let mut bad = vec![0];
+        bad.extend(1u32.to_be_bytes());
         bad.push(b'?');
-        assert!(read_commands(&mut bad.as_slice()).is_err());
+        assert!(read_frame(&mut bad.as_slice()).is_err());
     }
 
     #[test]

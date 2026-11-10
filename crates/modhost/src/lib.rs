@@ -42,6 +42,8 @@ struct Shared {
     fresh: bool,
     input: Input,
     commands: Vec<DrawCmd>,
+    /// A screen a mod opened is current in the JVM.
+    screen: bool,
 }
 
 struct Link {
@@ -91,6 +93,7 @@ impl ModHost {
                     fresh: false,
                     input: Input::default(),
                     commands: Vec::new(),
+                    screen: false,
                 }),
                 view: Condvar::new(),
             }),
@@ -140,11 +143,17 @@ impl ModHost {
         self.link.state.lock().unwrap().commands.clone()
     }
 
+    /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
+    pub fn screen_open(&self) -> bool {
+        self.link.state.lock().unwrap().screen
+    }
+
     pub fn stop(&mut self) {
         {
             let mut s = self.link.state.lock().unwrap();
             s.phase = Phase::Done;
             s.commands.clear();
+            s.screen = false;
             self.link.view.notify_all();
         }
         let mut child = self.child.lock().unwrap();
@@ -201,6 +210,7 @@ fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link) {
     }
     s.phase = Phase::Done;
     s.commands.clear();
+    s.screen = false;
 }
 
 fn connect(listener: &TcpListener, child: &Mutex<Child>, link: &Link) -> io::Result<TcpStream> {
@@ -252,8 +262,10 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             input
         };
         wire::write_input(&mut stream, &input)?;
-        let cmds = wire::read_commands(&mut stream)?;
-        link.state.lock().unwrap().commands = cmds;
+        let (screen, cmds) = wire::read_frame(&mut stream)?;
+        let mut s = link.state.lock().unwrap();
+        s.commands = cmds;
+        s.screen = screen;
     }
 }
 

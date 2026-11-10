@@ -677,7 +677,7 @@ impl App {
     }
 
     pub(super) fn sync_cursor(&mut self) {
-        let screen = self.ui.is_open() || self.container.is_some();
+        let screen = self.modal();
         if screen != self.input_modal {
             self.input_modal = screen;
             self.input.set_screen_open(screen);

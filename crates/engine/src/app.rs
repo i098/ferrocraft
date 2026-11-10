@@ -494,9 +494,19 @@ impl App {
         }
     }
 
-    /// A menu, the container or chat is open: vanilla routes input to it, not to the game.
+    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor.
+    fn mod_screen(&self) -> bool {
+        self.mods.as_ref().is_some_and(|m| m.screen_open())
+    }
+
+    /// A menu, the container or a mod screen is open: input goes to it, and the cursor is free.
+    fn modal(&self) -> bool {
+        self.ui.is_open() || self.container.is_some() || self.mod_screen()
+    }
+
+    /// A menu, the container, a mod screen or chat is open: vanilla routes input to it, not to the game.
     fn screen_open(&self) -> bool {
-        self.ui.is_open() || self.container.is_some() || self.input.chat_input().is_some()
+        self.modal() || self.input.chat_input().is_some()
     }
 
     /// The F3 left column, `None` without a player.
@@ -539,7 +549,7 @@ impl App {
         );
         let mut g = gui::Gui::new(scale, r.font(), 0);
         let m = Fm(g.metrics());
-        let screen_open = self.ui.is_open() || self.container.is_some();
+        let screen_open = self.modal();
         let in_world = self.ui.in_world && self.game.player.is_some();
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());

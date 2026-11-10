@@ -292,14 +292,24 @@ public class BridgeTransformer implements IClassTransformer {
         }
     }
 
-    /** Minecraft.displayGuiScreen needs the window, the sound handler and the mouse grab; {@link Host#displayScreen} does what mods read. */
+    /**
+     * Minecraft.displayGuiScreen needs the window, the sound handler and the mouse grab, so {@link Host#displayScreen}
+     * does what mods read. setIngameFocus, which GuiScreen.keyTyped calls after Escape, needs the mouse helper.
+     */
     private static InsnList minecraftMethod(MethodNode m) {
-        if (!(m.name + m.desc).equals("func_147108_a(Lnet/minecraft/client/gui/GuiScreen;)V")) return null;
         InsnList l = new InsnList();
-        l.add(new VarInsnNode(Opcodes.ALOAD, 1));
-        call(l, "net/ferrocraft/host/Host", "displayScreen", "(Ljava/lang/Object;)V");
-        l.add(new InsnNode(Opcodes.RETURN));
-        return l;
+        switch (m.name + m.desc) {
+            case "func_147108_a(Lnet/minecraft/client/gui/GuiScreen;)V": // displayGuiScreen
+                l.add(new VarInsnNode(Opcodes.ALOAD, 1));
+                call(l, "net/ferrocraft/host/Host", "displayScreen", "(Ljava/lang/Object;)V");
+                l.add(new InsnNode(Opcodes.RETURN));
+                return l;
+            case "func_71381_h()V": // setIngameFocus
+                l.add(new InsnNode(Opcodes.RETURN));
+                return l;
+            default:
+                return null;
+        }
     }
 
     /** FontRenderer.drawString(String, float, float, int, boolean): every draw method ends here. */

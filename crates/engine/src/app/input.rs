@@ -22,6 +22,16 @@ impl App {
             }
             _ => {}
         }
+        if self.mod_screen()
+            && matches!(
+                event,
+                WindowEvent::KeyboardInput { .. }
+                    | WindowEvent::MouseInput { .. }
+                    | WindowEvent::MouseWheel { .. }
+            )
+        {
+            return;
+        }
         let modal = self.ui.is_open() || self.container.is_some();
         if modal || self.input.chat_input().is_some() {
             self.route_to_screen(event, modal);

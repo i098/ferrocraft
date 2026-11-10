@@ -58,6 +58,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::guiMethod);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":
                 return patch(bytes, BridgeTransformer::lwjglManagerMethod);
+            case "cc/polyfrost/oneconfig/renderer/NanoVGHelper":
+                return withoutLwjgl3Methods(bytes);
             case "cc/polyfrost/oneconfig/platform/impl/GLPlatformImpl":
                 return patch(bytes, BridgeTransformer::glPlatformMethod);
             case "net/minecraft/entity/Entity":
@@ -364,6 +366,19 @@ public class BridgeTransformer implements IClassTransformer {
     /** AbstractClientPlayer.isSpectator reads the network player info, which does not exist here. */
     private static InsnList playerMethod(MethodNode m) {
         return (m.name + m.desc).equals("func_175149_v()Z") ? constant(false) : null;
+    }
+
+    /**
+     * NanoVGHelper declares two methods on NVGColor, a class of OneConfig's isolated LWJGL 3, which the game
+     * class loader cannot load next to LWJGL 2: a proxy of the interface fails on them. Nothing here uses them.
+     */
+    private static byte[] withoutLwjgl3Methods(byte[] bytes) {
+        ClassNode cn = new ClassNode();
+        new ClassReader(bytes).accept(cn, 0);
+        if (!cn.methods.removeIf(m -> ((MethodNode) m).desc.contains("Lorg/lwjgl/"))) return bytes;
+        ClassWriter cw = new ClassWriter(0);
+        cn.accept(cw);
+        return cw.toByteArray();
     }
 
     /**

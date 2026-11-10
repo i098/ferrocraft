@@ -120,6 +120,7 @@ public final class Host {
         lastTick += ticks * TICK_NANOS;
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
+            postTick("START");
             R.call(fml, "onPreClientTick");
             Object modScreen = Minecraft.modScreen(mc);
             if (modScreen != null) {
@@ -130,6 +131,7 @@ public final class Host {
                 pollKeyboard();
             }
             R.call(fml, "onPostClientTick");
+            postTick("END");
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
         renderOverlay(partial);
@@ -167,6 +169,12 @@ public final class Host {
             R.call(fml, "fireKeyInput");
             postOneConfig("KeyInputEvent", key, down);
         }
+    }
+
+    /** OneConfig's TickEvent, which its mixin posts at the head and the return of runTick; its TickDelay, and so GuiUtils.displayScreen, waits for it. */
+    private static void postTick(String stage) {
+        Object start = R.get(R.cls("cc.polyfrost.oneconfig.events.event.Stage"), stage);
+        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu("cc.polyfrost.oneconfig.events.event.TickEvent", start));
     }
 
     /** KeyBinding.setKeyBindState, and KeyBinding.onTick on a press; mouse buttons are code - 100. */

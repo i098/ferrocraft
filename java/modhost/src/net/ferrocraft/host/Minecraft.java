@@ -100,25 +100,25 @@ final class Minecraft {
      * mod opened stays.
      */
     static void setScreen(Object mc, boolean open) {
-        Object current = R.get(mc, "field_71462_q"); // currentScreen
+        Object current = R.get(mc, "field_71462_r"); // currentScreen
         if (current != null && current != screen) return;
         if (open && screen == null) screen = R.alloc("net.minecraft.client.gui.GuiIngameMenu");
-        R.set(mc, "field_71462_q", open ? screen : null);
+        R.set(mc, "field_71462_r", open ? screen : null);
         R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a"); // unPressAllKeys
     }
 
     /** The screen a mod opened, or null: the stand-in for Rust's screens does not count. */
     static Object modScreen(Object mc) {
-        Object current = R.get(mc, "field_71462_q");
+        Object current = R.get(mc, "field_71462_r");
         return current == screen ? null : current;
     }
 
     /** Minecraft.displayGuiScreen: close the old screen, release the key binds, size the new one. */
     static void displayScreen(Object next) {
         Object mc = R.get(R.cls("net.minecraft.client.Minecraft"), "field_71432_P");
-        Object old = R.get(mc, "field_71462_q");
+        Object old = R.get(mc, "field_71462_r");
         if (old != null && old != screen) R.call(old, "func_146281_b"); // GuiScreen.onGuiClosed
-        R.set(mc, "field_71462_q", next);
+        R.set(mc, "field_71462_r", next);
         if (next == null) return;
         R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a");
         Object size = R.neu("net.minecraft.client.gui.ScaledResolution", mc);

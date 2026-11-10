@@ -63,6 +63,13 @@ impl Bot {
             self.cmd(&l);
         }
     }
+
+    /// A lit TNT would blow a crater into the cells of later cases.
+    fn defuse(&mut self, setup: &[String]) {
+        if setup.iter().any(|l| l.contains("PrimedTnt")) {
+            self.cmd("kill @e[type=PrimedTnt]");
+        }
+    }
 }
 
 struct Case {
@@ -119,7 +126,8 @@ fn blocker_and_box_cases() -> Vec<Case> {
         ("cube into a minecart", "summon MinecartRideable {x} 4 {z}"),
         (
             "cube into primed tnt",
-            "summon PrimedTnt {x} 4 {z} {Fuse:32000}",
+            // `Fuse` is a byte: 32000 would wrap to 0 and blow up at once.
+            "summon PrimedTnt {x} 4 {z} {Fuse:127b}",
         ),
         ("cube into an end crystal", "summon EnderCrystal {x} 4 {z}"),
     ] {
@@ -586,6 +594,7 @@ fn client_prediction_equals_the_server() {
         if !verdict {
             bad.push(c.name);
         }
+        b.defuse(&c.setup);
     }
     assert!(
         bad.is_empty(),

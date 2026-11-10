@@ -1,5 +1,7 @@
 # java/modhost
 
+Owner: fc-modhost-pvp
+
 Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) and reads its draw commands over a loopback socket.
 
 ## How it runs

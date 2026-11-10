@@ -25,7 +25,7 @@ This is the planned way to load original mod packs unchanged. See [mod-host.md](
 
 ## Communication
 
-- A shared-memory ring buffer carries bulk data (render commands, chat lines, ticks).
+- Planned: a shared-memory ring buffer carries bulk data (render commands, chat lines, ticks). The mod host step 2 uses a loopback TCP socket instead (see `crates/modhost`).
 - Synchronous hook calls (cancellable events, Mixin redirects) use spin-then-futex on shared memory.
 - A per-method hook table decides when Rust hands execution to Java; unhooked methods cost one relaxed atomic load.
 

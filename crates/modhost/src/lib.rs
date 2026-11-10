@@ -271,7 +271,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
 
 impl Config {
     /// Read `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` (a platform path list) and
-    /// `FERROCRAFT_MODHOST_GAMEDIR`. `None` when the java variable is unset: no mods then.
+    /// `FERROCRAFT_MODHOST_GAMEDIR`. `None` when any of the three is unset: no mods then.
     pub fn from_env() -> Option<Self> {
         let java = PathBuf::from(std::env::var_os("FERROCRAFT_MODHOST_JAVA")?);
         let class_path =

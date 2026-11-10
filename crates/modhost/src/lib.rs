@@ -269,10 +269,18 @@ fn transition(event: &WindowEvent) -> Option<Event> {
             let PhysicalKey::Code(code) = k.physical_key else {
                 return None;
             };
+            let pressed = k.state == ElementState::Pressed;
             Some(Event::Key {
                 code: keys::lwjgl(code)?,
-                pressed: k.state == ElementState::Pressed,
+                pressed,
                 repeat: k.repeat,
+                ch: k
+                    .text
+                    .as_deref()
+                    .and_then(|t| t.chars().next())
+                    .filter(|_| pressed)
+                    .and_then(|c| u16::try_from(c).ok())
+                    .unwrap_or(0),
             })
         }
         WindowEvent::MouseInput { state, button, .. } => Some(Event::Button {
@@ -545,6 +553,7 @@ mod tests {
             code: 54,
             pressed,
             repeat: false,
+            ch: if pressed { 0x41 } else { 0 },
         };
         host.queue(key(true), false);
         host.queue(key(false), false);
@@ -555,12 +564,12 @@ mod tests {
         };
 
         let mut stream = jvm(port, TOKEN);
-        let mut frame = [0; 25 + 2 * 6];
+        let mut frame = [0; 25 + 2 * 8];
         stream.read_exact(&mut frame).unwrap();
         assert_eq!(frame[0], b'F');
         assert_eq!(frame[23..25], [0, 2]);
-        assert_eq!(frame[25..31], [b'K', 0, 0, 0, 54, 0b01]);
-        assert_eq!(frame[31..37], [b'K', 0, 0, 0, 54, 0]);
+        assert_eq!(frame[25..33], [b'K', 0, 0, 0, 54, 0b01, 0, 0x41]);
+        assert_eq!(frame[33..41], [b'K', 0, 0, 0, 54, 0, 0, 0]);
 
         let mut reply = vec![
             1, 0, 0, 0, 2, b'D', 0, 0, 0, 1, b'a', 0, 0, 0, 2, 7, 8, b'R',

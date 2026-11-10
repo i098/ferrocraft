@@ -5,10 +5,11 @@
 //!
 //! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
 //! u8 force unicode, u8 screen open, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event
-//! count, then per event: u8 kind, i32 argument, u8 state. Kinds: `'K'` key (LWJGL code; state bit 0
-//! down, bit 1 repeat), `'B'` mouse button (LWJGL number 0 left, 1 right, 2 middle; state bit 0 down),
-//! `'W'` wheel (argument is the LWJGL delta, 120 per notch). State bit 2 on any kind: a screen was open
-//! when the event arrived.
+//! count, then per event: u8 kind, i32 argument, u8 state, u16 character. Kinds: `'K'` key (LWJGL code; state
+//! bit 0 down, bit 1 repeat; character is the UTF-16 unit the key typed, 0 for none), `'B'` mouse button (LWJGL
+//! number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel (argument is the LWJGL delta, 120 per
+//! notch). The character is 0 for buttons and wheel. State bit 2 on any kind: a screen was open when the event
+//! arrived.
 //! Java to Rust, per frame: u8 mod screen open (a screen a mod opened is current), u32 command count,
 //! then the commands of `Sink.java`: `'R'` rect, `'G'` gradient, `'T'` text, `'D'` define (a resource
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
@@ -24,6 +25,8 @@ pub enum Event {
         code: i32,
         pressed: bool,
         repeat: bool,
+        /// What the key typed, as LWJGL's `getEventCharacter`: 0 when it typed nothing.
+        ch: u16,
     },
     Button {
         button: i32,
@@ -92,7 +95,7 @@ const MAX_TEXT: usize = 1 << 16;
 const MAX_COMMANDS: u32 = 1 << 16;
 
 pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
-    let mut b = Vec::with_capacity(32 + i.events.len() * 6);
+    let mut b = Vec::with_capacity(32 + i.events.len() * 8);
     b.push(b'F');
     for v in [i.width, i.height, i.gui_scale] {
         b.extend(v.to_be_bytes());
@@ -104,18 +107,20 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
     b.extend(n.to_be_bytes());
     for &(e, screen) in &i.events {
-        let (kind, arg, state) = match e {
+        let (kind, arg, state, ch) = match e {
             Event::Key {
                 code,
                 pressed,
                 repeat,
-            } => (b'K', code, u8::from(pressed) | u8::from(repeat) << 1),
-            Event::Button { button, pressed } => (b'B', button, u8::from(pressed)),
-            Event::Wheel(delta) => (b'W', delta, 0),
+                ch,
+            } => (b'K', code, u8::from(pressed) | u8::from(repeat) << 1, ch),
+            Event::Button { button, pressed } => (b'B', button, u8::from(pressed), 0),
+            Event::Wheel(delta) => (b'W', delta, 0, 0),
         };
         b.push(kind);
         b.extend(arg.to_be_bytes());
         b.push(state | u8::from(screen) << 2);
+        b.extend(ch.to_be_bytes());
     }
     w.write_all(&b)?;
     w.flush()
@@ -319,6 +324,7 @@ mod tests {
                         code: 17,
                         pressed: true,
                         repeat: true,
+                        ch: 0x00e9,
                     },
                     false,
                 ),
@@ -344,12 +350,15 @@ mod tests {
         want.push(b'K');
         want.extend(17i32.to_be_bytes());
         want.push(0b011);
+        want.extend(0x00e9u16.to_be_bytes());
         want.push(b'B');
         want.extend(1i32.to_be_bytes());
         want.push(0b100);
+        want.extend([0, 0]);
         want.push(b'W');
         want.extend((-120i32).to_be_bytes());
         want.push(0b100);
+        want.extend([0, 0]);
         assert_eq!(out, want);
     }
 }

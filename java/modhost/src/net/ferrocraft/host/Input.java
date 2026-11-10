@@ -9,11 +9,11 @@ import java.util.ArrayDeque;
 public final class Input {
     private static final boolean[] KEYS = new boolean[256];
     private static final boolean[] BUTTONS = new boolean[8];
-    /** Key events: key, down, repeat, screen open. */
+    /** Key events: key, down, repeat, screen open, character. */
     private static final ArrayDeque<int[]> KEY_EVENTS = new ArrayDeque<>();
     /** Mouse events: button (-1 for the wheel), down, wheel, x, y, dx, dy, screen open. */
     private static final ArrayDeque<int[]> MOUSE_EVENTS = new ArrayDeque<>();
-    private static int[] keyEvent = new int[4];
+    private static int[] keyEvent = new int[5];
     private static int[] mouseEvent = new int[8];
     private static boolean repeatEvents;
     private static int lastEventX;
@@ -33,13 +33,13 @@ public final class Input {
     }
 
     /** One transition from Rust: kind 'K', 'B' or 'W', see wire.rs. */
-    static synchronized void event(int kind, int arg, int state) {
+    static synchronized void event(int kind, int arg, int state, int ch) {
         boolean down = (state & 1) != 0;
         int screen = (state & 4) != 0 ? 1 : 0;
         switch (kind) {
             case 'K':
                 if (arg >= 0 && arg < KEYS.length) KEYS[arg] = down;
-                KEY_EVENTS.add(new int[] {arg, down ? 1 : 0, (state & 2) != 0 ? 1 : 0, screen});
+                KEY_EVENTS.add(new int[] {arg, down ? 1 : 0, (state & 2) != 0 ? 1 : 0, screen, ch});
                 break;
             case 'B':
                 if (arg >= 0 && arg < BUTTONS.length) BUTTONS[arg] = down;
@@ -99,6 +99,10 @@ public final class Input {
 
     public static synchronized boolean eventRepeat() {
         return keyEvent[2] != 0;
+    }
+
+    public static synchronized char eventChar() {
+        return (char) keyEvent[4];
     }
 
     public static synchronized int eventButton() {

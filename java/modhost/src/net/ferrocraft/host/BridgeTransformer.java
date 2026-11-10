@@ -175,7 +175,7 @@ public class BridgeTransformer implements IClassTransformer {
             case "areRepeatEventsEnabled()Z":
                 return forward(m, INPUT, "repeatEventsEnabled", "()Z");
             case "getEventCharacter()C":
-                return constant(0);
+                return forward(m, INPUT, "eventChar", "()C");
             case "getEventNanoseconds()J":
                 return defaultBody(m);
             default:
@@ -275,6 +275,8 @@ public class BridgeTransformer implements IClassTransformer {
     /**
      * Minecraft.displayGuiScreen needs the window, the sound handler and the mouse grab, so {@link Host#displayScreen}
      * does what mods read. setIngameFocus, which GuiScreen.keyTyped calls after Escape, needs the mouse helper.
+     * dispatchKeypresses, which GuiScreen.handleKeyboardInput calls after each key, reaches the window and the
+     * Twitch stream.
      */
     private static InsnList minecraftMethod(MethodNode m) {
         InsnList l = new InsnList();
@@ -285,6 +287,7 @@ public class BridgeTransformer implements IClassTransformer {
                 l.add(new InsnNode(Opcodes.RETURN));
                 return l;
             case "func_71381_h()V": // setIngameFocus
+            case "func_152348_aa()V": // dispatchKeypresses
                 l.add(new InsnNode(Opcodes.RETURN));
                 return l;
             default:

@@ -25,6 +25,14 @@ public final class Nvg {
     private static final Map<String, byte[]> RESOURCES = new HashMap<>();
     /** The scissors in force, innermost last: the Scissor object and its box on the screen. */
     private static final List<Object[]> SCISSORS = new ArrayList<>();
+    /** The static methods of this class by name and argument count; the first declared wins. */
+    private static final Map<String, Method> OWN = new HashMap<>();
+
+    static {
+        for (Method own : Nvg.class.getDeclaredMethods()) {
+            OWN.putIfAbsent(own.getName() + "/" + own.getParameterCount(), own);
+        }
+    }
 
     private Nvg() {
         throw new AssertionError();
@@ -40,11 +48,8 @@ public final class Nvg {
         ClassLoader cl = Nvg.class.getClassLoader();
         Class<?> c = Class.forName(iface, false, cl);
         return Proxy.newProxyInstance(cl, new Class<?>[] {c}, (proxy, m, args) -> {
-            for (Method own : Nvg.class.getDeclaredMethods()) {
-                if (own.getName().equals(m.getName()) && own.getParameterCount() == m.getParameterCount()) {
-                    return own.invoke(null, args);
-                }
-            }
+            Method own = OWN.get(m.getName() + "/" + m.getParameterCount());
+            if (own != null) return own.invoke(null, args);
             Class<?> r = m.getReturnType();
             if (r == boolean.class) return false;
             if (r == float.class) return 0f;

@@ -103,7 +103,7 @@ public final class Host {
             for (int i = 0; i < n; i++) {
                 int kind = in.readUnsignedByte();
                 int arg = in.readInt();
-                Input.event(kind, arg, in.readUnsignedByte());
+                Input.event(kind, arg, in.readUnsignedByte(), in.readUnsignedShort());
             }
             frame(w, h, scale, unicode, screen);
             out.write(Sink.take(Minecraft.modScreen(mc) != null));

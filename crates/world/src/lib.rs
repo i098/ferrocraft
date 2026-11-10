@@ -10,6 +10,7 @@ pub mod chunk;
 pub mod dig;
 pub mod entities;
 pub mod inventory;
+pub mod place;
 
 use std::sync::LazyLock;
 

@@ -358,7 +358,9 @@ impl InputState {
     }
 
     fn submit_chat(&mut self) {
-        let line = self.chat.take().unwrap_or_default().trim().to_owned();
+        // `String.trim()` strips only chars <= U+0020, not Unicode whitespace.
+        let line = self.chat.take().unwrap_or_default();
+        let line = line.trim_matches(|c| c <= ' ').to_owned();
         if line.is_empty() {
             return;
         }

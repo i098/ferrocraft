@@ -11,7 +11,7 @@
 //! keep metadata 0 until the server answers. The local player and every entity with
 //! `Entity.preventEntitySpawning` block a placement.
 
-use crate::dig::{ladder_box, opaque_cube, selection_box};
+use crate::dig::{opaque_cube, selection_box};
 
 /// Where and how a click hit a block: `hitVec - pos` as vanilla's `float` locals.
 #[derive(Clone, Copy, Debug)]
@@ -143,26 +143,26 @@ fn material_replaceable(id: u16) -> bool {
 }
 
 /// Blocks whose `getCollisionBoundingBox` is null: no entity ever blocks them.
-const NO_COLLISION: [u16; 36] = [
+const NO_COLLISION: [u16; 37] = [
     6, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 55, 59, 63, 66, 68, 69, 70, 72, 75, 76, 77, 83, 90,
-    104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
+    104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 157, 175,
 ];
 
-/// Fences, trapdoors and anvils: vanilla answers `getCollisionBoundingBox` from the bounds the
-/// last caller left on the shared block instance, so the box is not a function of the block
-/// (`BlockFence` has no override). A body in the unit cube therefore neither refuses the click
-/// nor predicts a placement.
+/// Blocks whose `getCollisionBoundingBox` is not a function of the block: fences, panes,
+/// single slabs, chests, ladders, trapdoors and anvils. None of them overrides it (`BlockLadder`
+/// does, but its `setBlockBoundsBasedOnState` guard fails on the air target), so vanilla reads the
+/// bounds the last caller left on the shared block instance. A body in the unit cube therefore
+/// neither refuses the click nor predicts a placement.
 fn stale_bounds(id: u16) -> bool {
-    matches!(id, 85 | 96 | 113 | 145 | 167 | 188..=192)
+    matches!(
+        id,
+        44 | 54 | 65 | 85 | 96 | 101 | 102 | 113 | 126 | 145 | 146 | 160 | 167 | 182 | 188..=192
+    )
 }
 
 /// Blocks with one fixed box smaller than the cell: slabs, chests, cactus, soul sand, carpet.
 const FIXED: &[(&[u16], [f64; 6])] = &[
-    (&[44, 126, 182], [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]),
-    (
-        &[54, 130, 146],
-        [0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375],
-    ),
+    (&[130], [0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375]),
     (&[81], [0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375]),
     (&[88], [0.0, 0.0, 0.0, 1.0, 0.875, 1.0]),
     (&[93, 94, 149, 150], [0.0, 0.0, 0.0, 1.0, 0.125, 1.0]),
@@ -177,7 +177,7 @@ const FIXED: &[(&[u16], [f64; 6])] = &[
 
 /// `Block.getCollisionBoundingBox` of the default state at `pos`, `None` when it has none.
 /// Walls and gates read their neighbours and stand 1.5 high. The hopper resets its bounds to
-/// the unit cube after adding its boxes.
+/// the unit cube after adding its boxes. Stale-bounds blocks answer the unit cube here.
 fn collision(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     if NO_COLLISION.contains(&id) {
         return None;
@@ -186,7 +186,6 @@ fn collision(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> Option<[f6
         return Some(*b);
     }
     match id {
-        65 => Some(ladder_box(2)),
         107 | 139 | 183..=187 => {
             let here = |p: [i32; 3]| if p == pos { id << 4 } else { at(p) };
             selection_box(&here, pos).map(|b| [b[0], b[1], b[2], b[3], 1.5, b[5]])
@@ -256,14 +255,15 @@ fn button_support(state: u16, face: u8) -> bool {
 }
 
 /// `Block.canPlaceBlockAt` of `id` into a cell whose material is replaceable.
-fn supported(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> bool {
+fn supported(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3], side: u8) -> bool {
     let below = at(offset(pos, 0));
     match id {
         50 | 75 | 76 => [NORTH, EAST, SOUTH, WEST, UP]
             .into_iter()
             .any(|f| torch_can_place(at, pos, f)),
         65 => HORIZONTAL.into_iter().any(|f| ladder_can_stay(at, pos, f)),
-        77 | 143 => (0..6).any(|f| button_support(at(offset(pos, f)), f)),
+        // `BlockButton.canPlaceBlockOnSide`: only the clicked side counts.
+        77 | 143 => button_support(at(offset(pos, opposite(side))), opposite(side)),
         27 | 28 | 66 | 157 => solid_top(below),
         // `BlockBasePressurePlate.canBePlacedOn`: a solid top surface or a fence.
         70 | 72 | 147 | 148 => solid_top(below) || is_fence(below >> 4),
@@ -347,14 +347,7 @@ fn placed_state(
         65 => ladder_facing(at, pos, face),
         // `BlockButton.onBlockPlaced` and `getMetaFromState`: DOWN 0, EAST 1, WEST 2, SOUTH 3,
         // NORTH 4, UP 5 - the same table as `BlockTorch`.
-        77 | 143 => {
-            let facing = if button_support(at(offset(pos, opposite(face))), opposite(face)) {
-                face
-            } else {
-                0
-            };
-            [0_u16, 5, 4, 3, 2, 1][usize::from(facing)]
-        }
+        77 | 143 => [0_u16, 5, 4, 3, 2, 1][usize::from(face)],
         _ => meta,
     };
     id << 4 | meta
@@ -379,14 +372,21 @@ pub fn can_place_on_side(
     } else {
         offset(click.pos, click.face)
     };
-    can_block_be_placed(at, block, pos, bodies)
+    // `ItemBlock.canPlaceBlockOnSide` clicks a snow layer from above.
+    let side = if pos == click.pos && at(pos) >> 4 == 78 {
+        UP
+    } else {
+        click.face
+    };
+    can_block_be_placed(at, block, pos, side, bodies)
 }
 
-/// `World.canBlockBePlaced` with no placing entity.
+/// `World.canBlockBePlaced` with no placing entity; `side` is the face `Block.canReplace` gets.
 fn can_block_be_placed(
     at: &dyn Fn([i32; 3]) -> u16,
     block: u16,
     pos: [i32; 3],
+    side: u8,
     bodies: &[[f64; 6]],
 ) -> bool {
     let overlaps = collision(at, block, pos).is_some_and(|b| blocked(b, pos, bodies));
@@ -397,7 +397,7 @@ fn can_block_be_placed(
     if block == 145 && circuits(at(pos) >> 4) {
         return true;
     }
-    material_replaceable(at(pos) >> 4) && supported(at, block, pos)
+    material_replaceable(at(pos) >> 4) && supported(at, block, pos, side)
 }
 
 /// `ItemStack.onItemUse` of an item block (id 1 to 255) and the items that place like one:
@@ -436,7 +436,12 @@ fn use_block(
     } else {
         offset(click.pos, click.face)
     };
-    if !can_block_be_placed(at, id, pos, bodies) {
+    let side = if pos == click.pos && at(pos) >> 4 == 78 {
+        UP
+    } else {
+        click.face
+    };
+    if !can_block_be_placed(at, id, pos, side, bodies) {
         return Outcome::Refused;
     }
     if stale_bounds(id) && collision(at, id, pos).is_some_and(|b| blocked(b, pos, bodies)) {
@@ -664,16 +669,25 @@ mod tests {
             use_item(&at, 30, 0, top_of_ground(), 0.0, &[body]),
             Outcome::Placed(_)
         ));
-        // A chest box stops at y + 0.875, so a body above that line leaves the cell free.
+        // `BlockChest` has no `getCollisionBoundingBox`: the box is stale, so a body in the
+        // cell neither refuses nor places (`Used`); an ender chest has its own fixed box.
         let above = [-0.3, 4.875, -0.3, 0.3, 6.675, 0.3];
+        for id in [54, 146] {
+            assert_eq!(
+                use_item(&at, id, 0, top_of_ground(), 0.0, &[above]),
+                Outcome::Used
+            );
+        }
         assert!(matches!(
-            use_item(&at, 54, 0, top_of_ground(), 0.0, &[above]),
+            use_item(&at, 130, 0, top_of_ground(), 0.0, &[above]),
             Outcome::Placed(_)
         ));
-        assert_eq!(
-            use_item(&at, 54, 0, top_of_ground(), 0.0, &[body]),
-            Outcome::Refused
-        );
+        // `BlockRailBase` has no collision box: an activator rail goes into the player's cell.
+        let rail = flat(&[([0, 3, 0], 1 << 4)]);
+        assert!(matches!(
+            use_item(&rail, 157, 0, top_of_ground(), 0.0, &[body]),
+            Outcome::Placed(_)
+        ));
     }
 
     #[test]
@@ -834,6 +848,14 @@ mod tests {
             use_item(&block, 143, 0, side, 0.0, &[FAR]),
             Outcome::Refused
         );
+        // Only the clicked side counts: the solid block below the target cell does not hold
+        // a button placed against the side of a fence.
+        let fence = flat(&[([0, 5, 0], 85 << 4)]);
+        assert_eq!(
+            use_item(&fence, 143, 0, side, 0.0, &[FAR]),
+            Outcome::Refused
+        );
+        assert!(!can_place_on_side(&fence, 143, 0, side, &[FAR]));
     }
 
     #[test]

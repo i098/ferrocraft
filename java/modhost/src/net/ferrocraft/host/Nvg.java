@@ -76,6 +76,17 @@ public final class Nvg {
         drawRect(vg, x, y, w, h, argb);
     }
 
+    /** The four radii are dropped as in drawRoundedRect. */
+    public static void drawRoundedRectVaried(long vg, float x, float y, float w, float h, int argb, float tl, float tr, float br, float bl) {
+        drawRect(vg, x, y, w, h, argb);
+    }
+
+    /** A line as the box of its end points grown by half the width: right for the horizontal and vertical lines OneConfig draws. */
+    public static void drawLine(long vg, float x0, float y0, float x1, float y1, float width, int argb) {
+        float half = width / 2f;
+        drawRect(vg, Math.min(x0, x1) - half, Math.min(y0, y1) - half, Math.abs(x1 - x0) + width, Math.abs(y1 - y0) + width, argb);
+    }
+
     public static void translate(long vg, float x, float y) {
         Sink.matrixMode(MODELVIEW);
         Sink.translate(x, y);

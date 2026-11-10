@@ -57,6 +57,20 @@ impl Bot {
         self.drain(400);
     }
 
+    /// A summoned entity the client never sees would make its case pass without a body.
+    /// Natural animals also spawn, so the new entity must stand in the target cell.
+    fn assert_summoned(&self, c: &Case, known: &[i32], [bx, bz]: [i32; 2]) {
+        if !c.setup.iter().any(|l| l.starts_with("summon ")) {
+            return;
+        }
+        let near = |v: f64, c: i32| (v - (f64::from(c) + 0.5)).abs() < 1.5;
+        let arrived = self
+            .entities
+            .iter()
+            .any(|e| !known.contains(&e.id) && near(e.pos[0], bx) && near(e.pos[2], bz));
+        assert!(arrived, "{}: the summoned entity did not reach the client", c.name);
+    }
+
     /// Console lines right before the click; each already drains the server's answer.
     fn run_late(&mut self, lines: impl Iterator<Item = String>) {
         for l in lines {
@@ -525,6 +539,7 @@ fn client_prediction_equals_the_server() {
                 .replace("{zs}", &stand.to_string())
                 .replace("{z}", &bz.to_string())
         };
+        let known: Vec<i32> = b.entities.iter().map(|e| e.id).collect();
         for l in &c.setup {
             b.cmd(&fill(l));
         }
@@ -545,6 +560,7 @@ fn client_prediction_equals_the_server() {
         b.s.held_item_change(0).unwrap();
         b.drain(500);
         b.run_late(c.late.iter().map(|l| fill(l)));
+        b.assert_summoned(&c, &known, [bx, bz]);
 
         let (rel, face, cur) = c.click;
         let pos = [bx + rel[0], rel[1], bz + rel[2]];

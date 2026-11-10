@@ -17,6 +17,10 @@ pub enum Kind {
     ExperienceOrb,
 }
 
+/// Spawn object types with `preventEntitySpawning`: boat, minecarts, primed TNT, end crystal,
+/// falling block and armor stand.
+const BLOCKING_OBJECTS: [i8; 8] = [1, 10, 11, 12, 50, 51, 70, 78];
+
 impl Kind {
     pub const ITEM: Kind = Kind::Object(2);
 
@@ -29,6 +33,7 @@ impl Kind {
             Kind::Object(60 | 61 | 62 | 65 | 90) => (0.25, 0.25),
             Kind::Object(78) => (0.5, 1.975),
             Kind::Object(1) => (1.5, 0.6),
+            Kind::Object(51) => (2.0, 2.0),
             Kind::Object(10..=12) => (0.98, 0.7),
             Kind::Object(_) => (0.98, 0.98),
             Kind::Mob(id) => mob_size(id),
@@ -195,9 +200,14 @@ impl Entity {
         self.death_time > 0
     }
 
-    /// `EntityLivingBase.preventEntitySpawning`: a living entity refuses a block placed into its box.
+    /// `Entity.preventEntitySpawning`: living entities (until `setDead`, after the death
+    /// animation) and the objects of `BLOCKING_OBJECTS` refuse a block placed into their box.
     pub fn blocks_placement(&self) -> bool {
-        !self.is_dead() && matches!(self.kind, Kind::Player | Kind::Mob(_) | Kind::Object(78))
+        match self.kind {
+            Kind::Player | Kind::Mob(_) => true,
+            Kind::Object(t) => BLOCKING_OBJECTS.contains(&t),
+            Kind::ExperienceOrb => false,
+        }
     }
 
     pub fn sneaking(&self) -> bool {
@@ -765,6 +775,27 @@ mod tests {
         }
         es.tick();
         assert!(es.get(3).is_none());
+    }
+
+    #[test]
+    fn boats_minecarts_tnt_crystals_and_dying_mobs_block_placement() {
+        for kind in [1, 10, 11, 12, 50, 51, 70, 78] {
+            let e = Entity::new(1, Kind::Object(kind), [0; 3], 0, 0);
+            assert!(e.blocks_placement(), "{kind}");
+        }
+        for kind in [2, 60, 71] {
+            let e = Entity::new(1, Kind::Object(kind), [0; 3], 0, 0);
+            assert!(!e.blocks_placement(), "{kind}");
+        }
+        assert!(!Entity::new(1, Kind::ExperienceOrb, [0; 3], 0, 0).blocks_placement());
+        let (lo, hi) = Entity::new(1, Kind::Object(51), [0; 3], 0, 0).bounds();
+        assert_eq!((hi[0] - lo[0], hi[1] - lo[1]), (2.0, 2.0));
+        let mut es = Entities::default();
+        spawn(&mut es, 3, [0; 3]);
+        es.apply(EntityEvent::Status { id: 3, status: 3 });
+        es.tick();
+        assert!(es.get(3).unwrap().is_dead());
+        assert!(es.get(3).unwrap().blocks_placement());
     }
 
     #[test]

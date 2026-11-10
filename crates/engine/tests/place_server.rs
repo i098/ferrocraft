@@ -56,6 +56,13 @@ impl Bot {
         writeln!(f, "{c}").unwrap();
         self.drain(400);
     }
+
+    /// Console lines right before the click; each already drains the server's answer.
+    fn run_late(&mut self, lines: impl Iterator<Item = String>) {
+        for l in lines {
+            self.cmd(&l);
+        }
+    }
 }
 
 struct Case {
@@ -75,6 +82,8 @@ struct Case {
     px: f64,
     /// Further server changes the click causes, relative to the column.
     extra: Vec<([i32; 3], u16)>,
+    /// Console lines run right before the click, after the setup has settled.
+    late: Vec<String>,
 }
 
 fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8; 3])) -> Case {
@@ -89,7 +98,85 @@ fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8;
         feet: 4.0,
         px: 0.5,
         extra: vec![],
+        late: vec![],
     }
+}
+
+/// A `Used` prediction holds for a sign or door the server placed, and for the items whose box
+/// the client leaves to the server (trapdoors and anvils).
+fn used_is_right(item: i16, got: &[([i32; 3], u16)]) -> bool {
+    matches!(item, 96 | 145 | 167) || got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68))
+}
+
+/// R9-6: every entity with `preventEntitySpawning` refuses the block, living or not, also while
+/// dying. R9-2: the fence-like boxes, the hopper, and the trapdoor and anvil that defer to the
+/// server.
+fn blocker_and_box_cases() -> Vec<Case> {
+    let ground = |c: [u8; 3]| ([0, 3, 0], 1, c);
+    let mut v = Vec::new();
+    for (name, summon) in [
+        ("cube into a boat", "summon Boat {x} 4 {z}"),
+        ("cube into a minecart", "summon MinecartRideable {x} 4 {z}"),
+        (
+            "cube into primed tnt",
+            "summon PrimedTnt {x} 4 {z} {Fuse:32000}",
+        ),
+        ("cube into an end crystal", "summon EnderCrystal {x} 4 {z}"),
+    ] {
+        let mut c = case(name, 1, 0, 0.0, ground([8, 16, 8]));
+        c.setup = vec![summon.into()];
+        v.push(c);
+    }
+    // `isDead` turns true only when the 20-tick death animation ends.
+    let mut c = case("cube into a dying mob", 1, 0, 0.0, ground([8, 16, 8]));
+    c.setup = vec!["summon Pig {x} 4 {z} {NoAI:1}".into()];
+    c.late = vec!["kill @e[type=Pig,x={x},y=4,z={z},r=3]".into()];
+    v.push(c);
+    // A fence post is 0.375..0.625 wide, a wall post 0.25..0.75, both 1.5 high; a body edge on
+    // x 0.8 touches neither, a hopper fills the cell.
+    for (name, item) in [
+        ("fence", 85),
+        ("nether fence", 113),
+        ("wall", 139),
+        ("hopper", 154),
+        ("trapdoor", 96),
+        ("anvil", 145),
+    ] {
+        let mut c = case(
+            &format!("{name} beside a body sliver"),
+            item,
+            0,
+            0.0,
+            ground([8, 16, 8]),
+        );
+        c.inside = true;
+        c.px = 1.1;
+        v.push(c);
+    }
+    for (name, item) in [("fence", 85), ("wall", 139), ("gate", 107), ("cube", 1)] {
+        let mut c = case(
+            &format!("{name} over a raised body"),
+            item,
+            0,
+            0.0,
+            ground([8, 16, 8]),
+        );
+        c.inside = true;
+        c.feet = 5.2;
+        v.push(c);
+    }
+    // Placement reads the default state, so the gate's panel is the same at any yaw.
+    let mut c = case(
+        "gate yaw 90 in the player's cell",
+        107,
+        0,
+        90.0,
+        ground([8, 16, 8]),
+    );
+    c.inside = true;
+    c.px = 1.1;
+    v.push(c);
+    v
 }
 
 fn cases() -> Vec<Case> {
@@ -315,7 +402,7 @@ fn cases() -> Vec<Case> {
     );
     c.setup = vec!["setblock {x} 5 {z} redstone_block".into()];
     v.push(c);
-    // R9-6: a living entity in the target cell refuses the block.
+    // R9-6: a living entity in the target cell refuses the block (armor stands are living).
     let mut c = case(
         "cube into a standing armor stand",
         1,
@@ -325,6 +412,7 @@ fn cases() -> Vec<Case> {
     );
     c.setup = vec!["summon ArmorStand {x} 4 {z}".into()];
     v.push(c);
+    v.extend(blocker_and_box_cases());
     // R9-7: redstone ore is a normal cube (`BlockRedstoneOre` cannot provide power), so a
     // ladder and a button hold on it. These stay last: the lit ore's revert tick must not reach
     // another case.
@@ -389,6 +477,7 @@ fn client_prediction_equals_the_server() {
         b.s.creative_slot(36, &stack).unwrap();
         b.s.held_item_change(0).unwrap();
         b.drain(500);
+        b.run_late(c.late.iter().map(|l| fill(l)));
 
         let (rel, face, cur) = c.click;
         let pos = [bx + rel[0], rel[1], bz + rel[2]];
@@ -434,7 +523,9 @@ fn client_prediction_equals_the_server() {
                 got == w
             }
             Outcome::Refused => got.is_empty(),
-            Outcome::Used => got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68)),
+            // The client leaves the box of these to the server: it answers `Used` whatever
+            // the server does.
+            Outcome::Used => used_is_right(c.item, &got),
         };
         // The client gate and the server must agree: a gate that refuses a click the server
         // honours would drop the placement in the real client.

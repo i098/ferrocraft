@@ -8,10 +8,10 @@
 //! the support rules of rails, plates, carpet, lily pads, plants, ladders and buttons are
 //! included, those of levers, trapdoors, vines, cactus, mushrooms and snow layers are not.
 //! Blocks that face the placer in `onBlockPlacedBy` (chests, furnaces, pistons, pumpkins, anvils)
-//! keep metadata 0 until the server answers. The local player and every living entity block a
-//! placement (`EntityLivingBase.preventEntitySpawning`).
+//! keep metadata 0 until the server answers. The local player and every entity with
+//! `Entity.preventEntitySpawning` block a placement.
 
-use crate::dig::{ladder_box, opaque_cube};
+use crate::dig::{ladder_box, opaque_cube, selection_box};
 
 /// Where and how a click hit a block: `hitVec - pos` as vanilla's `float` locals.
 #[derive(Clone, Copy, Debug)]
@@ -148,26 +148,46 @@ const NO_COLLISION: [u16; 39] = [
     90, 93, 94, 104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
 ];
 
-/// `Block.getCollisionBoundingBox` of the default state, `None` when it has none. Fences, walls,
-/// gates, hoppers, trapdoors and anvils keep the unit cube: vanilla answers those from shared
-/// mutable bounds, which depend on the last `setBlockBounds` call rather than on the block alone.
-/// shortcut: those ids then refuse a click vanilla may allow; refine when a desync shows up.
-fn collision(id: u16) -> Option<[f64; 6]> {
+/// Trapdoors and anvils: vanilla answers `getCollisionBoundingBox` from the bounds the last
+/// caller left on the shared block instance, so the box is not a function of the block. A body
+/// in the unit cube therefore neither refuses the click nor predicts a placement.
+fn stale_bounds(id: u16) -> bool {
+    matches!(id, 96 | 145 | 167)
+}
+
+/// Blocks with one fixed box smaller than the cell: slabs, chests, cactus, soul sand, carpet.
+const FIXED: &[(&[u16], [f64; 6])] = &[
+    (&[44, 126, 182], [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]),
+    (
+        &[54, 130, 146],
+        [0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375],
+    ),
+    (&[81], [0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375]),
+    (&[88], [0.0, 0.0, 0.0, 1.0, 0.875, 1.0]),
+    (&[111], [0.4375, 0.0, 0.4375, 0.5625, 0.015625, 0.5625]),
+    (&[116], [0.0, 0.0, 0.0, 1.0, 0.75, 1.0]),
+    (&[120], [0.0, 0.0, 0.0, 1.0, 0.8125, 1.0]),
+    (&[122], [0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375]),
+    (&[151, 178], [0.0, 0.0, 0.0, 1.0, 0.375, 1.0]),
+    (&[171], [0.0, 0.0, 0.0, 1.0, 0.0625, 1.0]),
+];
+
+/// `Block.getCollisionBoundingBox` of the default state at `pos`, `None` when it has none.
+/// Fences, walls and gates read their neighbours and stand 1.5 high. The hopper resets its
+/// bounds to the unit cube after adding its boxes.
+fn collision(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     if NO_COLLISION.contains(&id) {
         return None;
     }
+    if let Some((_, b)) = FIXED.iter().find(|(ids, _)| ids.contains(&id)) {
+        return Some(*b);
+    }
     match id {
-        44 | 126 | 182 => Some([0.0, 0.0, 0.0, 1.0, 0.5, 1.0]),
-        54 | 130 | 146 => Some([0.0625, 0.0, 0.0625, 0.9375, 0.875, 0.9375]),
         65 => Some(ladder_box(2)),
-        81 => Some([0.0625, 0.0, 0.0625, 0.9375, 0.9375, 0.9375]),
-        88 => Some([0.0, 0.0, 0.0, 1.0, 0.875, 1.0]),
-        111 => Some([0.4375, 0.0, 0.4375, 0.5625, 0.015625, 0.5625]),
-        116 => Some([0.0, 0.0, 0.0, 1.0, 0.75, 1.0]),
-        120 => Some([0.0, 0.0, 0.0, 1.0, 0.8125, 1.0]),
-        122 => Some([0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375]),
-        151 | 178 => Some([0.0, 0.0, 0.0, 1.0, 0.375, 1.0]),
-        171 => Some([0.0, 0.0, 0.0, 1.0, 0.0625, 1.0]),
+        85 | 107 | 113 | 139 | 183..=192 => {
+            let here = |p: [i32; 3]| if p == pos { id << 4 } else { at(p) };
+            selection_box(&here, pos).map(|b| [b[0], b[1], b[2], b[3], 1.5, b[5]])
+        }
         _ => Some([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
     }
 }
@@ -366,7 +386,8 @@ fn can_block_be_placed(
     pos: [i32; 3],
     bodies: &[[f64; 6]],
 ) -> bool {
-    if collision(block).is_some_and(|b| blocked(b, pos, bodies)) {
+    let overlaps = collision(at, block, pos).is_some_and(|b| blocked(b, pos, bodies));
+    if overlaps && !stale_bounds(block) {
         return false;
     }
     // An anvil lands on circuits before `isReplaceable` and `canReplace` are asked.
@@ -414,6 +435,9 @@ fn use_block(
     };
     if !can_block_be_placed(at, id, pos, bodies) {
         return Outcome::Refused;
+    }
+    if stale_bounds(id) && collision(at, id, pos).is_some_and(|b| blocked(b, pos, bodies)) {
+        return Outcome::Used;
     }
     if !(0..256).contains(&pos[1]) {
         return Outcome::Used;
@@ -663,6 +687,77 @@ mod tests {
             use_item(&at, 1, 0, top_of_ground(), 0.0, &[far]),
             Outcome::Placed(_)
         ));
+    }
+
+    fn placed_with(at: &dyn Fn([i32; 3]) -> u16, id: i16, body: [f64; 6]) -> bool {
+        matches!(
+            use_item(at, id, 0, top_of_ground(), 0.0, &[body]),
+            Outcome::Placed(_)
+        )
+    }
+
+    #[test]
+    fn a_body_beside_a_post_leaves_the_cell_free_for_fences_and_walls() {
+        // A lone fence post spans x 0.375..0.625 and a wall post 0.25..0.75: a body on
+        // x 0.8..0.9 leaves the cell free for them but not for a cube.
+        let at = flat(&[]);
+        let beside = [0.8, 4.0, 0.3, 0.9, 5.8, 0.7];
+        for id in [85, 113, 188, 192, 139] {
+            assert!(placed_with(&at, id, beside), "{id}");
+            assert!(can_place_on_side(&at, id, 0, top_of_ground(), &[beside]));
+        }
+        assert!(!placed_with(&at, 4, beside));
+    }
+
+    #[test]
+    fn fences_walls_and_gates_stand_one_and_a_half_high() {
+        // A body on y 5.2 is inside them and above a cube.
+        let at = flat(&[]);
+        let above = [0.4, 5.2, 0.4, 0.6, 6.0, 0.6];
+        for id in [85, 113, 139, 107, 183, 187] {
+            assert!(!placed_with(&at, id, above), "{id}");
+            assert!(!can_place_on_side(&at, id, 0, top_of_ground(), &[above]));
+        }
+        assert!(placed_with(&at, 4, above));
+    }
+
+    #[test]
+    fn posts_reach_their_joined_side_and_a_closed_gate_faces_north() {
+        // Stone to the east joins the post to x 1.0; a nether brick fence does not join a
+        // wooden one.
+        let joined = flat(&[([1, 4, 0], 1 << 4), ([-1, 4, 0], 85 << 4)]);
+        assert!(!placed_with(&joined, 85, [0.8, 4.0, 0.3, 0.9, 5.8, 0.7]));
+        let west = [0.05, 4.0, 0.3, 0.3, 5.8, 0.7];
+        assert!(placed_with(&joined, 113, west));
+        assert!(!placed_with(&joined, 85, west));
+        // A closed gate's panel spans z 0.375..0.625 across the cell.
+        let at = flat(&[]);
+        assert!(placed_with(&at, 107, [0.1, 4.0, 0.1, 0.9, 5.8, 0.3]));
+        assert!(!placed_with(&at, 107, [0.1, 4.0, 0.4, 0.9, 5.8, 0.6]));
+    }
+
+    #[test]
+    fn hoppers_fill_the_cell_and_trapdoors_and_anvils_defer_to_the_server() {
+        let at = flat(&[]);
+        let click = top_of_ground();
+        let corner = [0.0, 4.0, 0.0, 0.05, 5.8, 0.05];
+        assert_eq!(
+            use_item(&at, 154, 0, click, 0.0, &[corner]),
+            Outcome::Refused
+        );
+        let inside = [0.4, 4.0, 0.4, 0.6, 5.8, 0.6];
+        for id in [96, 145, 167] {
+            assert!(can_place_on_side(&at, id, 0, click, &[inside]), "{id}");
+            assert_eq!(
+                use_item(&at, id, 0, click, 0.0, &[inside]),
+                Outcome::Used,
+                "{id}"
+            );
+            assert!(matches!(
+                use_item(&at, id, 0, click, 0.0, &[FAR]),
+                Outcome::Placed(_)
+            ));
+        }
     }
 
     #[test]

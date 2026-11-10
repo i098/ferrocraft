@@ -464,7 +464,8 @@ impl Game {
         [x - 0.3, y, z - 0.3, x + 0.3, y + 1.8, z + 0.3]
     }
 
-    /// Every box `World.checkNoEntityCollision` tests: the local player and the living entities.
+    /// Every box `World.checkNoEntityCollision` tests: the local player and each entity with
+    /// `preventEntitySpawning`.
     pub fn bodies(&self) -> Vec<[f64; 6]> {
         let mut v = vec![self.body()];
         v.extend(

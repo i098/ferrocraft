@@ -588,6 +588,7 @@ dependencies = [
 name = "ferrocraft-engine"
 version = "0.1.0"
 dependencies = [
+ "ferrocraft-modhost",
  "ferrocraft-net-client",
  "gui",
  "input-audio",
@@ -601,6 +602,14 @@ name = "ferrocraft-launcher"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "ferrocraft-modhost"
+version = "0.1.0"
+dependencies = [
+ "gui",
+ "winit",
 ]
 
 [[package]]

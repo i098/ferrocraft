@@ -64,6 +64,8 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     hud: gui::Hud,
+    /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set.
+    mods: Option<ferrocraft_modhost::ModHost>,
     ui: Ui,
     icons: Option<Icons>,
     container: Option<ContainerScreen>,
@@ -127,6 +129,7 @@ impl App {
             window: None,
             renderer: None,
             hud: gui::Hud::default(),
+            mods: None,
             ui,
             icons: None,
             container: None,
@@ -563,6 +566,10 @@ impl App {
                 },
             );
         }
+        if let Some(mods) = &self.mods {
+            mods.set_view(scale.width, scale.height, scale.factor, (mx, my));
+            ferrocraft_modhost::draw(&mut g, &mods.commands());
+        }
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
             cs.draw(
@@ -623,6 +630,12 @@ impl ApplicationHandler for App {
         ));
         self.load_assets();
         self.load_sound();
+        if let Some(cfg) = ferrocraft_modhost::Config::from_env() {
+            match ferrocraft_modhost::ModHost::start(&cfg) {
+                Ok(host) => self.mods = Some(host),
+                Err(e) => crate::log::line(&format!("mod host did not start: {e}")),
+            }
+        }
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
@@ -632,6 +645,9 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         self.route_window_event(&event);
+        if let Some(mods) = &self.mods {
+            mods.window_event(&event);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 crate::log::line("window close requested");

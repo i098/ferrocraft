@@ -16,4 +16,5 @@ ferrocraft-net-client = { path = "../net-client" }
 render = { path = "../render" }
 input-audio = { path = "../input-audio" }
 gui = { path = "../gui" }
+ferrocraft-modhost = { path = "../modhost" }
 winit = "0.30"

@@ -352,6 +352,13 @@ impl Mesher<'_> {
             ],
         ];
         let own = self.light_at(at, [0; 3]);
+        // `LiquidRenderer`: sides are drawn from both sides; the top too while a gap is above (`isNeighboringGap`).
+        let gap = (-1..=1).any(|dx| {
+            (-1..=1).any(|dz| {
+                let s = self.st(at, [dx, 1, dz]);
+                !same(s) && !is_opaque_cube(s)
+            })
+        });
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
@@ -389,6 +396,10 @@ impl Mesher<'_> {
                 };
             }
             self.push_quad(pass, verts, false);
+            if f >= NORTH || (f == UP && gap) {
+                verts.reverse();
+                self.push_quad(pass, verts, false);
+            }
         }
         let _ = state;
     }
@@ -609,7 +620,8 @@ mod tests {
         });
         let m = mesh(&c, [None; 8]);
         assert!(m.opaque.is_empty());
-        assert_eq!(m.water.vertices.len(), 10 * 4);
+        // 2 tops and 2 bottoms, plus 6 open sides drawn from both sides and 2 top back faces (air above).
+        assert_eq!(m.water.vertices.len(), 18 * 4);
         // Corners average with the empty neighbours, so a lone source block is lower than 8/9.
         assert!(m.water.vertices.iter().all(|v| v.pos[1] < 60.89));
         assert!(m.water.vertices.iter().any(|v| v.pos[1] > 60.6));
@@ -669,14 +681,19 @@ mod tests {
     }
 
     #[test]
-    fn water_top_shows_under_a_solid_block() {
-        let c = flat(|x, y, z| match (x, y, z) {
-            (4, 60, 4) => 9 << 4,
-            (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) | (4, 61, 4) => 1 << 4,
-            _ => 0,
-        });
-        let m = mesh(&c, [None; 8]);
-        assert_eq!(m.water.vertices.len(), 4);
+    fn water_top_back_face_needs_a_gap_above() {
+        // `LiquidRenderer` draws the top's underside only while `isNeighboringGap` sees a non-opaque cell above.
+        let walled = |gap: bool| {
+            flat(move |x, y, z| match (x, y, z) {
+                (4, 60, 4) => 9 << 4,
+                (5, 61, 5) if gap => 0,
+                (3..=5, 61, 3..=5) => 1 << 4,
+                (3, 60, 4) | (5, 60, 4) | (4, 60, 3) | (4, 60, 5) | (4, 59, 4) => 1 << 4,
+                _ => 0,
+            })
+        };
+        assert_eq!(mesh(&walled(false), [None; 8]).water.vertices.len(), 4);
+        assert_eq!(mesh(&walled(true), [None; 8]).water.vertices.len(), 8);
     }
 
     #[test]

@@ -99,6 +99,8 @@ pub struct Renderer {
     entity_mesh: Option<GpuMesh>,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
+    /// `TRANSLUCENT` chunk layer: blended like `water_pipe`, but back faces culled as vanilla does.
+    translucent_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
     sky_add_pipe: wgpu::RenderPipeline,
     cloud_pipe: wgpu::RenderPipeline,
@@ -301,7 +303,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -322,6 +324,7 @@ impl Renderer {
             entity_mesh: None,
             opaque_pipe,
             water_pipe,
+            translucent_pipe,
             sky_pipe,
             sky_add_pipe,
             cloud_pipe,
@@ -991,6 +994,7 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            pass.set_pipeline(&self.translucent_pipe);
             self.meshes
                 .values()
                 .filter_map(|m| m.water.as_ref())
@@ -1220,7 +1224,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 7] {
+) -> [wgpu::RenderPipeline; 8] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1320,6 +1324,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let translucent_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        true,
+    );
     let sky_pipe = pipe(
         "vs_world",
         "fs_sky",
@@ -1374,6 +1388,7 @@ fn build_pipelines(
     [
         opaque_pipe,
         water_pipe,
+        translucent_pipe,
         sky_pipe,
         sky_add_pipe,
         cloud_pipe,

@@ -9,3 +9,5 @@ description = "Rust side of the mod host: starts a Java 8 JVM running Forge 1.8.
 [dependencies]
 winit = "0.30"
 gui = { path = "../gui" }
+resvg = { version = "0.46", default-features = false }
+png = "0.17"

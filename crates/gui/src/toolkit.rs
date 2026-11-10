@@ -317,6 +317,19 @@ fn apply(m: &Affine, [x, y]: [f32; 2]) -> [f32; 2] {
     [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
 }
 
+/// Corners, texture coordinates and colors of one quad.
+type Clipped = ([[f32; 2]; 4], [[f32; 2]; 4], [u32; 4]);
+
+/// The part `(s0, s1)` of the edge `p0 -> p1` (as fractions) that lies in `lo..hi`; `None` when none does.
+fn span(p0: f32, p1: f32, lo: f32, hi: f32) -> Option<(f32, f32)> {
+    if p0 == p1 {
+        return (lo <= p0 && p0 <= hi).then_some((0.0, 1.0));
+    }
+    let (a, b) = ((lo - p0) / (p1 - p0), (hi - p0) / (p1 - p0));
+    let (s0, s1) = (a.min(b).max(0.0), a.max(b).min(1.0));
+    (s0 < s1).then_some((s0, s1))
+}
+
 #[derive(Clone, Copy, Default)]
 struct TextStyle {
     random: bool,
@@ -360,6 +373,8 @@ pub struct Gui<'f> {
     stack: Vec<Affine>,
     color: u32,
     blend: Blend,
+    /// Window-pixel rectangle `[x0, y0, x1, y1]` that later quads are cut to.
+    clip: Option<[f32; 4]>,
     seed: u32,
 }
 
@@ -375,6 +390,7 @@ impl<'f> Gui<'f> {
             stack: Vec::new(),
             color: 0xFFFF_FFFF,
             blend: Blend::Alpha,
+            clip: None,
             seed: seed | 1,
         }
     }
@@ -440,6 +456,51 @@ impl<'f> Gui<'f> {
         self.blend = blend;
     }
 
+    /// Cut every later quad to `rect` (`[x0, y0, x1, y1]` in scaled GUI units), as `glScissor` does; `None` lifts it.
+    /// Upright quads are trimmed with their texture coordinates and colors; turned quads are only dropped when outside.
+    pub fn set_clip(&mut self, rect: Option<[f32; 4]>) {
+        let k = self.scale.factor as f32;
+        self.clip = rect.map(|r| r.map(|v| v * k));
+    }
+
+    fn clipped(&self, pos: [[f32; 2]; 4], uv: [[f32; 2]; 4], c: [u32; 4]) -> Option<Clipped> {
+        let Some([cx0, cy0, cx1, cy1]) = self.clip else {
+            return Some((pos, uv, c));
+        };
+        let [a, b, d, e] = pos;
+        if !(a[1] == b[1] && b[0] == d[0] && d[1] == e[1] && e[0] == a[0]) {
+            let (lo, hi) = pos
+                .iter()
+                .fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| {
+                    (
+                        [lo[0].min(p[0]), lo[1].min(p[1])],
+                        [hi[0].max(p[0]), hi[1].max(p[1])],
+                    )
+                });
+            let outside = hi[0] <= cx0 || lo[0] >= cx1 || hi[1] <= cy0 || lo[1] >= cy1;
+            return (!outside).then_some((pos, uv, c));
+        }
+        let (s0, s1) = span(a[0], d[0], cx0, cx1)?;
+        let (t0, t1) = span(a[1], d[1], cy0, cy1)?;
+        let at = |s: f32, t: f32| {
+            let w = [(1.0 - s) * (1.0 - t), s * (1.0 - t), s * t, (1.0 - s) * t];
+            let mix = |v: [f32; 4]| v[0] * w[0] + v[1] * w[1] + v[2] * w[2] + v[3] * w[3];
+            let p = [mix(pos.map(|p| p[0])), mix(pos.map(|p| p[1]))];
+            let q = [mix(uv.map(|p| p[0])), mix(uv.map(|p| p[1]))];
+            let shade = (0..4).fold(0u32, |acc, i| {
+                let ch = mix(c.map(|v| (v >> (24 - 8 * i) & 0xFF) as f32));
+                acc | (ch.round() as u32) << (24 - 8 * i)
+            });
+            (p, q, shade)
+        };
+        let corners = [at(s0, t0), at(s1, t0), at(s1, t1), at(s0, t1)];
+        Some((
+            corners.map(|v| v.0),
+            corners.map(|v| v.1),
+            corners.map(|v| v.2),
+        ))
+    }
+
     // --- Gui primitives ---
 
     /// One textured quad; `pts` and `uv` run top-left, top-right, bottom-right, bottom-left.
@@ -451,12 +512,15 @@ impl<'f> Gui<'f> {
         argb: [u32; 4],
     ) {
         let m = self.matrix;
+        let Some((pos, uv, color)) = self.clipped(pts.map(|p| apply(&m, p)), uv, argb) else {
+            return;
+        };
         self.quads.push(Quad {
             tex: tex.into(),
             blend: self.blend,
-            pos: pts.map(|p| apply(&m, p)),
+            pos,
             uv,
-            color: argb,
+            color,
         });
     }
 
@@ -789,6 +853,40 @@ mod tests {
             unicode: vec![0; 65536],
             force_unicode: false,
         }
+    }
+
+    #[test]
+    fn clip_trims_upright_quads_and_drops_outside_ones() {
+        let mut g = Gui::new(GuiScale::new(854, 480, 2, false), None, 0);
+        g.set_clip(Some([10.0, 10.0, 20.0, 20.0]));
+        g.gradient(0, 0, 40, 40, 0xFF00_0000, 0xFFFF_FFFF);
+        g.fill(40, 40, 50, 50, 0xFFFF_FFFF);
+        g.blit_tinted(
+            "t".to_owned(),
+            0.0,
+            10.0,
+            40.0,
+            10.0,
+            [0.0, 0.0, 1.0, 1.0],
+            0xFFFF_FFFF,
+        );
+        g.set_clip(None);
+        g.fill(0, 0, 1, 1, 1);
+        let q = g.into_quads();
+        assert_eq!(q.len(), 3);
+        assert_eq!(
+            q[0].pos,
+            [[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]]
+        );
+        assert_eq!(
+            q[0].color,
+            [0xFF40_4040, 0xFF40_4040, 0xFF80_8080, 0xFF80_8080]
+        );
+        assert_eq!(
+            q[1].pos,
+            [[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]]
+        );
+        assert_eq!(q[1].uv, [[0.25, 0.0], [0.5, 0.0], [0.5, 1.0], [0.25, 1.0]]);
     }
 
     #[test]

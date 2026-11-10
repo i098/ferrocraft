@@ -583,6 +583,7 @@ impl App {
                 },
             );
         }
+        let mut mod_textures = Vec::new();
         if let Some(mods) = &self.mods {
             mods.set_view(
                 w as i32,
@@ -593,7 +594,7 @@ impl App {
                 (self.cursor.0 as i32, self.cursor.1 as i32),
             );
             if show_hud {
-                ferrocraft_modhost::draw(&mut g, &mods.commands());
+                mods.draw(&mut g, &mut mod_textures);
             }
         }
         let mut c = gui::GuiCanvas::new(&mut g);
@@ -608,7 +609,8 @@ impl App {
             );
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
-        let textures = std::mem::take(&mut c.pending_textures);
+        let mut textures = std::mem::take(&mut c.pending_textures);
+        textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
     }
 }

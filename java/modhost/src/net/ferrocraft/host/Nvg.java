@@ -1,18 +1,30 @@
 package net.ferrocraft.host;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.LongConsumer;
 
 /**
  * Stands in for OneConfig's NanoVG renderer (NanoVGHelperImpl). Its calls become Sink commands, so
  * HUD mods built on OneConfig draw through the same path as plain Gui and FontRenderer mods.
- * Coordinates are GUI pixels. Rounded corners draw square: the wire has no rounded rect yet.
+ * Coordinates are GUI pixels. Rounded corners draw square: the wire has no rounded rect yet. Images and SVG files are
+ * read from the class path and sent whole once; Rust decodes them.
  */
 public final class Nvg {
     private static final int MODELVIEW = 5888;
     /** NanoVG font size that equals one vanilla glyph row. */
     private static final float VANILLA_SIZE = 9f;
+    /** Resource bytes by name; an empty array means the resource is missing. */
+    private static final Map<String, byte[]> RESOURCES = new HashMap<>();
+    /** The scissors in force, innermost last: the Scissor object and its box on the screen. */
+    private static final List<Object[]> SCISSORS = new ArrayList<>();
 
     private Nvg() {
         throw new AssertionError();
@@ -60,6 +72,8 @@ public final class Nvg {
             ((LongConsumer) body).accept(1L);
         } finally {
             Sink.pop();
+            SCISSORS.clear();
+            Sink.clip(null);
         }
     }
 
@@ -134,9 +148,107 @@ public final class Nvg {
         Sink.rect(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1), argb);
     }
 
-    /** ScissorHelper.scissor: the wire has no clip rectangle yet, so nothing clips; the caller still gets its Scissor. */
+    public static void drawImage(long vg, Object file, float x, float y, float w, float h) {
+        image(file, x, y, w, h, false, null, null);
+    }
+
+    /** The last argument is the ARGB tint or the Class whose loader finds the file. */
+    public static void drawImage(long vg, Object file, float x, float y, float w, float h, Object a) {
+        image(file, x, y, w, h, false, a, null);
+    }
+
+    public static void drawImage(long vg, Object file, float x, float y, float w, float h, Object a, Object b) {
+        image(file, x, y, w, h, false, a, b);
+    }
+
+    /** The radius is dropped as in drawRoundedRect. */
+    public static void drawRoundImage(long vg, Object file, float x, float y, float w, float h, float radius, Object a) {
+        image(file, x, y, w, h, false, a, null);
+    }
+
+    public static void drawSvg(long vg, Object file, float x, float y, float w, float h) {
+        image(file, x, y, w, h, true, null, null);
+    }
+
+    public static void drawSvg(long vg, Object file, float x, float y, float w, float h, Object a) {
+        image(file, x, y, w, h, true, a, null);
+    }
+
+    public static void drawSvg(long vg, Object file, float x, float y, float w, float h, Object a, Object b) {
+        image(file, x, y, w, h, true, a, b);
+    }
+
+    /** A file name, then a tint (an Integer) or a Class to load from, in either order. An SVG with a tint is painted in it. */
+    private static void image(Object file, float x, float y, float w, float h, boolean svg, Object a, Object b) {
+        if (!(file instanceof String)) return;
+        Integer tint = null;
+        Class<?> from = null;
+        for (Object o : new Object[] {a, b}) {
+            if (o instanceof Integer) tint = (Integer) o;
+            else if (o instanceof Class) from = (Class<?>) o;
+        }
+        byte[] data = resource((String) file, from);
+        if (data.length == 0) return;
+        Sink.matrixMode(MODELVIEW);
+        Sink.image((String) file, data, x, y, x + w, y + h, tint == null ? -1 : tint, svg && tint != null);
+    }
+
+    private static synchronized byte[] resource(String name, Class<?> from) {
+        byte[] known = RESOURCES.get(name);
+        if (known != null) return known;
+        byte[] data = new byte[0];
+        InputStream in = from == null ? null : from.getResourceAsStream(name);
+        if (in == null) in = Nvg.class.getClassLoader().getResourceAsStream(name.startsWith("/") ? name.substring(1) : name);
+        if (in == null) {
+            Host.log("no resource " + name);
+        } else {
+            try (InputStream s = in) {
+                ByteArrayOutputStream all = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                for (int n; (n = s.read(chunk)) > 0; ) all.write(chunk, 0, n);
+                data = all.toByteArray();
+            } catch (IOException e) {
+                Host.log("cannot read " + name + ": " + e);
+            }
+        }
+        RESOURCES.put(name, data);
+        return data;
+    }
+
+    /** ScissorHelper.scissor: later drawing is cut to the box, inside the scissors already in force. */
     public static Object scissor(long vg, float x, float y, float w, float h) throws ReflectiveOperationException {
         Class<?> c = Class.forName("cc.polyfrost.oneconfig.renderer.scissor.Scissor", true, Nvg.class.getClassLoader());
-        return c.getConstructor(float.class, float.class, float.class, float.class).newInstance(x, y, w, h);
+        Object s = c.getConstructor(float.class, float.class, float.class, float.class).newInstance(x, y, w, h);
+        Sink.matrixMode(MODELVIEW);
+        SCISSORS.add(new Object[] {s, Sink.transform(x, y, x + w, y + h)});
+        applyScissors();
+        return s;
+    }
+
+    /** ScissorHelper.resetScissor: lifts one scissor; the others stay. */
+    public static void resetScissor(long vg, Object scissor) {
+        SCISSORS.removeIf(e -> e[0] == scissor);
+        applyScissors();
+    }
+
+    public static void clearScissors(long vg) {
+        SCISSORS.clear();
+        applyScissors();
+    }
+
+    private static void applyScissors() {
+        if (SCISSORS.isEmpty()) {
+            Sink.clip(null);
+            return;
+        }
+        float[] box = {-Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
+        for (Object[] e : SCISSORS) {
+            float[] b = (float[]) e[1];
+            box[0] = Math.max(box[0], Math.min(b[0], b[2]));
+            box[1] = Math.max(box[1], Math.min(b[1], b[3]));
+            box[2] = Math.min(box[2], Math.max(b[0], b[2]));
+            box[3] = Math.min(box[3], Math.max(b[1], b[3]));
+        }
+        Sink.clip(box);
     }
 }

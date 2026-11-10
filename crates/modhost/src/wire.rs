@@ -7,7 +7,10 @@
 //! `'W'` wheel (argument is the LWJGL delta, 120 per notch). State bit 2 on any kind: a screen was open
 //! when the event arrived.
 //! Java to Rust, per frame: u8 mod screen open (a screen a mod opened is current), u32 command count,
-//! then the commands of `Sink.java`.
+//! then the commands of `Sink.java`: `'R'` rect, `'G'` gradient, `'T'` text, `'D'` define (a resource
+//! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
+//! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
+//! `'C'` clip (u8 on, then four f32 corners when on).
 
 use std::io::{self, Read, Write};
 
@@ -61,7 +64,24 @@ pub enum DrawCmd {
         translate: [f32; 2],
         scale: f32,
     },
+    /// A PNG or SVG file that later `Image` commands name.
+    Define {
+        name: String,
+        data: Vec<u8>,
+    },
+    Image {
+        name: String,
+        rect: [f32; 4],
+        argb: u32,
+        /// An SVG is painted in the color of `argb` instead of its own.
+        recolor: bool,
+    },
+    /// Cut the commands after this one to the rectangle; `None` lifts the cut.
+    Clip(Option<[f32; 4]>),
 }
+
+/// A resource file above this many bytes means a corrupt stream.
+const MAX_DATA: usize = 1 << 24;
 
 /// Text above this many bytes means a corrupt stream, not a long string.
 const MAX_TEXT: usize = 1 << 16;
@@ -126,14 +146,9 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
             let shadow = u8_(r)? != 0;
             let translate = [f32_(r)?, f32_(r)?];
             let scale = f32_(r)?;
-            let len = u32_(r)? as usize;
-            if len > MAX_TEXT {
-                return Err(io::Error::other(format!("{len} byte text")));
-            }
-            let mut s = vec![0; len];
-            r.read_exact(&mut s)?;
+            let text = string(r, MAX_TEXT)?;
             Ok(DrawCmd::Text {
-                text: String::from_utf8_lossy(&s).into_owned(),
+                text,
                 pos,
                 argb,
                 shadow,
@@ -141,8 +156,37 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
                 scale,
             })
         }
+        b'D' => Ok(DrawCmd::Define {
+            name: string(r, MAX_TEXT)?,
+            data: bytes(r, MAX_DATA)?,
+        }),
+        b'I' => Ok(DrawCmd::Image {
+            name: string(r, MAX_TEXT)?,
+            rect: rect(r)?,
+            argb: u32_(r)?,
+            recolor: u8_(r)? != 0,
+        }),
+        b'C' => Ok(DrawCmd::Clip(if u8_(r)? != 0 {
+            Some(rect(r)?)
+        } else {
+            None
+        })),
         t => Err(io::Error::other(format!("unknown command tag {t}"))),
     }
+}
+
+fn string(r: &mut impl Read, max: usize) -> io::Result<String> {
+    Ok(String::from_utf8_lossy(&bytes(r, max)?).into_owned())
+}
+
+fn bytes(r: &mut impl Read, max: usize) -> io::Result<Vec<u8>> {
+    let len = u32_(r)? as usize;
+    if len > max {
+        return Err(io::Error::other(format!("{len} byte string")));
+    }
+    let mut s = vec![0; len];
+    r.read_exact(&mut s)?;
+    Ok(s)
 }
 
 fn rect(r: &mut impl Read) -> io::Result<[f32; 4]> {
@@ -169,10 +213,11 @@ fn f32_(r: &mut impl Read) -> io::Result<f32> {
 mod tests {
     use super::*;
 
-    /// Bytes as `Sink.take(true)` writes them: the screen flag, one rect and one text with a scaled matrix.
+    /// Bytes as `Sink.take(true)` writes them: the screen flag, a rect, a text with a scaled matrix, a
+    /// resource, an image and the two forms of clip.
     fn frame() -> Vec<u8> {
         let mut b = vec![1];
-        b.extend(2u32.to_be_bytes());
+        b.extend(6u32.to_be_bytes());
         b.push(b'R');
         for v in [1.0f32, 2.0, 21.0, 22.0] {
             b.extend(v.to_be_bytes());
@@ -189,6 +234,24 @@ mod tests {
         }
         b.extend(1u32.to_be_bytes());
         b.push(b'W');
+        b.push(b'D');
+        b.extend(3u32.to_be_bytes());
+        b.extend(b"a.b");
+        b.extend(2u32.to_be_bytes());
+        b.extend([7, 8]);
+        b.push(b'I');
+        b.extend(3u32.to_be_bytes());
+        b.extend(b"a.b");
+        for v in [5.0f32, 6.0, 7.0, 8.0] {
+            b.extend(v.to_be_bytes());
+        }
+        b.extend(0xff00ff00u32.to_be_bytes());
+        b.push(1);
+        b.extend([b'C', 0]);
+        b.extend([b'C', 1]);
+        for v in [1.0f32, 2.0, 3.0, 4.0] {
+            b.extend(v.to_be_bytes());
+        }
         b
     }
 
@@ -211,6 +274,18 @@ mod tests {
                     translate: [10.0, 20.0],
                     scale: 2.0
                 },
+                DrawCmd::Define {
+                    name: "a.b".into(),
+                    data: vec![7, 8]
+                },
+                DrawCmd::Image {
+                    name: "a.b".into(),
+                    rect: [5.0, 6.0, 7.0, 8.0],
+                    argb: 0xff00ff00,
+                    recolor: true
+                },
+                DrawCmd::Clip(None),
+                DrawCmd::Clip(Some([1.0, 2.0, 3.0, 4.0])),
             ]
         );
     }

@@ -3,6 +3,7 @@
 pub mod keys;
 pub mod wire;
 
+use std::collections::HashMap;
 use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -44,6 +45,10 @@ struct Shared {
     commands: Vec<DrawCmd>,
     /// A screen a mod opened is current in the JVM.
     screen: bool,
+    /// The files the JVM defined, by name.
+    sources: HashMap<String, Vec<u8>>,
+    /// Texture names handed to the renderer, and whether the file decoded.
+    textures: HashMap<String, bool>,
 }
 
 struct Link {
@@ -94,6 +99,8 @@ impl ModHost {
                     input: Input::default(),
                     commands: Vec::new(),
                     screen: false,
+                    sources: HashMap::new(),
+                    textures: HashMap::new(),
                 }),
                 view: Condvar::new(),
             }),
@@ -138,9 +145,81 @@ impl ModHost {
         }
     }
 
-    /// The draw commands of the last finished frame; empty once the JVM is gone.
-    pub fn commands(&self) -> Vec<DrawCmd> {
-        self.link.state.lock().unwrap().commands.clone()
+    /// Draw the last finished frame into the HUD's `Gui`, over the vanilla HUD; nothing once the JVM is gone.
+    /// Images the renderer has not seen yet are appended to `textures` as PNG files under the name quads use.
+    pub fn draw(&self, g: &mut gui::Gui, textures: &mut Vec<(String, Vec<u8>)>) {
+        let mut s = self.link.state.lock().unwrap();
+        let Shared {
+            commands,
+            sources,
+            textures: known,
+            ..
+        } = &mut *s;
+        let factor = g.scale.factor.max(1);
+        for c in commands.iter() {
+            match c {
+                DrawCmd::Rect {
+                    rect: [x0, y0, x1, y1],
+                    argb,
+                } => g.fill(
+                    x0.round() as i32,
+                    y0.round() as i32,
+                    x1.round() as i32,
+                    y1.round() as i32,
+                    *argb,
+                ),
+                DrawCmd::Gradient {
+                    rect: [x0, y0, x1, y1],
+                    top,
+                    bottom,
+                } => g.gradient(
+                    x0.round() as i32,
+                    y0.round() as i32,
+                    x1.round() as i32,
+                    y1.round() as i32,
+                    *top,
+                    *bottom,
+                ),
+                DrawCmd::Text {
+                    text,
+                    pos: [x, y],
+                    argb,
+                    shadow,
+                    translate,
+                    scale,
+                } => {
+                    g.push();
+                    g.translate(translate[0], translate[1]);
+                    g.scale(*scale, *scale);
+                    g.draw_string(text, *x, *y, *argb, *shadow);
+                    g.pop();
+                }
+                DrawCmd::Image {
+                    name,
+                    rect: [x0, y0, x1, y1],
+                    argb,
+                    recolor,
+                } => {
+                    let (w, h) = (x1 - x0, y1 - y0);
+                    if let (Some(data), true) = (sources.get(name), w > 0.0 && h > 0.0) {
+                        let px = |v: f32| (v * factor as f32).round().clamp(1.0, MAX_SVG_PX) as u32;
+                        if let Some((tex, tint)) = texture(
+                            name,
+                            data,
+                            (px(w), px(h)),
+                            (*argb, *recolor),
+                            known,
+                            textures,
+                        ) {
+                            g.blit_tinted(tex, *x0, *y0, w, h, [0.0, 0.0, 1.0, 1.0], tint);
+                        }
+                    }
+                }
+                DrawCmd::Clip(rect) => g.set_clip(*rect),
+                DrawCmd::Define { .. } => {}
+            }
+        }
+        g.set_clip(None);
     }
 
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
@@ -264,7 +343,15 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
         let mut s = link.state.lock().unwrap();
-        s.commands = cmds;
+        s.commands = Vec::with_capacity(cmds.len());
+        for c in cmds {
+            match c {
+                DrawCmd::Define { name, data } => {
+                    s.sources.insert(name, data);
+                }
+                c => s.commands.push(c),
+            }
+        }
         s.screen = screen;
     }
 }
@@ -286,50 +373,84 @@ impl Config {
     }
 }
 
-/// Draw the commands of a mod frame into the HUD's `Gui`, over the vanilla HUD.
-pub fn draw(g: &mut gui::Gui, cmds: &[DrawCmd]) {
-    for c in cmds {
-        match c {
-            DrawCmd::Rect {
-                rect: [x0, y0, x1, y1],
-                argb,
-            } => {
-                g.fill(
-                    x0.round() as i32,
-                    y0.round() as i32,
-                    x1.round() as i32,
-                    y1.round() as i32,
-                    *argb,
-                );
+/// Largest side of a rasterized SVG, in window pixels.
+const MAX_SVG_PX: f32 = 2048.0;
+
+/// The texture name and the tint to blit an image with, registering the texture on first use. An SVG is rasterized
+/// at `size` pixels, in the tint's color when `recolor`. `None` when the file does not decode (logged once).
+fn texture(
+    name: &str,
+    data: &[u8],
+    size: (u32, u32),
+    (argb, recolor): (u32, bool),
+    known: &mut HashMap<String, bool>,
+    textures: &mut Vec<(String, Vec<u8>)>,
+) -> Option<(String, u32)> {
+    let svg = data.trim_ascii_start().starts_with(b"<");
+    let color = (svg && recolor).then_some(argb & 0x00FF_FFFF);
+    let key = match (svg, color) {
+        (false, _) => format!("modhost/{name}"),
+        (true, None) => format!("modhost/{name}@{}x{}", size.0, size.1),
+        (true, Some(c)) => format!("modhost/{name}@{}x{}#{c:06x}", size.0, size.1),
+    };
+    let ok = *known.entry(key.clone()).or_insert_with(|| {
+        let png = if svg {
+            rasterize(data, size, color)
+        } else {
+            Ok(data.to_vec())
+        };
+        match png {
+            Ok(png) => {
+                textures.push((key.clone(), png));
+                true
             }
-            DrawCmd::Gradient {
-                rect: [x0, y0, x1, y1],
-                top,
-                bottom,
-            } => {
-                g.gradient(
-                    x0.round() as i32,
-                    y0.round() as i32,
-                    x1.round() as i32,
-                    y1.round() as i32,
-                    *top,
-                    *bottom,
-                );
+            Err(e) => {
+                eprintln!("mod host: {name}: {e}");
+                false
             }
-            DrawCmd::Text {
-                text,
-                pos: [x, y],
-                argb,
-                shadow,
-                translate,
-                scale,
-            } => {
-                g.push();
-                g.translate(translate[0], translate[1]);
-                g.scale(*scale, *scale);
-                g.draw_string(text, *x, *y, *argb, *shadow);
-                g.pop();
+        }
+    });
+    ok.then(|| {
+        (
+            key,
+            if color.is_some() {
+                argb | 0x00FF_FFFF
+            } else {
+                argb
+            },
+        )
+    })
+}
+
+/// An SVG file as a PNG of `w` x `h` pixels; with `color` every pixel takes that RGB and keeps its alpha.
+fn rasterize(svg: &[u8], (w, h): (u32, u32), color: Option<u32>) -> Result<Vec<u8>, String> {
+    let tree = resvg::usvg::Tree::from_data(svg, &resvg::usvg::Options::default())
+        .map_err(|e| e.to_string())?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h).ok_or("empty image")?;
+    let size = tree.size();
+    let fit =
+        resvg::tiny_skia::Transform::from_scale(w as f32 / size.width(), h as f32 / size.height());
+    resvg::render(&tree, fit, &mut pixmap.as_mut());
+    let mut rgba = pixmap.take();
+    for p in rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(p[3]);
+        if let Some(c) = color {
+            p[..3].copy_from_slice(&c.to_be_bytes()[1..]);
+        } else {
+            // tiny-skia stores premultiplied colors; PNG wants straight ones
+            for v in &mut p[..3] {
+                *v = (u32::from(*v) * 255 + a / 2)
+                    .checked_div(a)
+                    .map_or(0, |x| x.min(255)) as u8;
             }
         }
     }
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w, h);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()
+        .and_then(|mut wr| wr.write_image_data(&rgba))
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }

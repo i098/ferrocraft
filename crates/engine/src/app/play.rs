@@ -169,18 +169,31 @@ impl App {
             self.attack_presses = 0;
         }
         self.limb_tick();
+        let host = self.host_player_tick();
         let input = if playing {
-            self.game
-                .player
-                .as_ref()
-                .map_or_else(world::Input::default, |p| {
-                    self.input
-                        .movement(p.on_ground, p.collided_horizontally, self.game.food > 6)
-                })
+            let native = |s: &mut Self| {
+                s.game
+                    .player
+                    .as_ref()
+                    .map_or_else(world::Input::default, |p| {
+                        s.input
+                            .movement(p.on_ground, p.collided_horizontally, s.game.food > 6)
+                    })
+            };
+            match host {
+                Some(h) => self.input.movement_from_host(h.sprinting, h.sneaking),
+                None => native(self),
+            }
         } else {
+            self.input.set_host_sneak(host.map(|h| h.sneaking));
             world::Input::default()
         };
+        let mut abilities = self.game.fly_toggle(input.jump);
         self.game.tick(input);
+        abilities |= self.game.fly_land();
+        if abilities {
+            self.send_abilities();
+        }
         if std::mem::take(&mut self.game.held_replaced) {
             self.use_ticks = 0;
         }
@@ -193,6 +206,27 @@ impl App {
         self.send_state();
         self.send_pose();
         self.sound_tick();
+    }
+
+    /// `EntityPlayerSP.sendPlayerAbilities`: C13 with the flags, fly speed and walk speed.
+    fn send_abilities(&mut self) {
+        let g = &self.game;
+        let (flags, fly, walk) = (g.abilities, g.fly_speed, g.walk_speed);
+        let r = self.session_send(|s| s.abilities(flags, fly, walk));
+        self.send_result(r);
+    }
+
+    /// One tick of the mod host's stand-in `EntityPlayerSP.onLivingUpdate`, where mods hook sprint and sneak.
+    fn host_player_tick(&mut self) -> Option<ferrocraft_modhost::PlayerInput> {
+        let (mods, p) = (self.mods.as_ref()?, self.game.player.as_ref()?);
+        mods.player_tick(ferrocraft_modhost::PlayerState {
+            on_ground: p.on_ground,
+            collided_horizontally: p.collided_horizontally,
+            food: self.game.food,
+            allow_flying: self.game.abilities & 4 != 0,
+            flying: self.game.abilities & 2 != 0,
+            using_item: self.use_ticks > 0,
+        })
     }
 
     fn chat_tick(&mut self) {

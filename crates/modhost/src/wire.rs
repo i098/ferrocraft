@@ -126,6 +126,43 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     w.flush()
 }
 
+/// What `EntityPlayerSP.onLivingUpdate` reads from the world, sent once per game tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlayerState {
+    pub on_ground: bool,
+    pub collided_horizontally: bool,
+    pub food: i32,
+    pub allow_flying: bool,
+    pub flying: bool,
+    pub using_item: bool,
+}
+
+/// What the mods leave of the player's input after `onLivingUpdate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerInput {
+    pub sprinting: bool,
+    pub sneaking: bool,
+}
+
+pub fn write_player(w: &mut impl Write, p: &PlayerState) -> io::Result<()> {
+    let mut b = vec![
+        b'P',
+        u8::from(p.on_ground),
+        u8::from(p.collided_horizontally),
+    ];
+    b.extend(p.food.to_be_bytes());
+    b.push(u8::from(p.allow_flying) | u8::from(p.flying) << 1 | u8::from(p.using_item) << 2);
+    w.write_all(&b)?;
+    w.flush()
+}
+
+pub fn read_player(r: &mut impl Read) -> io::Result<PlayerInput> {
+    Ok(PlayerInput {
+        sprinting: u8_(r)? != 0,
+        sneaking: u8_(r)? != 0,
+    })
+}
+
 /// Read one frame from Java: whether a mod screen is open, and the draw commands.
 pub fn read_frame(r: &mut impl Read) -> io::Result<(bool, Vec<DrawCmd>)> {
     let screen = u8_(r)? != 0;

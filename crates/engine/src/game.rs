@@ -19,6 +19,7 @@ pub fn eye_height(sneaking: bool) -> f64 {
 }
 
 const CREATIVE: u8 = 1;
+const SPECTATOR: u8 = 3;
 
 /// Left-button state for one client tick, as `world::dig` wants it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -130,6 +131,12 @@ pub struct Game {
     pub abilities: u8,
     /// `PlayerCapabilities.walkSpeed`.
     pub walk_speed: f32,
+    /// `PlayerCapabilities.flySpeed`.
+    pub fly_speed: f32,
+    /// `EntityPlayer.flyToggleTimer`: ticks left to double-tap jump.
+    fly_toggle_timer: u8,
+    /// `MovementInput.jump` of the previous tick.
+    jump_held: bool,
     /// `ItemStack.animationsToGo` of each hotbar slot (the pick-up pop).
     pub bob: [i32; 9],
     /// The held slot got another item stack or another index: vanilla's `EntityPlayer.onUpdate`
@@ -170,6 +177,9 @@ impl Game {
             xp_level: 0,
             abilities: 0,
             walk_speed: 0.1,
+            fly_speed: 0.05,
+            fly_toggle_timer: 0,
+            jump_held: false,
             bob: [0; 9],
             held_replaced: false,
         }
@@ -221,8 +231,10 @@ impl Game {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
             }
             NetEvent::Abilities {
-                flags, walk_speed, ..
-            } => (self.abilities, self.walk_speed) = (flags, walk_speed),
+                flags,
+                fly_speed,
+                walk_speed,
+            } => (self.abilities, self.fly_speed, self.walk_speed) = (flags, fly_speed, walk_speed),
             NetEvent::GameMode(mode) => self.set_gamemode(mode),
             other => return Err(other),
         }
@@ -393,6 +405,42 @@ impl Game {
         self.pitch = (self.pitch + dpitch).clamp(-90.0, 90.0);
     }
 
+    /// The flight toggle of `EntityPlayerSP.onLivingUpdate`, before the movement: a second jump press within
+    /// 7 ticks flips `isFlying` of a player that may fly, and a spectator always flies. `true` means `abilities`
+    /// changed and vanilla's `sendPlayerAbilities` (C13) is due.
+    pub fn fly_toggle(&mut self, jump: bool) -> bool {
+        let was_held = std::mem::replace(&mut self.jump_held, jump);
+        let pressed = jump && !was_held;
+        let mut changed = false;
+        if self.player.is_some() && self.abilities & 4 != 0 {
+            if self.gamemode == SPECTATOR {
+                changed = self.abilities & 2 == 0;
+                self.abilities |= 2;
+            } else if pressed {
+                if self.fly_toggle_timer == 0 {
+                    self.fly_toggle_timer = 7;
+                } else {
+                    self.abilities ^= 2;
+                    self.fly_toggle_timer = 0;
+                    changed = true;
+                }
+            }
+        }
+        // `EntityPlayer.onLivingUpdate`, right after the toggle.
+        self.fly_toggle_timer = self.fly_toggle_timer.saturating_sub(1);
+        changed
+    }
+
+    /// After the movement: landing ends flight outside spectator mode. `true` as for `fly_toggle`.
+    pub fn fly_land(&mut self) -> bool {
+        let landed = self.player.as_ref().is_some_and(|p| p.on_ground);
+        let flying = self.abilities & 2 != 0 && self.gamemode != SPECTATOR;
+        if landed && flying {
+            self.abilities &= !2;
+        }
+        landed && flying
+    }
+
     /// One 20 TPS step. The player stays frozen until the chunk under it has arrived, so
     /// it does not fall through the void while the world loads.
     pub fn tick(&mut self, input: Input) {
@@ -413,6 +461,11 @@ impl Game {
             (p.pos[2].floor() as i32) >> 4,
         );
         if self.store.get(cx, cz).is_some() {
+            let flying = self.abilities & 2 != 0;
+            let input = world::Input {
+                fly_speed: flying.then_some(self.fly_speed),
+                ..input
+            };
             p.tick(&Collision(&self.store), input);
         }
     }
@@ -574,6 +627,8 @@ mod tests {
         strafe: 0.0,
         jump: false,
         sprint: false,
+        sneak: false,
+        fly_speed: None,
     };
 
     #[test]
@@ -764,5 +819,105 @@ mod tests {
         assert_eq!(g.player.as_ref().unwrap().vel, [1.0, -0.5, 0.0]);
         g.apply(NetEvent::Entity(EntityEvent::Status { id: 7, status: 22 }));
         assert!(g.reduced_debug);
+    }
+
+    fn flier(abilities: u8, gamemode: u8) -> Game {
+        let mut g = Game::new();
+        g.apply(NetEvent::PlayerPosLook {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+        });
+        g.abilities = abilities;
+        g.gamemode = gamemode;
+        g
+    }
+
+    /// Presses jump on tick 0 and again `gap` ticks later; `true` when the second press flips flight.
+    fn second_press_toggles(g: &mut Game, gap: usize) -> bool {
+        assert!(!g.fly_toggle(true));
+        for _ in 1..gap {
+            assert!(!g.fly_toggle(false));
+        }
+        g.fly_toggle(true)
+    }
+
+    #[test]
+    fn a_second_jump_press_within_the_window_toggles_flight() {
+        // Oracle: decompiled 1.8.9 `EntityPlayerSP.onLivingUpdate` sets `flyToggleTimer` 7 and
+        // `EntityPlayer.onLivingUpdate` counts it down in the same tick, so the 6th tick after the first press
+        // is still a toggle and the 7th is a new first press.
+        let mut g = flier(4, 1);
+        assert!(second_press_toggles(&mut g, 6));
+        assert_eq!(g.abilities, 6);
+        let mut g = flier(4, 1);
+        assert!(!second_press_toggles(&mut g, 7));
+        assert_eq!(g.abilities, 4);
+        let mut g = flier(6, 1);
+        assert!(second_press_toggles(&mut g, 2));
+        assert_eq!(g.abilities, 4, "a second double tap ends flight");
+    }
+
+    #[test]
+    fn a_held_jump_or_a_player_that_may_not_fly_never_toggles() {
+        let mut g = flier(4, 1);
+        assert!(!g.fly_toggle(true));
+        for _ in 0..20 {
+            assert!(!g.fly_toggle(true));
+        }
+        let mut g = flier(0, 0);
+        assert!(!second_press_toggles(&mut g, 2));
+        assert_eq!(g.abilities, 0);
+    }
+
+    #[test]
+    fn landing_ends_flight_but_not_in_spectator_mode() {
+        let mut g = flier(6, 1);
+        g.player.as_mut().unwrap().on_ground = false;
+        assert!(!g.fly_land());
+        g.player.as_mut().unwrap().on_ground = true;
+        assert!(g.fly_land());
+        assert_eq!(g.abilities, 4);
+        assert!(!g.fly_land(), "only the landing sends");
+        let mut g = flier(6, 3);
+        g.player.as_mut().unwrap().on_ground = true;
+        assert!(!g.fly_land());
+        assert_eq!(g.abilities, 6);
+    }
+
+    #[test]
+    fn a_flying_player_hovers_and_is_not_landed() {
+        // Oracle: decompiled 1.8.9 `EntityPlayer.moveEntityWithHeading` keeps 0.6 of the vertical speed while
+        // `isFlying`, so with no key held a player at rest stays in the air; `fly_land` then never fires.
+        let mut g = flier(6, 1);
+        g.store.insert(floor_chunk());
+        g.player = Some(world::Player::new([0.5, 70.0, 0.5], 0.0));
+        for _ in 0..40 {
+            g.tick(IDLE);
+            assert!(!g.fly_land());
+        }
+        let y = g.player.as_ref().unwrap().pos[1];
+        assert_eq!(y, 70.0, "no gravity while flying");
+        assert_eq!(g.abilities, 6);
+        g.abilities = 4;
+        for _ in 0..40 {
+            g.tick(IDLE);
+        }
+        assert!(
+            g.player.as_ref().unwrap().on_ground,
+            "a walking player falls to the floor"
+        );
+        assert!(g.player.as_ref().unwrap().pos[1] < y);
+    }
+
+    #[test]
+    fn a_spectator_that_may_fly_starts_flying() {
+        let mut g = flier(4, 3);
+        assert!(g.fly_toggle(false));
+        assert_eq!(g.abilities, 6);
+        assert!(!g.fly_toggle(false));
     }
 }

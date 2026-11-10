@@ -2,8 +2,9 @@
 //!
 //! Ported: `PlayerEntity.mobTick` (the movement part of `onLivingUpdate`), `moveEntityWithHeading`,
 //! `moveFlying`, `jump` and `Entity.moveEntity` (axis-wise collision and step-up), all with
-//! the exact `f32`/`f64` arithmetic of the Java code. Not ported yet: water, lava, ladders,
-//! webs, sneaking, flying, potion effects, soul sand and slime, entity pushing.
+//! the exact `f32`/`f64` arithmetic of the Java code, and the flying branch of `moveEntityWithHeading`
+//! with the vertical keys of `EntityPlayerSP.onLivingUpdate`. Not ported yet: water, lava, ladders,
+//! webs, sneaking, potion effects, soul sand and slime, entity pushing.
 //! The differential tests check every tick against the real 1.8.9 jar through `oracle`.
 
 pub mod chunk;
@@ -49,6 +50,10 @@ pub struct Input {
     pub strafe: f32,
     pub jump: bool,
     pub sprint: bool,
+    /// The sneak key: flying down.
+    pub sneak: bool,
+    /// `PlayerAbilities.flySpeed` while `isFlying`, else `None`.
+    pub fly_speed: Option<f32>,
 }
 
 /// `MathHelper.sin` and `cos`: the vanilla lookup table, not `f32::sin`.
@@ -178,6 +183,15 @@ impl Player {
     /// One game tick: `PlayerEntity.mobTick` for a player that is on land and not flying.
     pub fn tick(&mut self, world: &dyn World, input: Input) {
         self.sprinting = input.sprint;
+        // `EntityPlayerSP.onLivingUpdate`: the vertical flight keys, before `mobTick`.
+        if let Some(fly) = input.fly_speed {
+            if input.sneak {
+                self.vel[1] -= f64::from(fly * 3.0_f32);
+            }
+            if input.jump {
+                self.vel[1] += f64::from(fly * 3.0_f32);
+            }
+        }
         if self.jump_ticks > 0 {
             self.jump_ticks -= 1;
         }
@@ -194,7 +208,12 @@ impl Player {
         } else {
             self.jump_ticks = 0;
         }
-        self.move_with_heading(world, input.strafe * 0.98, input.forward * 0.98);
+        self.move_with_heading(
+            world,
+            input.strafe * 0.98,
+            input.forward * 0.98,
+            input.fly_speed,
+        );
 
         self.jump_movement_factor = FLYING_SPEED;
         if self.sprinting {
@@ -222,8 +241,20 @@ impl Player {
         }
     }
 
-    /// `moveEntityWithHeading` without the water, lava and ladder branches.
-    fn move_with_heading(&mut self, world: &dyn World, strafe: f32, forward: f32) {
+    /// `EntityPlayer.moveEntityWithHeading` without the water, lava and ladder branches. A flying player
+    /// (`fly` is the fly speed) accelerates in the air by that speed, doubled while sprinting, and keeps
+    /// 0.6 of its vertical speed instead of gravity.
+    fn move_with_heading(
+        &mut self,
+        world: &dyn World,
+        strafe: f32,
+        forward: f32,
+        fly: Option<f32>,
+    ) {
+        let (kept_y, kept_factor) = (self.vel[1], self.jump_movement_factor);
+        if let Some(fly) = fly {
+            self.jump_movement_factor = fly * if self.sprinting { 2.0 } else { 1.0 };
+        }
         let mut friction = 0.91_f32;
         if self.on_ground {
             let below = world.block(
@@ -246,6 +277,10 @@ impl Player {
         self.vel[1] *= f64::from(0.98_f32);
         self.vel[0] *= f64::from(friction);
         self.vel[2] *= f64::from(friction);
+        if fly.is_some() {
+            self.vel[1] = kept_y * 0.6;
+            self.jump_movement_factor = kept_factor;
+        }
     }
 
     /// `moveFlying`.
@@ -446,8 +481,13 @@ mod tests {
             for (n, i) in &self.steps {
                 writeln!(
                     s,
-                    "tick {n} {:?} {:?} {} {}",
-                    i.forward, i.strafe, i.jump as u8, i.sprint as u8
+                    "tick {n} {:?} {:?} {} {} {:?} {}",
+                    i.forward,
+                    i.strafe,
+                    i.jump as u8,
+                    i.sprint as u8,
+                    i.fly_speed.unwrap_or(0.0),
+                    i.sneak as u8
                 )
                 .unwrap();
             }
@@ -507,6 +547,8 @@ mod tests {
             strafe,
             jump,
             sprint,
+            sneak: false,
+            fly_speed: None,
         }
     }
 
@@ -515,6 +557,8 @@ mod tests {
         strafe: 0.0,
         jump: false,
         sprint: false,
+        sneak: false,
+        fly_speed: None,
     };
 
     #[test]
@@ -556,6 +600,29 @@ mod tests {
         ]);
         s.yaw = 33.0;
         s.check("sprint jump");
+    }
+
+    #[test]
+    fn flying_climbs_hovers_sprints_and_descends() {
+        let fly = |forward, jump, sprint, sneak| Input {
+            forward,
+            strafe: 0.0,
+            jump,
+            sprint,
+            sneak,
+            fly_speed: Some(0.05),
+        };
+        let mut s = Scenario::new(vec![
+            (3, IDLE),
+            (15, fly(0.0, true, false, false)),
+            (10, fly(0.0, false, false, false)),
+            (20, fly(1.0, false, false, false)),
+            (20, fly(1.0, false, true, false)),
+            (15, fly(0.0, false, false, true)),
+            (10, fly(0.0, false, false, false)),
+        ]);
+        s.yaw = 33.0;
+        s.check("flying");
     }
 
     #[test]

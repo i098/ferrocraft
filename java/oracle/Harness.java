@@ -30,7 +30,8 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   floor <block>                 every block with y <= 63 becomes <block>
  *   block <x> <y> <z> <block>     extra block; must come before "start"
  *   start <x> <y> <z> <yaw>           spawn the player and build the world
- *   tick <n> <fwd> <strafe> <jump> <sprint>
+ *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak>
+ *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
@@ -151,12 +152,26 @@ public class Harness {
                     float strafe = Float.parseFloat(t[3]);
                     boolean jump = t[4].equals("1");
                     boolean sprint = t[5].equals("1");
+                    float fly = Float.parseFloat(t[6]);
+                    boolean sneak = t[7].equals("1");
+                    player.abilities.flying = fly > 0f;
+                    if (fly > 0f) {
+                        player.abilities.setFlySpeed(fly);
+                    }
                     for (int i = 0; i < n; i++) {
                         player.forwardSpeed = fwd;
                         player.sidewaysSpeed = strafe;
                         jumping.setBoolean(player, jump);
                         if (player.isSprinting() != sprint) {
                             player.setSprinting(sprint);
+                        }
+                        if (fly > 0f) {
+                            if (sneak) {
+                                player.velocityY -= (double) (fly * 3.0f);
+                            }
+                            if (jump) {
+                                player.velocityY += (double) (fly * 3.0f);
+                            }
                         }
                         player.mobTick();
                         System.out.println(hex(player.x) + " " + hex(player.y) + " " + hex(player.z) + " "

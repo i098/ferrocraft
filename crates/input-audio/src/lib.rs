@@ -358,7 +358,9 @@ impl InputState {
     }
 
     fn submit_chat(&mut self) {
-        let line = self.chat.take().unwrap_or_default().trim().to_owned();
+        // Vanilla 1.8.9 uses Java `String.trim()`, which strips only chars <= U+0020 (keeps NBSP).
+        let line = self.chat.take().unwrap_or_default();
+        let line = line.trim_matches(|c| c <= ' ').to_owned();
         if line.is_empty() {
             return;
         }

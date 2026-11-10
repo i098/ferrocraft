@@ -42,7 +42,7 @@ impl Kind {
 }
 
 /// Hitbox `(width, height)` per `SpawnMob` type id; other ids are 0.6 x 1.8.
-const MOB_SIZES: [(u8, f32, f32); 26] = [
+const MOB_SIZES: [(u8, f32, f32); 30] = [
     (50, 0.6, 1.7),
     (52, 1.4, 0.9),
     (53, 3.6, 10.8),
@@ -69,6 +69,10 @@ const MOB_SIZES: [(u8, f32, f32); 26] = [
     (101, 0.6, 0.7),
     (99, 1.4, 2.9),
     (100, 1.4, 1.6),
+    (51, 0.6, 1.95),
+    (54, 0.6, 1.95),
+    (57, 0.6, 1.95),
+    (66, 0.6, 1.95),
 ];
 
 fn mob_size(id: u8) -> (f32, f32) {
@@ -265,7 +269,7 @@ impl Entity {
                 (s, s)
             }
             Kind::Mob(54 | 57) => half(m.age.is_some_and(|a| a != 0)),
-            Kind::Mob(90..=93 | 95 | 96 | 98 | 101 | 120) => {
+            Kind::Mob(90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => {
                 half(m.age.is_some_and(|a| (a as i8) < 0))
             }
             _ => (w, h),
@@ -914,11 +918,13 @@ mod tests {
         };
         assert_eq!(mob(1, 90, age(0)), (0.9, 0.9));
         assert_eq!(mob(2, 90, age(255)), (0.45, 0.45));
-        assert_eq!(mob(3, 54, age(1)), (0.3, 0.9));
-        assert_eq!(mob(4, 54, age(0)), (0.6, 1.8));
+        assert_eq!(mob(3, 54, age(1)), (0.3, 0.975));
+        assert_eq!(mob(4, 54, age(0)), (0.6, 1.95));
         assert_eq!(mob(5, 55, slime(1)), (0.51000005, 0.51000005));
         assert_eq!(mob(6, 62, slime(4)), (0.51000005 * 4.0, 0.51000005 * 4.0));
         assert_eq!(mob(7, 50, age(255)), (0.6, 1.7));
+        assert_eq!(mob(8, 100, age(255)), (0.7, 0.8));
+        assert_eq!(mob(9, 51, age(0)), (0.6, 1.95));
     }
 
     #[test]

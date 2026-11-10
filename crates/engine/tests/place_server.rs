@@ -128,10 +128,13 @@ fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8;
 }
 
 /// A `Used` prediction holds for a sign or door the server placed, and for the items whose box
-/// the client leaves to the server (fences, trapdoors and anvils).
+/// the client leaves to the server (fences, panes, single slabs, chests, ladders, trapdoors and
+/// anvils).
 fn used_is_right(item: i16, got: &[([i32; 3], u16)]) -> bool {
-    matches!(item, 85 | 96 | 113 | 145 | 167 | 188..=192)
-        || got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68))
+    matches!(
+        item,
+        44 | 54 | 65 | 85 | 96 | 101 | 102 | 113 | 126 | 145 | 146 | 160 | 167 | 182 | 188..=192
+    ) || got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68))
 }
 
 /// A block change that is the click's doing. A grass block under a set block turns to dirt on a
@@ -496,6 +499,27 @@ fn cases() -> Vec<Case> {
         ([0, 5, 0], 5, [16, 8, 8]),
     );
     c.setup = vec!["setblock {x} 5 {z} redstone_block".into()];
+    v.push(c);
+    // `BlockButton.canPlaceBlockOnSide` asks only the clicked side: a fence is no support, though
+    // the stone below the target cell would hold a button from the DOWN side.
+    let mut c = case(
+        "button on a fence side",
+        143,
+        0,
+        0.0,
+        ([0, 4, 0], 5, [16, 8, 8]),
+    );
+    c.setup = vec!["setblock {x} 4 {z} fence".into()];
+    v.push(c);
+    // `BlockRailBase` has no collision box: the rail goes into the player's own cell.
+    let mut c = case(
+        "activator rail in the player",
+        157,
+        0,
+        0.0,
+        ([0, 3, 0], 1, [8, 16, 8]),
+    );
+    c.inside = true;
     v.push(c);
     // R9-6: a living entity in the target cell refuses the block (armor stands are living).
     let mut c = case(

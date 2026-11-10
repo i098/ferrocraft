@@ -66,6 +66,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::entityMethod);
             case "net/minecraft/client/entity/AbstractClientPlayer":
                 return patch(bytes, BridgeTransformer::playerMethod);
+            case "net/minecraft/client/renderer/EntityRenderer":
+                return patch(bytes, BridgeTransformer::entityRendererMethod);
             case "net/minecraft/client/gui/FontRenderer":
                 return patch(bytes, BridgeTransformer::fontMethod);
             case "net/minecraft/client/Minecraft":
@@ -366,6 +368,18 @@ public class BridgeTransformer implements IClassTransformer {
     /** AbstractClientPlayer.isSpectator reads the network player info, which does not exist here. */
     private static InsnList playerMethod(MethodNode m) {
         return (m.name + m.desc).equals("func_175149_v()Z") ? constant(false) : null;
+    }
+
+    /**
+     * EntityRenderer.loadShader builds a ShaderGroup from the resource manager and a framebuffer, which feed
+     * the GPU post pass (OneConfig's blur). Rust draws, so there is no pass: no group loads, and mods read
+     * getShaderGroup as null, the state of a client without shader support.
+     */
+    private static InsnList entityRendererMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_175069_a(Lnet/minecraft/util/ResourceLocation;)V")) return null;
+        InsnList l = new InsnList();
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
     }
 
     /**

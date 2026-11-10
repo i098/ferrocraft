@@ -31,3 +31,4 @@ Set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_G
 - Mods that draw with GL calls other than rectangles, gradients and text are not forwarded yet.
 - Mod screens are drawn only where the mod HUD is drawn (in a world); the window and sound handler parts of `displayGuiScreen` are skipped.
 - OneConfig's scissors do not clip: the wire has no clip rectangle, so widgets that rely on a scissor draw past their box. Images, SVGs and file dialogs (`AssetHelper`, `TinyFD`) do nothing.
+- `EntityRenderer.loadShader` does nothing: no shader group loads, so OneConfig's background blur never turns on.

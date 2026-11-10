@@ -89,7 +89,6 @@ pub mod flag {
 
 /// `EntityArmorStand` status byte (metadata index 10).
 pub mod stand {
-    pub const SMALL: u8 = 1;
     pub const MARKER: u8 = 16;
 }
 
@@ -260,11 +259,7 @@ impl Entity {
         let m = self.meta;
         let half = |baby: bool| if baby { (w * 0.5, h * 0.5) } else { (w, h) };
         match self.kind {
-            Kind::Object(78) => match m.stand.unwrap_or(0) {
-                s if s & stand::MARKER != 0 => (0.0, 0.0),
-                s if s & stand::SMALL != 0 => (0.25, 0.9875),
-                _ => (w, h),
-            },
+            Kind::Object(78) if m.stand.unwrap_or(0) & stand::MARKER != 0 => (0.0, 0.0),
             Kind::Mob(55 | 62) => {
                 let s = 0.51000005 * f32::from(m.slime.unwrap_or(1).max(1));
                 (s, s)
@@ -868,10 +863,11 @@ mod tests {
         });
         let size = |es: &Entities| es.get(5).unwrap().size();
         assert_eq!(size(&es), (0.5, 1.975));
+        // The small bit (1) leaves the 0.5 x 1.975 box: `EntityArmorStand` sizes only a marker.
         for (status, want) in [
-            (stand::SMALL, (0.25, 0.9875)),
+            (1, (0.5, 1.975)),
             (stand::MARKER, (0.0, 0.0)),
-            (stand::MARKER | stand::SMALL, (0.0, 0.0)),
+            (stand::MARKER | 1, (0.0, 0.0)),
             (4 | 8, (0.5, 1.975)),
         ] {
             es.apply(EntityEvent::Metadata {

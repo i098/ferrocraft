@@ -110,9 +110,10 @@ fn case(name: &str, item: i16, damage: i16, yaw: f32, click: ([i32; 3], u8, [u8;
 }
 
 /// A `Used` prediction holds for a sign or door the server placed, and for the items whose box
-/// the client leaves to the server (trapdoors and anvils).
+/// the client leaves to the server (fences, trapdoors and anvils).
 fn used_is_right(item: i16, got: &[([i32; 3], u16)]) -> bool {
-    matches!(item, 96 | 145 | 167) || got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68))
+    matches!(item, 85 | 96 | 113 | 145 | 167 | 188..=192)
+        || got.iter().any(|(_, s)| matches!(s >> 4, 63 | 68))
 }
 
 /// A block change that is the click's doing. A grass block under a set block turns to dirt on a
@@ -146,8 +147,8 @@ fn blocker_and_box_cases() -> Vec<Case> {
     c.setup = vec!["summon Pig {x} 4 {z} {NoAI:1}".into()];
     c.late = vec!["kill @e[type=Pig,x={x},y=4,z={z},r=3]".into()];
     v.push(c);
-    // A fence post is 0.375..0.625 wide, a wall post 0.25..0.75, both 1.5 high; a body edge on
-    // x 0.8 touches neither, a hopper fills the cell.
+    // A wall post is 0.25..0.75 wide and 1.5 high; a body edge on x 0.8 touches it. A hopper
+    // fills the cell; fences, trapdoors and anvils answer from stale server bounds.
     for (name, item) in [
         ("fence", 85),
         ("nether fence", 113),
@@ -190,7 +191,8 @@ fn blocker_and_box_cases() -> Vec<Case> {
     c.inside = true;
     c.px = 1.1;
     v.push(c);
-    // The armor stand status byte sets the box: a marker has none, a small stand is half high.
+    // The armor stand status byte sets the box: a marker has a 0x0 box, which still blocks a
+    // cell it stands in; a small stand keeps the 0.5 x 1.975 box.
     for (name, nbt, y, item) in [
         ("cube into a marker armor stand", "Marker:1b,NoGravity:1b", "4.5", 1),
         ("cube over a small armor stand", "Small:1b", "3.0", 1),

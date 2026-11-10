@@ -148,11 +148,12 @@ const NO_COLLISION: [u16; 36] = [
     104, 105, 106, 115, 131, 132, 141, 142, 143, 147, 148, 175,
 ];
 
-/// Trapdoors and anvils: vanilla answers `getCollisionBoundingBox` from the bounds the last
-/// caller left on the shared block instance, so the box is not a function of the block. A body
-/// in the unit cube therefore neither refuses the click nor predicts a placement.
+/// Fences, trapdoors and anvils: vanilla answers `getCollisionBoundingBox` from the bounds the
+/// last caller left on the shared block instance, so the box is not a function of the block
+/// (`BlockFence` has no override). A body in the unit cube therefore neither refuses the click
+/// nor predicts a placement.
 fn stale_bounds(id: u16) -> bool {
-    matches!(id, 96 | 145 | 167)
+    matches!(id, 85 | 96 | 113 | 145 | 167 | 188..=192)
 }
 
 /// Blocks with one fixed box smaller than the cell: slabs, chests, cactus, soul sand, carpet.
@@ -175,8 +176,8 @@ const FIXED: &[(&[u16], [f64; 6])] = &[
 ];
 
 /// `Block.getCollisionBoundingBox` of the default state at `pos`, `None` when it has none.
-/// Fences, walls and gates read their neighbours and stand 1.5 high. The hopper resets its
-/// bounds to the unit cube after adding its boxes.
+/// Walls and gates read their neighbours and stand 1.5 high. The hopper resets its bounds to
+/// the unit cube after adding its boxes.
 fn collision(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     if NO_COLLISION.contains(&id) {
         return None;
@@ -186,7 +187,7 @@ fn collision(at: &dyn Fn([i32; 3]) -> u16, id: u16, pos: [i32; 3]) -> Option<[f6
     }
     match id {
         65 => Some(ladder_box(2)),
-        85 | 107 | 113 | 139 | 183..=192 => {
+        107 | 139 | 183..=187 => {
             let here = |p: [i32; 3]| if p == pos { id << 4 } else { at(p) };
             selection_box(&here, pos).map(|b| [b[0], b[1], b[2], b[3], 1.5, b[5]])
         }
@@ -699,24 +700,22 @@ mod tests {
     }
 
     #[test]
-    fn a_body_beside_a_post_leaves_the_cell_free_for_fences_and_walls() {
-        // A lone fence post spans x 0.375..0.625 and a wall post 0.25..0.75: a body on
-        // x 0.8..0.9 leaves the cell free for them but not for a cube.
+    fn a_body_beside_a_post_leaves_the_cell_free_for_walls() {
+        // A lone wall post spans x 0.25..0.75: a body on x 0.8..0.9 leaves the cell free for
+        // it but not for a cube. Fences defer to the server instead.
         let at = flat(&[]);
         let beside = [0.8, 4.0, 0.3, 0.9, 5.8, 0.7];
-        for id in [85, 113, 188, 192, 139] {
-            assert!(placed_with(&at, id, beside), "{id}");
-            assert!(can_place_on_side(&at, id, 0, top_of_ground(), &[beside]));
-        }
+        assert!(placed_with(&at, 139, beside));
+        assert!(can_place_on_side(&at, 139, 0, top_of_ground(), &[beside]));
         assert!(!placed_with(&at, 4, beside));
     }
 
     #[test]
-    fn fences_walls_and_gates_stand_one_and_a_half_high() {
+    fn walls_and_gates_stand_one_and_a_half_high() {
         // A body on y 5.2 is inside them and above a cube.
         let at = flat(&[]);
         let above = [0.4, 5.2, 0.4, 0.6, 6.0, 0.6];
-        for id in [85, 113, 139, 107, 183, 187] {
+        for id in [139, 107, 183, 187] {
             assert!(!placed_with(&at, id, above), "{id}");
             assert!(!can_place_on_side(&at, id, 0, top_of_ground(), &[above]));
         }
@@ -724,14 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn posts_reach_their_joined_side_and_a_closed_gate_faces_north() {
-        // Stone to the east joins the post to x 1.0; a nether brick fence does not join a
-        // wooden one.
-        let joined = flat(&[([1, 4, 0], 1 << 4), ([-1, 4, 0], 85 << 4)]);
-        assert!(!placed_with(&joined, 85, [0.8, 4.0, 0.3, 0.9, 5.8, 0.7]));
-        let west = [0.05, 4.0, 0.3, 0.3, 5.8, 0.7];
-        assert!(placed_with(&joined, 113, west));
-        assert!(!placed_with(&joined, 85, west));
+    fn a_closed_gate_faces_north() {
         // A closed gate's panel spans z 0.375..0.625 across the cell.
         let at = flat(&[]);
         assert!(placed_with(&at, 107, [0.1, 4.0, 0.1, 0.9, 5.8, 0.3]));
@@ -739,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn hoppers_fill_the_cell_and_trapdoors_and_anvils_defer_to_the_server() {
+    fn hoppers_fill_the_cell_and_fences_trapdoors_and_anvils_defer_to_the_server() {
         let at = flat(&[]);
         let click = top_of_ground();
         let corner = [0.0, 4.0, 0.0, 0.05, 5.8, 0.05];
@@ -748,7 +740,7 @@ mod tests {
             Outcome::Refused
         );
         let inside = [0.4, 4.0, 0.4, 0.6, 5.8, 0.6];
-        for id in [96, 145, 167] {
+        for id in [85, 113, 188, 192, 96, 145, 167] {
             assert!(can_place_on_side(&at, id, 0, click, &[inside]), "{id}");
             assert_eq!(
                 use_item(&at, id, 0, click, 0.0, &[inside]),

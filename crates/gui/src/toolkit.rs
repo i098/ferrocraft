@@ -467,6 +467,9 @@ impl<'f> Gui<'f> {
         let Some([cx0, cy0, cx1, cy1]) = self.clip else {
             return Some((pos, uv, c));
         };
+        if cx0 >= cx1 || cy0 >= cy1 {
+            return None;
+        }
         let [a, b, d, e] = pos;
         if !(a[1] == b[1] && b[0] == d[0] && d[1] == e[1] && e[0] == a[0]) {
             let (lo, hi) = pos
@@ -887,6 +890,22 @@ mod tests {
             [[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]]
         );
         assert_eq!(q[1].uv, [[0.25, 0.0], [0.5, 0.0], [0.5, 1.0], [0.25, 1.0]]);
+    }
+
+    #[test]
+    fn an_inverted_or_empty_clip_drops_every_quad() {
+        let mut g = Gui::new(GuiScale::new(854, 480, 2, false), None, 0);
+        for clip in [
+            [150.0, 0.0, 100.0, 300.0],
+            [0.0, 150.0, 300.0, 100.0],
+            [5.0, 5.0, 5.0, 50.0],
+        ] {
+            g.set_clip(Some(clip));
+            g.fill(0, 0, 300, 300, 0xFFFF_FFFF);
+        }
+        g.set_clip(None);
+        g.fill(0, 0, 1, 1, 1);
+        assert_eq!(g.into_quads().len(), 1);
     }
 
     #[test]

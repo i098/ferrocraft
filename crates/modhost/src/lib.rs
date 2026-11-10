@@ -29,7 +29,7 @@ pub struct Config {
 
 #[derive(PartialEq)]
 enum Phase {
-    /// The JVM has not said hello yet; input is dropped.
+    /// The JVM has not said hello yet; input is queued and sent with the first frame.
     Starting,
     Live,
     /// Stopped, or the JVM is gone.
@@ -133,7 +133,7 @@ impl ModHost {
             return;
         };
         let mut s = self.link.state.lock().unwrap();
-        if s.phase == Phase::Live {
+        if s.phase != Phase::Done {
             s.input.events.push((e, screen));
         }
     }

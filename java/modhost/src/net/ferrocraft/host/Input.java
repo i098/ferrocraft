@@ -68,6 +68,8 @@ public final class Input {
             if (e == null) return false;
         } while (e[2] != 0 && !repeatEvents);
         keyEvent = e;
+        // The polled state follows the event being handled, as a mod that polls inside its handler expects.
+        if (e[0] >= 0 && e[0] < KEYS.length) KEYS[e[0]] = e[1] != 0;
         return true;
     }
 
@@ -75,6 +77,7 @@ public final class Input {
         int[] e = MOUSE_EVENTS.poll();
         if (e == null) return false;
         mouseEvent = e;
+        if (e[0] >= 0 && e[0] < BUTTONS.length) BUTTONS[e[0]] = e[1] != 0;
         return true;
     }
 

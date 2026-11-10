@@ -536,7 +536,9 @@ impl App {
         let m = Fm(g.metrics());
         let screen_open = self.ui.is_open() || self.container.is_some();
         let in_world = self.ui.in_world && self.game.player.is_some();
-        if in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none()) {
+        let show_hud =
+            in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
+        if show_hud {
             let debug = self.debug_lines(eye);
             let status = status_of(&self.game, self.input.sneaking());
             self.hud.selected_slot = i32::from(self.game.inv.held);
@@ -567,8 +569,16 @@ impl App {
             );
         }
         if let Some(mods) = &self.mods {
-            mods.set_view(scale.width, scale.height, scale.factor, (mx, my));
-            ferrocraft_modhost::draw(&mut g, &mods.commands());
+            mods.set_view(
+                w as i32,
+                h as i32,
+                i32::from(self.ui.settings.gui_scale),
+                self.ui.settings.force_unicode,
+                (self.cursor.0 as i32, self.cursor.1 as i32),
+            );
+            if show_hud {
+                ferrocraft_modhost::draw(&mut g, &mods.commands());
+            }
         }
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {

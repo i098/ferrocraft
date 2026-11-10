@@ -6,9 +6,10 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 
 - `net.minecraft.client.main.Main` replaces the vanilla entry point. It starts no window and no GL. It builds a stand-in `Minecraft` (`Minecraft.java`), loads the mods through Forge's `FMLClientHandler`, then runs `Host`.
 - `HostTweaker` registers `BridgeTransformer` first, so LWJGL and OneConfig classes are patched before they load. `HostLateTweaker` queues `HostLastTweaker`, which registers `MinecraftBridgeTransformer` after FML's deobfuscation tweaker: Minecraft classes keep notch names until then.
-- `BridgeTransformer` rewrites four things: LWJGL `Keyboard`, `Mouse` and `Display` read `Input`; GL calls and `FontRenderer.drawString` become commands in `Sink`; OneConfig's `NanoVGHelper` and `GLPlatform` calls go to `Nvg`; a few `Entity` methods that need a real world return fixed values.
-- `Host` posts Forge's `RenderGameOverlayEvent`, so HUD mods draw. `OverlayFilter` cancels the vanilla elements, because Rust draws those.
-- `Sink` collects rectangles, gradients and text. `Host` sends them as one frame per round.
+- `BridgeTransformer` rewrites four things: LWJGL `Keyboard`, `Mouse` and `Display` read `Input` (polled state and the event queues behind `next()`); GL calls and `FontRenderer.drawString` become commands in `Sink`; OneConfig's `NanoVGHelper` and `GLPlatform` calls go to `Nvg`; a few `Entity` methods that need a real world return fixed values.
+- `Host` runs the input loops of `Minecraft.runTick` inside each 20 Hz tick: for every mouse and key event it posts Forge's `MouseEvent`, sets `KeyBinding` state (mouse buttons are code - 100), posts FML's `InputEvent` and OneConfig's `KeyInputEvent` or `MouseInputEvent`.
+- `Host` also posts Forge's `RenderGameOverlayEvent`, so HUD mods draw. `OverlayFilter` cancels the vanilla elements, because Rust draws those.
+- `Sink` collects rectangles, gradients and text. `Host` sends them as one frame per round. The window size is in pixels and the GUI scale is the setting, so `ScaledResolution` in the JVM gives the same scale as Rust.
 
 ## Build
 

@@ -159,9 +159,21 @@ public class BridgeTransformer implements IClassTransformer {
             case "isCreated()Z":
                 return constant(true);
             case "next()Z":
-            case "isRepeatEvent()Z":
+                return forward(m, INPUT, "nextKey", "()Z");
+            case "getEventKey()I":
+                return forward(m, INPUT, "eventKey", "()I");
             case "getEventKeyState()Z":
-                return constant(false);
+                return forward(m, INPUT, "eventKeyDown", "()Z");
+            case "isRepeatEvent()Z":
+                return forward(m, INPUT, "eventRepeat", "()Z");
+            case "enableRepeatEvents(Z)V":
+                return forward(m, INPUT, "repeatEvents", "(Z)V");
+            case "areRepeatEventsEnabled()Z":
+                return forward(m, INPUT, "repeatEventsEnabled", "()Z");
+            case "getEventCharacter()C":
+                return constant(0);
+            case "getEventNanoseconds()J":
+                return defaultBody(m);
             default:
                 return null;
         }
@@ -178,13 +190,28 @@ public class BridgeTransformer implements IClassTransformer {
             case "isCreated()Z":
                 return constant(true);
             case "next()Z":
-            case "isGrabbed()Z":
+                return forward(m, INPUT, "nextMouse", "()Z");
+            case "getEventButton()I":
+                return forward(m, INPUT, "eventButton", "()I");
             case "getEventButtonState()Z":
+                return forward(m, INPUT, "eventButtonDown", "()Z");
+            case "getEventDWheel()I":
+                return forward(m, INPUT, "eventDWheel", "()I");
+            case "getEventX()I":
+                return forward(m, INPUT, "eventX", "()I");
+            case "getEventY()I":
+                return forward(m, INPUT, "eventY", "()I");
+            case "getEventDX()I":
+                return forward(m, INPUT, "eventDX", "()I");
+            case "getEventDY()I":
+                return forward(m, INPUT, "eventDY", "()I");
+            case "getEventNanoseconds()J":
+                return defaultBody(m);
+            case "isGrabbed()Z":
                 return constant(false);
             case "getDX()I":
             case "getDY()I":
             case "getDWheel()I":
-            case "getEventDWheel()I":
                 return constant(0);
             default:
                 return null;

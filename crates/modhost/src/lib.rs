@@ -7,13 +7,14 @@ use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
-pub use wire::{DrawCmd, Input};
+pub use wire::{DrawCmd, Event, Input};
 
 /// What the JVM needs to start.
 pub struct Config {
@@ -26,21 +27,40 @@ pub struct Config {
     pub assets_dir: PathBuf,
 }
 
+#[derive(PartialEq)]
+enum Phase {
+    /// The JVM has not said hello yet; input is dropped.
+    Starting,
+    Live,
+    /// Stopped, or the JVM is gone.
+    Done,
+}
+
 struct Shared {
+    phase: Phase,
+    /// A view arrived since the last frame was sent.
+    fresh: bool,
     input: Input,
     commands: Vec<DrawCmd>,
 }
 
+struct Link {
+    state: Mutex<Shared>,
+    view: Condvar,
+}
+
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
-    child: Child,
-    shared: Arc<Mutex<Shared>>,
+    child: Arc<Mutex<Child>>,
+    link: Arc<Link>,
 }
 
 impl ModHost {
-    /// Start the JVM and wait until it connects, which is after FML has loaded the mods.
+    /// Start the JVM and return at once. A worker thread waits for it to connect, which is after FML
+    /// has loaded the mods, and gives up when the process exits first.
     pub fn start(cfg: &Config) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let sep = if cfg!(windows) { ";" } else { ":" };
         let cp = cfg
@@ -63,76 +83,69 @@ impl ModHost {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()?;
-        let mut host = Self {
-            child,
-            shared: Arc::new(Mutex::new(Shared {
-                input: Input::default(),
-                commands: Vec::new(),
-            })),
+        let host = Self {
+            child: Arc::new(Mutex::new(child)),
+            link: Arc::new(Link {
+                state: Mutex::new(Shared {
+                    phase: Phase::Starting,
+                    fresh: false,
+                    input: Input::default(),
+                    commands: Vec::new(),
+                }),
+                view: Condvar::new(),
+            }),
         };
-        let (mut stream, _) = listener.accept()?;
-        stream.set_nodelay(true)?;
-        let mut hello = [0; 1];
-        stream.read_exact(&mut hello)?;
-        if hello[0] != b'H' {
-            host.stop();
-            return Err(io::Error::other("the JVM sent no hello"));
-        }
-        let shared = Arc::clone(&host.shared);
-        thread::spawn(move || pump(stream, &shared));
+        let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
+        thread::spawn(move || run(&listener, &child, &link));
         Ok(host)
     }
 
-    /// Set the window size, GUI scale and mouse for the next frame.
-    pub fn set_view(&self, width: i32, height: i32, gui_scale: i32, mouse: (i32, i32)) {
-        let mut s = self.shared.lock().unwrap();
+    /// Set the window size in pixels, the GUI scale setting, the unicode font flag and the mouse in
+    /// pixels for the next frame, and ask for that frame. The JVM runs one frame per call.
+    pub fn set_view(
+        &self,
+        width: i32,
+        height: i32,
+        gui_scale: i32,
+        unicode: bool,
+        mouse: (i32, i32),
+    ) {
+        let mut s = self.link.state.lock().unwrap();
         s.input.width = width;
         s.input.height = height;
         s.input.gui_scale = gui_scale;
+        s.input.unicode = unicode;
         s.input.mouse = mouse;
+        s.fresh = true;
+        self.link.view.notify_one();
     }
 
-    /// Track key and mouse button state from a winit window event.
+    /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
     pub fn window_event(&self, event: &WindowEvent) {
-        let mut s = self.shared.lock().unwrap();
-        match event {
-            WindowEvent::KeyboardInput { event: k, .. } => {
-                let PhysicalKey::Code(code) = k.physical_key else {
-                    return;
-                };
-                let Some(code) = keys::lwjgl(code) else {
-                    return;
-                };
-                s.input.keys.retain(|&c| c != code);
-                if k.state == ElementState::Pressed {
-                    s.input.keys.push(code);
-                }
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                let bit = match button {
-                    MouseButton::Left => 1,
-                    MouseButton::Right => 2,
-                    MouseButton::Middle => 4,
-                    _ => return,
-                };
-                if *state == ElementState::Pressed {
-                    s.input.buttons |= bit;
-                } else {
-                    s.input.buttons &= !bit;
-                }
-            }
-            _ => {}
+        let Some(e) = transition(event) else {
+            return;
+        };
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase == Phase::Live {
+            s.input.events.push(e);
         }
     }
 
-    /// The draw commands of the last finished frame.
+    /// The draw commands of the last finished frame; empty once the JVM is gone.
     pub fn commands(&self) -> Vec<DrawCmd> {
-        self.shared.lock().unwrap().commands.clone()
+        self.link.state.lock().unwrap().commands.clone()
     }
 
     pub fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        {
+            let mut s = self.link.state.lock().unwrap();
+            s.phase = Phase::Done;
+            s.commands.clear();
+            self.link.view.notify_all();
+        }
+        let mut child = self.child.lock().unwrap();
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -142,16 +155,101 @@ impl Drop for ModHost {
     }
 }
 
-/// One request and one reply per round, as fast as the JVM answers, until it closes the socket.
-fn pump(mut stream: TcpStream, shared: &Mutex<Shared>) {
-    loop {
-        let input = shared.lock().unwrap().input.clone();
-        let reply =
-            wire::write_input(&mut stream, &input).and_then(|()| wire::read_commands(&mut stream));
-        match reply {
-            Ok(cmds) => shared.lock().unwrap().commands = cmds,
-            Err(_) => return,
+fn transition(event: &WindowEvent) -> Option<Event> {
+    match event {
+        WindowEvent::KeyboardInput { event: k, .. } => {
+            let PhysicalKey::Code(code) = k.physical_key else {
+                return None;
+            };
+            Some(Event::Key {
+                code: keys::lwjgl(code)?,
+                pressed: k.state == ElementState::Pressed,
+                repeat: k.repeat,
+            })
         }
+        WindowEvent::MouseInput { state, button, .. } => Some(Event::Button {
+            button: match button {
+                MouseButton::Left => 0,
+                MouseButton::Right => 1,
+                MouseButton::Middle => 2,
+                _ => return None,
+            },
+            pressed: *state == ElementState::Pressed,
+        }),
+        // LWJGL reports 120 per notch. Pixel deltas (trackpads) arrive in many small steps and are dropped.
+        WindowEvent::MouseWheel {
+            delta: MouseScrollDelta::LineDelta(_, y),
+            ..
+        } => {
+            let delta = (y * 120.0) as i32;
+            (delta != 0).then_some(Event::Wheel(delta))
+        }
+        _ => None,
+    }
+}
+
+/// Connect, then serve frames until the JVM goes away; then leave no stale commands behind.
+fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link) {
+    let result = connect(listener, child, link).and_then(|stream| pump(stream, link));
+    let mut s = link.state.lock().unwrap();
+    if let (Err(e), false) = (result, s.phase == Phase::Done) {
+        eprintln!("mod host stopped: {e}");
+    }
+    s.phase = Phase::Done;
+    s.commands.clear();
+}
+
+fn connect(listener: &TcpListener, child: &Mutex<Child>, link: &Link) -> io::Result<TcpStream> {
+    let mut stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                if let Some(status) = child.lock().unwrap().try_wait()? {
+                    return Err(io::Error::other(format!(
+                        "the JVM exited with {status} before it connected"
+                    )));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    stream.set_nonblocking(false)?;
+    stream.set_nodelay(true)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let mut hello = [0; 1];
+    stream.read_exact(&mut hello)?;
+    if hello[0] != b'H' {
+        return Err(io::Error::other("the JVM sent no hello"));
+    }
+    stream.set_read_timeout(None)?;
+    let mut s = link.state.lock().unwrap();
+    if s.phase != Phase::Starting {
+        return Err(io::Error::other("stopped"));
+    }
+    s.phase = Phase::Live;
+    Ok(stream)
+}
+
+/// One frame per `set_view`: send the input and the events since the last frame, read the commands.
+fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
+    loop {
+        let input = {
+            let mut s = link.state.lock().unwrap();
+            while s.phase == Phase::Live && !s.fresh {
+                s = link.view.wait(s).unwrap();
+            }
+            if s.phase != Phase::Live {
+                return Ok(());
+            }
+            s.fresh = false;
+            let input = s.input.clone();
+            s.input.events.clear();
+            input
+        };
+        wire::write_input(&mut stream, &input)?;
+        let cmds = wire::read_commands(&mut stream)?;
+        link.state.lock().unwrap().commands = cmds;
     }
 }
 

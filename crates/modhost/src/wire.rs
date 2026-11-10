@@ -1,10 +1,28 @@
 //! The loopback protocol with `net.ferrocraft.host.Host`. All numbers are big-endian.
 //!
-//! Rust to Java, one frame: `'F'`, i32 width, i32 height, i32 gui scale, u8 force unicode,
-//! i32 mouse x, i32 mouse y, u8 mouse button mask, u16 key count, i32 LWJGL key codes.
+//! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
+//! u8 force unicode, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event count, then per
+//! event: u8 kind, i32 argument, u8 state. Kinds: `'K'` key (LWJGL code; state bit 0 down, bit 1
+//! repeat), `'B'` mouse button (LWJGL number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel
+//! (argument is the LWJGL delta, 120 per notch).
 //! Java to Rust, per frame: u32 command count, then the commands of `Sink.java`.
 
 use std::io::{self, Read, Write};
+
+/// A key or mouse transition, in the order it happened.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Event {
+    Key {
+        code: i32,
+        pressed: bool,
+        repeat: bool,
+    },
+    Button {
+        button: i32,
+        pressed: bool,
+    },
+    Wheel(i32),
+}
 
 /// What Rust tells the JVM each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14,10 +32,8 @@ pub struct Input {
     pub gui_scale: i32,
     pub unicode: bool,
     pub mouse: (i32, i32),
-    /// Bit 0 left, bit 1 right, bit 2 middle.
-    pub buttons: u8,
-    /// LWJGL 2 key codes that are down.
-    pub keys: Vec<i32>,
+    /// Transitions since the previous frame.
+    pub events: Vec<Event>,
 }
 
 /// One draw call of a mod, in scaled GUI pixels.
@@ -49,7 +65,7 @@ const MAX_TEXT: usize = 1 << 16;
 const MAX_COMMANDS: u32 = 1 << 16;
 
 pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
-    let mut b = Vec::with_capacity(32 + i.keys.len() * 4);
+    let mut b = Vec::with_capacity(32 + i.events.len() * 6);
     b.push(b'F');
     for v in [i.width, i.height, i.gui_scale] {
         b.extend(v.to_be_bytes());
@@ -57,11 +73,21 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     b.push(u8::from(i.unicode));
     b.extend(i.mouse.0.to_be_bytes());
     b.extend(i.mouse.1.to_be_bytes());
-    b.push(i.buttons);
-    let n = u16::try_from(i.keys.len()).map_err(|_| io::Error::other("too many keys"))?;
+    let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
     b.extend(n.to_be_bytes());
-    for k in &i.keys {
-        b.extend(k.to_be_bytes());
+    for e in &i.events {
+        let (kind, arg, state) = match *e {
+            Event::Key {
+                code,
+                pressed,
+                repeat,
+            } => (b'K', code, u8::from(pressed) | u8::from(repeat) << 1),
+            Event::Button { button, pressed } => (b'B', button, u8::from(pressed)),
+            Event::Wheel(delta) => (b'W', delta, 0),
+        };
+        b.push(kind);
+        b.extend(arg.to_be_bytes());
+        b.push(state);
     }
     w.write_all(&b)?;
     w.flush()
@@ -189,21 +215,45 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_frame_header_java_reads() {
+    fn writes_the_frame_java_reads() {
         let mut out = Vec::new();
         let input = Input {
             width: 854,
             height: 480,
-            gui_scale: 0,
-            unicode: false,
+            gui_scale: 2,
+            unicode: true,
             mouse: (5, 6),
-            buttons: 1,
-            keys: vec![17],
+            events: vec![
+                Event::Key {
+                    code: 17,
+                    pressed: true,
+                    repeat: true,
+                },
+                Event::Button {
+                    button: 1,
+                    pressed: false,
+                },
+                Event::Wheel(-120),
+            ],
         };
         write_input(&mut out, &input).unwrap();
-        assert_eq!(out[0], b'F');
-        assert_eq!(out.len(), 1 + 12 + 1 + 8 + 1 + 2 + 4);
-        assert_eq!(&out[out.len() - 6..out.len() - 4], &[0, 1]);
-        assert_eq!(&out[out.len() - 4..], &17i32.to_be_bytes());
+        let mut want = vec![b'F'];
+        for v in [854i32, 480, 2] {
+            want.extend(v.to_be_bytes());
+        }
+        want.push(1);
+        want.extend(5i32.to_be_bytes());
+        want.extend(6i32.to_be_bytes());
+        want.extend([0, 3]);
+        want.push(b'K');
+        want.extend(17i32.to_be_bytes());
+        want.push(0b11);
+        want.push(b'B');
+        want.extend(1i32.to_be_bytes());
+        want.push(0);
+        want.push(b'W');
+        want.extend((-120i32).to_be_bytes());
+        want.push(0);
+        assert_eq!(out, want);
     }
 }

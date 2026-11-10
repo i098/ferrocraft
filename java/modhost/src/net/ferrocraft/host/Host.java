@@ -6,16 +6,13 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import net.minecraft.launchwrapper.Launch;
 
 /**
  * Boots Forge's FML around Minecraft state that Rust owns, then answers one frame message at a time.
  *
  * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, i32 mouseX,
- * i32 mouseY, u8 mouse button mask, u16 key count, i32 LWJGL key codes. 'Q' ends the host.
+ * i32 mouseY, u16 event count, then the key and mouse events of wire.rs. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take()}.
  */
 public final class Host {
@@ -25,7 +22,6 @@ public final class Host {
     private final Object mc;
     private final Object forgeBus;
     private final Object fml;
-    private final boolean[] held = new boolean[256];
     private long lastTick = System.nanoTime();
 
     private Host(Object mc) {
@@ -77,10 +73,6 @@ public final class Host {
 
         Host host = new Host(mc);
         String bridge = System.getProperty("ferro.bridge");
-        if (bridge == null) {
-            host.selfTest();
-            return;
-        }
         int colon = bridge.lastIndexOf(':');
         try (Socket s = new Socket(bridge.substring(0, colon), Integer.parseInt(bridge.substring(colon + 1)))) {
             s.setTcpNoDelay(true);
@@ -102,32 +94,20 @@ public final class Host {
             int h = in.readInt();
             int scale = in.readInt();
             boolean unicode = in.readUnsignedByte() != 0;
-            int mx = in.readInt();
-            int my = in.readInt();
-            int buttons = in.readUnsignedByte();
+            Input.set(w, h, in.readInt(), in.readInt());
             int n = in.readUnsignedShort();
-            int[] keys = new int[n];
-            for (int i = 0; i < n; i++) keys[i] = in.readInt();
-            frame(w, h, scale, unicode, mx, my, buttons, keys);
+            for (int i = 0; i < n; i++) {
+                int kind = in.readUnsignedByte();
+                int arg = in.readInt();
+                Input.event(kind, arg, in.readUnsignedByte());
+            }
+            frame(w, h, scale, unicode);
             out.write(Sink.take());
             out.flush();
         }
     }
 
-    private void frame(int w, int h, int scale, boolean unicode, int mx, int my, int buttons, int[] keys) {
-        Input.set(w, h, mx, my);
-        for (int b = 0; b < 3; b++) Input.button(b, (buttons & (1 << b)) != 0);
-        boolean[] now = new boolean[256];
-        for (int k : keys) if (k >= 0 && k < 256) now[k] = true;
-        Class<?> keyBinding = R.cls("net.minecraft.client.settings.KeyBinding");
-        for (int k = 0; k < 256; k++) {
-            if (now[k] != held[k]) {
-                Input.key(k, now[k]);
-                R.call(keyBinding, "func_74510_a", k, now[k]);
-                if (now[k]) R.call(keyBinding, "func_74507_a", k);
-                held[k] = now[k];
-            }
-        }
+    private void frame(int w, int h, int scale, boolean unicode) {
         Minecraft.resize(mc, w, h, scale, unicode);
         long t = System.nanoTime();
         int ticks = (int) Math.min(MAX_TICKS, (t - lastTick) / TICK_NANOS);
@@ -135,10 +115,56 @@ public final class Host {
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
             R.call(fml, "onPreClientTick");
+            pollMouse();
+            pollKeyboard();
             R.call(fml, "onPostClientTick");
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
         renderOverlay(partial);
+    }
+
+    /** The mouse loop of Minecraft.runTick: Forge's MouseEvent, key binds, then the input events. */
+    private void pollMouse() {
+        while (Input.nextMouse()) {
+            if (Boolean.TRUE.equals(R.call(R.cls("net.minecraftforge.client.ForgeHooksClient"), "postMouseEvent"))) continue;
+            int button = Input.eventButton() - 100;
+            boolean down = Input.eventButtonDown();
+            keyBind(button, down);
+            R.call(fml, "fireMouseInput");
+            postOneConfig("MouseInputEvent", Input.eventButton(), down);
+        }
+    }
+
+    /** The keyboard loop of Minecraft.runTick. */
+    private void pollKeyboard() {
+        while (Input.nextKey()) {
+            int key = Input.eventKey();
+            boolean down = Input.eventKeyDown();
+            keyBind(key, down);
+            R.call(fml, "fireKeyInput");
+            postOneConfig("KeyInputEvent", key, down);
+        }
+    }
+
+    /** KeyBinding.setKeyBindState, and KeyBinding.onTick on a press; mouse buttons are code - 100. */
+    private static void keyBind(int code, boolean down) {
+        Class<?> keyBinding = R.cls("net.minecraft.client.settings.KeyBinding");
+        R.call(keyBinding, "func_74510_a", code, down);
+        if (down) R.call(keyBinding, "func_74507_a", code);
+    }
+
+    /**
+     * OneConfig's own input events, which its mixin posts from runTick. The constructor is filled by
+     * parameter type: an int is the key or button, a boolean the state.
+     */
+    private static void postOneConfig(String event, int code, boolean down) {
+        String cls = "cc.polyfrost.oneconfig.events.event." + event;
+        Class<?>[] types = R.cls(cls).getDeclaredConstructors()[0].getParameterTypes();
+        Object[] args = new Object[types.length];
+        for (int i = 0; i < types.length; i++) {
+            args[i] = types[i] == int.class ? (Object) code : types[i] == boolean.class ? (Object) down : null;
+        }
+        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu(cls, args));
     }
 
     /** GuiIngameForge.renderGameOverlay, which posts the overlay events and runs mixins hooked into it. */
@@ -146,24 +172,5 @@ public final class Host {
         R.call(fml, "onRenderTickStart", partial);
         Minecraft.renderOverlay(mc, partial);
         R.call(fml, "onRenderTickEnd", partial);
-    }
-
-    /** Without a Rust peer: hold W for a while and print the commands, to prove the draw path. */
-    private void selfTest() {
-        for (int i = 0; i < 40; i++) {
-            int[] keys = i >= 20 ? new int[] {17} : new int[0];
-            frame(854, 480, 0, false, 10, 10, 0, keys);
-            byte[] b = Sink.take();
-            if (i == 30) { StringBuilder sb = new StringBuilder(); for (byte x : b) sb.append(String.format("%02x", x)); log("HEX " + sb); }
-            if (i == 5 || i == 30) log("frame " + i + ": " + java.util.Arrays.toString(Collections.singletonList(b.length).toArray()) + " bytes, commands=" + ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]));
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                return;
-            }
-        }
-        List<String> done = new ArrayList<>();
-        done.add("done");
-        log(done.get(0));
     }
 }

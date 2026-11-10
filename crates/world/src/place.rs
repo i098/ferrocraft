@@ -764,7 +764,10 @@ mod tests {
         };
         let edge = [0.1, 4.0, 0.1, 0.3, 5.8, 0.3];
         assert!(!can_place_on_side(&pond, 111, 0, side, &[edge]));
-        assert_eq!(use_item(&pond, 111, 0, side, 0.0, &[edge]), Outcome::Refused);
+        assert_eq!(
+            use_item(&pond, 111, 0, side, 0.0, &[edge]),
+            Outcome::Refused
+        );
         assert!(can_place_on_side(&pond, 111, 0, side, &[FAR]));
         let at = flat(&[]);
         assert!(!placed_with(&at, 78, [0.1, 3.5, 0.1, 0.3, 5.3, 0.3]));

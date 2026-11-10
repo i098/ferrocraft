@@ -68,7 +68,11 @@ impl Bot {
             .entities
             .iter()
             .any(|e| !known.contains(&e.id) && near(e.pos[0], bx) && near(e.pos[2], bz));
-        assert!(arrived, "{}: the summoned entity did not reach the client", c.name);
+        assert!(
+            arrived,
+            "{}: the summoned entity did not reach the client",
+            c.name
+        );
     }
 
     /// Console lines right before the click; each already drains the server's answer.
@@ -208,7 +212,12 @@ fn blocker_and_box_cases() -> Vec<Case> {
     // The armor stand status byte sets the box: a marker has a 0x0 box, which still blocks a
     // cell it stands in; a small stand keeps the 0.5 x 1.975 box.
     for (name, nbt, y, item) in [
-        ("cube into a marker armor stand", "Marker:1b,NoGravity:1b", "4.5", 1),
+        (
+            "cube into a marker armor stand",
+            "Marker:1b,NoGravity:1b",
+            "4.5",
+            1,
+        ),
         ("cube over a small armor stand", "Small:1b", "3.0", 1),
         ("cube into a large armor stand", "Small:0b", "3.0", 1),
     ] {
@@ -244,10 +253,19 @@ fn blocker_and_box_cases() -> Vec<Case> {
     // Baby and slime sizes come from metadata; a mob centred 0.3 west of the cell reaches into
     // it only with its adult half width (pig 0.45, slime 0.255 at size 1 and 0.765 at size 3).
     for (name, summon) in [
-        ("cube beside a baby pig", "Pig {xw7} 4 {zc} {NoAI:1b,Age:-24000}"),
+        (
+            "cube beside a baby pig",
+            "Pig {xw7} 4 {zc} {NoAI:1b,Age:-24000}",
+        ),
         ("cube into an adult pig", "Pig {xw7} 4 {zc} {NoAI:1b}"),
-        ("cube beside a small slime", "Slime {xw7} 4 {zc} {NoAI:1b,Size:0}"),
-        ("cube into a big slime", "Slime {xw7} 4 {zc} {NoAI:1b,Size:2}"),
+        (
+            "cube beside a small slime",
+            "Slime {xw7} 4 {zc} {NoAI:1b,Size:0}",
+        ),
+        (
+            "cube into a big slime",
+            "Slime {xw7} 4 {zc} {NoAI:1b,Size:2}",
+        ),
     ] {
         let mut c = case(name, 1, 0, 0.0, ground([8, 16, 8]));
         c.setup = vec![format!("summon {summon}")];

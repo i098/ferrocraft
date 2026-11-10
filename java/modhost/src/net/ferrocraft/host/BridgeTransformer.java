@@ -56,6 +56,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::playerSpMethod);
             case "net/minecraft/entity/player/EntityPlayer":
                 return patch(bytes, BridgeTransformer::entityPlayerMethod);
+            case "net/minecraft/client/network/NetHandlerPlayClient":
+                return patch(bytes, BridgeTransformer::sendQueueMethod);
             case "net/minecraft/client/gui/Gui":
                 return patch(bytes, BridgeTransformer::guiMethod);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":
@@ -354,6 +356,17 @@ public class BridgeTransformer implements IClassTransformer {
      */
     private static InsnList playerSpMethod(MethodNode m) {
         return (m.name + m.desc).equals("func_145771_j(DDD)Z") ? constant(false) : null;
+    }
+
+    /**
+     * The stand-in player's sendQueue sends nothing: Rust owns the connection and sends the packets of what the
+     * player does (the abilities packet after a flight toggle) as vanilla does.
+     */
+    private static InsnList sendQueueMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_147297_a(Lnet/minecraft/network/Packet;)V")) return null;
+        InsnList l = new InsnList();
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
     }
 
     /** The super call of EntityPlayerSP.onLivingUpdate moves and animates the entity; Rust does that. */

@@ -63,7 +63,7 @@ public final class Host {
     }
 
     /** FML's security manager traps every exit except the one from its own handler. */
-    private static void halt(int code) {
+    static void halt(int code) {
         R.call(R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance"), "exitJava", code, true);
     }
 

@@ -34,6 +34,7 @@ final class Player {
         R.call(player, "func_70088_a"); // entityInit: the flags and health in the data watcher
         R.call(player, "func_110147_ax"); // applyEntityAttributes: the movement speed that sprinting modifies
         R.set(player, "field_71159_c", mc);
+        R.set(player, "field_71174_a", R.alloc("net.minecraft.client.network.NetHandlerPlayClient")); // sendQueue: sends nothing, see BridgeTransformer
         this.input = R.neu("net.minecraft.util.MovementInputFromOptions", settings);
         R.set(player, "field_71158_b", input);
     }

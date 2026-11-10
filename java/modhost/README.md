@@ -27,6 +27,10 @@ FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.0.3.jar for
 The class path of the JVM is `java/modhost/cls`, then the libraries, then the Forge jar and the Minecraft 1.8.9 jar.
 Set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_GAMEDIR` for the engine. Put the mod jars (for example Keystrokes) in `GAMEDIR/mods`.
 
+## Test
+
+After `build.sh`, run `java/modhost/test.sh` with the same `FERRO_JAVA_HOME` and `FERRO_LIB`; the folder also holds the Minecraft 1.8.9 jar and the other Java 8 libraries. It boots FML with the host tweakers and runs `test/` classes in place of the host entry point. `PlayerTest` runs the stand-in player through a double-tap of jump with `allowFlying`, which must toggle flight without a packet send or an exception.
+
 ## Limits
 
 - The Minecraft classes are the vanilla 1.8.9 classes from the player's jar, patched at load time. The generated stand-in jar from `ferro-prepare` is not built yet.

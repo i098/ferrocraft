@@ -66,6 +66,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::playerMethod);
             case "net/minecraft/client/gui/FontRenderer":
                 return patch(bytes, BridgeTransformer::fontMethod);
+            case "net/minecraft/client/Minecraft":
+                return patch(bytes, BridgeTransformer::minecraftMethod);
             default:
                 return bytes;
         }
@@ -288,6 +290,16 @@ public class BridgeTransformer implements IClassTransformer {
             default:
                 return null;
         }
+    }
+
+    /** Minecraft.displayGuiScreen needs the window, the sound handler and the mouse grab; {@link Host#displayScreen} does what mods read. */
+    private static InsnList minecraftMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_147108_a(Lnet/minecraft/client/gui/GuiScreen;)V")) return null;
+        InsnList l = new InsnList();
+        l.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        call(l, "net/ferrocraft/host/Host", "displayScreen", "(Ljava/lang/Object;)V");
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
     }
 
     /** FontRenderer.drawString(String, float, float, int, boolean): every draw method ends here. */

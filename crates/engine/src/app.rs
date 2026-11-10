@@ -494,6 +494,11 @@ impl App {
         }
     }
 
+    /// A menu, the container or chat is open: vanilla routes input to it, not to the game.
+    fn screen_open(&self) -> bool {
+        self.ui.is_open() || self.container.is_some() || self.input.chat_input().is_some()
+    }
+
     /// The F3 left column, `None` without a player.
     fn debug_lines(&self, eye: Option<[f64; 3]>) -> Option<Vec<String>> {
         self.game.player.as_ref().map(|p| {
@@ -574,6 +579,7 @@ impl App {
                 h as i32,
                 i32::from(self.ui.settings.gui_scale),
                 self.ui.settings.force_unicode,
+                self.screen_open(),
                 (self.cursor.0 as i32, self.cursor.1 as i32),
             );
             if show_hud {
@@ -654,9 +660,10 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        let screen = self.screen_open();
         self.route_window_event(&event);
         if let Some(mods) = &self.mods {
-            mods.window_event(&event);
+            mods.window_event(&event, screen);
         }
         match event {
             WindowEvent::CloseRequested => {

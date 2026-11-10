@@ -1,10 +1,11 @@
 //! The loopback protocol with `net.ferrocraft.host.Host`. All numbers are big-endian.
 //!
 //! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
-//! u8 force unicode, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event count, then per
-//! event: u8 kind, i32 argument, u8 state. Kinds: `'K'` key (LWJGL code; state bit 0 down, bit 1
-//! repeat), `'B'` mouse button (LWJGL number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel
-//! (argument is the LWJGL delta, 120 per notch).
+//! u8 force unicode, u8 screen open, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event
+//! count, then per event: u8 kind, i32 argument, u8 state. Kinds: `'K'` key (LWJGL code; state bit 0
+//! down, bit 1 repeat), `'B'` mouse button (LWJGL number 0 left, 1 right, 2 middle; state bit 0 down),
+//! `'W'` wheel (argument is the LWJGL delta, 120 per notch). State bit 2 on any kind: a screen was open
+//! when the event arrived.
 //! Java to Rust, per frame: u32 command count, then the commands of `Sink.java`.
 
 use std::io::{self, Read, Write};
@@ -31,9 +32,11 @@ pub struct Input {
     pub height: i32,
     pub gui_scale: i32,
     pub unicode: bool,
+    /// A menu, the container or chat is open.
+    pub screen: bool,
     pub mouse: (i32, i32),
-    /// Transitions since the previous frame.
-    pub events: Vec<Event>,
+    /// Transitions since the previous frame, each with whether a screen was open when it arrived.
+    pub events: Vec<(Event, bool)>,
 }
 
 /// One draw call of a mod, in scaled GUI pixels.
@@ -71,12 +74,13 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
         b.extend(v.to_be_bytes());
     }
     b.push(u8::from(i.unicode));
+    b.push(u8::from(i.screen));
     b.extend(i.mouse.0.to_be_bytes());
     b.extend(i.mouse.1.to_be_bytes());
     let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
     b.extend(n.to_be_bytes());
-    for e in &i.events {
-        let (kind, arg, state) = match *e {
+    for &(e, screen) in &i.events {
+        let (kind, arg, state) = match e {
             Event::Key {
                 code,
                 pressed,
@@ -87,7 +91,7 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
         };
         b.push(kind);
         b.extend(arg.to_be_bytes());
-        b.push(state);
+        b.push(state | u8::from(screen) << 2);
     }
     w.write_all(&b)?;
     w.flush()
@@ -222,18 +226,25 @@ mod tests {
             height: 480,
             gui_scale: 2,
             unicode: true,
+            screen: true,
             mouse: (5, 6),
             events: vec![
-                Event::Key {
-                    code: 17,
-                    pressed: true,
-                    repeat: true,
-                },
-                Event::Button {
-                    button: 1,
-                    pressed: false,
-                },
-                Event::Wheel(-120),
+                (
+                    Event::Key {
+                        code: 17,
+                        pressed: true,
+                        repeat: true,
+                    },
+                    false,
+                ),
+                (
+                    Event::Button {
+                        button: 1,
+                        pressed: false,
+                    },
+                    true,
+                ),
+                (Event::Wheel(-120), true),
             ],
         };
         write_input(&mut out, &input).unwrap();
@@ -241,19 +252,19 @@ mod tests {
         for v in [854i32, 480, 2] {
             want.extend(v.to_be_bytes());
         }
-        want.push(1);
+        want.extend([1, 1]);
         want.extend(5i32.to_be_bytes());
         want.extend(6i32.to_be_bytes());
         want.extend([0, 3]);
         want.push(b'K');
         want.extend(17i32.to_be_bytes());
-        want.push(0b11);
+        want.push(0b011);
         want.push(b'B');
         want.extend(1i32.to_be_bytes());
-        want.push(0);
+        want.push(0b100);
         want.push(b'W');
         want.extend((-120i32).to_be_bytes());
-        want.push(0);
+        want.push(0b100);
         assert_eq!(out, want);
     }
 }

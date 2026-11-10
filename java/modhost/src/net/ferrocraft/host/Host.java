@@ -11,8 +11,8 @@ import net.minecraft.launchwrapper.Launch;
 /**
  * Boots Forge's FML around Minecraft state that Rust owns, then answers one frame message at a time.
  *
- * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, i32 mouseX,
- * i32 mouseY, u16 event count, then the key and mouse events of wire.rs. Any other first byte ends the host.
+ * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
+ * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take()}.
  */
 public final class Host {
@@ -23,6 +23,7 @@ public final class Host {
     private final Object forgeBus;
     private final Object fml;
     private long lastTick = System.nanoTime();
+    private boolean screenOpen;
 
     private Host(Object mc) {
         this.mc = mc;
@@ -94,6 +95,7 @@ public final class Host {
             int h = in.readInt();
             int scale = in.readInt();
             boolean unicode = in.readUnsignedByte() != 0;
+            boolean screen = in.readUnsignedByte() != 0;
             Input.set(w, h, in.readInt(), in.readInt());
             int n = in.readUnsignedShort();
             for (int i = 0; i < n; i++) {
@@ -101,45 +103,66 @@ public final class Host {
                 int arg = in.readInt();
                 Input.event(kind, arg, in.readUnsignedByte());
             }
-            frame(w, h, scale, unicode);
+            frame(w, h, scale, unicode, screen);
             out.write(Sink.take());
             out.flush();
         }
     }
 
-    private void frame(int w, int h, int scale, boolean unicode) {
+    private void frame(int w, int h, int scale, boolean unicode, boolean screen) {
         Minecraft.resize(mc, w, h, scale, unicode);
+        if (screen != screenOpen) {
+            screenOpen = screen;
+            Minecraft.setScreen(mc, screen);
+        }
         long t = System.nanoTime();
         int ticks = (int) Math.min(MAX_TICKS, (t - lastTick) / TICK_NANOS);
         lastTick += ticks * TICK_NANOS;
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
             R.call(fml, "onPreClientTick");
-            pollMouse();
-            pollKeyboard();
+            Object modScreen = Minecraft.modScreen(mc);
+            if (modScreen != null) {
+                R.call(modScreen, "func_146269_k"); // GuiScreen.handleInput
+                R.call(modScreen, "func_73876_c"); // GuiScreen.updateScreen
+            } else {
+                pollMouse();
+                pollKeyboard();
+            }
             R.call(fml, "onPostClientTick");
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
         renderOverlay(partial);
     }
 
-    /** The mouse loop of Minecraft.runTick: Forge's MouseEvent, key binds, then the input events. */
+    /**
+     * The mouse loop of Minecraft.runTick: Forge's MouseEvent, key binds, then the input events. Events
+     * that arrived with a screen open belong to the screen, so the game only sees their releases.
+     */
     private void pollMouse() {
         while (Input.nextMouse()) {
-            if (Boolean.TRUE.equals(R.call(R.cls("net.minecraftforge.client.ForgeHooksClient"), "postMouseEvent"))) continue;
-            int button = Input.eventButton() - 100;
             boolean down = Input.eventButtonDown();
+            int button = Input.eventButton() - 100;
+            if (Input.mouseInScreen()) {
+                if (!down) keyBind(button, false);
+                continue;
+            }
+            if (Boolean.TRUE.equals(R.call(R.cls("net.minecraftforge.client.ForgeHooksClient"), "postMouseEvent"))) continue;
             keyBind(button, down);
             R.call(fml, "fireMouseInput");
             postOneConfig("MouseInputEvent", Input.eventButton(), down);
         }
     }
 
-    /** The keyboard loop of Minecraft.runTick. */
+    /** The keyboard loop of Minecraft.runTick; like the mouse loop, it hides events of an open screen. */
     private void pollKeyboard() {
         while (Input.nextKey()) {
             int key = Input.eventKey();
             boolean down = Input.eventKeyDown();
+            if (Input.keyInScreen()) {
+                if (!down) keyBind(key, false);
+                continue;
+            }
             keyBind(key, down);
             R.call(fml, "fireKeyInput");
             postOneConfig("KeyInputEvent", key, down);
@@ -171,6 +194,13 @@ public final class Host {
     private void renderOverlay(float partial) {
         R.call(fml, "onRenderTickStart", partial);
         Minecraft.renderOverlay(mc, partial);
+        Object modScreen = Minecraft.modScreen(mc);
+        if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(fml, "onRenderTickEnd", partial);
+    }
+
+    /** Called in place of Minecraft.displayGuiScreen, see {@link BridgeTransformer}. */
+    public static void displayScreen(Object screen) {
+        Minecraft.displayScreen(screen);
     }
 }

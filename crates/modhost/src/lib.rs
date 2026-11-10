@@ -100,14 +100,16 @@ impl ModHost {
         Ok(host)
     }
 
-    /// Set the window size in pixels, the GUI scale setting, the unicode font flag and the mouse in
-    /// pixels for the next frame, and ask for that frame. The JVM runs one frame per call.
+    /// Set the window size in pixels, the GUI scale setting, the unicode font flag, whether a screen
+    /// is open and the mouse in pixels for the next frame, and ask for that frame. The JVM runs one
+    /// frame per call.
     pub fn set_view(
         &self,
         width: i32,
         height: i32,
         gui_scale: i32,
         unicode: bool,
+        screen: bool,
         mouse: (i32, i32),
     ) {
         let mut s = self.link.state.lock().unwrap();
@@ -115,19 +117,21 @@ impl ModHost {
         s.input.height = height;
         s.input.gui_scale = gui_scale;
         s.input.unicode = unicode;
+        s.input.screen = screen;
         s.input.mouse = mouse;
         s.fresh = true;
         self.link.view.notify_one();
     }
 
     /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
-    pub fn window_event(&self, event: &WindowEvent) {
+    /// `screen` is whether a screen was open when the event arrived: the game does not see those.
+    pub fn window_event(&self, event: &WindowEvent, screen: bool) {
         let Some(e) = transition(event) else {
             return;
         };
         let mut s = self.link.state.lock().unwrap();
         if s.phase == Phase::Live {
-            s.input.events.push(e);
+            s.input.events.push((e, screen));
         }
     }
 

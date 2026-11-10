@@ -11,6 +11,7 @@ import java.util.List;
 final class Minecraft {
     private static List<Object> packs;
     private static Object resources;
+    private static Object screen;
 
     private Minecraft() {}
 
@@ -91,6 +92,47 @@ final class Minecraft {
 
     static void renderOverlay(Object mc, float partial) {
         R.call(R.get(mc, "field_71456_v"), "func_175180_a", partial); // GuiIngame.renderGameOverlay
+    }
+
+    /**
+     * Mirrors Rust's open screen into Minecraft.currentScreen, which mods read, and releases every
+     * key bind as Minecraft.displayGuiScreen does. The stand-in screen has no behaviour; a screen a
+     * mod opened stays.
+     */
+    static void setScreen(Object mc, boolean open) {
+        Object current = R.get(mc, "field_71462_q"); // currentScreen
+        if (current != null && current != screen) return;
+        if (open && screen == null) screen = R.alloc("net.minecraft.client.gui.GuiIngameMenu");
+        R.set(mc, "field_71462_q", open ? screen : null);
+        R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a"); // unPressAllKeys
+    }
+
+    /** The screen a mod opened, or null: the stand-in for Rust's screens does not count. */
+    static Object modScreen(Object mc) {
+        Object current = R.get(mc, "field_71462_q");
+        return current == screen ? null : current;
+    }
+
+    /** Minecraft.displayGuiScreen: close the old screen, release the key binds, size the new one. */
+    static void displayScreen(Object next) {
+        Object mc = R.get(R.cls("net.minecraft.client.Minecraft"), "field_71432_P");
+        Object old = R.get(mc, "field_71462_q");
+        if (old != null && old != screen) R.call(old, "func_146281_b"); // GuiScreen.onGuiClosed
+        R.set(mc, "field_71462_q", next);
+        if (next == null) return;
+        R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a");
+        Object size = R.neu("net.minecraft.client.gui.ScaledResolution", mc);
+        R.call(next, "func_146280_a", mc, R.call(size, "func_78326_a"), R.call(size, "func_78328_b")); // setWorldAndResolution
+    }
+
+    /** What runGameLoop does for a screen: draw it with the mouse in scaled GUI units. */
+    static void drawScreen(Object mc, Object modScreen, float partial) {
+        Object size = R.neu("net.minecraft.client.gui.ScaledResolution", mc);
+        int w = (Integer) R.call(size, "func_78326_a");
+        int h = (Integer) R.call(size, "func_78328_b");
+        int mx = Input.mouseX() * w / Input.width();
+        int my = h - Input.mouseY() * h / Input.height() - 1;
+        R.call(modScreen, "func_73863_a", mx, my, partial); // GuiScreen.drawScreen
     }
 
     static void resize(Object mc, int w, int h, int scale, boolean unicode) {

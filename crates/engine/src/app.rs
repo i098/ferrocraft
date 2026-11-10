@@ -679,7 +679,11 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let screen = self.screen_open();
         self.route_window_event(&event);
-        if let Some(mods) = &self.mods {
+        if let Some(mods) = self
+            .mods
+            .as_ref()
+            .filter(|m| self.in_world() || !m.screen_open())
+        {
             mods.window_event(&event, screen);
         }
         match event {

@@ -16,7 +16,7 @@ mod shapes;
 mod sky;
 mod weather;
 
-pub use hand::{Hand, HeldKind};
+pub use hand::{Hand, HeldKind, UseAction, Using};
 pub use sky::Environment;
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};

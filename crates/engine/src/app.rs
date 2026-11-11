@@ -472,12 +472,12 @@ impl App {
             hurt: false,
             death_time: 0.0,
             invisible: false,
+            burning: self.game.burning(),
             size: (0.6, 1.8),
             held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
             armor: [slot(8), slot(7), slot(6), slot(5)],
             name: None,
             skin: None,
-            burning: false,
             eye_height: eye_height(self.input.sneaking()) as f32,
             always_name: false,
             pointed: false,
@@ -569,6 +569,7 @@ impl App {
                 using,
             }),
         );
+        r.set_on_fire(self.perspective == 0 && self.game.player.is_some() && self.game.burning());
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
         r.set_cracks(self.game.cracks());

@@ -117,6 +117,7 @@ pub struct SizeMeta {
     pub guardian: Option<i32>,
     pub horse: Option<u8>,
     pub always_name: Option<u8>,
+    pub skeleton: Option<u8>,
 }
 
 impl SizeMeta {
@@ -127,6 +128,7 @@ impl SizeMeta {
         self.guardian = new.guardian.or(self.guardian);
         self.horse = new.horse.or(self.horse);
         self.always_name = new.always_name.or(self.always_name);
+        self.skeleton = new.skeleton.or(self.skeleton);
     }
 }
 
@@ -277,8 +279,20 @@ impl Entity {
         self.flags & flag::INVISIBLE != 0
     }
 
+    fn immune_to_fire(&self) -> bool {
+        match self.kind {
+            Kind::Mob(51) => self.meta.skeleton == Some(1),
+            Kind::Mob(56 | 57 | 62 | 63 | 64) | Kind::Object(50) => true,
+            _ => false,
+        }
+    }
+
     pub fn burning(&self) -> bool {
-        self.flags & flag::BURNING != 0
+        if self.kind == Kind::Mob(61) {
+            // Blaze metadata index 16 carries its fire-active bit.
+            return self.meta.slime.is_some_and(|flags| flags & 1 != 0);
+        }
+        !self.immune_to_fire() && self.flags & flag::BURNING != 0
     }
 
     /// `Entity.getAlwaysRenderNameTag`: metadata byte 3 is 1.
@@ -1047,5 +1061,39 @@ mod tests {
         assert_eq!(e.textures.as_deref(), Some("dGV4"));
         assert!(e.sneaking());
         assert_eq!(e.equipment[0].unwrap().id, 276);
+    }
+
+    #[test]
+    fn fire_flags_respect_immunity_and_blaze_activity() {
+        let mut entity = Entity::new(1, Kind::Mob(54), [0; 3], 0, 0);
+        entity.flags = flag::BURNING | flag::INVISIBLE;
+        assert!(entity.burning());
+        entity.flags = 0;
+        assert!(!entity.burning());
+        // 1.8.9 `isImmuneToFire` overrides: EntityGhast 56, EntityPigZombie 57, EntityMagmaCube 62,
+        // EntityDragon 63, EntityWither 64, EntityTNTPrimed (object 50). Every other id burns;
+        // EntityBlaze 61 is driven by metadata and EntitySkeleton 51 by its type, both below.
+        for id in 0..=u8::MAX {
+            for kind in [Kind::Mob(id), Kind::Object(id as i8)] {
+                if matches!(kind, Kind::Mob(51 | 61)) {
+                    continue;
+                }
+                entity.kind = kind;
+                entity.flags = flag::BURNING;
+                let immune = matches!(kind, Kind::Mob(56 | 57 | 62 | 63 | 64) | Kind::Object(50));
+                assert_eq!(entity.burning(), !immune, "{kind:?}");
+            }
+        }
+        entity.kind = Kind::Mob(51);
+        entity.flags = flag::BURNING;
+        entity.meta.skeleton = Some(0);
+        assert!(entity.burning());
+        entity.meta.skeleton = Some(1);
+        assert!(!entity.burning());
+        entity.kind = Kind::Mob(61);
+        assert!(!entity.burning());
+        entity.flags = 0;
+        entity.meta.slime = Some(1);
+        assert!(entity.burning());
     }
 }

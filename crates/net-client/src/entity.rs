@@ -76,6 +76,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         },
         horse: byte(19),
         always_name: byte(3),
+        skeleton: byte(13),
     }
 }
 

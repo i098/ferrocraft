@@ -96,6 +96,7 @@ pub struct Game {
     pub entities: Entities,
     /// The local player's entity id, from `JoinGame`.
     pub entity_id: i32,
+    pub entity_flags: u8,
     pub vehicle: Option<i32>,
     /// Creative mode (6 block entity reach instead of 3).
     pub creative: bool,
@@ -172,6 +173,7 @@ impl Game {
             store: ChunkStore::default(),
             entities: Entities::default(),
             entity_id: -1,
+            entity_flags: 0,
             vehicle: None,
             creative: false,
             gamemode: 0,
@@ -259,6 +261,9 @@ impl Game {
                 self.set_gamemode(gamemode);
             }
             NetEvent::Difficulty(d) => self.difficulty = d,
+            NetEvent::Entity(EntityEvent::Metadata { id, flags, .. }) if id == self.entity_id => {
+                self.entity_flags = flags.unwrap_or(self.entity_flags);
+            }
             NetEvent::Health {
                 health,
                 food,
@@ -367,6 +372,7 @@ impl Game {
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
             NetEvent::Respawn => {
+                self.entity_flags = 0;
                 self.vehicle = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.effects.clear();
@@ -495,6 +501,11 @@ impl Game {
             p.yaw += dyaw;
         }
         self.pitch = (self.pitch + dpitch).clamp(-90.0, 90.0);
+    }
+
+    /// Whether the local player burns visibly (spectators show no fire).
+    pub fn burning(&self) -> bool {
+        self.entity_flags & world::entities::flag::BURNING != 0 && self.gamemode != 3
     }
 
     /// The flight toggle of `EntityPlayerSP.onLivingUpdate`, before the movement: a second jump press within
@@ -1096,5 +1107,31 @@ mod tests {
         assert!(g.fly_toggle(false));
         assert_eq!(g.abilities, 6);
         assert!(!g.fly_toggle(false));
+    }
+
+    #[test]
+    fn local_fire_metadata_survives_partial_updates_and_resets_on_respawn() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        let flags = |id, flags| {
+            NetEvent::Entity(EntityEvent::Metadata {
+                id,
+                flags,
+                name: None,
+                health: None,
+                stack: None,
+                size: world::entities::SizeMeta::default(),
+            })
+        };
+        g.apply(flags(8, Some(1)));
+        assert_eq!(g.entity_flags, 0);
+        g.apply(flags(7, Some(1)));
+        g.apply(flags(7, None));
+        assert_eq!(g.entity_flags, 1);
+        g.apply(flags(7, Some(0)));
+        assert_eq!(g.entity_flags, 0);
+        g.apply(flags(7, Some(1)));
+        g.apply(NetEvent::Respawn);
+        assert_eq!(g.entity_flags, 0);
     }
 }

@@ -38,13 +38,23 @@ pub enum Kind {
     Droplet,
     AngryVillager,
     HappyVillager,
+    /// `fireworksSpark` (3).
+    FireworksSpark,
+    /// `suspended` (7).
+    Suspended,
+    /// `depthsuspend` (8) and `townaura` (22).
+    DepthSuspend,
+    DripWater,
+    DripLava,
+    Enchant,
+    SnowShovel,
     /// `blockcrack`/`blockdust`: `id | meta << 12` in the packet data.
     BlockCrack,
 }
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        const IDS: [(i32, i32, Kind); 25] = [
+        const IDS: [(i32, i32, Kind); 33] = [
             (0, 0, Kind::Explode),
             (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
@@ -70,6 +80,14 @@ impl Kind {
             (34, 34, Kind::Heart),
             (37, 38, Kind::BlockCrack),
             (39, 39, Kind::Droplet),
+            (3, 3, Kind::FireworksSpark),
+            (7, 7, Kind::Suspended),
+            (8, 8, Kind::DepthSuspend),
+            (18, 18, Kind::DripWater),
+            (19, 19, Kind::DripLava),
+            (22, 22, Kind::DepthSuspend),
+            (25, 25, Kind::Enchant),
+            (32, 32, Kind::SnowShovel),
         ];
         IDS.iter()
             .find(|(lo, hi, _)| (*lo..=*hi).contains(&id))
@@ -100,6 +118,13 @@ enum Behavior {
     Spell,
     HugeEmitter,
     LargeExplosion,
+    Suspend,
+    SuspendWater,
+    Enchant,
+    DripWater,
+    DripLava,
+    Snow,
+    Spark,
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +243,7 @@ impl Particles {
         let made = self
             .spawn_motion(kind, pos, motion, data)
             .or_else(|| self.spawn_timed(kind, pos, motion))
+            .or_else(|| self.spawn_misc(kind, pos, motion))
             .or_else(|| self.spawn_icon(kind, pos, motion));
         if let Some(p) = made {
             self.push(p);
@@ -423,6 +449,119 @@ impl Particles {
         p
     }
 
+    /// Drifting, dripping, enchanting, snow and firework particles.
+    fn spawn_misc(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
+        let sheet = |base, anim| Sprite::Sheet { base, anim };
+        let p = match kind {
+            Kind::DepthSuspend | Kind::HappyVillager | Kind::Suspended => {
+                self.suspended(kind, pos, motion)
+            }
+            Kind::Enchant => self.enchant(pos, motion),
+            Kind::DripWater | Kind::DripLava => self.drip(kind, pos),
+            Kind::SnowShovel => {
+                let mut p = self.damped(pos, sheet(0, true), 1.0, motion);
+                p.color = [1.0 - (self.rand() * f64::from(0.3_f32)) as f32; 3];
+                p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
+                p.behavior = Behavior::Snow;
+                p
+            }
+            Kind::FireworksSpark => {
+                let mut p = self.base(pos, [0.0; 3], sheet(160, true));
+                p.vel = motion;
+                p.scale *= 0.75;
+                p.init_scale = p.scale;
+                p.alpha = 0.99;
+                p.max_age = 48 + (self.rand() * 12.0) as u32;
+                p.behavior = Behavior::Spark;
+                p
+            }
+            _ => return None,
+        };
+        Some(p)
+    }
+
+    /// `DepthSuspendParticle` (the happy villager variant is tile 82, white) and `SuspendedParticle`.
+    fn suspended(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        let sheet = |base, anim| Sprite::Sheet { base, anim };
+        let mut p;
+        if kind == Kind::Suspended {
+            p = self.base([pos[0], pos[1] - 0.125, pos[2]], [0.0; 3], sheet(0, false));
+            p.vel = [0.0; 3];
+            p.color = [0.4, 0.4, 0.7];
+            p.half = 0.005;
+            p.scale *= (self.rand() * 0.6 + 0.2) as f32;
+            p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        } else {
+            p = self.base(pos, motion, sheet(0, false));
+            p.color = [(self.rand() * 0.1 + 0.2) as f32; 3];
+            p.half = 0.01;
+            p.scale *= (self.rand() * 0.6 + 0.5) as f32;
+            p.vel = p.vel.map(|v| v * f64::from(0.02_f32));
+            p.max_age = (20.0 / (self.rand() * 0.8 + 0.2)) as u32;
+            if kind == Kind::HappyVillager {
+                p.sprite = sheet(82, false);
+                p.color = [1.0; 3];
+            }
+        }
+        p.behavior = if kind == Kind::Suspended {
+            Behavior::SuspendWater
+        } else {
+            Behavior::Suspend
+        };
+        p
+    }
+
+    /// `EnchantingParticle`: a fixed curve from `pos + motion` back to `pos`.
+    fn enchant(&mut self, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        let tile = 225 + (self.rand() * 26.0) as u32;
+        let mut p = self.base(
+            pos,
+            [0.0; 3],
+            Sprite::Sheet {
+                base: tile,
+                anim: false,
+            },
+        );
+        p.vel = motion;
+        p.origin = pos;
+        p.pos = [0, 1, 2].map(|i| pos[i] + motion[i]);
+        p.prev = p.pos;
+        let f = (self.rand() * 0.6 + 0.4) as f32;
+        p.color = [f * 0.9, f * 0.9, f];
+        p.scale = (self.rand() * 0.5 + 0.2) as f32;
+        p.max_age = (self.rand() * 10.0) as u32 + 30;
+        p.behavior = Behavior::Enchant;
+        p
+    }
+
+    /// `LiquidDripParticle` constructor.
+    fn drip(&mut self, kind: Kind, pos: [f64; 3]) -> Particle {
+        let mut p = self.base(
+            pos,
+            [0.0; 3],
+            Sprite::Sheet {
+                base: 113,
+                anim: false,
+            },
+        );
+        p.vel = [0.0; 3];
+        let water = kind == Kind::DripWater;
+        p.color = if water {
+            [0.0, 0.0, 1.0]
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        p.half = 0.005;
+        p.gravity = f64::from(0.06_f32);
+        p.max_age = (64.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        p.behavior = if water {
+            Behavior::DripWater
+        } else {
+            Behavior::DripLava
+        };
+        p
+    }
+
     fn spawn_icon(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
@@ -434,7 +573,7 @@ impl Particles {
                 p.max_age = (6.0 / (self.rand() * 0.8 + 0.6)) as u32;
                 p.behavior = Behavior::Crit;
                 // The vanilla constructor ends with one `tick()`; the world is not at hand here.
-                self.tick_one(&mut p, &|_, _, _| false, &mut Vec::new());
+                self.tick_one(&mut p, &|_, _, _| 0, &mut Vec::new());
                 if kind == Kind::MagicCrit {
                     p.color = [p.color[0] * 0.3, p.color[1] * 0.8, p.color[2]];
                     p.sprite = sheet(66, false);
@@ -447,12 +586,8 @@ impl Particles {
                 p.drag = 0.96;
                 p.scale *= 0.5;
             }
-            Kind::Heart | Kind::HappyVillager | Kind::AngryVillager => {
-                let tile = match kind {
-                    Kind::Heart => 80,
-                    Kind::HappyVillager => 82,
-                    _ => 81,
-                };
+            Kind::Heart | Kind::AngryVillager => {
+                let tile = if kind == Kind::Heart { 80 } else { 81 };
                 p = self.base(pos, [0.0; 3], sheet(tile, false));
                 p.vel = [motion[0] * 0.01, motion[1] * 0.01 + 0.1, motion[2] * 0.01];
                 p.scale *= 1.5;
@@ -563,6 +698,124 @@ impl Particles {
         self.spawn(kind, at, rgb, 0);
     }
 
+    /// `Explosion.doExplosionB`: the burst at `pos`, then smoke and puffs from every destroyed block
+    /// in `records` (block positions). A radius of 2 or more uses the huge burst.
+    pub fn explosion(&mut self, pos: [f64; 3], radius: f32, records: &[[i32; 3]]) {
+        let burst = if radius >= 2.0 {
+            Kind::HugeExplode
+        } else {
+            Kind::LargeExplode
+        };
+        self.spawn(burst, pos, [1.0, 0.0, 0.0], 0);
+        for b in records {
+            let c = [0, 1, 2].map(|i| f64::from(b[i]) + self.rand());
+            let d = [0, 1, 2].map(|i| c[i] - pos[i]);
+            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-9);
+            let k = 0.5 / (len / f64::from(radius) + 0.1) * (self.rand() * self.rand() + 0.3);
+            let m = d.map(|v| v / len * k);
+            self.spawn(
+                Kind::Explode,
+                [0, 1, 2].map(|i| (c[i] + pos[i]) / 2.0),
+                m,
+                0,
+            );
+            self.spawn(Kind::Smoke, c, m, 0);
+        }
+    }
+
+    /// The particle cases of `WorldRenderer.doEvent` that need only the particle pass: 2000 dispenser
+    /// smoke (`data` is the facing), 2003 ender eye portal ring and 2004 spawner smoke and flames.
+    pub fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
+        let b = pos.map(f64::from);
+        match id {
+            2000 => self.dispenser_smoke(b, data),
+            2003 => self.eye_portal_ring(b),
+            2004 => self.spawner_burst(b),
+            _ => {}
+        }
+    }
+
+    fn dispenser_smoke(&mut self, b: [f64; 3], data: i32) {
+        let (dx, dz) = (f64::from(data % 3 - 1), f64::from(data / 3 % 3 - 1));
+        let c = [b[0] + dx * 0.6 + 0.5, b[1] + 0.5, b[2] + dz * 0.6 + 0.5];
+        for _ in 0..10 {
+            let d = self.rand() * 0.2 + 0.01;
+            let at = [
+                c[0] + dx * 0.01 + (self.rand() - 0.5) * dz * 0.5,
+                c[1] + (self.rand() - 0.5) * 0.5,
+                c[2] + dz * 0.01 + (self.rand() - 0.5) * dx * 0.5,
+            ];
+            let m = [
+                dx * d + self.gaussian() * 0.01,
+                -0.03 + self.gaussian() * 0.01,
+                dz * d + self.gaussian() * 0.01,
+            ];
+            self.spawn(Kind::Smoke, at, m, 0);
+        }
+    }
+
+    fn eye_portal_ring(&mut self, b: [f64; 3]) {
+        let (x, z) = (b[0] + 0.5, b[2] + 0.5);
+        let mut a = 0.0_f64;
+        while a < std::f64::consts::TAU {
+            for k in [-5.0, -7.0] {
+                let at = [x + a.cos() * 5.0, b[1] - 0.4, z + a.sin() * 5.0];
+                self.spawn(Kind::Portal, at, [a.cos() * k, 0.0, a.sin() * k], 0);
+            }
+            a += 0.157_079_632_679_489_66;
+        }
+    }
+
+    fn spawner_burst(&mut self, b: [f64; 3]) {
+        for _ in 0..20 {
+            let at = [0, 1, 2].map(|i| b[i] + 0.5 + (self.rand() - 0.5) * 2.0);
+            self.spawn(Kind::Smoke, at, [0.0; 3], 0);
+            self.spawn(Kind::Flame, at, [0.0; 3], 0);
+        }
+    }
+
+    /// World effect 2002: a splash potion shatters into 100 swirls tinted by the potion `rgb`.
+    pub fn splash_potion(&mut self, pos: [i32; 3], rgb: i32, instant: bool) {
+        let b = pos.map(f64::from);
+        let kind = if instant {
+            Kind::InstantSpell
+        } else {
+            Kind::Spell
+        };
+        let tint = [16, 8, 0].map(|shift| (rgb >> shift & 255) as f32 / 255.0);
+        for _ in 0..100 {
+            let d = self.rand() * 4.0;
+            let a = self.rand() * std::f64::consts::TAU;
+            let m = [a.cos() * d, 0.01 + self.rand() * 0.5, a.sin() * d];
+            self.spawn(
+                kind,
+                [b[0] + m[0] * 0.1, b[1] + 0.3, b[2] + m[2] * 0.1],
+                m,
+                0,
+            );
+            let f = 0.75 + self.rand() as f32 * 0.25;
+            if let Some(p) = self.list.last_mut() {
+                p.color = tint.map(|t| t * f);
+                p.vel = p.vel.map(|v| v * f64::from(d as f32));
+            }
+        }
+    }
+
+    /// World effect 2005, `ItemDye.spawnBonemealParticles`: `count` (15 when 0) green sparkles over a block
+    /// whose top is `max_y` above its base.
+    pub fn bone_meal(&mut self, pos: [i32; 3], count: i32, max_y: f64) {
+        let b = pos.map(f64::from);
+        for _ in 0..if count == 0 { 15 } else { count } {
+            let m = [0, 1, 2].map(|_| self.gaussian() * 0.02);
+            let at = [
+                b[0] + self.rand(),
+                b[1] + self.rand() * max_y,
+                b[2] + self.rand(),
+            ];
+            self.spawn(Kind::HappyVillager, at, m, 0);
+        }
+    }
+
     /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block.
     pub fn break_block(&mut self, [x, y, z]: [i32; 3], state: u16) {
         for i in 0..4 {
@@ -609,11 +862,11 @@ impl Particles {
         }
     }
 
-    /// One 20 Hz tick (`EntityFX.onUpdate`); `solid(x, y, z)` reports blocks that stop particles.
-    pub fn tick(&mut self, solid: impl Fn(i32, i32, i32) -> bool) {
+    /// One 20 Hz tick (`EntityFX.onUpdate`); `block(x, y, z)` is the block state at that cell.
+    pub fn tick(&mut self, block: impl Fn(i32, i32, i32) -> u16) {
         let mut list = std::mem::take(&mut self.list);
         let mut spawned = Vec::new();
-        list.retain_mut(|p| self.tick_one(p, &solid, &mut spawned));
+        list.retain_mut(|p| self.tick_one(p, &block, &mut spawned));
         self.list = list;
         for (kind, pos, motion) in spawned {
             self.spawn(kind, pos, motion, 0);
@@ -624,18 +877,18 @@ impl Particles {
     fn tick_one(
         &mut self,
         p: &mut Particle,
-        solid: &impl Fn(i32, i32, i32) -> bool,
+        block: &impl Fn(i32, i32, i32) -> u16,
         spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
     ) -> bool {
         p.prev = p.pos;
-        if let Some(alive) = self.tick_special(p, solid, spawned) {
+        if let Some(alive) = self.tick_special(p, block, spawned) {
             return alive;
         }
         if p.age >= p.max_age {
             return false;
         }
         p.age += 1;
-        move_generic(p, solid);
+        move_generic(p, &|x, y, z| crate::is_solid(block(x, y, z)));
         if p.on_ground {
             p.vel[0] *= f64::from(0.7_f32);
             p.vel[2] *= f64::from(0.7_f32);
@@ -647,7 +900,7 @@ impl Particles {
     fn tick_special(
         &mut self,
         p: &mut Particle,
-        solid: &impl Fn(i32, i32, i32) -> bool,
+        block: &impl Fn(i32, i32, i32) -> u16,
         spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
     ) -> Option<bool> {
         Some(match p.behavior {
@@ -680,15 +933,39 @@ impl Particles {
                 p.age += 1;
                 true
             }
-            Behavior::Rain => self.tick_rain(p, solid),
+            Behavior::Suspend | Behavior::SuspendWater => {
+                p.pos = [0, 1, 2].map(|i| p.pos[i] + p.vel[i]);
+                p.vel = p.vel.map(|v| v * 0.99);
+                let c = p.pos.map(|v| v.floor() as i32);
+                let wet = p.behavior == Behavior::Suspend || is_water(block(c[0], c[1], c[2]));
+                let alive = wet && p.age < p.max_age;
+                p.age += 1;
+                alive
+            }
+            Behavior::Enchant => {
+                let f = 1.0 - p.age as f32 / p.max_age as f32;
+                let g = (1.0 - f) * (1.0 - f);
+                let g = g * g;
+                p.pos = [
+                    p.origin[0] + p.vel[0] * f64::from(f),
+                    p.origin[1] + p.vel[1] * f64::from(f) - f64::from(g * 1.2),
+                    p.origin[2] + p.vel[2] * f64::from(f),
+                ];
+                let alive = p.age < p.max_age;
+                p.age += 1;
+                alive
+            }
+            Behavior::DripWater | Behavior::DripLava => tick_drip(p, block, spawned),
+            Behavior::Rain => self.tick_rain(p, block),
             _ => return None,
         })
     }
 
     /// `RainSplashParticle.onUpdate`: gravity is subtracted whole, and a landed drop dies half the time.
-    fn tick_rain(&mut self, p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) -> bool {
+    fn tick_rain(&mut self, p: &mut Particle, block: &impl Fn(i32, i32, i32) -> u16) -> bool {
+        let solid = |x, y, z| crate::is_solid(block(x, y, z));
         p.vel[1] -= p.gravity;
-        step(p, solid);
+        step(p, &solid);
         p.vel = p.vel.map(|v| v * f64::from(0.98_f32));
         let mut dead = p.age >= p.max_age;
         p.age += 1;
@@ -697,10 +974,7 @@ impl Particles {
             p.vel[0] *= f64::from(0.7_f32);
             p.vel[2] *= f64::from(0.7_f32);
         }
-        // shortcut: only solid full cubes are known here, not the liquid level or the real block top.
-        let cell = p.pos.map(f64::floor);
-        dead |= solid(cell[0] as i32, cell[1] as i32, cell[2] as i32) && p.pos[1] < cell[1] + 1.0;
-        !dead
+        !(dead || buried(block, p.pos, true))
     }
 
     /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`.
@@ -746,7 +1020,7 @@ enum Layer {
 fn render_scale(p: &Particle, partial: f32) -> f32 {
     let t = (p.age as f32 + partial) / p.max_age.max(1) as f32;
     match p.behavior {
-        Behavior::Smoke | Behavior::RedDust | Behavior::Crit => {
+        Behavior::Smoke | Behavior::RedDust | Behavior::Crit | Behavior::Snow => {
             p.init_scale * (t * 32.0).clamp(0.0, 1.0)
         }
         Behavior::Portal => p.init_scale * (1.0 - (1.0 - t) * (1.0 - t)),
@@ -833,6 +1107,19 @@ fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
             creep_on_floor(p);
             p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
         }
+        Behavior::Snow => {
+            p.vel[1] -= 0.03;
+            step(p, solid);
+            p.vel = p.vel.map(|v| v * f64::from(0.99_f32));
+        }
+        Behavior::Spark => {
+            if p.age > p.max_age / 2 {
+                p.alpha = 1.0 - (p.age - p.max_age / 2) as f32 / p.max_age as f32;
+            }
+            p.vel[1] -= 0.004;
+            step(p, solid);
+            p.vel = p.vel.map(|v| v * f64::from(0.91_f32));
+        }
         Behavior::Crit => {
             step(p, solid);
             p.color[1] = (f64::from(p.color[1]) * 0.96) as f32;
@@ -854,6 +1141,131 @@ fn creep_on_floor(p: &mut Particle) {
         p.vel[0] *= 1.1;
         p.vel[2] *= 1.1;
     }
+}
+
+/// `LiquidDripParticle.onUpdate`: it hangs for 40 ticks, then falls; water splashes on the ground,
+/// lava stays as a puddle tile. `leakTime` is `40 - age`.
+fn tick_drip(
+    p: &mut Particle,
+    block: &impl Fn(i32, i32, i32) -> u16,
+    spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
+) -> bool {
+    let solid = |x, y, z| crate::is_solid(block(x, y, z));
+    let water = p.behavior == Behavior::DripWater;
+    let age = p.age as i32;
+    p.color = if water {
+        [0.2, 0.3, 1.0]
+    } else {
+        [1.0, 16.0 / (age + 16) as f32, 4.0 / (age + 8) as f32]
+    };
+    p.vel[1] -= p.gravity;
+    let tile = if age < 40 {
+        p.vel = p.vel.map(|v| v * 0.02);
+        113
+    } else {
+        112
+    };
+    p.sprite = Sprite::Sheet {
+        base: tile,
+        anim: false,
+    };
+    step(p, &solid);
+    p.vel = p.vel.map(|v| v * f64::from(0.98_f32));
+    let mut dead = p.age >= p.max_age;
+    p.age += 1;
+    if p.on_ground {
+        if water {
+            dead = true;
+            spawned.push((Kind::Splash, p.pos, [0.0; 3]));
+        } else {
+            p.sprite = Sprite::Sheet {
+                base: 114,
+                anim: false,
+            };
+        }
+        p.vel[0] *= f64::from(0.7_f32);
+        p.vel[2] *= f64::from(0.7_f32);
+    }
+    !(dead || buried(block, p.pos, false))
+}
+
+fn is_water(state: u16) -> bool {
+    matches!(state >> 4, 8 | 9)
+}
+
+/// `Material.isSolid`: full cubes, and shaped blocks except the plant, circuit, snow-layer, carpet,
+/// web, fire and portal materials.
+fn material_solid(state: u16) -> bool {
+    match crate::blocks::look(state).kind {
+        crate::blocks::Kind::Opaque | crate::blocks::Kind::Cutout => true,
+        crate::blocks::Kind::Shape => !matches!(
+            state >> 4,
+            6 | 27
+                | 28
+                | 30
+                | 31
+                | 32
+                | 37
+                | 38
+                | 39
+                | 40
+                | 50
+                | 51
+                | 55
+                | 59
+                | 65
+                | 66
+                | 69
+                | 75
+                | 76
+                | 77
+                | 78
+                | 83
+                | 90
+                | 104
+                | 105
+                | 106
+                | 111
+                | 115
+                | 119
+                | 127
+                | 131
+                | 132
+                | 93
+                | 94
+                | 140
+                | 141
+                | 142
+                | 143
+                | 144
+                | 149
+                | 150
+                | 157
+                | 171
+                | 175
+                | 198
+        ),
+        _ => false,
+    }
+}
+
+/// Whether the cell holding `pos` has a liquid surface or solid top above `pos` (`LiquidBlock.getHeightLoss`;
+/// rain splashes use the block's real top, drips the full cell).
+fn buried(block: &impl Fn(i32, i32, i32) -> u16, pos: [f64; 3], real_top: bool) -> bool {
+    let c = pos.map(|v| v.floor() as i32);
+    let state = block(c[0], c[1], c[2]);
+    let top = if matches!(state >> 4, 8..=11) {
+        let level = state & 15;
+        1.0 - f64::from(if level >= 8 { 1 } else { level + 1 }) / 9.0
+    } else if !material_solid(state) {
+        return false;
+    } else if real_top {
+        let at = |p: [i32; 3]| block(p[0], p[1], p[2]);
+        world::dig::selection_box(&at, c).map_or(1.0, |b| b[4])
+    } else {
+        1.0
+    };
+    pos[1] < f64::from(c[1]) + top
 }
 
 /// Moves by `vel` one axis at a time (y, x, z); a blocked axis zeroes its velocity.
@@ -918,7 +1330,7 @@ mod tests {
         ps.break_block([0, 10, 0], 1 << 4);
         assert_eq!(ps.len(), 64);
         for _ in 0..200 {
-            ps.tick(|_, y, _| y < 5);
+            ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.is_empty());
     }
@@ -928,7 +1340,7 @@ mod tests {
         let mut ps = Particles::new();
         ps.spawn(Kind::BlockCrack, [0.5, 6.5, 0.5], [0.0; 3], 16);
         for _ in 0..3 {
-            ps.tick(|_, y, _| y < 5);
+            ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.list.iter().all(|p| p.pos[1] >= 5.0));
     }
@@ -986,11 +1398,11 @@ mod tests {
         ps.spawn(Kind::Portal, [0.0; 3], [1.0, 0.0, 0.0], 0);
         let life = ps.list[0].max_age;
         assert!((40..50).contains(&life));
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         // t = 0: f = 1, so the particle sits at origin + motion and 1 block above.
         assert_eq!(ps.list[0].pos, [1.0, 1.0, 0.0]);
         for _ in 0..life {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         assert!(ps.is_empty());
     }
@@ -1000,7 +1412,7 @@ mod tests {
         let mut ps = Particles::new();
         ps.spawn(Kind::HugeExplode, [0.0; 3], [0.0; 3], 0);
         for _ in 0..8 {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         let large = ps
             .list
@@ -1008,7 +1420,7 @@ mod tests {
             .filter(|p| p.behavior == Behavior::LargeExplosion)
             .count();
         assert!(large > 0 && large <= 48);
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         assert!(ps.list.iter().all(|p| p.behavior != Behavior::HugeEmitter));
     }
 
@@ -1049,10 +1461,10 @@ mod tests {
         ps.spawn(Kind::MobSpell, [0.0, 10.0, 0.0], [1.0, 1.0, 1.0], 0);
         let life = ps.list[0].max_age;
         let y = ps.list[0].pos[1];
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         assert!(ps.list[0].pos[1] > y);
         for _ in 0..=life {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         assert!(ps.is_empty());
     }
@@ -1068,5 +1480,193 @@ mod tests {
             assert!((0.48..=1.0).contains(&p.color[0]));
             assert_eq!(p.color[1..], [0.0, 0.0]);
         }
+    }
+
+    #[test]
+    fn explosion_bursts_then_puffs_and_smokes_per_block() {
+        let mut ps = Particles::new();
+        ps.explosion([0.0; 3], 4.0, &[[1, 0, 0], [0, 1, 0], [0, 0, 2]]);
+        // One emitter plus an explosion puff and a smoke per block.
+        assert_eq!(ps.len(), 1 + 3 * 2);
+        assert!(ps.list.iter().any(|p| p.behavior == Behavior::HugeEmitter));
+        let mut small = Particles::new();
+        small.explosion([0.0; 3], 1.0, &[]);
+        assert!(small
+            .list
+            .iter()
+            .all(|p| p.behavior == Behavior::LargeExplosion));
+    }
+
+    #[test]
+    fn spawner_effect_makes_20_smoke_and_20_flames() {
+        let mut ps = Particles::new();
+        ps.world_effect(2004, [0, 64, 0], 0);
+        assert_eq!(ps.len(), 40);
+        let smoke = ps
+            .list
+            .iter()
+            .filter(|p| p.behavior == Behavior::Smoke)
+            .count();
+        let flames = ps
+            .list
+            .iter()
+            .filter(|p| matches!(p.sprite, Sprite::Sheet { base: 48, .. }))
+            .count();
+        assert_eq!((smoke, flames), (20, 20));
+    }
+
+    #[test]
+    fn splash_potion_uses_the_instant_or_plain_spell_sprite() {
+        let tile = |instant| {
+            let mut ps = Particles::new();
+            ps.splash_potion([0, 0, 0], 0xF8_2423, instant);
+            assert!(ps.list.iter().all(|p| p.behavior == Behavior::Spell));
+            ps.list
+                .iter()
+                .map(|p| match p.sprite {
+                    Sprite::Sheet { base, .. } => base,
+                    _ => 0,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(tile(true).iter().all(|&b| b == 144));
+        assert!(tile(false).iter().all(|&b| b == 128));
+    }
+
+    #[test]
+    fn dispenser_effect_puffs_10_smoke_ahead_of_its_facing() {
+        // `data` 5 is facing +x: x offset 1, z offset 0 (WorldRenderer.doEvent case 2000).
+        let mut ps = Particles::new();
+        ps.world_effect(2000, [0, 64, 0], 5);
+        assert_eq!(ps.len(), 10);
+        assert!(ps.list.iter().all(|p| p.behavior == Behavior::Smoke));
+        // Spawn x is 0.5 + 0.6 + 0.01; the sideways spread acts on z only.
+        assert!(ps.list.iter().all(|p| (p.pos[0] - 1.11).abs() < 1e-9));
+        assert!(ps.list.iter().all(|p| (0.25..=0.75).contains(&p.pos[2])));
+    }
+
+    #[test]
+    fn bone_meal_effect_spawns_15_sparkles_by_default_or_data_many_in_the_block() {
+        let mut ps = Particles::new();
+        ps.bone_meal([2, 5, 3], 0, 0.5);
+        assert_eq!(ps.len(), 15);
+        let mut ps = Particles::new();
+        ps.bone_meal([2, 5, 3], 7, 0.5);
+        assert_eq!(ps.len(), 7);
+        for p in &ps.list {
+            assert!((2.0..=3.0).contains(&p.pos[0]) && (3.0..=4.0).contains(&p.pos[2]));
+            assert!((5.0..=5.5).contains(&p.pos[1]), "y {}", p.pos[1]);
+            assert!(matches!(
+                p.sprite,
+                Sprite::Sheet {
+                    base: 82,
+                    anim: false
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn splash_potion_tints_100_swirls_and_ender_eye_ring_is_portal() {
+        let mut ps = Particles::new();
+        ps.splash_potion([0, 0, 0], 0xF8_2423, true);
+        assert_eq!(ps.len(), 100);
+        assert!(ps
+            .list
+            .iter()
+            .all(|p| p.color[0] > p.color[1] && p.color[0] <= 1.0));
+        let mut ring = Particles::new();
+        ring.world_effect(2003, [0, 0, 0], 0);
+        assert_eq!(ring.len(), 2 * 40);
+        assert!(ring.list.iter().all(|p| p.behavior == Behavior::Portal));
+    }
+
+    #[test]
+    fn new_packet_ids_are_mapped_and_spawn() {
+        for id in [3, 7, 8, 18, 19, 22, 25, 32] {
+            let mut ps = Particles::new();
+            ps.spawn_packet(id, [0.0; 3], [0.0; 3], 0.0, 0, &[]);
+            assert_eq!(ps.len(), 1, "id {id}");
+        }
+    }
+
+    #[test]
+    fn enchant_glyph_flies_from_offset_back_to_its_origin() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::Enchant, [0.0, 0.0, 0.0], [1.0, 2.0, 0.0], 0);
+        assert_eq!(ps.list[0].pos, [1.0, 2.0, 0.0]);
+        for _ in 0..ps.list[0].max_age {
+            ps.tick(|_, _, _| 0);
+        }
+        assert!(ps.list[0].pos[0].abs() < 0.05, "{:?}", ps.list[0].pos);
+    }
+
+    #[test]
+    fn water_drip_splashes_on_the_ground_and_lava_stays() {
+        let floor = |_: i32, y: i32, _: i32| if y < 0 { 16 } else { 0 };
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripWater, [0.5, 0.2, 0.5], [0.0; 3], 0);
+        for _ in 0..200 {
+            ps.tick(floor);
+        }
+        assert!(ps.list.iter().all(|p| p.behavior != Behavior::DripWater));
+        let mut lava = Particles::new();
+        lava.spawn(Kind::DripLava, [0.5, 0.2, 0.5], [0.0; 3], 0);
+        for _ in 0..60 {
+            lava.tick(floor);
+        }
+        assert!(lava.list.iter().all(|p| p.behavior == Behavior::DripLava));
+    }
+
+    fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {
+        move |x, y, z| if [x, y, z] == cell { state } else { 0 }
+    }
+
+    #[test]
+    fn suspended_dies_on_the_first_tick_outside_water() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::Suspended, [0.5, 0.5, 0.5], [0.0; 3], 0);
+        let cell = ps.list[0].pos.map(|v| v.floor() as i32);
+        ps.tick(at(cell, 9 << 4));
+        assert_eq!(ps.list.len(), 1);
+        ps.tick(|_, _, _| 0);
+        assert!(ps.is_empty());
+        let mut dry = Particles::new();
+        dry.spawn(Kind::Suspended, [0.5, 0.5, 0.5], [0.0; 3], 0);
+        dry.tick(|_, _, _| 0);
+        assert!(dry.is_empty());
+    }
+
+    #[test]
+    fn drip_dies_below_a_liquid_surface_but_not_above_it() {
+        // Water level 7 (height loss 8/9): the surface is 1/9 above the cell floor.
+        let water = |y: f64| {
+            let mut ps = Particles::new();
+            ps.spawn(Kind::DripWater, [0.5, y, 0.5], [0.0; 3], 0);
+            ps.tick(at([0, 0, 0], (9 << 4) | 7));
+            ps.is_empty()
+        };
+        assert!(water(0.05));
+        assert!(!water(0.5));
+    }
+
+    #[test]
+    fn drip_dies_inside_a_solid_cell() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 0.9, 0.5], [0.0; 3], 0);
+        ps.tick(at([0, 0, 0], 1 << 4));
+        assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn drip_dies_in_shaped_solid_cells_but_not_in_snow_layers() {
+        let mut slab = Particles::new();
+        slab.spawn(Kind::DripLava, [0.5, 0.9, 0.5], [0.0; 3], 0);
+        slab.tick(at([0, 0, 0], 44 << 4));
+        assert!(slab.is_empty());
+        let mut snow = Particles::new();
+        snow.spawn(Kind::DripLava, [0.5, 0.9, 0.5], [0.0; 3], 0);
+        snow.tick(at([0, 0, 0], 78 << 4));
+        assert!(!snow.is_empty());
     }
 }

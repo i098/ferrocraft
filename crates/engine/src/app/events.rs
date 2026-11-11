@@ -248,16 +248,23 @@ impl App {
             NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
             NetEvent::Explosion {
                 pos,
+                radius,
                 records,
                 motion,
-                ..
-            } => self.explode(pos, &records, motion, dirty),
+            } => self.explode(pos, radius, &records, motion, dirty),
             other => return Err(other),
         }
         Ok(())
     }
 
-    fn explode(&mut self, pos: [f32; 3], records: &[[i8; 3]], motion: [f32; 3], dirty: &mut Dirty) {
+    fn explode(
+        &mut self,
+        pos: [f32; 3],
+        radius: f32,
+        records: &[[i8; 3]],
+        motion: [f32; 3],
+        dirty: &mut Dirty,
+    ) {
         if let Some(p) = &mut self.game.player {
             for (v, m) in p.vel.iter_mut().zip(motion) {
                 *v += f64::from(m);
@@ -267,6 +274,12 @@ impl App {
             s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
         }
         let base = pos.map(|v| v as i32);
+        let blocks: Vec<[i32; 3]> = records
+            .iter()
+            .map(|r| [0, 1, 2].map(|i| base[i] + i32::from(r[i])))
+            .collect();
+        self.particles
+            .explosion(pos.map(f64::from), radius, &blocks);
         for r in records {
             let at = [0, 1, 2].map(|i| base[i] + i32::from(r[i]));
             if self.game.store.get(at[0] >> 4, at[2] >> 4).is_some() {
@@ -387,9 +400,23 @@ impl App {
         if let Some(s) = &mut self.sound {
             s.play_effect(id, data, at);
         }
-        if id == 2001 {
-            let state = (((data & 0xfff) << 4) | ((data >> 12) & 0xf)) as u16;
-            self.particles.break_block(pos, state);
+        match id {
+            2001 => {
+                let state = (((data & 0xfff) << 4) | ((data >> 12) & 0xf)) as u16;
+                self.particles.break_block(pos, state);
+            }
+            2002 => {
+                let (rgb, instant) = world::potion_brew::color_and_instant(data);
+                self.particles.splash_potion(pos, rgb, instant);
+            }
+            2005 => {
+                let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
+                if at(pos) != 0 {
+                    let top = world::dig::selection_box(&at, pos).map_or(1.0, |b| b[4]);
+                    self.particles.bone_meal(pos, data, top);
+                }
+            }
+            _ => self.particles.world_effect(id, pos, data),
         }
     }
 

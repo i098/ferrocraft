@@ -15,6 +15,7 @@ pub mod entity_sound;
 pub mod inventory;
 pub mod motion_sound;
 pub mod place;
+pub mod potion_brew;
 
 use std::sync::LazyLock;
 

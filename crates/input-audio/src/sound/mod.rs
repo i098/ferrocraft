@@ -60,6 +60,12 @@ impl Sound {
         self.rng
     }
 
+    /// `rand.nextFloat() - rand.nextFloat()`: the pitch jitter of vanilla entity sounds, in -1..1.
+    pub fn rand_diff(&mut self) -> f32 {
+        let f = |s: &mut Self| (s.rand() >> 8) as f32 / (1u32 << 24) as f32;
+        f(self) - f(self)
+    }
+
     pub fn set_listener(&mut self, pos: [f64; 3]) {
         self.listener = pos;
     }

@@ -20,6 +20,7 @@ Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, part
 light at its position like the 1.8.9 particle classes.
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
+Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.

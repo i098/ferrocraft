@@ -68,6 +68,63 @@ fn renders_synthetic_chunks_to_png() {
     encode_png(path.as_ref(), w, h, &rgba).expect("write png");
 }
 
+/// Synthetic terrain in a given biome.
+struct InBiome(i32, i32, u8);
+
+impl ChunkBlocks for InBiome {
+    fn chunk_x(&self) -> i32 {
+        self.0
+    }
+    fn chunk_z(&self) -> i32 {
+        self.1
+    }
+    fn block(&self, x: usize, y: usize, z: usize) -> u16 {
+        Synthetic(self.0, self.1).block(x, y, z)
+    }
+    fn biome(&self, _x: usize, _z: usize) -> u8 {
+        self.2
+    }
+}
+
+/// Plains rain, ice plains snow and desert dry weather draw three different frames (vanilla `renderRainSnow`).
+#[test]
+fn precipitation_follows_the_biome() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let frame = |biome: u8| {
+        let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+        for cx in -1..=1 {
+            for cz in 0..=2 {
+                r.upload_chunk(&InBiome(cx, cz, biome));
+            }
+        }
+        r.set_environment(Environment {
+            rain: 1.0,
+            ticks: 40,
+            ..Environment::default()
+        });
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let (plains, ice, desert) = (frame(1), frame(12), frame(2));
+    assert_ne!(plains, ice, "snow must differ from rain");
+    assert_ne!(plains, desert, "a dry biome draws no rain");
+    if let Some(dir) = std::env::var_os("RENDER_SNOW_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, rgba) in [("rain", &plains), ("snow", &ice), ("dry", &desert)] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, rgba).unwrap();
+        }
+    }
+}
+
 /// Rain, the first-person hand, a flat held item, particles, the local player model (third person)
 /// and a runtime-registered GUI texture: each changes the frame.
 #[test]

@@ -325,13 +325,14 @@ impl App {
         };
         let store = &self.game.store;
         let top = |x: i32, z: i32| {
-            store.get(x >> 4, z >> 4)?;
-            Some(
-                (0..256)
-                    .rev()
-                    .find(|&y| render::stops_rain(store.get_block(x, y, z)))
-                    .map_or(0, |y| y + 1),
-            )
+            let biome = store
+                .get(x >> 4, z >> 4)?
+                .biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
+            let y = (0..256)
+                .rev()
+                .find(|&y| render::stops_rain(store.get_block(x, y, z)))
+                .map_or(0, |y| y + 1);
+            Some((y, biome))
         };
         let (rain, _) = self.game.weather.strengths(1.0);
         let settings = &self.ui.settings;

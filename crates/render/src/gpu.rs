@@ -1,6 +1,7 @@
 //! wgpu device, pipelines and frame rendering.
 
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
+use crate::biome::{temperature, PLAINS_TEMPERATURE};
 use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
@@ -10,7 +11,7 @@ use crate::particles::Quads;
 use crate::sky::{
     build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
 };
-use crate::weather::{build_rain, precipitation_height};
+use crate::weather::{build_precipitation, precipitation_height};
 use crate::{Camera, ChunkBlocks, Quad};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -132,6 +133,7 @@ pub struct Renderer {
     /// Player skin and its height in pixels; `None` without assets.
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
+    snow_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
     hand_glint_group: Option<wgpu::BindGroup>,
     held: Option<(HeldKind, Held)>,
@@ -149,6 +151,8 @@ pub struct Renderer {
     env_tex: EnvTexture,
     environment: Environment,
     blocks: HashMap<(i32, i32), SharedBlocks>,
+    /// Biome ids per chunk column, `z << 4 | x`.
+    biomes: HashMap<(i32, i32), [u8; 256]>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     mesher: Mesher,
     /// Chunks to remesh on the workers.
@@ -265,6 +269,7 @@ impl Renderer {
                 .and_then(|b| decode_png(&b))
         };
         let rain_img = load_png("environment/rain");
+        let snow_img = load_png("environment/snow");
         let skin_img = load_png("entity/steve");
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
@@ -331,6 +336,8 @@ impl Renderer {
         });
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
+        let snow_group =
+            snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
             build_pipelines(&device, &layout_bg, format);
@@ -376,6 +383,7 @@ impl Renderer {
             hand_atlas_group,
             hand_skin,
             rain_group,
+            snow_group,
             hand: None,
             hand_glint_group: None,
             held: None,
@@ -390,6 +398,7 @@ impl Renderer {
             env_tex,
             environment: Environment::default(),
             blocks: HashMap::new(),
+            biomes: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
             urgent: HashSet::new(),
@@ -561,11 +570,14 @@ impl Renderer {
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
         self.blocks.insert(key, Arc::new(data));
+        self.biomes
+            .insert(key, std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)));
         self.mark_around(key);
     }
 
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
+        self.biomes.remove(&(x, z));
         self.meshes.remove(&(x, z));
         self.pending.remove(&(x, z));
         self.mark_neighbors((x, z));
@@ -573,6 +585,7 @@ impl Renderer {
 
     pub fn clear_chunks(&mut self) {
         self.blocks.clear();
+        self.biomes.clear();
         self.meshes.clear();
         self.dirty.clear();
         self.urgent.clear();
@@ -878,14 +891,25 @@ impl Renderer {
         self.textures.insert(name.to_owned(), group);
     }
 
-    /// Highest block that stops rain in a loaded column, as `World.getPrecipitationHeight`.
-    fn rain_top(&self, x: i32, z: i32) -> Option<i32> {
+    /// Highest block that stops rain in a loaded column, as `World.getPrecipitationHeight`, and the column's biome id.
+    fn rain_top(&self, x: i32, z: i32) -> Option<(i32, u8)> {
         let blocks = self.blocks.get(&(x >> 4, z >> 4))?;
-        Some(precipitation_height(
-            blocks,
-            x.rem_euclid(16) as usize,
-            z.rem_euclid(16) as usize,
-        ))
+        let ground =
+            precipitation_height(blocks, x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
+        Some((ground, self.biome_at(x, z)?))
+    }
+
+    /// Biome id of a loaded column.
+    fn biome_at(&self, x: i32, z: i32) -> Option<u8> {
+        let biomes = self.biomes.get(&(x >> 4, z >> 4))?;
+        Some(biomes[(z.rem_euclid(16) as usize) << 4 | x.rem_euclid(16) as usize])
+    }
+
+    /// `World.getSkyColor` reads the temperature at the camera entity's block; plains when unloaded.
+    fn sky_temperature(&self, cam: &Camera) -> f32 {
+        let [x, y, z] = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]].map(|c| c.floor() as i32);
+        self.biome_at(x, z)
+            .map_or(PLAINS_TEMPERATURE, |b| temperature(b, x, y, z))
     }
 
     /// Hand geometry for this frame and the texture it samples; `None` when no hand or texture exists.
@@ -992,11 +1016,26 @@ impl Renderer {
         }
     }
 
-    fn rain_mesh(&self, env: &Environment, cam: &Camera) -> Option<GpuMesh> {
-        self.rain_group.as_ref()?;
+    /// Draws each precipitation mesh that has a texture.
+    fn draw_precipitation<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        layers: [(&'a Option<GpuMesh>, &'a Option<wgpu::BindGroup>); 2],
+    ) {
+        for (mesh, group) in layers {
+            if let (Some(m), Some(group)) = (mesh, group) {
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.water_pipe);
+                draw_mesh(pass, m);
+            }
+        }
+    }
+
+    /// Rain and snow meshes for this frame.
+    fn rain_mesh(&self, env: &Environment, cam: &Camera) -> (Option<GpuMesh>, Option<GpuMesh>) {
         let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
-        let rain = build_rain(env, feet, |x, z| self.rain_top(x, z));
-        self.upload_geometry(&rain)
+        let (rain, snow) = build_precipitation(env, feet, |x, z| self.rain_top(x, z));
+        (self.upload_geometry(&rain), self.upload_geometry(&snow))
     }
 
     /// Uploads the hand and its own projection, with the texture it samples.
@@ -1175,7 +1214,7 @@ impl Renderer {
         let (w, h) = self.size();
         let env = self.environment;
         let fire = self.prepare_fire(cam, w, h);
-        let sky = env.sky_state();
+        let sky = env.sky_state(self.sky_temperature(cam));
         let globals = Self::globals(cam, &env, &sky, (w, h));
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
@@ -1191,7 +1230,7 @@ impl Renderer {
         let bolt_mesh = (!self.bolts.is_empty())
             .then(|| crate::lightning::build(&self.bolts, cam.pos))
             .and_then(|d| self.upload_mesh(d, cam.pos.map(|c| c as f32)));
-        let rain = self.rain_mesh(&env, cam);
+        let (rain, snow) = self.rain_mesh(&env, cam);
         let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
         let offset = cam.pos.map(|c| c as f32);
         let crack_meshes = self.crack_meshes();
@@ -1335,11 +1374,10 @@ impl Renderer {
                     draw_mesh(&mut pass, m);
                 }
             }
-            if let (Some(m), Some(group)) = (&rain, &self.rain_group) {
-                pass.set_bind_group(0, group, &[]);
-                pass.set_pipeline(&self.water_pipe);
-                draw_mesh(&mut pass, m);
-            }
+            self.draw_precipitation(
+                &mut pass,
+                [(&rain, &self.rain_group), (&snow, &self.snow_group)],
+            );
         }
         self.draw_hand_and_gui(
             &mut enc,

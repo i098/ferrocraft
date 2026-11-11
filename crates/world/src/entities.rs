@@ -312,11 +312,15 @@ impl Entity {
         self.meta.always_name == Some(1)
     }
 
-    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height (0.5 when small), else 0.85.
+    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height (0.5
+    /// when small), the spider, cave spider and enderman overrides, else 0.85 of the height.
     pub fn eye_height(&self) -> f32 {
         match self.kind {
             Kind::Player => 1.62 - if self.sneaking() { 0.08 } else { 0.0 },
             Kind::Object(78) => self.size().1 * if self.is_child() { 0.5 } else { 0.9 },
+            Kind::Mob(52) => 0.65,
+            Kind::Mob(59) => 0.45,
+            Kind::Mob(58) => 2.55,
             _ => self.size().1 * 0.85,
         }
     }
@@ -1016,6 +1020,21 @@ mod tests {
         assert!((pitch - 20.0).abs() < 1e-4);
         e.tick();
         assert_eq!((e.prev_yaw, e.prev_pitch), (-170.0, 30.0));
+    }
+
+    #[test]
+    fn mob_eye_heights_match_vanilla_get_eye_height() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0; 3]);
+        let mut e = es.get(1).unwrap().clone();
+        for (kind, want) in [(52, 0.65), (59, 0.45), (58, 2.55), (50, 1.7 * 0.85)] {
+            e.kind = Kind::Mob(kind);
+            assert!(
+                (e.eye_height() - want).abs() < 1e-5,
+                "mob {kind}: {}",
+                e.eye_height()
+            );
+        }
     }
 
     #[test]

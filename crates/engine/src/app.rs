@@ -870,6 +870,11 @@ fn use_action(id: i16) -> UseAction {
     }
 }
 
+/// Action of the timed item use a remote entity has in progress, from its `USING_ITEM` flag.
+fn remote_using(e: &Entity) -> Option<UseAction> {
+    (e.flags & flag::USING_ITEM != 0).then(|| use_action(e.equipment[0].map_or(0, |i| i.id)))
+}
+
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
@@ -923,8 +928,7 @@ fn entity_draw(
         pointed,
         ridden,
         child: e.is_child(),
-        using: (e.flags & flag::USING_ITEM != 0)
-            .then(|| use_action(e.equipment[0].map_or(0, |i| i.id))),
+        using: remote_using(e),
     }
 }
 

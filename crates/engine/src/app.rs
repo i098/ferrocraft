@@ -10,6 +10,7 @@ macro_rules! metrics {
 
 mod events;
 mod input;
+mod own_sounds;
 mod play;
 
 use crate::args::Args;
@@ -98,6 +99,7 @@ pub struct App {
     /// `Entity.distanceWalkedOnStepModified` and `nextStepDistance` for footstep sounds.
     walked: f32,
     next_step: i32,
+    own_sounds: own_sounds::State,
     limbs: Limbs,
     /// `EntityRenderer.fovModifierHand` and its previous tick value.
     fov_mod: (f32, f32),
@@ -154,6 +156,7 @@ impl App {
             chat_open: false,
             walked: 0.0,
             next_step: 0,
+            own_sounds: own_sounds::State::default(),
             limbs: Limbs::default(),
             fov_mod: (1.0, 1.0),
             view_bob: play::ViewBob::default(),

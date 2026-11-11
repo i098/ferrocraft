@@ -150,6 +150,8 @@ pub struct Game {
     /// The held slot got another item stack or another index: vanilla's `EntityPlayer.onUpdate`
     /// then clears the item use. The app takes the flag each tick.
     pub held_replaced: bool,
+    /// Status 9 for the own player (`finishUsingItem`); the app takes the flag each tick.
+    pub finished_use: bool,
 }
 
 impl Game {
@@ -193,6 +195,7 @@ impl Game {
             jump_held: false,
             bob: [0; 9],
             held_replaced: false,
+            finished_use: false,
         }
     }
 
@@ -357,6 +360,9 @@ impl Game {
                 if let Some(p) = &mut self.player {
                     p.vel = vel.map(|v| f64::from(v) / 8000.0);
                 }
+            }
+            NetEvent::Entity(EntityEvent::Status { id, status: 9 }) if id == self.entity_id => {
+                self.finished_use = true;
             }
             NetEvent::Entity(EntityEvent::Status {
                 id,

@@ -1214,7 +1214,7 @@ impl Renderer {
         let (w, h) = self.size();
         let env = self.environment;
         let fire = self.prepare_fire(cam, w, h);
-        let sky = env.sky_state(self.sky_temperature(cam));
+        let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
         let globals = Self::globals(cam, &env, &sky, (w, h));
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
@@ -2079,14 +2079,20 @@ fn create_texture(
     )
 }
 
-/// Column-major view-projection (OpenGL-style camera math, wgpu 0..1 depth).
-pub fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
+/// `Entity.getLook`: the unit vector the camera faces.
+fn look_vector(cam: &Camera) -> [f32; 3] {
     let (yaw, pitch) = (cam.yaw.to_radians(), cam.pitch.to_radians());
-    let fwd = [
+    [
         -yaw.sin() * pitch.cos(),
         -pitch.sin(),
         yaw.cos() * pitch.cos(),
-    ];
+    ]
+}
+
+/// Column-major view-projection (OpenGL-style camera math, wgpu 0..1 depth).
+pub fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
+    let yaw = cam.yaw.to_radians();
+    let fwd = look_vector(cam);
     let right = [-yaw.cos(), 0.0, -yaw.sin()];
     let up = cross(right, fwd);
     let eye = [cam.pos[0] as f32, cam.pos[1] as f32, cam.pos[2] as f32];

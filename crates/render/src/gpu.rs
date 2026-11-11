@@ -1248,9 +1248,7 @@ impl Renderer {
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
         let env = self.environment;
-        if let (Some(post), true) = (&mut self.post, self.post_on) {
-            post.advance(env.partial);
-        }
+        self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
         let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
         let globals = Self::globals(cam, &env, &sky, (w, h));
@@ -1304,10 +1302,7 @@ impl Renderer {
                 })
         });
 
-        let world = match &self.post {
-            Some(post) if self.post_on => post.main(),
-            _ => view,
-        };
+        let world = self.running_post().map_or(view, Post::main);
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -1464,19 +1459,12 @@ impl Renderer {
     ) {
         // Vanilla draws the hand on a cleared depth buffer, then the GUI.
         let mut pass = overlay_pass(enc, world, &self.depth);
-        if let Some((m, tex, glint)) = hand {
-            pass.set_bind_group(0, self.hand_group(*tex), &[]);
-            pass.set_pipeline(&self.hand_pipe);
-            draw_mesh(&mut pass, m);
-            if let (Some(g), Some(group)) = (glint, &self.hand_glint_group) {
-                pass.set_bind_group(0, group, &[]);
-                pass.set_pipeline(&self.hand_glint_pipe);
-                draw_mesh(&mut pass, g);
-            }
+        if let Some(hand) = hand {
+            self.draw_hand(&mut pass, hand);
         }
         self.draw_fire_overlay(&mut pass, fire);
         // `updateCameraAndRender`: the effect runs after the hand and before the GUI.
-        if let Some(post) = self.post.as_ref().filter(|_| self.post_on) {
+        if let Some(post) = self.running_post() {
             drop(pass);
             post.process(&self.queue, enc);
             pass = overlay_pass(enc, view, &self.depth);
@@ -1484,6 +1472,33 @@ impl Renderer {
         }
         if let Some(buf) = gui_buf {
             self.draw_gui(&mut pass, buf, overlay);
+        }
+    }
+
+    fn draw_hand<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        (m, tex, glint): &'a (GpuMesh, HandTex, Option<GpuMesh>),
+    ) {
+        pass.set_bind_group(0, self.hand_group(*tex), &[]);
+        pass.set_pipeline(&self.hand_pipe);
+        draw_mesh(pass, m);
+        if let (Some(g), Some(group)) = (glint, &self.hand_glint_group) {
+            pass.set_bind_group(0, group, &[]);
+            pass.set_pipeline(&self.hand_glint_pipe);
+            draw_mesh(pass, g);
+        }
+    }
+
+    /// The loaded effect while it runs (`useShader`).
+    fn running_post(&self) -> Option<&Post> {
+        self.post.as_ref().filter(|_| self.post_on)
+    }
+
+    /// The effect's `Time` step, once per frame while it runs.
+    fn advance_post(&mut self, partial: f32) {
+        if let (Some(post), true) = (&mut self.post, self.post_on) {
+            post.advance(partial);
         }
     }
 

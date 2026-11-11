@@ -516,7 +516,7 @@ fn post_effects_run_between_world_and_gui() {
         uv: [[0.0; 2]; 4],
         color: [0xFFFF_0000; 4],
     };
-    let frame = |r: &mut Renderer| r.render_to_rgba(&cam, &[red.clone()]).2;
+    let frame = |r: &mut Renderer| r.render_to_rgba(&cam, std::slice::from_ref(&red)).2;
     let px = |f: &[u8], x: u32, y: u32| f[((y * w + x) * 4) as usize..][..3].to_vec();
     let plain = frame(&mut r);
 

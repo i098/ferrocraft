@@ -169,41 +169,13 @@ impl Post {
             let mut pass = load_program(device, source, program, format, input, output)?;
             let mut aux = vec![("DiffuseSampler".to_owned(), Read::Target(input))];
             for a in array(p, "auxtargets") {
-                let s = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or_default();
-                let read = match names.iter().position(|t| t == s("id")) {
-                    Some(i) => {
-                        pass.aux_sizes.push([size.0 as f32, size.1 as f32]);
-                        Read::Target(i)
-                    }
-                    None => {
-                        let int = |k| a.get(k).and_then(Value::as_u64).ok_or(format!("aux {k}"));
-                        pass.aux_sizes
-                            .push([int("width")? as f32, int("height")? as f32]);
-                        let bilinear = a.get("bilinear").and_then(Value::as_bool) == Some(true);
-                        let path = format!("assets/minecraft/textures/effect/{}.png", s("id"));
-                        textures.push(effect_texture(device, queue, source, &path, bilinear)?);
-                        Read::Texture(textures.len() - 1)
-                    }
-                };
-                aux.push((s("name").to_owned(), read));
+                let (name, read, aux_size) =
+                    aux_target((device, queue), source, a, &names, size, &mut textures)?;
+                pass.aux_sizes.push(aux_size);
+                aux.push((name, read));
             }
-            // A sampler that the pass does not set keeps reading the input (`DiffuseSampler`,
-            // the first sampler of every vanilla program).
-            for (i, s) in pass.samplers.iter().enumerate() {
-                if let Some((_, r)) = aux.iter().find(|(n, _)| n == s) {
-                    pass.reads[i] = *r;
-                }
-            }
-            if pass.reads.contains(&Read::Target(output)) {
-                return Err(format!("pass {program} reads its own output"));
-            }
-            for u in array(p, "uniforms") {
-                let n = u.get("name").and_then(Value::as_str).unwrap_or_default();
-                if !pass.slots.iter().any(|s| s.name == n && s.listed) {
-                    return Err(format!("Uniform '{n}' does not exist"));
-                }
-                pass.set(n, &floats(u.get("values")));
-            }
+            pass.bind_reads(&aux, output, program)?;
+            pass.set_uniforms(p)?;
             passes.push(pass);
         }
         let blit = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -245,7 +217,64 @@ impl Post {
             last_stamp: 0.0,
         })
     }
+}
 
+/// One `auxtargets` entry: a chain target, or else `textures/effect/<id>.png` at its own size.
+fn aux_target(
+    (device, queue): (&wgpu::Device, &wgpu::Queue),
+    source: &mut AssetSource,
+    a: &Value,
+    names: &[String],
+    size: (u32, u32),
+    textures: &mut Vec<(wgpu::TextureView, wgpu::Sampler)>,
+) -> Result<(String, Read, [f32; 2]), String> {
+    let s = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or_default();
+    let name = s("name").to_owned();
+    if let Some(i) = names.iter().position(|t| t == s("id")) {
+        return Ok((name, Read::Target(i), [size.0 as f32, size.1 as f32]));
+    }
+    let int = |k| a.get(k).and_then(Value::as_u64).ok_or(format!("aux {k}"));
+    let aux_size = [int("width")? as f32, int("height")? as f32];
+    let bilinear = a.get("bilinear").and_then(Value::as_bool) == Some(true);
+    let path = format!("assets/minecraft/textures/effect/{}.png", s("id"));
+    textures.push(effect_texture(device, queue, source, &path, bilinear)?);
+    Ok((name, Read::Texture(textures.len() - 1), aux_size))
+}
+
+impl Pass {
+    /// A sampler that the pass does not set keeps reading the input (`DiffuseSampler`, the
+    /// first sampler of every vanilla program).
+    fn bind_reads(
+        &mut self,
+        aux: &[(String, Read)],
+        output: usize,
+        program: &str,
+    ) -> Result<(), String> {
+        for (i, s) in self.samplers.iter().enumerate() {
+            if let Some((_, r)) = aux.iter().find(|(n, _)| n == s) {
+                self.reads[i] = *r;
+            }
+        }
+        if self.reads.contains(&Read::Target(output)) {
+            return Err(format!("pass {program} reads its own output"));
+        }
+        Ok(())
+    }
+
+    /// The pass `uniforms` of the chain JSON; each must be one the program JSON lists.
+    fn set_uniforms(&mut self, p: &Value) -> Result<(), String> {
+        for u in array(p, "uniforms") {
+            let n = u.get("name").and_then(Value::as_str).unwrap_or_default();
+            if !self.slots.iter().any(|s| s.name == n && s.listed) {
+                return Err(format!("Uniform '{n}' does not exist"));
+            }
+            self.set(n, &floats(u.get("values")));
+        }
+        Ok(())
+    }
+}
+
+impl Post {
     /// Where the world and the hand draw while the effect is on.
     pub fn main(&self) -> &wgpu::TextureView {
         &self.targets[0]
@@ -513,35 +542,7 @@ fn load_program(
         .filter_map(|u| u.get("name")?.as_str())
         .collect();
     let (slots, block_size) = block(&vertex, &listed);
-    let mut entries = Vec::new();
-    if block_size > 0 {
-        entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        });
-    }
-    for i in 0..program.samplers.len() as u32 {
-        for (b, ty) in [
-            (1 + 2 * i, texture_binding()),
-            (
-                2 + 2 * i,
-                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-            ),
-        ] {
-            entries.push(wgpu::BindGroupLayoutEntry {
-                binding: b,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty,
-                count: None,
-            });
-        }
-    }
+    let entries = layout_entries(block_size > 0, program.samplers.len() as u32);
     let module = |m| {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(name),
@@ -586,6 +587,33 @@ fn load_program(
     Ok(pass)
 }
 
+/// The uniform block at binding 0 when the program has one, then a texture and a sampler for
+/// each sampler at bindings `1 + 2i` and `2 + 2i`.
+fn layout_entries(has_block: bool, samplers: u32) -> Vec<wgpu::BindGroupLayoutEntry> {
+    let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        ty,
+        count: None,
+    };
+    let block = wgpu::BindingType::Buffer {
+        ty: wgpu::BufferBindingType::Uniform,
+        has_dynamic_offset: false,
+        min_binding_size: None,
+    };
+    let sampler = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
+    has_block
+        .then(|| entry(0, block))
+        .into_iter()
+        .chain((0..samplers).flat_map(|i| {
+            [
+                entry(1 + 2 * i, texture_binding()),
+                entry(2 + 2 * i, sampler),
+            ]
+        }))
+        .collect()
+}
+
 /// The members of the uniform block with naga's std140 offsets, and the block size.
 fn block(m: &naga::Module, listed: &[&str]) -> (Vec<Slot>, usize) {
     let found = m
@@ -621,35 +649,8 @@ fn blend(j: Option<&Value>) -> Result<Option<wgpu::BlendState>, String> {
     use wgpu::{BlendFactor as F, BlendOperation as Op};
     let Some(j) = j else { return Ok(None) };
     let get = |k: &str| j.get(k).and_then(Value::as_str);
-    let op = match get("func").map(str::to_lowercase).as_deref() {
-        Some("subtract") => Op::Subtract,
-        Some("reversesubtract" | "reverse_subtract") => Op::ReverseSubtract,
-        Some("min") => Op::Min,
-        Some("max") => Op::Max,
-        _ => Op::Add,
-    };
-    let factor = |k: &str, default: F| {
-        let Some(s) = get(k) else { return Ok(default) };
-        let s = s
-            .to_lowercase()
-            .replace('_', "")
-            .replace("one", "1")
-            .replace("zero", "0")
-            .replace("minus", "-");
-        Ok(match s.as_str() {
-            "0" => F::Zero,
-            "1" => F::One,
-            "srccolor" => F::Src,
-            "1-srccolor" => F::OneMinusSrc,
-            "dstcolor" => F::Dst,
-            "1-dstcolor" => F::OneMinusDst,
-            "srcalpha" => F::SrcAlpha,
-            "1-srcalpha" => F::OneMinusSrcAlpha,
-            "dstalpha" => F::DstAlpha,
-            "1-dstalpha" => F::OneMinusDstAlpha,
-            _ => return Err(format!("blend factor '{s}'")),
-        })
-    };
+    let op = blend_op(get("func"));
+    let factor = |k: &str, default| get(k).map_or(Ok(default), blend_factor);
     let (src, dst) = (factor("srcrgb", F::One)?, factor("dstrgb", F::Zero)?);
     let (src_a, dst_a) = (factor("srcalpha", F::One)?, factor("dstalpha", F::Zero)?);
     if op == Op::Add && (src, dst, src_a, dst_a) == (F::One, F::Zero, F::One, F::Zero) {
@@ -674,6 +675,42 @@ fn blend(j: Option<&Value>) -> Result<Option<wgpu::BlendState>, String> {
         color,
         alpha: if separate { comp(src_a, dst_a) } else { color },
     }))
+}
+
+/// `BlendMode.stringToBlendFunc`; an unknown name is `add`.
+fn blend_op(name: Option<&str>) -> wgpu::BlendOperation {
+    use wgpu::BlendOperation as Op;
+    match name.map(str::to_lowercase).as_deref() {
+        Some("subtract") => Op::Subtract,
+        Some("reversesubtract" | "reverse_subtract") => Op::ReverseSubtract,
+        Some("min") => Op::Min,
+        Some("max") => Op::Max,
+        _ => Op::Add,
+    }
+}
+
+/// `BlendMode.stringToBlendFactor`: `one_minus_src_alpha` and `1-srcalpha` are the same factor.
+fn blend_factor(name: &str) -> Result<wgpu::BlendFactor, String> {
+    use wgpu::BlendFactor as F;
+    let s = name
+        .to_lowercase()
+        .replace('_', "")
+        .replace("one", "1")
+        .replace("zero", "0")
+        .replace("minus", "-");
+    Ok(match s.as_str() {
+        "0" => F::Zero,
+        "1" => F::One,
+        "srccolor" => F::Src,
+        "1-srccolor" => F::OneMinusSrc,
+        "dstcolor" => F::Dst,
+        "1-dstcolor" => F::OneMinusDst,
+        "srcalpha" => F::SrcAlpha,
+        "1-srcalpha" => F::OneMinusSrcAlpha,
+        "dstalpha" => F::DstAlpha,
+        "1-dstalpha" => F::OneMinusDstAlpha,
+        _ => return Err(format!("blend factor '{s}'")),
+    })
 }
 
 /// A pass or blit pipeline; the post vertex stage reads `Position` as a pixel-space `vec4`.

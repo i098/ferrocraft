@@ -887,20 +887,8 @@ impl App {
         match action {
             Action::ToggleDebug => self.show_debug = !self.show_debug,
             Action::ToggleHud => self.hide_hud = !self.hide_hud,
-            Action::ToggleShader => {
-                if let Some(r) = &mut self.renderer {
-                    r.toggle_post();
-                }
-            }
-            // `Minecraft.runTick`: first person views as the camera entity, the back view clears.
-            Action::TogglePerspective => {
-                self.perspective = (self.perspective + 1) % 3;
-                match self.perspective {
-                    0 => self.entity_shader(self.game.camera),
-                    1 => self.entity_shader(None),
-                    _ => {}
-                }
-            }
+            Action::ToggleShader => self.renderer.iter_mut().for_each(|r| r.toggle_post()),
+            Action::TogglePerspective => self.toggle_perspective(),
             Action::Debug(DebugCombo::ClearChat) => {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();
@@ -940,6 +928,16 @@ impl App {
                 self.reload_chunks();
                 self.debug_chat("Reloading all chunks");
             }
+            _ => {}
+        }
+    }
+
+    /// F5, `Minecraft.runTick`: first person views as the camera entity, the back view clears.
+    fn toggle_perspective(&mut self) {
+        self.perspective = (self.perspective + 1) % 3;
+        match self.perspective {
+            0 => self.entity_shader(self.game.camera),
+            1 => self.entity_shader(None),
             _ => {}
         }
     }

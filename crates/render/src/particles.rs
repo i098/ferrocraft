@@ -1384,7 +1384,7 @@ mod tests {
     fn hit_burst_spawns_near_the_entity_and_death_puff_makes_20() {
         let mut ps = Particles::new();
         ps.hit_burst(false, [0.0; 3], (0.6, 1.8));
-        assert!(ps.len() > 0 && ps.len() <= 16);
+        assert!(!ps.is_empty() && ps.len() <= 16);
         assert!(ps
             .list
             .iter()

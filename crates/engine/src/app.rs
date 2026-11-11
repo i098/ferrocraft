@@ -504,7 +504,14 @@ impl App {
                         .and_then(|r| skins.show(r, u, e.textures.as_deref()))
                 });
                 let slim = skin.and_then(|u| skins.slim(u));
-                entity_draw(e, frac, skin, slim, pointed == Some(e.id), ridden.contains(&e.id))
+                entity_draw(
+                    e,
+                    frac,
+                    skin,
+                    slim,
+                    pointed == Some(e.id),
+                    ridden.contains(&e.id),
+                )
             })
             .collect();
         draws.extend(self_model);

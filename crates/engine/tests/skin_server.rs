@@ -240,6 +240,12 @@ fn textures_property_skins_the_spawned_player() {
         armor: [0; 4],
         name: None,
         skin,
+        burning: true,
+        eye_height: 1.62,
+        always_name: false,
+        pointed: false,
+        ridden: false,
+        child: false,
     };
     let at = |e: &world::entities::Entity| e.pos[0];
     r.set_entities(&[draw(at(skinned), Some(SKINNED)), draw(at(plain), None)]);

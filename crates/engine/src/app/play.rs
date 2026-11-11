@@ -848,7 +848,7 @@ impl App {
     }
 
     /// `RenderGlobal.loadRenderers`: rebuild every chunk mesh.
-    fn reload_chunks(&mut self) {
+    pub(super) fn reload_chunks(&mut self) {
         let Some(r) = &mut self.renderer else { return };
         r.clear_chunks();
         let at: Vec<_> = self.game.store.positions().collect();

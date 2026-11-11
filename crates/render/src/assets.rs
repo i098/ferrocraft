@@ -11,6 +11,8 @@ const COLUMNS: usize = 16;
 pub enum AssetSource {
     Jar(zip::ZipArchive<std::fs::File>),
     Dir(PathBuf),
+    /// `FallbackResourceManager`: the selected resource packs, top first, over the client jar.
+    Layers(Vec<AssetSource>),
 }
 
 impl AssetSource {
@@ -20,6 +22,18 @@ impl AssetSource {
         }
         let file = std::fs::File::open(path).ok()?;
         zip::ZipArchive::new(file).ok().map(AssetSource::Jar)
+    }
+
+    /// `packs` (top first, each a zip or a folder) over `base`; a pack that cannot be opened is
+    /// skipped, as vanilla skips it.
+    pub fn layered(packs: &[PathBuf], base: &Path) -> Option<AssetSource> {
+        let base = Self::open(base)?;
+        if packs.is_empty() {
+            return Some(base);
+        }
+        let mut layers: Vec<AssetSource> = packs.iter().filter_map(|p| Self::open(p)).collect();
+        layers.push(base);
+        Some(AssetSource::Layers(layers))
     }
 
     /// `name` is a jar path such as `assets/minecraft/textures/font/ascii.png`.
@@ -36,6 +50,7 @@ impl AssetSource {
                     .or_else(|_| std::fs::read(dir.join(stripped)))
                     .ok()
             }
+            AssetSource::Layers(layers) => layers.iter_mut().find_map(|l| l.read(name)),
         }
     }
 }

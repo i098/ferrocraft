@@ -186,7 +186,7 @@ impl App {
     /// Loads language texts, item icons and sounds once the window and its assets exist.
     fn load_assets(&mut self) {
         self.load_texts();
-        let Some(mut src) = self.args.assets_dir.as_deref().and_then(AssetSource::open) else {
+        let Some(mut src) = self.asset_source() else {
             return;
         };
         self.icons = Some(Icons::new(|name| {
@@ -198,7 +198,7 @@ impl App {
     /// splashes and the `pack.mcmeta` language list. Only `en_US` is in the client jar; the other
     /// languages and `pack.mcmeta` come from the launcher's asset index.
     fn load_texts(&mut self) {
-        let mut src = self.args.assets_dir.as_deref().and_then(AssetSource::open);
+        let mut src = self.asset_source();
         let index = [
             Some(self.args.game_dir.as_path()),
             self.args.game_dir.parent(),
@@ -225,8 +225,19 @@ impl App {
             lang += &text(&format!("lang/{}.lang", self.ui.settings.lang));
         }
         let mut texts = Texts::parse(&lang, &text("texts/splashes.txt"));
-        texts.languages = file("pack.mcmeta").map_or_else(Vec::new, |b| languages(&b));
+        let meta = file("pack.mcmeta");
+        texts.languages = meta.as_deref().map_or_else(Vec::new, languages);
+        // `DefaultResourcePack`: `pack.png` from the jar, the description from the asset index.
+        let desc = meta.map_or_else(String::new, |b| gui::screens::default_description(&b));
+        let jar = self.args.assets_dir.as_deref().and_then(AssetSource::open);
+        texts.default_pack = (jar.and_then(|mut j| j.read("pack.png")), desc);
         self.ui.texts = texts;
+    }
+
+    /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
+    pub(super) fn asset_source(&self) -> Option<AssetSource> {
+        let packs = gui::screens::selected_paths(&self.args.game_dir, &self.ui.settings);
+        AssetSource::layered(&packs, self.args.assets_dir.as_deref()?)
     }
 
     fn load_sound(&mut self) {
@@ -872,10 +883,7 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes().with_title("Minecraft 1.8.9");
         let window = Arc::new(el.create_window(attrs).expect("create window"));
-        self.renderer = Some(Renderer::new(
-            window.clone(),
-            self.args.assets_dir.as_deref(),
-        ));
+        self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
         if let Some(cfg) = ferrocraft_modhost::Config::from_env() {

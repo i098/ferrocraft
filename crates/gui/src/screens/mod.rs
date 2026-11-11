@@ -10,6 +10,7 @@ mod disconnect;
 mod language;
 mod multiplayer;
 mod options;
+mod packs;
 mod pause;
 mod snooper;
 mod title;
@@ -20,6 +21,7 @@ pub use disconnect::Disconnected;
 pub use language::{languages, Language};
 pub use multiplayer::Multiplayer;
 pub use options::{KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
+pub use packs::{default_description, selected_paths};
 pub use pause::Pause;
 pub use title::Title;
 
@@ -123,8 +125,10 @@ pub enum Effect {
     /// "Super Secret Settings...": a random animal, block, mob, player or weather sound instead of
     /// the click, then `EntityRenderer.activateNextShader`.
     SuperSecret,
-    /// Open a web page in the system browser.
-    OpenUrl(&'static str),
+    /// The selected resource packs changed: reload the resources (`Minecraft.refreshResources`).
+    ResourcesChanged,
+    /// Open a web page or a folder in the system browser.
+    OpenUrl(String),
 }
 
 /// Localized text, `I18n`/`LanguageMap`/`LanguageManager`, and the title splashes.
@@ -136,6 +140,8 @@ pub struct Texts {
     pub unicode: bool,
     /// The languages of `pack.mcmeta`, sorted by code.
     pub languages: Vec<Language>,
+    /// The built-in pack's `pack.png` and `pack.mcmeta` description, for the resource pack list.
+    pub default_pack: (Option<Vec<u8>>, String),
 }
 
 impl Texts {
@@ -1122,11 +1128,15 @@ pub fn allowed_char(c: char) -> bool {
 /// `GuiSlot`/`GuiListExtended` geometry and scrolling; the screen draws the rows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScrollList {
+    /// `left`: the list spans `left..left + width`.
+    pub left: i32,
     pub width: i32,
     pub height: i32,
     pub top: i32,
     pub bottom: i32,
     pub slot_h: i32,
+    /// `headerPadding`: space above the first row.
+    pub header: i32,
     /// `getListWidth`.
     pub row_w: i32,
     /// `getScrollBarX`.
@@ -1140,11 +1150,13 @@ pub struct ScrollList {
 impl ScrollList {
     pub fn new(width: i32, height: i32, top: i32, bottom: i32, slot_h: i32) -> ScrollList {
         ScrollList {
+            left: 0,
             width,
             height,
             top,
             bottom,
             slot_h,
+            header: 0,
             row_w: 220,
             bar_x: width / 2 + 124,
             scroll: 0.0,
@@ -1153,8 +1165,18 @@ impl ScrollList {
         }
     }
 
+    /// `setSlotXBoundsFromLeft` for a list of `width` whose rows fill it, with a header
+    /// (`GuiResourcePackList`).
+    pub fn at(mut self, left: i32, header: i32) -> ScrollList {
+        self.left = left;
+        self.header = header;
+        self.row_w = self.width;
+        self.bar_x = left + self.width - 6;
+        self
+    }
+
     fn content_h(&self, rows: usize) -> i32 {
-        rows as i32 * self.slot_h
+        rows as i32 * self.slot_h + self.header
     }
 
     /// `getMaxScroll`.
@@ -1175,24 +1197,26 @@ impl ScrollList {
 
     /// Left edge of the rows.
     pub fn row_x(&self) -> i32 {
-        self.width / 2 - self.row_w / 2 + 2
+        self.left + self.width / 2 - self.row_w / 2 + 2
     }
 
     /// Top of row `i` on screen.
     pub fn row_y(&self, i: usize) -> i32 {
-        self.top + 4 - self.scroll as i32 + i as i32 * self.slot_h
+        self.top + 4 - self.scroll as i32 + i as i32 * self.slot_h + self.header
     }
 
     /// `getSlotIndexFromScreenCoords`.
     pub fn row_at(&self, x: i32, y: i32, rows: usize) -> Option<usize> {
-        let (l, r) = (
-            self.width / 2 - self.row_w / 2,
-            self.width / 2 + self.row_w / 2,
-        );
-        let rel = y - self.top + self.scroll as i32 - 4;
+        let (l, r) = self.row_edges();
+        let rel = y - self.top - self.header + self.scroll as i32 - 4;
         let i = rel / self.slot_h;
         (x < self.bar_x && x >= l && x <= r && i >= 0 && rel >= 0 && (i as usize) < rows)
             .then_some(i as usize)
+    }
+
+    fn row_edges(&self) -> (i32, i32) {
+        let mid = self.left + self.width / 2;
+        (mid - self.row_w / 2, mid + self.row_w / 2)
     }
 
     /// Left-button press on the list: starts a scroll-bar or content drag (`GuiSlot.handleMouseInput`).
@@ -1238,9 +1262,9 @@ impl ScrollList {
         self.bind(rows);
         dirt(
             c,
-            0,
+            self.left,
             self.top,
-            self.width,
+            self.left + self.width,
             self.bottom,
             self.scroll as i32,
             0xff202020,
@@ -1249,10 +1273,7 @@ impl ScrollList {
 
     /// `drawSelectionBox` highlight for row `i`.
     pub fn draw_selection(&self, c: &mut dyn Canvas, i: usize) {
-        let (l, r) = (
-            self.width / 2 - self.row_w / 2,
-            self.width / 2 + self.row_w / 2,
-        );
+        let (l, r) = self.row_edges();
         let y = self.row_y(i);
         let h = self.slot_h - 4;
         c.fill(l, y - 2, r, y + h + 2, 0xff808080);
@@ -1267,24 +1288,23 @@ impl ScrollList {
 
     /// Dirt bands, shadows and the scroll bar over the rows.
     pub fn draw_front(&self, c: &mut dyn Canvas, rows: usize) {
-        dirt(c, 0, 0, self.width, self.top, 0, 0xff404040);
-        dirt(c, 0, self.bottom, self.width, self.height, 0, 0xff404040);
-        c.gradient(
-            0,
-            self.top,
-            self.width,
-            self.top + 4,
-            0xff000000,
-            0x00000000,
-        );
-        c.gradient(
-            0,
-            self.bottom - 4,
-            self.width,
-            self.bottom,
-            0x00000000,
-            0xff000000,
-        );
+        let (x0, x1, w) = (self.left, self.left + self.width, self.width as f32);
+        // `overlayBackground`: the texture starts at the list's left edge.
+        for (y0, y1) in [(0, self.top), (self.bottom, self.height)] {
+            let uv = [0.0, y0 as f32 / 32.0, w / 32.0, y1 as f32 / 32.0];
+            let h = (y1 - y0) as f32;
+            c.blit(
+                OPTIONS_BACKGROUND,
+                x0 as f32,
+                y0 as f32,
+                w,
+                h,
+                uv,
+                0xff404040,
+            );
+        }
+        c.gradient(x0, self.top, x1, self.top + 4, 0xff000000, 0x00000000);
+        c.gradient(x0, self.bottom - 4, x1, self.bottom, 0x00000000, 0xff000000);
         let max = self.max_scroll(rows);
         if max > 0 {
             let span = self.bottom - self.top;

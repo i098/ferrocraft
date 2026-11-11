@@ -1399,6 +1399,7 @@ impl Options {
                 SKIN => Box::new(OptionPage::new(me, Page::Skin)),
                 LANGUAGE => Box::new(super::language::LanguageScreen::new(me)),
                 SNOOPER => Box::new(super::snooper::Snooper::new(me)),
+                RESOURCE_PACKS => Box::new(super::packs::PacksScreen::new(me)),
                 // Ferrocraft has no Twitch SDK, as a vanilla client whose natives fail to load (`ErrorTwitchStream`).
                 STREAM => Box::new(StreamUnavailable::new(me)),
                 _ => Box::new(OptionPage::new(me, Page::Sounds)),
@@ -1456,8 +1457,6 @@ impl Screen for Options {
         b.push(row(RESOURCE_PACKS, false, 144, "options.resourcepack"));
         b.push(row(SNOOPER, true, 144, "options.snooper.view"));
         b.push(Button::wide(DONE, w / 2 - 100, h / 6 + 168, t("gui.done")));
-        // shortcut: no resource pack screen yet (#118); its button stays disabled.
-        button(&mut b, RESOURCE_PACKS).enabled = false;
         self.buttons = b;
     }
 
@@ -1482,7 +1481,8 @@ impl Screen for Options {
                 ctx.effects.push(Effect::SuperSecret);
                 None
             }
-            VIDEO | CONTROLS | CHAT | SKIN | SOUNDS | LANGUAGE | SNOOPER | STREAM => {
+            VIDEO | CONTROLS | CHAT | SKIN | SOUNDS | LANGUAGE | SNOOPER | STREAM
+            | RESOURCE_PACKS => {
                 ctx.save_settings();
                 Some(Self::child(id))
             }
@@ -1895,7 +1895,7 @@ impl Screen for StreamUnavailable {
         let id = press(&mut self.buttons, x, y, mb, ctx)?;
         if id == Self::REPORT {
             ctx.effects
-                .push(Effect::OpenUrl("http://bugs.mojang.com/browse/MC"));
+                .push(Effect::OpenUrl("http://bugs.mojang.com/browse/MC".into()));
         }
         self.parent.take().map(Nav::Open)
     }
@@ -1918,12 +1918,17 @@ mod tests {
         s.keys[2].code = 200;
         s.volumes[SoundCategory::Music as usize] = 0.25;
         s.set_part(6, false);
+        s.resource_packs = r#"["b","new"]"#.into();
+        s.incompatible_resource_packs = r#"["new"]"#.into();
         let text = s.to_text();
         assert!(text.contains("fov:0.5\n"));
         assert!(text.contains("renderClouds:fast\n"));
         assert!(text.contains("key_key.forward:200\n"));
         assert!(text.contains("soundCategory_music:0.25\n"));
         assert!(text.contains("modelPart_hat:false\n"));
+        assert!(
+            text.contains("resourcePacks:[\"b\",\"new\"]\nincompatibleResourcePacks:[\"new\"]\n")
+        );
         let mut back = Settings::new(PathBuf::from("/tmp"));
         for line in text.lines() {
             assert!(back.apply(line).is_some(), "{line}");

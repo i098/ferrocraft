@@ -212,19 +212,27 @@ impl App {
                 .path(name)
                 .and_then(|p| std::fs::read(p).ok())
         };
-        let mut text = |name: &str| {
-            src.as_mut()
-                .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
-                .or_else(|| file(&format!("minecraft/{name}")))
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default()
+        let join = |parts: Vec<Vec<u8>>| {
+            let parts: Vec<_> = parts.iter().map(|b| String::from_utf8_lossy(b)).collect();
+            parts.join("\n")
         };
-        let mut lang = text("lang/en_US.lang");
+        let mut merged = |name: &str| {
+            let base = file(&format!("minecraft/{name}"));
+            let packs = src.as_mut().map(|s| s.read_all(&format!("assets/minecraft/{name}")));
+            join(base.into_iter().chain(packs.into_iter().flatten()).collect())
+        };
+        let mut lang = merged("lang/en_US.lang");
         if self.ui.settings.lang != "en_US" {
             lang.push('\n');
-            lang += &text(&format!("lang/{}.lang", self.ui.settings.lang));
+            lang += &merged(&format!("lang/{}.lang", self.ui.settings.lang));
         }
-        let mut texts = Texts::parse(&lang, &text("texts/splashes.txt"));
+        let splashes = src
+            .as_mut()
+            .and_then(|s| s.read("assets/minecraft/texts/splashes.txt"))
+            .or_else(|| file("minecraft/texts/splashes.txt"))
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
+        let mut texts = Texts::parse(&lang, &splashes);
         let meta = file("pack.mcmeta");
         texts.languages = meta.as_deref().map_or_else(Vec::new, languages);
         // `DefaultResourcePack`: `pack.png` from the jar, the description from the asset index.

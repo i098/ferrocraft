@@ -3,6 +3,7 @@
 use crate::swing::Swing;
 use crate::weather::Weather;
 use ferrocraft_net_client::{NetEvent, Styled};
+use std::collections::HashMap;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
@@ -99,6 +100,8 @@ pub struct Game {
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub gamemode: u8,
     digger: Digger,
+    /// `RenderGlobal.damagedBlocks` of other players: breaker id to block, stage `0..=9` and the tick of the last packet.
+    cracks: HashMap<i32, ([i32; 3], u8, u64)>,
     pub player: Option<Player>,
     /// Player position before the latest tick, for partial-tick interpolation.
     pub prev_pos: [f64; 3],
@@ -154,6 +157,7 @@ impl Game {
             creative: false,
             gamemode: 0,
             digger: Digger::default(),
+            cracks: HashMap::new(),
             player: None,
             prev_pos: [0.0; 3],
             teleported: false,
@@ -310,6 +314,7 @@ impl Game {
             NetEvent::Respawn => {
                 self.vehicle = None;
                 self.digger = Digger::default();
+                self.cracks.clear();
                 self.store.clear();
                 return Some(Effect::Clear);
             }
@@ -371,6 +376,13 @@ impl Game {
                 self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
+            NetEvent::BlockBreakAnim { id, pos, stage } => {
+                if (0..10).contains(&stage) {
+                    self.cracks.insert(id, (pos, stage as u8, self.ticks));
+                } else {
+                    self.cracks.remove(&id);
+                }
+            }
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
         }
@@ -454,6 +466,11 @@ impl Game {
             *b = (*b - 1).max(0);
         }
         self.entities.tick();
+        if self.ticks.is_multiple_of(20) {
+            // `RenderGlobal.updateDamagedBlocks`: a stage nobody refreshed for 400 ticks goes.
+            let now = self.ticks;
+            self.cracks.retain(|_, c| now - c.2 <= 400);
+        }
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
         let (cx, cz) = (
@@ -558,6 +575,24 @@ impl Game {
         touched
             .into_iter()
             .map(|(x, z)| Effect::Upload(x, z))
+            .collect()
+    }
+
+    /// Blocks to draw cracked: the local dig and other players' digs within 32 blocks.
+    pub fn cracks(&self) -> Vec<([i32; 3], u8)> {
+        let near = |at: [i32; 3]| {
+            self.player.as_ref().is_none_or(|p| {
+                (0..3)
+                    .map(|i| (f64::from(at[i]) - p.pos[i]).powi(2))
+                    .sum::<f64>()
+                    <= 1024.0
+            })
+        };
+        self.digger
+            .stage()
+            .into_iter()
+            .chain(self.cracks.values().map(|c| (c.0, c.1)))
+            .filter(|c| near(c.0))
             .collect()
     }
 

@@ -1,6 +1,7 @@
 //! wgpu device, pipelines and frame rendering.
 
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
+use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
@@ -107,7 +108,11 @@ pub struct Renderer {
     cloud_pipe: wgpu::RenderPipeline,
     hand_pipe: wgpu::RenderPipeline,
     line_pipe: wgpu::RenderPipeline,
+    /// `renderMiningProgress` blend: source times destination, twice.
+    crack_pipe: wgpu::RenderPipeline,
     selection: Option<[f64; 6]>,
+    /// Blocks with a crack stage `0..=9` for the next frames.
+    cracks: Vec<([i32; 3], u8)>,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
@@ -305,7 +310,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -333,6 +338,8 @@ impl Renderer {
             cloud_pipe,
             hand_pipe,
             line_pipe,
+            crack_pipe,
+            cracks: Vec::new(),
             selection: None,
             hand_globals,
             hand_atlas_group,
@@ -375,6 +382,41 @@ impl Renderer {
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
     pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
         self.selection = selection;
+    }
+
+    /// Blocks being mined, with their destroy stage in `0..=9`: the local target and other players' `BlockBreakAnim`.
+    pub fn set_cracks(&mut self, cracks: Vec<([i32; 3], u8)>) {
+        self.cracks = cracks;
+    }
+
+    /// One mesh per destroy stage in use, with the stage texture's name.
+    fn crack_meshes(&mut self) -> Vec<(String, GpuMesh)> {
+        let mut out = Vec::new();
+        for stage in 0..10u8 {
+            let mut verts = Vec::new();
+            for &(at, _) in self.cracks.iter().filter(|c| c.1 == stage) {
+                let at_block = |x: i32, y: i32, z: i32| match self
+                    .blocks
+                    .get(&(x.div_euclid(16), z.div_euclid(16)))
+                {
+                    Some(d) if (0..HEIGHT as i32).contains(&y) => {
+                        d[index(
+                            x.rem_euclid(16) as usize,
+                            y as usize,
+                            z.rem_euclid(16) as usize,
+                        )]
+                    }
+                    _ => 0,
+                };
+                verts.extend(crack::quads(at, at_block(at[0], at[1], at[2]), &at_block));
+            }
+            let tex = format!("textures/blocks/destroy_stage_{stage}.png");
+            if let Some(m) = self.upload_mesh(quad_mesh(verts), [0.0; 3]) {
+                self.load_texture(&tex);
+                out.push((tex, m));
+            }
+        }
+        out
     }
 
     /// Switches the window between vsync and no vsync; offscreen renderers ignore it.
@@ -937,6 +979,7 @@ impl Renderer {
         let rain = self.rain_mesh(&env, cam);
         let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
         let offset = cam.pos.map(|c| c as f32);
+        let crack_meshes = self.crack_meshes();
         let quads = std::mem::take(&mut self.particles);
         let particle_block = self.upload_mesh(quad_mesh(quads.block), offset);
         let particle_sheet = self.upload_mesh(quad_mesh(quads.sheet), offset);
@@ -1016,6 +1059,13 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            // `renderMiningProgress` follows the entities.
+            pass.set_pipeline(&self.crack_pipe);
+            for (tex, m) in &crack_meshes {
+                pass.set_bind_group(0, &self.textures[tex.as_str()], &[]);
+                draw_mesh(&mut pass, m);
+            }
+            pass.set_bind_group(0, &self.world_group, &[]);
             // `EffectRenderer.renderParticles` runs after entities and before the translucent layer.
             pass.set_pipeline(&self.water_pipe);
             particle_block.iter().for_each(|m| draw_mesh(&mut pass, m));
@@ -1259,7 +1309,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 8] {
+) -> [wgpu::RenderPipeline; 9] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1331,7 +1381,16 @@ fn build_pipelines(
                     wgpu::CompareFunction::Always
                 },
                 stencil: Default::default(),
-                bias: Default::default(),
+                // `glPolygonOffset(-3, -3)` keeps the crack overlay in front of the block face.
+                bias: if fs == "fs_crack" {
+                    wgpu::DepthBiasState {
+                        constant: -3,
+                        slope_scale: -3.0,
+                        clamp: 0.0,
+                    }
+                } else {
+                    Default::default()
+                },
             }),
             multisample: Default::default(),
             multiview: None,
@@ -1420,6 +1479,27 @@ fn build_pipelines(
         true,
         false,
     );
+    let crack_pipe = pipe(
+        "vs_world",
+        "fs_crack",
+        stride,
+        &world_attrs,
+        Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Dst,
+                dst_factor: wgpu::BlendFactor::Src,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::Zero,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
+        false,
+        true,
+        true,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -1429,6 +1509,7 @@ fn build_pipelines(
         cloud_pipe,
         hand_pipe,
         line_pipe,
+        crack_pipe,
     ]
 }
 

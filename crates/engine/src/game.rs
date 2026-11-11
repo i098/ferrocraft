@@ -334,6 +334,7 @@ impl Game {
             }
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
+            NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
             ev => self.apply_state(ev),
         }
         None
@@ -376,7 +377,6 @@ impl Game {
                 self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
-            NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
         }

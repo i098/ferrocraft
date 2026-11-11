@@ -62,7 +62,7 @@ impl App {
                 } else {
                     format!("{host}:{port}")
                 };
-                self.link = Link::connect(addr, self.args.username.clone());
+                self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
             }
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),

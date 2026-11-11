@@ -1,9 +1,9 @@
-//! Client session for Minecraft 1.8.9 (protocol 47): offline login, then a reader thread that
-//! answers keepalive and turns play packets into [`NetEvent`] values.
-//!
-//! Only for servers with `online-mode=false`: no encryption, no Microsoft sign-in.
+//! Client session for Minecraft 1.8.9 (protocol 47): login (offline, or online with an [`Auth`]
+//! from the launcher), then a reader thread that answers keepalive and turns play packets into
+//! [`NetEvent`] values.
 
 mod actions;
+mod auth;
 mod chat;
 mod entity;
 mod events;
@@ -11,7 +11,7 @@ mod link;
 mod play;
 mod screens;
 
-use ferrocraft_protocol::codec::{Position, VarInt};
+use ferrocraft_protocol::codec::{Bytes, Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
 use ferrocraft_protocol::{handshake, login, PROTOCOL_VERSION};
 use link::{Reader, Writer};
@@ -21,6 +21,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub use auth::Auth;
 pub use chat::{formatted_text, plain_text, styled, Styled};
 pub use events::{PlayerInfo, PlayerListEvent};
 pub use screens::{
@@ -229,9 +230,10 @@ fn invalid(msg: impl Into<String>) -> io::Error {
 }
 
 impl Session {
-    /// Connects, logs in with `username` (offline mode) and starts the reader thread.
-    /// Returns once the server accepted the login; `JoinGame` arrives through [`Session::poll`].
-    pub fn connect(addr: &str, username: &str) -> io::Result<Session> {
+    /// Connects, logs in with `username` and starts the reader thread. A server in online mode
+    /// needs `auth`; without it such a server is refused. Returns once the server accepted the
+    /// login; `JoinGame` arrives through [`Session::poll`].
+    pub fn connect(addr: &str, username: &str, auth: Option<&Auth>) -> io::Result<Session> {
         let sock = addr
             .to_socket_addrs()?
             .next()
@@ -241,7 +243,7 @@ impl Session {
         stream.set_read_timeout(Some(LOGIN_TIMEOUT))?;
         let mut reader = Reader::new(stream.try_clone()?);
         let writer = Arc::new(Mutex::new(Writer::new(stream.try_clone()?)));
-        login(&mut reader, &writer, sock, username)?;
+        login(&mut reader, &writer, sock, username, auth)?;
         stream.set_read_timeout(None)?;
 
         let (tx, events) = mpsc::channel();
@@ -336,6 +338,7 @@ fn login(
     writer: &Mutex<Writer>,
     sock: std::net::SocketAddr,
     username: &str,
+    auth: Option<&Auth>,
 ) -> io::Result<()> {
     use login::clientbound::Packet as Login;
     let mut w = writer.lock().map_err(|_| invalid("writer poisoned"))?;
@@ -367,10 +370,22 @@ fn login(
                     plain_text(&d.reason),
                 ))
             }
-            Login::EncryptionRequest(_) => {
-                return Err(invalid(
-                    "server requires online mode; use online-mode=false",
-                ))
+            Login::EncryptionRequest(r) => {
+                let auth = auth.ok_or_else(|| {
+                    invalid("server requires online mode: start with --accessToken and --uuid")
+                })?;
+                let h =
+                    auth::answer_request(auth, &r.server_id, &r.public_key.0, &r.verify_token.0)?;
+                // The response itself goes out in clear; everything after it is encrypted.
+                let mut w = writer.lock().map_err(|_| invalid("writer poisoned"))?;
+                w.send(&login::serverbound::Packet::from(
+                    login::serverbound::EncryptionResponse {
+                        shared_secret: Bytes(h.encrypted_secret),
+                        verify_token: Bytes(h.encrypted_token),
+                    },
+                ))?;
+                w.enable_encryption(&h.secret);
+                reader.enable_encryption(&h.secret);
             }
         }
     }

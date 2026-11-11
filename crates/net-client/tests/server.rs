@@ -26,7 +26,7 @@ fn wait_for(
 #[ignore = "needs the local server from harness/testserver"]
 fn join_receive_chunks_and_chat_echo() {
     let addr = std::env::var("FC_SERVER").unwrap_or_else(|_| "127.0.0.1:25565".into());
-    let mut s = Session::connect(&addr, "Ferro").expect("login");
+    let mut s = Session::connect(&addr, "Ferro", None).expect("login");
     let mut log = Vec::new();
 
     wait_for(&mut s, &mut log, "join + position + chunks", |l| {
@@ -66,7 +66,7 @@ fn join_receive_chunks_and_chat_echo() {
 #[ignore = "needs the local server from harness/testserver"]
 fn survival_start_then_finish_digging_removes_the_grass_below_spawn() {
     let addr = std::env::var("FC_SERVER").unwrap_or_else(|_| "127.0.0.1:25565".into());
-    let mut s = Session::connect(&addr, "Ferro").expect("login");
+    let mut s = Session::connect(&addr, "Ferro", None).expect("login");
     let mut log = Vec::new();
     wait_for(&mut s, &mut log, "join, position and chunks", |l| {
         l.iter()
@@ -106,4 +106,22 @@ fn survival_start_then_finish_digging_removes_the_grass_below_spawn() {
         )
     });
     eprintln!("server confirmed: block {pos:?} is air");
+}
+
+/// Online-mode proof: start the server with `FC_ONLINE=1 harness/testserver/run.sh` and give the
+/// account in the environment (`FC_ACCESS_TOKEN`, `FC_UUID`, `FC_USERNAME`). Only for a local server.
+#[test]
+#[ignore = "needs an online-mode local server and a real account"]
+fn online_mode_login_joins_the_local_server() {
+    use ferrocraft_net_client::Auth;
+    let addr = std::env::var("FC_SERVER").unwrap_or_else(|_| "127.0.0.1:25565".into());
+    let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+    let auth = Auth::new(var("FC_ACCESS_TOKEN"), &var("FC_UUID"));
+    let mut s = Session::connect(&addr, &var("FC_USERNAME"), Some(&auth)).expect("online login");
+    let mut log = Vec::new();
+    wait_for(&mut s, &mut log, "join and chunks over encryption", |l| {
+        l.iter().any(|e| matches!(e, NetEvent::JoinGame { .. }))
+            && l.iter().filter(|e| matches!(e, NetEvent::Chunk(_))).count() >= 9
+    });
+    eprintln!("joined online-mode server, {} events", log.len());
 }

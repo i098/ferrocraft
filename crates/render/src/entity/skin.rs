@@ -263,26 +263,31 @@ fn crop(img: &Image, (x, y, size): (usize, usize, usize)) -> Image {
     }
 }
 
+/// Skins in `SKINS` order.
+const FIXED: [Skin; SKINS.len()] = [
+    Skin::Steve,
+    Skin::Alex,
+    Skin::Zombie,
+    Skin::Skeleton,
+    Skin::PigZombie,
+    Skin::Creeper,
+    Skin::Pig,
+    Skin::Cow,
+    Skin::Arrow,
+    Skin::Snowball,
+    Skin::Egg,
+    Skin::EnderPearl,
+    Skin::FireCharge,
+    Skin::Bobber,
+    Skin::SplashPotion,
+];
+
 fn slot(skin: Skin) -> Option<u32> {
-    Some(match skin {
-        Skin::Steve => 0,
-        Skin::Alex => 1,
-        Skin::Zombie => 2,
-        Skin::Skeleton => 3,
-        Skin::PigZombie => 4,
-        Skin::Creeper => 5,
-        Skin::Pig => 6,
-        Skin::Cow => 7,
-        Skin::Arrow => 8,
-        Skin::Snowball => 9,
-        Skin::Egg => 10,
-        Skin::EnderPearl => 11,
-        Skin::FireCharge => 12,
-        Skin::Bobber => 13,
-        Skin::SplashPotion => 14,
-        Skin::Player(i) => SLOTS + u32::from(i),
-        Skin::White => return None,
-    })
+    match skin {
+        Skin::Player(i) => Some(SLOTS + u32::from(i)),
+        Skin::White => None,
+        fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
+    }
 }
 
 #[cfg(test)]

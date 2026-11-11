@@ -96,6 +96,7 @@ pub struct Renderer {
     env_group: wgpu::BindGroup,
     entity_group: wgpu::BindGroup,
     entity_skins: Skins,
+    entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
@@ -240,13 +241,14 @@ impl Renderer {
         let skin_img = load_png("entity/steve");
         let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
-        let entity_view = upload_texture(
+        let entity_tex = create_texture(
             &device,
             &queue,
             Skins::width(),
             Skins::height(),
             &entity_skins.rgba,
         );
+        let entity_view = entity_tex.create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
@@ -321,6 +323,7 @@ impl Renderer {
             env_group,
             entity_group,
             entity_skins,
+            entity_tex,
             entity_mesh: None,
             opaque_pipe,
             water_pipe,
@@ -639,8 +642,40 @@ impl Renderer {
 
     /// Replaces the entities drawn each frame: models are meshed here and live until the next call.
     pub fn set_entities(&mut self, draws: &[EntityDraw]) {
+        for key in draws.iter().filter_map(|d| d.skin) {
+            self.entity_skins.touch(key);
+        }
         let mesh = entity::build(draws, &self.entity_skins);
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
+    }
+
+    /// Stores the decoded skin of player `key` and uploads its slot.
+    pub fn set_player_skin(&mut self, key: u128, img: &Image) {
+        let (row, rgba) = self.entity_skins.set_player(key, img);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.entity_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(Skins::width() * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: Skins::width(),
+                height: Skins::width(),
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Whether the skin of player `key` is stored; a replaced one has to be sent again.
+    pub fn has_player_skin(&self, key: u128) -> bool {
+        self.entity_skins.player(key).is_some()
     }
 
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
@@ -1549,7 +1584,17 @@ fn upload_texture(
     h: u32,
     rgba: &[u8],
 ) -> wgpu::TextureView {
-    let tex = device.create_texture_with_data(
+    create_texture(device, queue, w, h, rgba).create_view(&Default::default())
+}
+
+fn create_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    w: u32,
+    h: u32,
+    rgba: &[u8],
+) -> wgpu::Texture {
+    device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
             label: None,
@@ -1562,13 +1607,12 @@ fn upload_texture(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         },
         wgpu::util::TextureDataOrder::LayerMajor,
         rgba,
-    );
-    tex.create_view(&Default::default())
+    )
 }
 
 /// Column-major view-projection (OpenGL-style camera math, wgpu 0..1 depth).

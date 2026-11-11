@@ -130,6 +130,8 @@ pub struct Entity {
     pub uuid: Option<u128>,
     /// Display name for players (from the player list) or a custom name tag.
     pub name: Option<String>,
+    /// Players: the `textures` profile property from the player list (base64 JSON).
+    pub textures: Option<String>,
     /// Living entities: metadata index 6 (`getHealth`), as last sent.
     pub health: Option<f32>,
     pub pos: [f64; 3],
@@ -193,6 +195,7 @@ impl Entity {
             kind,
             uuid: None,
             name: None,
+            textures: None,
             health: None,
             pos,
             prev_pos: pos,
@@ -500,6 +503,8 @@ pub enum EntityEvent {
     PlayerName {
         uuid: u128,
         name: String,
+        /// Base64 value of the profile's `textures` property.
+        textures: Option<String>,
     },
     PlayerRemove {
         uuid: u128,
@@ -511,7 +516,7 @@ pub enum EntityEvent {
 #[derive(Default)]
 pub struct Entities {
     map: HashMap<i32, Entity>,
-    names: HashMap<u128, String>,
+    names: HashMap<u128, (String, Option<String>)>,
 }
 
 impl Entities {
@@ -533,7 +538,7 @@ impl Entities {
 
     /// Name the player list has for `uuid`.
     pub fn name_of(&self, uuid: u128) -> Option<&str> {
-        self.names.get(&uuid).map(String::as_str)
+        self.names.get(&uuid).map(|n| n.0.as_str())
     }
 
     pub fn apply(&mut self, ev: EntityEvent) {
@@ -608,7 +613,10 @@ impl Entities {
             } => {
                 let mut e = Entity::new(id, Kind::Player, pos, yaw, pitch);
                 e.uuid = Some(uuid);
-                e.name = self.names.get(&uuid).cloned();
+                if let Some((name, textures)) = self.names.get(&uuid) {
+                    e.name = Some(name.clone());
+                    e.textures = textures.clone();
+                }
                 e.flags = flags.unwrap_or(0);
                 if held > 0 {
                     e.equipment[0] = Some(ItemRef {
@@ -680,11 +688,16 @@ impl Entities {
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
-            E::PlayerName { uuid, name } => {
+            E::PlayerName {
+                uuid,
+                name,
+                textures,
+            } => {
                 for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
                     e.name = Some(name.clone());
+                    e.textures = textures.clone();
                 }
-                self.names.insert(uuid, name);
+                self.names.insert(uuid, (name, textures));
             }
             E::PlayerRemove { uuid } => {
                 self.names.remove(&uuid);
@@ -958,6 +971,7 @@ mod tests {
         es.apply(EntityEvent::PlayerName {
             uuid: 9,
             name: "Alex".into(),
+            textures: Some("dGV4".into()),
         });
         es.apply(EntityEvent::SpawnPlayer {
             id: 4,
@@ -970,6 +984,7 @@ mod tests {
         });
         let e = es.get(4).unwrap();
         assert_eq!(e.name.as_deref(), Some("Alex"));
+        assert_eq!(e.textures.as_deref(), Some("dGV4"));
         assert!(e.sneaking());
         assert_eq!(e.equipment[0].unwrap().id, 276);
     }

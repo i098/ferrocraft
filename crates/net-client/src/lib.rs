@@ -10,6 +10,7 @@ mod events;
 mod link;
 mod play;
 mod screens;
+mod skin;
 
 use ferrocraft_protocol::codec::{Bytes, Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
@@ -28,6 +29,7 @@ use screens::DEFAULT_PORT;
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
+pub use skin::{fetch as fetch_skin, parse_textures, SkinInfo};
 pub use world::chunk::Chunk;
 
 /// What the server told the client, in packet order.

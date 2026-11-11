@@ -1,4 +1,5 @@
-//! One texture for every entity model: 64x64 slots stacked vertically, the last slot plain white.
+//! One texture for every entity model: 64x64 slots stacked vertically. The fixed slots come first, then one
+//! plain white slot, then [`PLAYER_SLOTS`] slots for downloaded player skins.
 
 use crate::assets::{decode_png, AssetSource, Image};
 
@@ -28,13 +29,22 @@ pub enum Skin {
     Cow,
     /// Plain white: shapes take their color from the vertex tint.
     White,
+    /// A downloaded player skin in dynamic slot `n`.
+    Player(u8),
 }
 
+/// Fixed slots plus the white one.
 pub const SLOTS: u32 = SKINS.len() as u32 + 1;
+/// Downloaded player skins kept at once; the least recently drawn one is replaced.
+pub const PLAYER_SLOTS: usize = 32;
+const TOTAL: u32 = SLOTS + PLAYER_SLOTS as u32;
 
 pub struct Skins {
     pub rgba: Vec<u8>,
     loaded: [bool; SKINS.len()],
+    /// Owner key and last-use tick of each dynamic slot.
+    players: [Option<(u128, u64)>; PLAYER_SLOTS],
+    clock: u64,
 }
 
 impl Skins {
@@ -43,14 +53,89 @@ impl Skins {
     }
 
     pub fn height() -> u32 {
-        SLOT * SLOTS
+        SLOT * TOTAL
     }
 
     /// All slots white: models draw flat-colored.
     pub fn flat() -> Skins {
         Skins {
-            rgba: vec![255; (SLOT * SLOT * SLOTS * 4) as usize],
+            rgba: vec![255; (SLOT * SLOT * TOTAL * 4) as usize],
             loaded: [false; SKINS.len()],
+            players: [None; PLAYER_SLOTS],
+            clock: 0,
+        }
+    }
+
+    /// Stores the skin of player `key` in its slot, or in a free or the least recently used one.
+    /// Returns the texel rows of the slot that changed.
+    pub fn set_player(&mut self, key: u128, img: &Image) -> (u32, &[u8]) {
+        let i = self
+            .players
+            .iter()
+            .position(|p| p.is_some_and(|(k, _)| k == key))
+            .or_else(|| self.players.iter().position(Option::is_none))
+            .unwrap_or_else(|| {
+                (0..PLAYER_SLOTS)
+                    .min_by_key(|&i| self.players[i].map_or(0, |p| p.1))
+                    .unwrap_or(0)
+            });
+        self.clock += 1;
+        self.players[i] = Some((key, self.clock));
+        let slot = SLOTS + i as u32;
+        self.blit(slot, img);
+        self.fix_alpha(slot);
+        let from = (slot * SLOT * SLOT * 4) as usize;
+        (
+            slot * SLOT,
+            &self.rgba[from..from + (SLOT * SLOT * 4) as usize],
+        )
+    }
+
+    /// `ImageBufferDownload.parseUserSkin`: the base layers are forced opaque. An outer layer that
+    /// is fully opaque is an image editor without alpha, so it becomes transparent.
+    fn fix_alpha(&mut self, slot: u32) {
+        let base = (slot * SLOT) as usize;
+        let px = |x: usize, y: usize| (base + y) * SLOT as usize * 4 + x * 4 + 3;
+        for (x0, y0, x1, y1, opaque) in [
+            (0, 0, 32, 16, true),
+            (32, 0, 64, 32, false),
+            (0, 16, 64, 32, true),
+            (0, 32, 16, 48, false),
+            (16, 32, 40, 48, false),
+            (40, 32, 56, 48, false),
+            (0, 48, 16, 64, false),
+            (16, 48, 48, 64, true),
+            (48, 48, 64, 64, false),
+        ] {
+            let area = || (x0..x1).flat_map(move |x| (y0..y1).map(move |y| (x, y)));
+            if opaque {
+                for (x, y) in area() {
+                    let i = px(x, y);
+                    self.rgba[i] = 255;
+                }
+            } else if !area().any(|(x, y)| self.rgba[px(x, y)] < 128) {
+                for (x, y) in area() {
+                    let i = px(x, y);
+                    self.rgba[i] = 0;
+                }
+            }
+        }
+    }
+
+    /// The slot of player `key`'s skin, when one is stored.
+    pub fn player(&self, key: u128) -> Option<Skin> {
+        let i = self
+            .players
+            .iter()
+            .position(|p| p.is_some_and(|(k, _)| k == key))?;
+        Some(Skin::Player(i as u8))
+    }
+
+    /// Marks the skin of player `key` as drawn now.
+    pub fn touch(&mut self, key: u128) {
+        if let Some(Skin::Player(i)) = self.player(key) {
+            self.clock += 1;
+            self.players[i as usize] = Some((key, self.clock));
         }
     }
 
@@ -109,13 +194,13 @@ impl Skins {
 
     /// Whether the real texture of `skin` was found; a missing one is drawn white with a tint.
     pub fn has(&self, skin: Skin) -> bool {
-        slot(skin).is_some_and(|s| self.loaded[s as usize])
+        matches!(skin, Skin::Player(_)) || slot(skin).is_some_and(|s| self.loaded[s as usize])
     }
 
     /// Row offset in texels of the slot to sample for `skin`.
     pub fn v_offset(&self, skin: Skin) -> f32 {
         let s = match slot(skin) {
-            Some(s) if self.loaded[s as usize] => s,
+            Some(s) if s >= SLOTS || self.loaded[s as usize] => s,
             _ => SLOTS - 1,
         };
         (s * SLOT) as f32
@@ -132,6 +217,7 @@ fn slot(skin: Skin) -> Option<u32> {
         Skin::Creeper => 5,
         Skin::Pig => 6,
         Skin::Cow => 7,
+        Skin::Player(i) => SLOTS + u32::from(i),
         Skin::White => return None,
     })
 }
@@ -139,6 +225,24 @@ fn slot(skin: Skin) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_slots_replace_the_least_recently_used_skin() {
+        let img = Image {
+            width: 64,
+            height: 64,
+            rgba: vec![255; 64 * 64 * 4],
+        };
+        let mut skins = Skins::flat();
+        for key in 0..PLAYER_SLOTS as u128 {
+            skins.set_player(key, &img);
+        }
+        skins.touch(0);
+        skins.set_player(99, &img);
+        assert!(skins.player(0).is_some());
+        assert!(skins.player(1).is_none());
+        assert_eq!(skins.player(99), Some(Skin::Player(1)));
+    }
 
     #[test]
     fn legacy_skin_left_limb_faces_are_flipped_one_by_one() {

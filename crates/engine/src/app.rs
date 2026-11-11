@@ -15,6 +15,7 @@ mod play;
 use crate::args::Args;
 use crate::game::{eye_height, Game};
 use crate::link::Link;
+use crate::skins::PlayerSkins;
 use crate::ui::{Fm, Ui};
 use gui::inventory::icons::Icons;
 use gui::inventory::ContainerScreen;
@@ -115,6 +116,7 @@ pub struct App {
     input_modal: bool,
     quit: bool,
     started: Instant,
+    skins: PlayerSkins,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
     deadline: Option<Instant>,
 }
@@ -123,6 +125,7 @@ impl App {
     pub fn new(args: Args) -> App {
         let ui = Ui::new(args.game_dir.clone(), Texts::default());
         let mut app = App {
+            skins: PlayerSkins::new(&args.game_dir),
             input: InputState::new(ui.settings.mouse_sensitivity),
             link: Link::Offline,
             game: Game::new(),
@@ -428,6 +431,7 @@ impl App {
             held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
             armor: [slot(8), slot(7), slot(6), slot(5)],
             name: None,
+            skin: None,
         })
     }
 
@@ -475,11 +479,19 @@ impl App {
                 lowered,
             }),
         );
+        let skins = &mut self.skins;
         let mut draws: Vec<EntityDraw> = self
             .game
             .entities
             .iter()
-            .map(|e| entity_draw(e, frac))
+            .map(|e| {
+                let skin = e
+                    .uuid
+                    .filter(|_| e.kind == Kind::Player)
+                    .and_then(|u| skins.show(r, u, e.textures.as_deref()));
+                let slim = skin.and_then(|u| skins.slim(u));
+                entity_draw(e, frac, skin, slim)
+            })
             .collect();
         draws.extend(self_model);
         r.set_entities(&draws);
@@ -731,11 +743,15 @@ impl ApplicationHandler for App {
     }
 }
 
-fn entity_draw(e: &Entity, partial: f64) -> EntityDraw {
+/// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
+/// that `DefaultPlayerSkin` picks from the uuid.
+fn entity_draw(e: &Entity, partial: f64, skin: Option<u128>, slim: Option<bool>) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
-            slim: e.uuid.is_some_and(|u| {
-                (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
+            slim: slim.unwrap_or_else(|| {
+                e.uuid.is_some_and(|u| {
+                    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
+                })
             }),
         },
         Kind::Mob(id) => Class::Mob(id),
@@ -766,6 +782,7 @@ fn entity_draw(e: &Entity, partial: f64) -> EntityDraw {
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
         name: e.name.clone(),
+        skin,
     }
 }
 

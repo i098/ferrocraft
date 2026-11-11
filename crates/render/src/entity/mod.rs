@@ -45,6 +45,8 @@ pub struct EntityDraw {
     pub held: i16,
     pub armor: [i16; 4],
     pub name: Option<String>,
+    /// Player whose downloaded skin to draw; the default skin when none is stored.
+    pub skin: Option<u128>,
 }
 
 /// A box of a model, in vanilla model pixels (y down).
@@ -638,7 +640,13 @@ impl Xf {
 
 /// Texture and tint of the main layer: the real skin when loaded, else white with a stand-in tint.
 fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
-    let (skin, tint) = if skins.has(m.skin) {
+    let own = match (d.class, d.skin) {
+        (Class::Player { .. }, Some(key)) => skins.player(key),
+        _ => None,
+    };
+    let (skin, tint) = if let Some(own) = own {
+        (own, m.tint)
+    } else if skins.has(m.skin) {
         (m.skin, m.tint)
     } else if m.skin == Skin::White {
         (Skin::White, m.tint)
@@ -714,7 +722,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Creeper => [0.3, 0.7, 0.25],
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
-        Skin::White => [1.0; 3],
+        Skin::White | Skin::Player(_) => [1.0; 3],
     }
 }
 
@@ -930,6 +938,7 @@ mod tests {
             held: 0,
             armor: [0; 4],
             name: None,
+            skin: None,
         }
     }
 
@@ -941,7 +950,7 @@ mod tests {
                 .vertices
                 .iter()
                 .filter(|p| {
-                    let (u, v) = (p.uv[0] * 64.0, p.uv[1] * 576.0 - 512.0);
+                    let (u, v) = (p.uv[0] * 64.0, p.uv[1] * Skins::height() as f32 - 512.0);
                     (48.0..=64.0).contains(&v) && (16.0..=48.0).contains(&u)
                 })
                 .count()
@@ -973,7 +982,7 @@ mod tests {
             d.yaw = yaw;
             d.head_yaw = yaw;
             let m = build(&[d], &Skins::flat());
-            let v = |y: f32| (512.0 + y) / 576.0;
+            let v = |y: f32| (512.0 + y) / Skins::height() as f32;
             let q: Vec<_> = m
                 .vertices
                 .iter()

@@ -5,6 +5,7 @@ mod args;
 mod game;
 mod link;
 mod log;
+mod skins;
 mod swing;
 mod ui;
 mod weather;

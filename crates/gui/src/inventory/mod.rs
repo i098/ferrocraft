@@ -15,6 +15,7 @@ pub use crate::screens::{Canvas, Metrics};
 use creative::Creative;
 use icons::Icons;
 use layout::{layout, Layout, LABEL};
+use world::effects::{self, Effects};
 use world::inventory::{self as inv, Click, Inventory, ItemStack, Kind, Slot, OUTSIDE};
 
 /// What the screen asks the engine to send.
@@ -81,6 +82,46 @@ pub struct ContainerScreen {
     last_click: Option<(Option<usize>, u64, u8)>,
     shift_clicked: Slot,
     creative: Option<Creative>,
+    /// `PlayerInventoryScreen.hasStatusEffect`: the window sits right of the effect list.
+    effects_shown: bool,
+}
+
+/// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
+fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
+    const TEXTURE: &str = "textures/gui/container/inventory.png";
+    let n = effects.iter().count() as i32;
+    let step = if n > 5 { 132 / (n - 1) } else { 33 };
+    for (i, e) in effects.iter().enumerate() {
+        let y = top + step * i as i32;
+        modal(c, TEXTURE, x, y, 0, 166, 140, 32);
+        if let Some(icon) = effects::icon(e.id) {
+            modal(
+                c,
+                TEXTURE,
+                x + 6,
+                y + 7,
+                icon % 8 * 18,
+                198 + icon / 8 * 18,
+                18,
+                18,
+            );
+        }
+        let mut name = effects::name(e.id).unwrap_or("").to_owned();
+        match e.amplifier {
+            1 => name.push_str(" II"),
+            2 => name.push_str(" III"),
+            3 => name.push_str(" IV"),
+            _ => {}
+        }
+        c.text(&name, (x + 28) as f32, (y + 6) as f32, 0xFFFF_FFFF, true);
+        c.text(
+            &effects::duration_string(e),
+            (x + 28) as f32,
+            (y + 16) as f32,
+            0xFF7F_7F7F,
+            true,
+        );
+    }
 }
 
 /// `GuiScreen.drawDefaultBackground` over a world.
@@ -104,6 +145,7 @@ impl ContainerScreen {
             last_click: None,
             shift_clicked: None,
             creative,
+            effects_shown: false,
         }
     }
 
@@ -136,7 +178,12 @@ impl ContainerScreen {
 
     fn origin(&self) -> (i32, i32) {
         let (w, h) = self.size();
-        ((self.width - w) / 2, (self.height - h) / 2)
+        let left = if self.effects_shown {
+            160 + (self.width - w - 200) / 2
+        } else {
+            (self.width - w) / 2
+        };
+        (left, (self.height - h) / 2)
     }
 
     /// Slot positions of what is on screen, in click-slot order.
@@ -523,7 +570,10 @@ impl ContainerScreen {
         mx: i32,
         my: i32,
         advanced_tooltips: bool,
+        effects: &Effects,
     ) {
+        // `checkStatusEffects`: only the player's own inventory and the creative screen list effects.
+        self.effects_shown = !effects.is_empty() && inv.open.is_none();
         let (l, t) = self.origin();
         if let Some(cr) = &mut self.creative {
             cr.advanced = advanced_tooltips;
@@ -551,6 +601,9 @@ impl ContainerScreen {
             self.draw_cursor(c, inv, icons, cursor, mx - l - 8, my - t - 8);
         }
         c.pop();
+        if self.effects_shown {
+            draw_effects(c, effects, l - 124, t);
+        }
         if let Some(cr) = &self.creative {
             if cr.draw_hover_text(c, mx - l, my - t, mx, my, self.width, self.height) {
                 return;

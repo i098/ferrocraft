@@ -51,6 +51,22 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             food: p.food.0,
             saturation: p.saturation,
         },
+        P::EntityEffect(p) => NetEvent::EntityEffect {
+            entity_id: p.entity_id.0,
+            effect: world::effects::Effect {
+                id: p.effect_id,
+                amplifier: p.amplifier,
+                duration: p.duration.0,
+                permanent: p.duration.0 == world::effects::PERMANENT_TICKS,
+                ambient: false,
+                particles: !p.hide_particles,
+            },
+        },
+        P::RemoveEntityEffect(p) => NetEvent::RemoveEntityEffect {
+            entity_id: p.entity_id.0,
+            effect_id: p.effect_id,
+        },
+        P::EntityProperties(p) => movement_speed(p)?,
         P::SetExperience(p) => NetEvent::Experience {
             bar: p.bar,
             level: p.level.0,
@@ -84,6 +100,30 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             accepted: p.accepted,
         },
         _ => return None,
+    })
+}
+
+/// The `generic.movementSpeed` instance of an S20 packet.
+fn movement_speed(p: &cb::EntityProperties) -> Option<NetEvent> {
+    let a = p
+        .attributes
+        .0
+        .iter()
+        .find(|a| a.key == "generic.movementSpeed")?;
+    Some(NetEvent::MovementSpeed {
+        entity_id: p.entity_id.0,
+        speed: world::effects::Speed {
+            base: a.value,
+            modifiers: a
+                .modifiers
+                .iter()
+                .map(|m| world::effects::Modifier {
+                    uuid: m.uuid.0,
+                    amount: m.amount,
+                    operation: m.operation,
+                })
+                .collect(),
+        },
     })
 }
 

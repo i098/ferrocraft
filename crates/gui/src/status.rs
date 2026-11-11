@@ -18,6 +18,8 @@ pub struct Status {
     pub hardcore: bool,
     pub poisoned: bool,
     pub withered: bool,
+    /// Hunger effect: the food row uses the green sprites.
+    pub hunger: bool,
     pub absorption: f32,
     /// Index of the bouncing heart while regenerating (`updateCounter % ceil(max + 5)`), or -1.
     pub regen_tick: i32,
@@ -45,6 +47,7 @@ impl Default for Status {
             hardcore: false,
             poisoned: false,
             withered: false,
+            hunger: false,
             absorption: 0.0,
             regen_tick: -1,
             horse_jump: None,
@@ -231,15 +234,16 @@ fn draw_food(
     k1: i32,
 ) {
     let k = s.food.clamp(0, 20);
-    // shortcut: no Hunger effect sprites (u + 36, v 13); add when the engine tracks potion effects.
+    // `Potion.hunger`: the background tile is the 13th 9-px column and the food pips sit 36 px right.
+    let (bg, shift) = if s.hunger { (16 + 13 * 9, 36) } else { (16, 0) };
     for k6 in 0..10 {
         let mut l6 = k1;
         if s.saturation <= 0.0 && update_counter % (k * 3 + 1) == 0 {
             l6 = k1 + (rand.next_int(3) - 1);
         }
         let k8 = j1 - k6 * 8 - 9;
-        gui.blit(ICONS, k8, l6, 16, 27, 9, 9);
-        pip(gui, k8, l6, k6, k, 52, 61, 27);
+        gui.blit(ICONS, k8, l6, bg, 27, 9, 9);
+        pip(gui, k8, l6, k6, k, 52 + shift, 61 + shift, 27);
     }
 }
 

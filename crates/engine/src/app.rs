@@ -36,6 +36,7 @@ use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 use world::chunk::Chunk;
+use world::effects::id as Fx;
 use world::entities::{look_vector, Entity, Kind};
 
 const TICK: Duration = Duration::from_millis(50);
@@ -659,7 +660,7 @@ impl App {
         if show_hud {
             draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
             let debug = self.debug_lines(eye);
-            let status = status_of(&self.game, self.input.sneaking());
+            let status = status_of(&self.game, self.hud.update_counter);
             self.hud.selected_slot = i32::from(self.game.inv.held);
             let inv = &self.game.inv;
             let hotbar = self.icons.as_ref().map(|icons| gui::HotbarItems {
@@ -710,6 +711,7 @@ impl App {
                 mx,
                 my,
                 self.ui.settings.advanced_item_tooltips,
+                &self.game.effects,
             );
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
@@ -747,7 +749,7 @@ fn draw_name_tags(
 }
 
 /// `GuiIngame.renderPlayerStats` inputs from the local player.
-fn status_of(game: &Game, _sneaking: bool) -> Status {
+fn status_of(game: &Game, update_counter: i32) -> Status {
     let armor_points: i32 = (5..9)
         .filter_map(|i| game.inv.player[i].as_ref())
         .map(|s| armor_points(s.id))
@@ -762,6 +764,14 @@ fn status_of(game: &Game, _sneaking: bool) -> Status {
         hardcore: game.hardcore,
         creative: game.gamemode == 1,
         spectator: game.gamemode == 3,
+        poisoned: game.effects.has(Fx::POISON),
+        withered: game.effects.has(Fx::WITHER),
+        hunger: game.effects.has(Fx::HUNGER),
+        regen_tick: if game.effects.has(Fx::REGENERATION) {
+            update_counter % (game.health + 5.0).ceil() as i32
+        } else {
+            -1
+        },
         ..Status::default()
     }
 }

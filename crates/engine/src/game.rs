@@ -157,6 +157,13 @@ pub struct Game {
     pub held_replaced: bool,
     /// Status 9 for the own player (`finishUsingItem`); the app takes the flag each tick.
     pub finished_use: bool,
+    /// `EntityLivingBase.activePotionsMap` of the local player.
+    pub effects: world::effects::Effects,
+    /// The local player's `generic.movementSpeed` attribute.
+    pub speed: world::effects::Speed,
+    /// Metadata index 7 and 8 of the local player: potion colour and ambient flag.
+    pub potion_color: i32,
+    pub potion_ambient: bool,
 }
 
 impl Game {
@@ -203,6 +210,10 @@ impl Game {
             bob: [0; 9],
             held_replaced: false,
             finished_use: false,
+            effects: world::effects::Effects::default(),
+            speed: world::effects::Speed::default(),
+            potion_color: 0,
+            potion_ambient: false,
         }
     }
 
@@ -264,6 +275,20 @@ impl Game {
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
             }
+            NetEvent::EntityEffect { entity_id, effect } if entity_id == self.entity_id => {
+                self.effects.add(effect);
+            }
+            NetEvent::RemoveEntityEffect {
+                entity_id,
+                effect_id,
+            } if entity_id == self.entity_id => self.effects.remove(effect_id),
+            NetEvent::MovementSpeed { entity_id, speed } if entity_id == self.entity_id => {
+                self.speed = speed;
+            }
+            // Effects and attributes of other entities are not tracked.
+            NetEvent::EntityEffect { .. }
+            | NetEvent::RemoveEntityEffect { .. }
+            | NetEvent::MovementSpeed { .. } => {}
             NetEvent::Abilities {
                 flags,
                 fly_speed,
@@ -344,6 +369,10 @@ impl Game {
             NetEvent::Respawn => {
                 self.vehicle = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
+                self.effects.clear();
+                self.speed = world::effects::Speed::default();
+                self.potion_color = 0;
+                self.potion_ambient = false;
                 self.digger = Digger::default();
                 self.cracks.clear();
                 self.bolts.clear();
@@ -396,6 +425,12 @@ impl Game {
             }
             NetEvent::Entity(EntityEvent::Status { id, status: 9 }) if id == self.entity_id => {
                 self.finished_use = true;
+            }
+            NetEvent::Entity(EntityEvent::Potion { id, color, ambient })
+                if id == self.entity_id =>
+            {
+                self.potion_color = color.unwrap_or(self.potion_color);
+                self.potion_ambient = ambient.unwrap_or(self.potion_ambient);
             }
             NetEvent::Entity(EntityEvent::Status {
                 id,
@@ -523,6 +558,7 @@ impl Game {
             let now = self.ticks;
             self.cracks.retain(|_, c| now - c.2 <= 400);
         }
+        self.effects.tick();
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
         let (cx, cz) = (

@@ -180,6 +180,10 @@ pub struct Entity {
     /// Entity id of the vehicle, if riding.
     pub vehicle: Option<i32>,
     pub age: u32,
+    /// Metadata index 7: the mixed colour of the active potion effects, 0 for none.
+    pub potion_color: i32,
+    /// Metadata index 8: every active effect is ambient (beacon).
+    pub potion_ambient: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -242,6 +246,8 @@ impl Entity {
             stack: None,
             vehicle: None,
             age: 0,
+            potion_color: 0,
+            potion_ambient: false,
         }
     }
 
@@ -520,6 +526,12 @@ pub enum EntityEvent {
         stack: Option<ItemRef>,
         size: SizeMeta,
     },
+    /// Metadata index 7 (potion colour) and 8 (ambient), where a packet carried them.
+    Potion {
+        id: i32,
+        color: Option<i32>,
+        ambient: Option<bool>,
+    },
     Equipment {
         id: i32,
         slot: i16,
@@ -722,6 +734,10 @@ impl Entities {
                 stack,
                 size,
             } => self.with(id, |e| e.set_metadata(flags, name, stack, health, size)),
+            E::Potion { id, color, ambient } => self.with(id, |e| {
+                e.potion_color = color.unwrap_or(e.potion_color);
+                e.potion_ambient = ambient.unwrap_or(e.potion_ambient);
+            }),
             E::Equipment { id, slot, item } => self.with(id, |e| {
                 if let Some(s) = e.equipment.get_mut(slot as usize) {
                     *s = item;

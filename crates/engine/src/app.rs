@@ -128,6 +128,9 @@ pub struct App {
     deadline: Option<Instant>,
 }
 
+/// `view_ray`'s eye, yaw, pitch, viewer id and its vehicle.
+type ViewRay = ([f64; 3], f32, f32, i32, Option<i32>);
+
 impl App {
     pub fn new(args: Args) -> App {
         let ui = Ui::new(args.game_dir.clone(), Texts::default());
@@ -393,7 +396,7 @@ impl App {
 
     /// `renderViewEntity`'s eyes and look, which `getMouseOver` casts from: the camera entity,
     /// else the local player. Returns the eye, yaw, pitch, viewer id and its vehicle.
-    pub(super) fn view_ray(&self, frac: f64) -> Option<([f64; 3], f32, f32, i32, Option<i32>)> {
+    pub(super) fn view_ray(&self, frac: f64) -> Option<ViewRay> {
         let Some(e) = self.game.camera.and_then(|id| self.game.entities.get(id)) else {
             let p = self.game.player.as_ref()?;
             let (id, vehicle) = (self.game.entity_id, self.game.vehicle);

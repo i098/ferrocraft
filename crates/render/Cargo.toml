@@ -8,7 +8,7 @@ description = "wgpu renderer for the ferrocraft 1.8.9 client: chunk meshes, sky,
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
-# Vanilla post shaders are GLSL 1.20 from the jar; naga parses them after `post::glsl` rewrites them.
+# Vanilla post shaders are GLSL 1.20 from the jar; naga parses them after `glsl.rs` rewrites them.
 naga = { version = "24", features = ["glsl-in"] }
 pollster = "0.4"
 png = "0.17"

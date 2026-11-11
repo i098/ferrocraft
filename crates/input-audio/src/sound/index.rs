@@ -179,6 +179,17 @@ impl SoundIndex {
     pub fn event(&self, name: &str) -> Option<&Event> {
         self.events.get(name)
     }
+
+    /// `SoundHandler.getRandomSoundFromCategories`: one event of `cats`, chosen by `roll`.
+    pub fn random_in(&self, cats: &[Category], roll: u32) -> Option<&str> {
+        let names: Vec<&String> = self
+            .events
+            .iter()
+            .filter(|(_, e)| cats.contains(&e.category))
+            .map(|(n, _)| n)
+            .collect();
+        (!names.is_empty()).then(|| names[roll as usize % names.len()].as_str())
+    }
 }
 
 fn parse_objects(index: &[u8]) -> Result<HashMap<String, String>, String> {
@@ -215,5 +226,12 @@ mod tests {
             idx.event("random.click").unwrap().category,
             Category::Master
         );
+        for roll in 0..4 {
+            assert_eq!(
+                idx.random_in(&[Category::Neutral], roll),
+                Some("mob.pig.say")
+            );
+        }
+        assert_eq!(idx.random_in(&[Category::Weather], 0), None);
     }
 }

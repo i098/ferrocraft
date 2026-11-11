@@ -153,6 +153,21 @@ impl Sound {
         self.play(event, None, 1.0, 1.0);
     }
 
+    /// The Super Secret Settings click: a random sound of the animal, block, mob, player and
+    /// weather categories, as `PositionedSoundRecord.create(sound, 0.5f)` (volume 0.25, pitch 0.5).
+    pub fn play_super_secret(&mut self) {
+        use Category::{Block, Hostile, Neutral, Player, Weather};
+        let roll = self.rand();
+        let Some(name) = self
+            .index
+            .random_in(&[Neutral, Block, Hostile, Player, Weather], roll)
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        self.play(&name, None, 0.25, 0.5);
+    }
+
     pub fn step(&mut self, block_id: u16, at: [f64; 3]) {
         let (e, v, p) = BlockSound::of(block_id).step();
         self.play(&e, Some(at), v, p);

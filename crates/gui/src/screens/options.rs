@@ -1456,10 +1456,8 @@ impl Screen for Options {
         b.push(row(RESOURCE_PACKS, false, 144, "options.resourcepack"));
         b.push(row(SNOOPER, true, 144, "options.snooper.view"));
         b.push(Button::wide(DONE, w / 2 - 100, h / 6 + 168, t("gui.done")));
-        // shortcut: no post-processing shaders or resource pack screen yet; their buttons stay disabled.
-        for id in [SUPER_SECRET, RESOURCE_PACKS] {
-            button(&mut b, id).enabled = false;
-        }
+        // shortcut: no resource pack screen yet (#118); its button stays disabled.
+        button(&mut b, RESOURCE_PACKS).enabled = false;
         self.buttons = b;
     }
 
@@ -1476,6 +1474,13 @@ impl Screen for Options {
             DONE => {
                 ctx.save_settings();
                 self.parent.take().map(Nav::Open)
+            }
+            SUPER_SECRET => {
+                // The button's own click sound replaces `gui.button.press`.
+                ctx.effects
+                    .retain(|e| *e != Effect::Sound("gui.button.press"));
+                ctx.effects.push(Effect::SuperSecret);
+                None
             }
             VIDEO | CONTROLS | CHAT | SKIN | SOUNDS | LANGUAGE | SNOOPER | STREAM => {
                 ctx.save_settings();

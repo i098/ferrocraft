@@ -76,6 +76,13 @@ impl App {
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
             UiEffect::OpenUrl(url) => open_url(url),
+            // `activateNextShader` returns at once without `OpenGlHelper.shadersSupported`; Ferrocraft
+            // has no post-process shaders yet (#121), so only the sound plays.
+            UiEffect::SuperSecret => {
+                if let Some(s) = &mut self.sound {
+                    s.play_super_secret();
+                }
+            }
         }
     }
 

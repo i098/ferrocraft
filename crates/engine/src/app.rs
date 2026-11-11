@@ -37,7 +37,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 use world::chunk::Chunk;
 use world::effects::id as Fx;
-use world::entities::{look_vector, Entity, Kind};
+use world::entities::{flag, look_vector, Entity, Kind};
 
 const TICK: Duration = Duration::from_millis(50);
 /// Catch-up cap after a stall, like vanilla's `elapsedTicks` clamp.
@@ -396,13 +396,8 @@ impl App {
             return None;
         }
         let id = self.game.inv.held_stack().as_ref()?.id;
-        let action = match id {
-            261 => UseAction::Bow,
-            267 | 268 | 272 | 276 | 283 => UseAction::Block,
-            _ => UseAction::Consume,
-        };
         Some(Using {
-            action,
+            action: use_action(id),
             timer: self.use_ticks as f32 - frac + 1.0,
         })
     }
@@ -488,6 +483,7 @@ impl App {
             pointed: false,
             ridden: false,
             child: false,
+            using: self.using(f).map(|u| u.action),
         })
     }
 
@@ -867,6 +863,15 @@ impl ApplicationHandler for App {
 
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
+/// `Item.getItemUseAction` of an item id, as far as the poses differ.
+fn use_action(id: i16) -> UseAction {
+    match id {
+        261 => UseAction::Bow,
+        267 | 268 | 272 | 276 | 283 => UseAction::Block,
+        _ => UseAction::Consume,
+    }
+}
+
 fn entity_draw(
     e: &Entity,
     partial: f64,
@@ -918,6 +923,8 @@ fn entity_draw(
         pointed,
         ridden,
         child: e.is_child(),
+        using: (e.flags & flag::USING_ITEM != 0)
+            .then(|| use_action(e.equipment[0].map_or(0, |i| i.id))),
     }
 }
 

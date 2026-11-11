@@ -161,6 +161,9 @@ pub struct Entity {
     pub prev_pos: [f64; 3],
     pub yaw: f32,
     pub pitch: f32,
+    /// Look at the previous tick (`prevRotationYaw`, `prevRotationPitch`).
+    pub prev_yaw: f32,
+    pub prev_pitch: f32,
     pub head_yaw: f32,
     pub on_ground: bool,
     pub vel: [f64; 3],
@@ -230,6 +233,8 @@ impl Entity {
             prev_pos: pos,
             yaw,
             pitch,
+            prev_yaw: yaw,
+            prev_pitch: pitch,
             head_yaw: yaw,
             on_ground: false,
             vel: [0.0; 3],
@@ -307,11 +312,15 @@ impl Entity {
         self.meta.always_name == Some(1)
     }
 
-    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height (0.5 when small), else 0.85.
+    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height (0.5
+    /// when small), the spider, cave spider and enderman overrides, else 0.85 of the height.
     pub fn eye_height(&self) -> f32 {
         match self.kind {
             Kind::Player => 1.62 - if self.sneaking() { 0.08 } else { 0.0 },
             Kind::Object(78) => self.size().1 * if self.is_child() { 0.5 } else { 0.9 },
+            Kind::Mob(52) => 0.65,
+            Kind::Mob(59) => 0.45,
+            Kind::Mob(58) => 2.55,
             _ => self.size().1 * 0.85,
         }
     }
@@ -358,6 +367,7 @@ impl Entity {
     fn tick(&mut self) {
         self.age += 1;
         self.prev_pos = self.pos;
+        (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
         if self.target.steps > 0 {
             let n = f64::from(self.target.steps);
             for i in 0..3 {
@@ -452,6 +462,15 @@ impl Entity {
     /// Position between the previous and current tick.
     pub fn lerp_pos(&self, partial: f64) -> [f64; 3] {
         std::array::from_fn(|i| self.prev_pos[i] + (self.pos[i] - self.prev_pos[i]) * partial)
+    }
+
+    /// Yaw and pitch between the previous and current tick, yaw the short way round
+    /// (`orientCamera` after `EntityLivingBase.onUpdate` wraps `prevRotationYaw`).
+    pub fn lerp_look(&self, partial: f32) -> (f32, f32) {
+        (
+            self.prev_yaw + wrap(self.yaw - self.prev_yaw) * partial,
+            self.prev_pitch + (self.pitch - self.prev_pitch) * partial,
+        )
     }
 }
 
@@ -988,6 +1007,34 @@ mod tests {
         e.target.steps = STEPS;
         e.tick();
         assert!(e.yaw > 170.0, "went the long way: {}", e.yaw);
+    }
+
+    #[test]
+    fn look_interpolates_between_ticks_the_short_way_around() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0; 3]);
+        let mut e = es.get(1).unwrap().clone();
+        (e.prev_yaw, e.yaw, e.prev_pitch, e.pitch) = (170.0, -170.0, 10.0, 30.0);
+        let (yaw, pitch) = e.lerp_look(0.5);
+        assert!((yaw - 180.0).abs() < 1e-4, "went the long way: {yaw}");
+        assert!((pitch - 20.0).abs() < 1e-4);
+        e.tick();
+        assert_eq!((e.prev_yaw, e.prev_pitch), (-170.0, 30.0));
+    }
+
+    #[test]
+    fn mob_eye_heights_match_vanilla_get_eye_height() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0; 3]);
+        let mut e = es.get(1).unwrap().clone();
+        for (kind, want) in [(52, 0.65), (59, 0.45), (58, 2.55), (50, 1.7 * 0.85)] {
+            e.kind = Kind::Mob(kind);
+            assert!(
+                (e.eye_height() - want).abs() < 1e-5,
+                "mob {kind}: {}",
+                e.eye_height()
+            );
+        }
     }
 
     #[test]

@@ -98,6 +98,9 @@ pub struct Game {
     pub entity_id: i32,
     pub entity_flags: u8,
     pub vehicle: Option<i32>,
+    /// `Minecraft.renderViewEntity` when it is not the local player: the spectated entity.
+    /// Join and respawn set the player back without a shader change, as vanilla does.
+    pub camera: Option<i32>,
     /// Creative mode (6 block entity reach instead of 3).
     pub creative: bool,
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
@@ -175,6 +178,7 @@ impl Game {
             entity_id: -1,
             entity_flags: 0,
             vehicle: None,
+            camera: None,
             creative: false,
             gamemode: 0,
             digger: Digger::default(),
@@ -254,6 +258,7 @@ impl Game {
                 self.entity_id = entity_id;
                 self.health_seen = false;
                 self.vehicle = None;
+                self.camera = None;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
                 self.reduced_debug = reduced_debug_info;
@@ -383,6 +388,7 @@ impl Game {
             NetEvent::Respawn => {
                 self.entity_flags = 0;
                 self.vehicle = None;
+                self.camera = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.effects.clear();
                 self.speed = world::effects::Speed::default();
@@ -607,8 +613,8 @@ impl Game {
     }
 
     /// World-space outline box of the targeted block, grown by 0.002 like vanilla.
-    pub fn selection(&self, eye: [f64; 3]) -> Option<[f64; 6]> {
-        let hit = self.target(eye)?;
+    pub fn selection(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<[f64; 6]> {
+        let (hit, _) = self.ray_dist(eye, yaw, pitch)?;
         let at = |p: [i32; 3]| self.store.get_block(p[0], p[1], p[2]);
         let b = dig::selection_box(&at, hit.pos)?;
         let o = hit.pos.map(f64::from);
@@ -623,16 +629,11 @@ impl Game {
         ])
     }
 
-    /// The block under the crosshair for a camera at `eye`, within the game mode's reach.
-    pub fn target(&self, eye: [f64; 3]) -> Option<Hit> {
-        self.target_dist(eye).map(|(hit, _)| hit)
-    }
-
-    /// [`Game::target`] plus the distance from `eye` to the hit point.
-    pub fn target_dist(&self, eye: [f64; 3]) -> Option<(Hit, f64)> {
-        let p = self.player.as_ref()?;
+    /// The block under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`, within
+    /// the game mode's reach, plus the distance to the hit point.
+    pub fn ray_dist(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<(Hit, f64)> {
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
-        dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
+        dig::raycast_dist(&at, eye, yaw, pitch, dig::reach(self.creative))
     }
 
     /// A selectable block lies between `from` and `to`.
@@ -646,12 +647,6 @@ impl Game {
         let pitch = (-d[1] / len).asin().to_degrees() as f32;
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
         dig::raycast_dist(&at, from, yaw, pitch, len).is_some()
-    }
-
-    /// `Entity.getPositionEyes(1)` of the local player.
-    pub fn eye(&self, sneaking: bool) -> Option<[f64; 3]> {
-        let p = self.player.as_ref()?;
-        Some([p.pos[0], p.pos[1] + eye_height(sneaking), p.pos[2]])
     }
 
     /// The local player's bounding box `[x0, y0, z0, x1, y1, z1]`, which blocks a placement.
@@ -729,16 +724,16 @@ impl Game {
 
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
     /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
-    /// the block and a click attacks it, as in vanilla's `objectMouseOver`. Only survival and
-    /// creative can dig.
+    /// the block `block` and a click attacks it, as in vanilla's `objectMouseOver`. Only
+    /// survival and creative can dig.
     pub fn dig_tick(
         &mut self,
         attack: Attack,
         entity: Option<i32>,
-        sneaking: bool,
+        block: Option<Hit>,
     ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
-        let (Some(p), Some(eye)) = (&self.player, self.eye(sneaking)) else {
+        let Some(p) = &self.player else {
             return (actions, Vec::new());
         };
         let frame = Frame {
@@ -748,11 +743,7 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
-            target: if entity.is_some() {
-                None
-            } else {
-                self.target(eye)
-            },
+            target: block.filter(|_| entity.is_none()),
             entity,
         };
         let mut local = Local {

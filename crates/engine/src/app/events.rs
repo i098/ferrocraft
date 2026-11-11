@@ -68,12 +68,11 @@ impl App {
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
             UiEffect::OpenUrl(url) => open_url(&url),
-            // `activateNextShader` returns at once without `OpenGlHelper.shadersSupported`; Ferrocraft
-            // has no post-process shaders yet (#121), so only the sound plays.
             UiEffect::SuperSecret => {
                 if let Some(s) = &mut self.sound {
                     s.play_super_secret();
                 }
+                self.next_shader();
             }
             UiEffect::ResourcesChanged => self.refresh_resources(),
         }
@@ -100,6 +99,11 @@ impl App {
         self.load_assets();
         self.apply_settings();
         self.reload_chunks();
+        // `onResourceManagerReload`: the cycle's effect, else the camera entity's.
+        match render::SHADERS.get(self.shader_index) {
+            Some(name) => self.load_shader(name),
+            None => self.entity_shader(self.game.camera),
+        }
         self.resize_screens();
     }
 
@@ -126,6 +130,59 @@ impl App {
         self.use_ticks = 0;
         if let Some(r) = &mut self.renderer {
             r.clear_chunks();
+            // `runTick` without a world: `stopUseShader`.
+            let _ = r.set_post(None);
+        }
+        self.shader_index = render::SHADERS.len();
+    }
+
+    /// `GameRenderer.loadShader(shaders/post/<name>.json)`; a failed load also ends the cycle.
+    fn load_shader(&mut self, name: &str) {
+        let Some(r) = &mut self.renderer else { return };
+        if let Err(e) = r.set_post(Some(&format!("shaders/post/{name}.json"))) {
+            crate::log::line(&format!("failed to load shader {name}: {e}"));
+            self.shader_index = render::SHADERS.len();
+        }
+    }
+
+    /// `GameRenderer.loadEntityShader`: drop the effect, then a creeper, spider (cave spiders
+    /// too) or enderman camera sees through its own.
+    pub(super) fn entity_shader(&mut self, camera: Option<i32>) {
+        if let Some(r) = &mut self.renderer {
+            let _ = r.set_post(None);
+        }
+        let kind = camera
+            .and_then(|id| self.game.entities.get(id))
+            .map(|e| e.kind);
+        let name = match kind {
+            Some(Kind::Mob(50)) => "creeper",
+            Some(Kind::Mob(52 | 59)) => "spider",
+            Some(Kind::Mob(58)) => "invert",
+            _ => return,
+        };
+        self.load_shader(name);
+    }
+
+    /// "Super Secret Settings...", `GameRenderer.activateNextShader`: the next effect of the
+    /// cycle, then none, while a player is the camera.
+    fn next_shader(&mut self) {
+        let player = match self.game.camera {
+            Some(id) => self
+                .game
+                .entities
+                .get(id)
+                .is_some_and(|e| e.kind == Kind::Player),
+            None => self.game.player.is_some(),
+        };
+        if !player {
+            return;
+        }
+        if let Some(r) = &mut self.renderer {
+            let _ = r.set_post(None);
+        }
+        self.shader_index = (self.shader_index + 1) % (render::SHADERS.len() + 1);
+        if let Some(name) = render::SHADERS.get(self.shader_index) {
+            self.load_shader(name);
         }
     }
 
@@ -285,6 +342,14 @@ impl App {
                 records,
                 motion,
             } => self.explode(pos, radius, &records, motion, dirty),
+            // `handleCamera` ignores an entity the world does not have.
+            NetEvent::Camera(id) => {
+                let own = id == self.game.entity_id;
+                if own || self.game.entities.get(id).is_some() {
+                    self.game.camera = (!own).then_some(id);
+                    self.entity_shader(self.game.camera);
+                }
+            }
             other => return Err(other),
         }
         Ok(())

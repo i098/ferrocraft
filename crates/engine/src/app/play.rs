@@ -477,21 +477,22 @@ impl App {
         }
     }
 
-    /// The entity under the crosshair (`EntityRenderer.getMouseOver`): a nearer block hides it.
-    pub(super) fn entity_target(&self) -> Option<(i32, f64)> {
-        let p = self.game.player.as_ref()?;
-        let eye = self.game.eye(self.input.sneaking())?;
-        let dir = look_vector(p.yaw, self.game.pitch);
+    /// The entity under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`
+    /// (`EntityRenderer.getMouseOver`), which skips the viewer `skip` and its vehicle: a nearer
+    /// block hides it.
+    pub(super) fn entity_pick(
+        &self,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        skip: i32,
+        vehicle: Option<i32>,
+    ) -> Option<(i32, f64)> {
         let reach = if self.game.creative { 6.0 } else { 3.0 };
-        let block = self.game.target_dist(eye).map(|(_, d)| d);
-        self.game.entities.pick(
-            eye,
-            dir,
-            reach,
-            self.game.entity_id,
-            self.game.vehicle,
-            block,
-        )
+        let block = self.game.ray_dist(eye, yaw, pitch).map(|(_, d)| d);
+        self.game
+            .entities
+            .pick(eye, look_vector(yaw, pitch), reach, skip, vehicle, block)
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
@@ -504,8 +505,16 @@ impl App {
             held: self.input.attack_held(),
             presses,
         };
-        let entity = self.entity_target().map(|(id, _)| id);
-        let (actions, effects) = self.game.dig_tick(attack, entity, self.input.sneaking());
+        let ray = self.view_ray(1.0);
+        let entity = ray
+            .and_then(|(eye, yaw, pitch, skip, vehicle)| {
+                self.entity_pick(eye, yaw, pitch, skip, vehicle)
+            })
+            .map(|(id, _)| id);
+        let block = ray
+            .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
+            .map(|(h, _)| h);
+        let (actions, effects) = self.game.dig_tick(attack, entity, block);
         for action in actions {
             let sent = match action {
                 DigAction::Dig { status, pos, face } => {
@@ -547,10 +556,10 @@ impl App {
     }
 
     fn hit_shard(&mut self) {
-        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
             return;
         };
-        if let Some(h) = self.game.target(eye) {
+        if let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) {
             let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
             let state = at(h.pos);
             if state != 0 {
@@ -651,13 +660,13 @@ impl App {
         }
         self.use_delay = USE_DELAY;
         let sneaking = self.input.sneaking();
-        let (Some(p), Some(eye)) = (&self.game.player, self.game.eye(sneaking)) else {
+        let Some((eye, yaw, pitch, skip, vehicle)) = self.view_ray(1.0) else {
             return;
         };
-        let dir = look_vector(p.yaw, self.game.pitch);
+        let dir = look_vector(yaw, pitch);
         let held = self.game.inv.held_stack().clone();
         let gamemode = self.game.gamemode;
-        if let Some((id, dist)) = self.entity_target() {
+        if let Some((id, dist)) = self.entity_pick(eye, yaw, pitch, skip, vehicle) {
             let Some(e) = self.game.entities.get(id) else {
                 return;
             };
@@ -670,7 +679,7 @@ impl App {
             }
             let r = self.session_send(|s| s.interact_entity(id));
             self.send_result(r);
-        } else if let Some((h, dist)) = self.game.target_dist(eye) {
+        } else if let Some((h, dist)) = self.game.ray_dist(eye, yaw, pitch) {
             if self.use_block(h, dist, eye, dir, sneaking, &held) {
                 return;
             }
@@ -772,10 +781,10 @@ impl App {
     /// `Minecraft.middleClickMouse`: select the targeted block's item on the hotbar; creative
     /// puts it there when missing.
     fn pick_block(&mut self) {
-        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
             return;
         };
-        let Some(h) = self.game.target(eye) else {
+        let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) else {
             return;
         };
         let state = self.game.store.get_block(h.pos[0], h.pos[1], h.pos[2]);
@@ -888,7 +897,8 @@ impl App {
         match action {
             Action::ToggleDebug => self.show_debug = !self.show_debug,
             Action::ToggleHud => self.hide_hud = !self.hide_hud,
-            Action::TogglePerspective => self.perspective = (self.perspective + 1) % 3,
+            Action::ToggleShader => self.renderer.iter_mut().for_each(|r| r.toggle_post()),
+            Action::TogglePerspective => self.toggle_perspective(),
             Action::Debug(DebugCombo::ClearChat) => {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();
@@ -928,6 +938,16 @@ impl App {
                 self.reload_chunks();
                 self.debug_chat("Reloading all chunks");
             }
+            _ => {}
+        }
+    }
+
+    /// F5, `Minecraft.runTick`: first person views as the camera entity, the back view clears.
+    fn toggle_perspective(&mut self) {
+        self.perspective = (self.perspective + 1) % 3;
+        match self.perspective {
+            0 => self.entity_shader(self.game.camera),
+            1 => self.entity_shader(None),
             _ => {}
         }
     }

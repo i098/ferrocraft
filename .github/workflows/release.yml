@@ -8,28 +8,9 @@ env:
   FABRIC_LOADER_URL: https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.16.10/fabric-loader-0.16.10.jar
 
 jobs:
-  jars:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "8"
-      - run: |
-          mkdir out
-          java/launcher/build.sh out/ferrocraft-boot.jar
-          curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
-          FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh out/ferrocraft-fabric.jar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: jars
-          path: out/*.jar
-
   package:
-    needs: jars
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - { os: macos-15, target: aarch64-apple-darwin }
@@ -42,10 +23,16 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-java@v4
         with:
-          name: jars
-          path: stage
+          distribution: temurin
+          java-version: "8"
+      - name: Build jars
+        run: |
+          mkdir stage
+          java/launcher/build.sh stage/ferrocraft-boot.jar
+          curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
+          FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh stage/ferrocraft-fabric.jar
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

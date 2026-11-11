@@ -376,6 +376,8 @@ pub struct Gui<'f> {
     /// Window-pixel rectangle `[x0, y0, x1, y1]` that later quads are cut to.
     clip: Option<[f32; 4]>,
     seed: u32,
+    /// `FontRenderer.bidiFlag`.
+    bidi: bool,
 }
 
 impl<'f> Gui<'f> {
@@ -392,7 +394,13 @@ impl<'f> Gui<'f> {
             blend: Blend::Alpha,
             clip: None,
             seed: seed | 1,
+            bidi: false,
         }
+    }
+
+    /// `FontRenderer.setBidiFlag`.
+    pub fn set_bidi(&mut self, on: bool) {
+        self.bidi = on;
     }
 
     pub fn into_quads(self) -> Vec<Quad> {
@@ -613,6 +621,13 @@ impl<'f> Gui<'f> {
 
     /// `FontRenderer.drawString(text, x, y, color, dropShadow)`: the end x of the text.
     pub fn draw_string(&mut self, s: &str, x: f32, y: f32, argb: u32, shadow: bool) -> i32 {
+        let reordered;
+        let s = if self.bidi {
+            reordered = crate::bidi::reorder(s);
+            &reordered
+        } else {
+            s
+        };
         if shadow {
             let a = self.render_string(s, x + 1.0, y + 1.0, argb, true);
             a.max(self.render_string(s, x, y, argb, false))

@@ -15,7 +15,6 @@ pub struct Language {
     pub code: String,
     pub name: String,
     pub region: String,
-    // Not applied yet: vanilla `setBidiFlag` reordering, https://github.com/i098/ferrocraft/issues/115
     pub bidirectional: bool,
 }
 
@@ -80,6 +79,7 @@ impl Screen for LanguageScreen {
             self.list.drag(my, n);
         }
         self.list.draw_back(c, n);
+        let current = ctx.texts.bidirectional(&ctx.settings.lang);
         for (i, l) in ctx.texts.languages.iter().enumerate() {
             if !self.list.row_visible(i) {
                 continue;
@@ -88,7 +88,9 @@ impl Screen for LanguageScreen {
                 self.list.draw_selection(c, i);
             }
             let label = format!("{} ({})", l.name, l.region);
+            c.set_bidi(true);
             centered(c, &label, ctx.width / 2, self.list.row_y(i) + 1, WHITE);
+            c.set_bidi(current);
         }
         self.list.draw_front(c, n);
         centered(c, &ctx.tr("options.language"), ctx.width / 2, 16, WHITE);

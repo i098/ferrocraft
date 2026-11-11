@@ -794,6 +794,7 @@ impl App {
             (self.cursor.1 / factor) as i32,
         );
         let mut g = gui::Gui::new(scale, r.font(), 0);
+        g.set_bidi(self.ui.bidirectional());
         self.draw_screen_effects(&mut g, (w, h), frac as f32);
         let m = Fm(g.metrics());
         let screen_open = self.modal();

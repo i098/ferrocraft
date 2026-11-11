@@ -52,6 +52,10 @@ impl Canvas for GuiCanvas<'_, '_> {
         self.gui.draw_string(s, x, y, argb, shadow);
     }
 
+    fn set_bidi(&mut self, on: bool) {
+        self.gui.set_bidi(on);
+    }
+
     fn texture(&mut self, name: &str, png: &[u8]) {
         self.pending_textures.push((name.to_owned(), png.to_vec()));
     }

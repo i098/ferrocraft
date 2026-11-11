@@ -376,15 +376,18 @@ impl Game {
                 self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
-            NetEvent::BlockBreakAnim { id, pos, stage } => {
-                if (0..10).contains(&stage) {
-                    self.cracks.insert(id, (pos, stage as u8, self.ticks));
-                } else {
-                    self.cracks.remove(&id);
-                }
-            }
+            NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
+        }
+    }
+
+    /// Stage `0..=9` shows a crack, anything else clears the breaker's entry.
+    fn set_crack(&mut self, id: i32, pos: [i32; 3], stage: i8) {
+        if (0..10).contains(&stage) {
+            self.cracks.insert(id, (pos, stage as u8, self.ticks));
+        } else {
+            self.cracks.remove(&id);
         }
     }
 

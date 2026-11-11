@@ -571,7 +571,7 @@ pub fn build(
     light: impl Fn([f64; 3]) -> [f32; 2],
 ) -> MeshData {
     let mut out = MeshData::default();
-    for d in draws.iter().filter(|d| !d.invisible) {
+    for d in draws {
         let start = out.vertices.len();
         draw_entity(&mut out, d, skins);
         let level = if d.burning {
@@ -718,10 +718,11 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
     let xf = Xf::new(d, generic);
     let white = skins.v_offset(Skin::White);
 
+    // `LivingEntityRenderer.renderModel` skips the body of an invisible entity; layers still draw.
     for part in m
         .parts
         .iter()
-        .filter(|p| p.inflate == 0.0 || skin != Skin::White)
+        .filter(|p| !d.invisible && (p.inflate == 0.0 || skin != Skin::White))
     {
         emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
     }
@@ -1005,6 +1006,26 @@ mod tests {
             ridden: false,
             child: false,
         }
+    }
+
+    #[test]
+    fn invisible_player_keeps_armor_and_held_item_but_not_the_body() {
+        let count = |d: &EntityDraw| {
+            build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
+                .vertices
+                .len()
+        };
+        let mut d = steve();
+        d.invisible = true;
+        assert_eq!(count(&d), 0);
+        d.held = 276;
+        let held = count(&d);
+        assert!(held > 0);
+        d.armor = [310; 4];
+        let worn = count(&d);
+        assert!(worn > held);
+        d.invisible = false;
+        assert!(count(&d) > worn);
     }
 
     #[test]

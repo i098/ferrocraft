@@ -7,14 +7,17 @@
 mod connecting;
 mod death;
 mod disconnect;
+mod language;
 mod multiplayer;
 mod options;
 mod pause;
+mod snooper;
 mod title;
 
 pub use connecting::{Connecting, DownloadingTerrain};
 pub use death::Death;
 pub use disconnect::Disconnected;
+pub use language::{languages, Language};
 pub use multiplayer::Multiplayer;
 pub use options::{KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
 pub use pause::Pause;
@@ -115,19 +118,27 @@ pub enum Effect {
     Quit,
     /// `options.txt` was written: apply changed settings and send `C15PacketClientSettings` when in a world.
     SettingsSaved,
+    /// `Settings::lang` changed: reload the language files (`Minecraft.refreshResources`), then save.
+    LanguageChanged,
+    /// Open a web page in the system browser.
+    OpenUrl(&'static str),
 }
 
-/// Localized text, `I18n`/`LanguageMap`, and the title splashes.
+/// Localized text, `I18n`/`LanguageMap`/`LanguageManager`, and the title splashes.
 #[derive(Default)]
 pub struct Texts {
     lang: HashMap<String, String>,
     pub splashes: Vec<String>,
+    /// `Locale.isUnicode`: over 10% of the translated text is outside Latin-1.
+    pub unicode: bool,
+    /// The languages of `pack.mcmeta`, sorted by code.
+    pub languages: Vec<Language>,
 }
 
 impl Texts {
-    /// `lang` is a `.lang` file (`key=value` lines), `splashes` is `texts/splashes.txt`.
+    /// `lang` is `.lang` text (`key=value` lines; a later line wins), `splashes` is `texts/splashes.txt`.
     pub fn parse(lang: &str, splashes: &str) -> Texts {
-        let lang = lang
+        let lang: HashMap<String, String> = lang
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .filter_map(|l| l.split_once('='))
@@ -139,7 +150,17 @@ impl Texts {
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect();
-        Texts { lang, splashes }
+        // `Locale.checkUnicodeUsage` counts UTF-16 units, as Java strings hold them.
+        let (wide, all) = lang
+            .values()
+            .flat_map(|v| v.encode_utf16())
+            .fold((0, 0), |(w, a), u| (w + usize::from(u >= 0x100), a + 1));
+        Texts {
+            lang,
+            splashes,
+            unicode: wide as f32 / all as f32 > 0.1,
+            ..Texts::default()
+        }
     }
 
     /// `I18n.format(key)`; an unknown key is returned as is.
@@ -213,6 +234,11 @@ impl Ctx<'_> {
         self.texts.tr(key)
     }
 
+    /// `Minecraft.isUnicode`: the font draws `unicode_page_*.png` glyphs for this language or setting.
+    pub fn unicode(&self) -> bool {
+        self.settings.force_unicode || self.texts.unicode
+    }
+
     /// `GameSettings.saveOptions`.
     pub fn save_settings(&mut self) {
         if let Err(e) = self.settings.save() {
@@ -279,7 +305,8 @@ pub struct Mods {
 pub struct Screens {
     current: Option<Box<dyn Screen>>,
     px: (u32, u32),
-    gui_scale: u8,
+    /// `(guiScale, unicode)` of the last resize; a change rescales the screen.
+    scale: (u8, bool),
 }
 
 impl Screens {
@@ -320,13 +347,8 @@ impl Screens {
     /// Framebuffer size changed (or call once at start). Returns the GUI scale factor.
     pub fn resize(&mut self, px_w: u32, px_h: u32, ctx: &mut Ctx) -> i32 {
         self.px = (px_w, px_h);
-        self.gui_scale = ctx.settings.gui_scale;
-        let s = GuiScale::new(
-            px_w,
-            px_h,
-            u32::from(ctx.settings.gui_scale),
-            ctx.settings.force_unicode,
-        );
+        self.scale = (ctx.settings.gui_scale, ctx.unicode());
+        let s = GuiScale::new(px_w, px_h, u32::from(ctx.settings.gui_scale), ctx.unicode());
         (ctx.width, ctx.height) = (s.width, s.height);
         if let Some(s) = self.current.as_mut() {
             s.init(ctx);
@@ -358,7 +380,7 @@ impl Screens {
         if let Some(nav) = nav {
             self.nav(nav, ctx);
         }
-        if ctx.settings.gui_scale != self.gui_scale {
+        if (ctx.settings.gui_scale, ctx.unicode()) != self.scale {
             self.resize(self.px.0, self.px.1, ctx);
         }
     }
@@ -1382,6 +1404,16 @@ mod tests {
             }
             n
         }
+    }
+
+    #[test]
+    fn unicode_locale_needs_over_ten_percent_wide_chars() {
+        let t = |lang: &str| Texts::parse(lang, "").unicode;
+        assert!(!t("a=Hello\nb=Français"));
+        assert!(t("a=Привет\nb=Hello"));
+        // en_US under the chosen language: the English keys count too (6 of 66 is under 10%).
+        assert!(!t(&format!("a=Привет\nb={}", "e".repeat(60))));
+        assert!(!t(""));
     }
 
     #[test]

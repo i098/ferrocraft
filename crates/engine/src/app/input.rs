@@ -104,7 +104,7 @@ impl App {
             w,
             h,
             u32::from(self.ui.settings.gui_scale),
-            self.ui.settings.force_unicode,
+            self.ui.unicode(),
         );
         let f = f64::from(scale.factor.max(1));
         ((self.cursor.0 / f) as i32, (self.cursor.1 / f) as i32)

@@ -74,7 +74,16 @@ impl App {
             }
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
+            UiEffect::LanguageChanged => self.change_language(),
+            UiEffect::OpenUrl(url) => open_url(url),
         }
+    }
+
+    /// `refreshResources`, then the font flag and a rescale, which relabels the screen.
+    fn change_language(&mut self) {
+        self.load_texts();
+        self.apply_settings();
+        self.resize_screens();
     }
 
     /// Back to the menus: forget the world and the connection.
@@ -463,5 +472,21 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
             }
             _ => r.remove_chunk(x, z),
         }
+    }
+}
+
+/// Opens a web page in the system browser.
+fn open_url(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    match std::process::Command::new(opener).arg(url).spawn() {
+        // Reap the opener so it does not stay a zombie.
+        Ok(mut c) => drop(std::thread::spawn(move || c.wait())),
+        Err(e) => crate::log::line(&format!("Couldn't open link: {e}")),
     }
 }

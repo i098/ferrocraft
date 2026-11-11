@@ -210,12 +210,46 @@ impl App {
         self.boss_tick();
         self.step_sound();
         self.rain_particles();
+        self.potion_particles();
         self.particles
             .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
         self.equip_tick();
         self.send_state();
         self.send_pose();
         self.sound_tick();
+    }
+
+    /// `EntityLivingBase.onEntityUpdate`: swirls of every living entity with potion effects.
+    fn potion_particles(&mut self) {
+        let g = &self.game;
+        for e in g
+            .entities
+            .iter()
+            .filter(|e| e.potion_color > 0 && !e.is_dead())
+        {
+            self.particles.potion_swirl(
+                e.pos,
+                e.size(),
+                e.potion_color,
+                e.potion_ambient,
+                e.invisible(),
+            );
+        }
+        self.local_potion_particles();
+    }
+
+    fn local_potion_particles(&mut self) {
+        let g = &self.game;
+        if let Some(p) = &g.player {
+            let invisible = g.effects.has(world::effects::id::INVISIBILITY);
+            self.particles.potion_swirl(
+                p.pos,
+                (0.6, 1.8),
+                g.potion_color,
+                g.potion_ambient,
+                invisible,
+            );
+        }
     }
 
     /// `EntityPlayerSP.sendPlayerAbilities`: C13 with the flags, fly speed and walk speed.
@@ -529,12 +563,8 @@ impl App {
             if self.game.abilities & 2 != 0 {
                 f *= 1.1;
             }
-            let sprint = if p.sprinting {
-                1.300_000_011_920_929
-            } else {
-                1.0
-            };
-            let speed = 0.100_000_001_490_116_12 * sprint;
+            // `getEntityAttribute(movementSpeed).getAttributeValue()`: speed potions and the sprint boost.
+            let speed = self.game.speed.value(p.sprinting);
             let walk = self.game.walk_speed;
             f = (f64::from(f) * ((speed / f64::from(walk) + 1.0) / 2.0)) as f32;
             if walk == 0.0 || !f.is_finite() {

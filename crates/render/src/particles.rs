@@ -22,7 +22,12 @@ pub enum Kind {
     MagicCrit,
     Smoke,
     LargeSmoke,
+    /// `spell` (13), `instantSpell` (14), `mobSpell` (15), `mobSpellAmbient` (16), `witchMagic` (17).
     Spell,
+    InstantSpell,
+    MobSpell,
+    MobSpellAmbient,
+    WitchMagic,
     Flame,
     Lava,
     Cloud,
@@ -39,7 +44,7 @@ pub enum Kind {
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        const IDS: [(i32, i32, Kind); 21] = [
+        const IDS: [(i32, i32, Kind); 25] = [
             (0, 0, Kind::Explode),
             (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
@@ -49,7 +54,11 @@ impl Kind {
             (10, 10, Kind::MagicCrit),
             (11, 11, Kind::Smoke),
             (12, 12, Kind::LargeSmoke),
-            (13, 17, Kind::Spell),
+            (13, 13, Kind::Spell),
+            (14, 14, Kind::InstantSpell),
+            (15, 15, Kind::MobSpell),
+            (16, 16, Kind::MobSpellAmbient),
+            (17, 17, Kind::WitchMagic),
             (20, 20, Kind::AngryVillager),
             (21, 21, Kind::HappyVillager),
             (23, 23, Kind::Note),
@@ -88,6 +97,7 @@ enum Behavior {
     Crit,
     Portal,
     Rain,
+    Spell,
     HugeEmitter,
     LargeExplosion,
 }
@@ -360,14 +370,57 @@ impl Particles {
                 p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
                 p.behavior = Behavior::RedDust;
             }
-            Kind::Spell => {
-                p = self.base(pos, motion, sheet(128, true));
-                p.max_age = (40.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.gravity = -0.2;
+            Kind::Spell
+            | Kind::InstantSpell
+            | Kind::MobSpell
+            | Kind::MobSpellAmbient
+            | Kind::WitchMagic => {
+                p = self.spell(kind, pos, motion);
             }
             _ => return None,
         }
         Some(p)
+    }
+
+    /// `SpellParticle` and its colored variants.
+    fn spell(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        // The horizontal start motion is `0.5 - random`, not the packet's.
+        let start = [0.5 - self.rand(), motion[1], 0.5 - self.rand()];
+        let tile = if matches!(kind, Kind::Spell | Kind::MobSpell | Kind::MobSpellAmbient) {
+            128
+        } else {
+            144
+        };
+        let mut p = self.base(
+            pos,
+            start,
+            Sprite::Sheet {
+                base: tile,
+                anim: true,
+            },
+        );
+        p.vel[1] *= f64::from(0.2_f32);
+        if motion[0] == 0.0 && motion[2] == 0.0 {
+            p.vel[0] *= f64::from(0.1_f32);
+            p.vel[2] *= f64::from(0.1_f32);
+        }
+        p.scale *= 0.75;
+        p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        p.behavior = Behavior::Spell;
+        match kind {
+            Kind::MobSpell | Kind::MobSpellAmbient => {
+                p.color = motion.map(|m| m as f32);
+                if kind == Kind::MobSpellAmbient {
+                    p.alpha = 0.15;
+                }
+            }
+            Kind::WitchMagic => {
+                let f = (self.rand() * 0.5 + 0.35) as f32;
+                p.color = [f, 0.0, f];
+            }
+            _ => {}
+        }
+        p
     }
 
     fn spawn_icon(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
@@ -470,6 +523,44 @@ impl Particles {
             ];
             self.spawn(kind, p, m, data0);
         }
+    }
+
+    /// `EntityLivingBase.onEntityUpdate`, the potion part: about every other tick an entity with
+    /// active effects (`color` from metadata index 7, `ambient` from index 8) sheds one swirl.
+    pub fn potion_swirl(
+        &mut self,
+        pos: [f64; 3],
+        (width, height): (f32, f32),
+        color: i32,
+        ambient: bool,
+        invisible: bool,
+    ) {
+        if color <= 0 {
+            return;
+        }
+        let mut shed = if invisible {
+            (self.rand() * 15.0) as u32 == 0
+        } else {
+            self.rand() < 0.5
+        };
+        if ambient {
+            shed &= (self.rand() * 5.0) as u32 == 0;
+        }
+        if !shed {
+            return;
+        }
+        let at = [
+            pos[0] + (self.rand() - 0.5) * f64::from(width),
+            pos[1] + self.rand() * f64::from(height),
+            pos[2] + (self.rand() - 0.5) * f64::from(width),
+        ];
+        let rgb = [16, 8, 0].map(|shift| f64::from(color >> shift & 255) / 255.0);
+        let kind = if ambient {
+            Kind::MobSpellAmbient
+        } else {
+            Kind::MobSpell
+        };
+        self.spawn(kind, at, rgb, 0);
     }
 
     /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block.
@@ -736,6 +827,12 @@ fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
             creep_on_floor(p);
             p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
         }
+        Behavior::Spell => {
+            p.vel[1] += 0.004;
+            step(p, solid);
+            creep_on_floor(p);
+            p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
+        }
         Behavior::Crit => {
             step(p, solid);
             p.color[1] = (f64::from(p.color[1]) * 0.96) as f32;
@@ -913,6 +1010,51 @@ mod tests {
         assert!(large > 0 && large <= 48);
         ps.tick(|_, _, _| false);
         assert!(ps.list.iter().all(|p| p.behavior != Behavior::HugeEmitter));
+    }
+
+    #[test]
+    fn mob_spell_takes_its_colour_from_the_motion_and_ambient_ones_are_faint() {
+        let mut ps = Particles::new();
+        ps.spawn_packet(15, [0.0; 3], [0.25, 0.5, 0.75], 1.0, 0, &[]);
+        ps.spawn_packet(16, [0.0; 3], [0.25, 0.5, 0.75], 1.0, 0, &[]);
+        assert_eq!(ps.list[0].color, [0.25, 0.5, 0.75]);
+        assert_eq!(ps.list[0].alpha, 1.0);
+        assert_eq!(ps.list[1].alpha, 0.15);
+    }
+
+    #[test]
+    fn swirl_sheds_about_half_the_ticks_and_only_with_a_colour() {
+        let mut ps = Particles::new();
+        for _ in 0..1000 {
+            ps.potion_swirl([0.0; 3], (0.6, 1.8), 0, false, false);
+        }
+        assert!(ps.is_empty());
+        for _ in 0..1000 {
+            ps.potion_swirl([0.0; 3], (0.6, 1.8), 0x00FF_8000, false, false);
+        }
+        assert!((400..600).contains(&ps.len()), "{}", ps.len());
+        // Invisible entities shed 1 tick in 15.
+        let mut inv = Particles::new();
+        for _ in 0..3000 {
+            inv.potion_swirl([0.0; 3], (0.6, 1.8), 1, false, true);
+        }
+        assert!((120..300).contains(&inv.len()), "{}", inv.len());
+        let first = &ps.list[0];
+        assert!((first.color[1] - 128.0 / 255.0).abs() < 1e-6 && first.color[0] == 1.0);
+    }
+
+    #[test]
+    fn spell_particle_drifts_up_and_ends_with_its_lifetime() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::MobSpell, [0.0, 10.0, 0.0], [1.0, 1.0, 1.0], 0);
+        let life = ps.list[0].max_age;
+        let y = ps.list[0].pos[1];
+        ps.tick(|_, _, _| false);
+        assert!(ps.list[0].pos[1] > y);
+        for _ in 0..=life {
+            ps.tick(|_, _, _| false);
+        }
+        assert!(ps.is_empty());
     }
 
     #[test]

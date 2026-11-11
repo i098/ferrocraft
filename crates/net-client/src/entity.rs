@@ -42,6 +42,18 @@ fn health(meta: &Metadata) -> Option<f32> {
     }
 }
 
+fn potion(id: i32, meta: &Metadata) -> Option<EntityEvent> {
+    let color = match find(meta, 7) {
+        Some(MetaValue::Int(c)) => Some(*c),
+        _ => None,
+    };
+    let ambient = match find(meta, 8) {
+        Some(MetaValue::Byte(b)) => Some(*b > 0),
+        _ => None,
+    };
+    (color.is_some() || ambient.is_some()).then_some(EntityEvent::Potion { id, color, ambient })
+}
+
 fn stack(meta: &Metadata) -> Option<ItemRef> {
     match find(meta, 10) {
         Some(MetaValue::Slot(s)) => item(s),
@@ -72,10 +84,17 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
     if let cb::Packet::PlayerListItem(p) = packet {
         return player_list(&p.action);
     }
+    let (id, meta) = match packet {
+        cb::Packet::SpawnPlayer(p) => (p.entity_id.0, Some(&p.metadata)),
+        cb::Packet::SpawnMob(p) => (p.entity_id.0, Some(&p.metadata)),
+        cb::Packet::EntityMetadata(p) => (p.entity_id.0, Some(&p.metadata)),
+        _ => (0, None),
+    };
     spawn_event(packet)
         .or_else(|| motion_event(packet))
         .or_else(|| state_event(packet))
         .into_iter()
+        .chain(meta.and_then(|m| potion(id, m)))
         .collect()
 }
 

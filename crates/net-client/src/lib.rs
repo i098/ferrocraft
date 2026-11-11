@@ -91,6 +91,21 @@ pub enum NetEvent {
         food: i32,
         saturation: f32,
     },
+    /// S1D EntityEffect: `duration` 32767 is a maxed effect.
+    EntityEffect {
+        entity_id: i32,
+        effect: world::effects::Effect,
+    },
+    /// S1E RemoveEntityEffect.
+    RemoveEntityEffect {
+        entity_id: i32,
+        effect_id: i8,
+    },
+    /// S20 EntityProperties: the `generic.movementSpeed` entry, when the packet has one.
+    MovementSpeed {
+        entity_id: i32,
+        speed: world::effects::Speed,
+    },
     /// S1F SetExperience.
     Experience {
         bar: f32,

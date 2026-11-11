@@ -516,7 +516,7 @@ pub mod clientbound {
         effect_id: i8,
         amplifier: i8,
         duration: VarInt,
-        hide_particles: bool,
+        show_particles: bool,
     });
     packet!(RemoveEntityEffect = 0x1E { entity_id: VarInt, effect_id: i8 });
     packet!(SetExperience = 0x1F { bar: f32, level: VarInt, total: VarInt });

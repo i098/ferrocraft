@@ -1054,22 +1054,19 @@ mod tests {
         assert!(entity.burning());
         entity.flags = 0;
         assert!(!entity.burning());
-        for kind in [
-            Kind::Mob(56),
-            Kind::Mob(57),
-            Kind::Mob(62),
-            Kind::Mob(63),
-            Kind::Mob(64),
-            Kind::Object(50),
-        ] {
-            entity.kind = kind;
-            entity.flags = flag::BURNING;
-            assert!(!entity.burning(), "{kind:?}");
-        }
-        for kind in [Kind::Mob(53), Kind::Object(70)] {
-            entity.kind = kind;
-            entity.flags = flag::BURNING;
-            assert!(entity.burning(), "{kind:?}");
+        // 1.8.9 `isImmuneToFire` overrides: EntityGhast 56, EntityPigZombie 57, EntityMagmaCube 62,
+        // EntityDragon 63, EntityWither 64, EntityTNTPrimed (object 50). Every other id burns;
+        // EntityBlaze 61 is driven by metadata and EntitySkeleton 51 by its type, both below.
+        for id in 0..=u8::MAX {
+            for kind in [Kind::Mob(id), Kind::Object(id as i8)] {
+                if matches!(kind, Kind::Mob(51 | 61)) {
+                    continue;
+                }
+                entity.kind = kind;
+                entity.flags = flag::BURNING;
+                let immune = matches!(kind, Kind::Mob(56 | 57 | 62 | 63 | 64) | Kind::Object(50));
+                assert_eq!(entity.burning(), !immune, "{kind:?}");
+            }
         }
         entity.kind = Kind::Mob(51);
         entity.flags = flag::BURNING;

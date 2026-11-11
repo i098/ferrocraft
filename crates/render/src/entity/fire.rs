@@ -44,11 +44,10 @@ pub fn build(fires: &[Fire], yaw: f32, tick: u64, frames: [u32; 2]) -> [MeshData
                 [-half_width, y + 1.4],
                 [half_width, y + 1.4],
             ];
-            let frame = tick + if layer % 2 == 0 { 16 } else { 0 };
             for ([x, y], uv) in
                 coords
                     .into_iter()
-                    .zip(uv(frame, frames[layer % 2], layer / 2 % 2 == 0))
+                    .zip(uv(tick, frames[layer % 2], layer / 2 % 2 == 0))
             {
                 mesh.vertices.push(Vertex {
                     pos: [
@@ -112,6 +111,8 @@ mod tests {
         assert!((a[0].vertices[4].pos[0].abs() - 0.42 * 0.9 * 0.9).abs() < 0.00001);
         assert!((a[0].vertices[0].pos[0] - b[0].vertices[0].pos[2]).abs() < 0.00001);
         assert_ne!(a[0].vertices[0].uv, b[0].vertices[0].uv);
+        let c = build(&fires, 0.0, 5, [32; 2]);
+        assert_eq!(c[0].vertices[0].uv[1], c[1].vertices[0].uv[1]);
         assert_eq!(uv(32, 32, false), uv(0, 32, false));
         assert!(build(
             &[Fire {

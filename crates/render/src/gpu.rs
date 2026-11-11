@@ -974,7 +974,7 @@ impl Renderer {
                 .flat_map(|pass| {
                     draw.vertices.iter().map(move |v| Vertex {
                         uv: entity::glint_uv_item(v.uv.map(|c| c * uv_scale), age * 50.0, pass),
-                        color: entity::GLINT_COLOR,
+                        color: entity::ITEM_GLINT_COLOR,
                         light: [1.0; 2],
                         ..*v
                     })

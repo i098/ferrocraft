@@ -620,7 +620,9 @@ pub fn glint_uv_item(uv: [f32; 2], ms: f32, pass: usize) -> [f32; 2] {
 pub const ITEM_UV_SCALE: f32 = 16.0 / 512.0;
 
 /// Glint tint, 0.5 * 0.76, 0.25 * 0.76, 0.8 * 0.76 as `renderGlint` sets it.
-pub const GLINT_COLOR: [f32; 4] = [0.38, 0.19, 0.608, 1.0];
+pub const ARMOR_GLINT_COLOR: [f32; 4] = [0.38, 0.19, 0.608, 1.0];
+/// Item glint tint, `0xFF8040CC` as `RenderItem.renderEffect` passes it.
+pub const ITEM_GLINT_COLOR: [f32; 4] = [0.502, 0.251, 0.8, 1.0];
 
 /// The glint layer: the glowing armor pieces and held items again, once per vanilla pass, with
 /// texture coordinates that scroll over the surface. Blended `SRC_COLOR, ONE` at the same depth as
@@ -651,8 +653,9 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
                 }
             }
             for (n, v) in out.vertices[start..].iter_mut().enumerate() {
-                v.uv = if start + n < armor_end {
-                    glint_uv_armor([v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0], d.age, pass)
+                (v.uv, v.color) = if start + n < armor_end {
+                    let uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
+                    (glint_uv_armor(uv, d.age, pass), ARMOR_GLINT_COLOR)
                 } else {
                     // shortcut: the held bar has no sprite; its model-space position stands in.
                     let rel = [
@@ -661,9 +664,8 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
                         v.pos[2] - xf.pos[2] as f32,
                     ];
                     let uv = [(rel[0] + rel[2]) * ITEM_UV_SCALE, rel[1] * ITEM_UV_SCALE];
-                    glint_uv_item(uv, d.age * 50.0, pass)
+                    (glint_uv_item(uv, d.age * 50.0, pass), ITEM_GLINT_COLOR)
                 };
-                v.color = GLINT_COLOR;
                 v.light = [1.0; 2];
             }
         }

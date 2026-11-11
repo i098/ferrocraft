@@ -31,6 +31,8 @@ pub struct Environment {
     pub gamma: f32,
     /// The liquid around the camera: its own fog color and density.
     pub fluid: Option<Fluid>,
+    /// `gameSettings.clouds`: 0 off, 1 fast, 2 fancy.
+    pub clouds: u8,
 }
 
 impl Default for Environment {
@@ -46,6 +48,7 @@ impl Default for Environment {
             render_distance_chunks: 8,
             gamma: 0.0,
             fluid: None,
+            clouds: 2,
         }
     }
 }
@@ -153,10 +156,16 @@ impl Environment {
             sky = fog;
         }
 
-        let mut cloud = [day * 0.9 + 0.1, day * 0.9 + 0.1, day * 0.85 + 0.15];
+        // `World.getCloudColor`: rain grays the white `cloudColor` before the daylight scaling.
+        let mut cloud = [1.0; 3];
         if self.rain > 0.0 {
             cloud = desaturate(cloud, 0.6, 1.0 - self.rain * 0.95);
         }
+        cloud = [
+            cloud[0] * (day * 0.9 + 0.1),
+            cloud[1] * (day * 0.9 + 0.1),
+            cloud[2] * (day * 0.85 + 0.15),
+        ];
         if self.thunder > 0.0 {
             cloud = desaturate(cloud, 0.2, 1.0 - self.thunder * 0.95);
         }
@@ -204,7 +213,8 @@ pub struct EnvTexture {
     pub rgba: Vec<u8>,
     /// Whether `clouds.png` was found (clouds are not drawn otherwise).
     pub has_clouds: bool,
-    /// `true` where a cloud texel is opaque, row-major 256x256.
+    /// `true` where a cloud texel passes the default `alphaFunc(GREATER, 0.1)`, row-major 256x256.
+    /// The empty texels of the vanilla `clouds.png` have alpha 1, not 0.
     pub clouds: Vec<bool>,
 }
 
@@ -237,7 +247,7 @@ impl EnvTexture {
             };
             if let Some(img) = load("clouds").filter(|i| i.width == 256 && i.height == 256) {
                 for (c, px) in clouds.iter_mut().zip(img.rgba.as_chunks::<4>().0) {
-                    *c = px[3] > 0;
+                    *c = f32::from(px[3]) / 255.0 > 0.1;
                 }
                 has_clouds = true;
             }
@@ -459,68 +469,134 @@ fn stars(g: &mut SkyGeometry, alpha: f32, place: impl Fn([f32; 3]) -> [f32; 3]) 
     }
 }
 
-/// Fancy clouds: a 12x4x12 block box per opaque `clouds.png` texel around the camera.
+/// Cloud texel `(tx, tz)` of the wrapping 256x256 `clouds.png`.
+fn cloud_at(texels: &[bool], tx: i64, tz: i64) -> bool {
+    texels[(tz.rem_euclid(256) * 256 + tx.rem_euclid(256)) as usize]
+}
+
+/// `RenderGlobal.renderClouds` (fast) and `renderCloudsFancy`, in world space around the camera at `eye`.
+/// Only opaque texels make geometry, as the alpha test drops the rest.
+/// Fancy clouds need a depth-only pass before the color pass, as vanilla draws them twice.
 pub fn build_clouds(
     env: &Environment,
     s: &SkyState,
     eye: [f64; 3],
     texels: &[bool],
 ) -> SkyGeometry {
+    // `GameSettings.shouldRenderClouds`: no clouds when off or below 4 chunks of render distance.
+    if env.clouds == 0 || env.render_distance_chunks < 4 {
+        return SkyGeometry::default();
+    }
+    // `(ticks + partialTicks) * 0.03F`: the clouds drift toward +x.
+    let drift = (env.ticks as f64 + env.partial as f64) * f64::from(0.03f32);
+    let cloud = |k: f32| [s.cloud[0] * k, s.cloud[1] * k, s.cloud[2] * k, 0.8];
+    if env.clouds == 1 {
+        fast_clouds(eye, drift, texels, cloud(1.0))
+    } else {
+        fancy_clouds(eye, drift, texels, cloud)
+    }
+}
+
+const CLOUD_Y: f32 = 128.33;
+
+/// Fast: one plane of 8-block texels over the 512x512 square around the camera.
+fn fast_clouds(eye: [f64; 3], drift: f64, texels: &[bool], color: [f32; 4]) -> SkyGeometry {
     let mut g = SkyGeometry::default();
-    let shift = (env.ticks as f64 + env.partial as f64) * 0.03;
-    let (tx0, tz0) = (
-        ((eye[0] + shift) / 12.0).floor() as i64,
-        (eye[2] / 12.0 + 0.33).floor() as i64,
+    let y0 = CLOUD_Y;
+    let (x0, z0) = (eye[0] - 256.0, eye[2] - 256.0);
+    let (bx, bz) = (
+        ((x0 + drift) / 8.0).floor() as i64,
+        (z0 / 8.0).floor() as i64,
     );
-    let at = |tx: i64, tz: i64| texels[((tz.rem_euclid(256)) * 256 + tx.rem_euclid(256)) as usize];
-    let (y0, y1) = (128.0f32 + 0.33, 128.0f32 + 0.33 + 4.0);
-    let shade = [1.0, 0.7, 0.8, 0.8, 0.9, 0.9];
-    let range = 12i64;
-    for tz in tz0 - range..=tz0 + range {
-        for tx in tx0 - range..=tx0 + range {
-            if !at(tx, tz) {
-                continue;
-            }
-            let x0 = (tx as f64 * 12.0 - shift) as f32;
-            let z0 = ((tz as f64 - 0.33) * 12.0) as f32;
-            let (x1, z1) = (x0 + 12.0, z0 + 12.0);
-            // Faces in `UP, DOWN, NORTH, SOUTH, WEST, EAST` order; a face is dropped next to another cloud texel.
-            let faces: [(bool, [[f32; 3]; 4]); 6] = [
-                (
-                    true,
-                    [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
-                ),
-                (
-                    true,
-                    [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
-                ),
-                (
-                    !at(tx, tz - 1),
-                    [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
-                ),
-                (
-                    !at(tx, tz + 1),
-                    [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
-                ),
-                (
-                    !at(tx - 1, tz),
-                    [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
-                ),
-                (
-                    !at(tx + 1, tz),
-                    [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]],
-                ),
-            ];
-            for (f, (draw, corners)) in faces.iter().enumerate() {
-                if *draw {
-                    let k = shade[f];
-                    let color = [s.cloud[0] * k, s.cloud[1] * k, s.cloud[2] * k, 0.8];
-                    g.solid_quad(*corners, color);
-                }
+    for tz in bz..=bz + 64 {
+        for tx in (bx..=bx + 64).filter(|&tx| cloud_at(texels, tx, tz)) {
+            let (xa, xb) = ((tx * 8) as f64 - drift, (tx * 8 + 8) as f64 - drift);
+            let (xa, xb) = (xa.max(x0) as f32, xb.min(x0 + 512.0) as f32);
+            let (za, zb) = (
+                ((tz * 8) as f64).max(z0) as f32,
+                ((tz * 8 + 8) as f64).min(z0 + 512.0) as f32,
+            );
+            if xa < xb && za < zb {
+                g.solid_quad(
+                    [[xa, y0, zb], [xb, y0, zb], [xb, y0, za], [xa, y0, za]],
+                    color,
+                );
             }
         }
     }
     g
+}
+
+/// Fancy: 8x8 groups of 8x8 texels; a group shows only the side faces that can face the camera.
+fn fancy_clouds(
+    eye: [f64; 3],
+    drift: f64,
+    texels: &[bool],
+    cloud: impl Fn(f32) -> [f32; 4],
+) -> SkyGeometry {
+    let mut g = SkyGeometry::default();
+    let (bx, bz) = (
+        ((eye[0] + drift) / 12.0).floor() as i64,
+        (eye[2] / 12.0 + f64::from(0.33f32)).floor() as i64,
+    );
+    let rel = CLOUD_Y - eye[1] as f32;
+    for (cx, cz) in (-3i64..=4).flat_map(|cz| (-3i64..=4).map(move |cx| (cx, cz))) {
+        // Bottom, top, west, east, north, south.
+        let show = [rel > -5.0, rel <= 5.0, cx > -1, cx <= 1, cz > -1, cz <= 1];
+        for (i, j) in (0..8).flat_map(|j| (0..8).map(move |i| (i, j))) {
+            let (tx, tz) = (bx + cx * 8 + i, bz + cz * 8 + j);
+            if cloud_at(texels, tx, tz) {
+                let x0 = (tx as f64 * 12.0 - drift) as f32;
+                let z0 = ((tz as f64 - f64::from(0.33f32)) * 12.0) as f32;
+                cloud_box(&mut g, x0, z0, show, &cloud);
+            }
+        }
+    }
+    g
+}
+
+/// One 12x4x12 cloud texel box with the faces in `show`, shaded like `renderCloudsFancy`.
+fn cloud_box(
+    g: &mut SkyGeometry,
+    x0: f32,
+    z0: f32,
+    show: [bool; 6],
+    cloud: impl Fn(f32) -> [f32; 4],
+) {
+    let y0 = CLOUD_Y;
+    // Top face 4 - 1/1024 up; the far side faces sit 1/1024 of a texel inside.
+    let (y1, y4, inset) = (y0 + 4.0 - 1.0 / 1024.0, y0 + 4.0, 12.0 / 1024.0);
+    let (x1, z1) = (x0 + 12.0, z0 + 12.0);
+    let (xe, zs) = (x1 - inset, z1 - inset);
+    let faces: [(f32, [[f32; 3]; 4]); 6] = [
+        (
+            0.7,
+            [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]],
+        ),
+        (
+            1.0,
+            [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]],
+        ),
+        (
+            0.9,
+            [[x0, y0, z1], [x0, y4, z1], [x0, y4, z0], [x0, y0, z0]],
+        ),
+        (
+            0.9,
+            [[xe, y0, z1], [xe, y4, z1], [xe, y4, z0], [xe, y0, z0]],
+        ),
+        (
+            0.8,
+            [[x0, y4, z0], [x1, y4, z0], [x1, y0, z0], [x0, y0, z0]],
+        ),
+        (
+            0.8,
+            [[x0, y4, zs], [x1, y4, zs], [x1, y0, zs], [x0, y0, zs]],
+        ),
+    ];
+    for ((k, corners), _) in faces.into_iter().zip(show).filter(|(_, s)| *s) {
+        g.solid_quad(corners, cloud(k));
+    }
 }
 
 #[cfg(test)]
@@ -566,6 +642,39 @@ mod tests {
         };
         assert!(glow_x(0) > 90.0, "sunrise {}", glow_x(0));
         assert!(glow_x(12000) < -90.0, "sunset {}", glow_x(12000));
+    }
+
+    #[test]
+    fn fancy_clouds_show_the_faces_vanilla_draws() {
+        let env = Environment::default();
+        let s = env.sky_state();
+        // One cloud texel, at the camera's own texel.
+        let mut texels = vec![false; 256 * 256];
+        texels[0] = true;
+        let quads = |eye: [f64; 3], clouds: u8| {
+            build_clouds(&Environment { clouds, ..env }, &s, eye, &texels)
+                .indices
+                .len()
+                / 6
+        };
+        assert_eq!(
+            quads([6.0, 70.0, 2.0], 2),
+            5,
+            "bottom and four sides from below"
+        );
+        assert_eq!(
+            quads([6.0, 200.0, 2.0], 2),
+            5,
+            "top and four sides from above"
+        );
+        assert_eq!(quads([6.0, 129.0, 2.0], 2), 6, "both caps inside the layer");
+        // Three groups of 8 texels to the west, only the faces toward the camera remain.
+        assert_eq!(quads([6.0 + 24.0 * 12.0, 70.0, 2.0], 2), 4);
+        assert_eq!(
+            quads([6.0, 70.0, 2.0], 1),
+            1,
+            "fast clouds are one flat quad"
+        );
     }
 
     #[test]

@@ -641,6 +641,7 @@ impl App {
             render_distance_chunks: self.ui.settings.render_distance as u32,
             gamma: self.ui.settings.gamma,
             fluid,
+            clouds: self.ui.settings.clouds as u8,
         });
         r.set_lightning(self.game.bolts.shapes());
         let hand_item = self.equip.2.or(held);

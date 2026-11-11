@@ -114,6 +114,8 @@ pub struct Renderer {
     sky_pipe: wgpu::RenderPipeline,
     sky_add_pipe: wgpu::RenderPipeline,
     cloud_pipe: wgpu::RenderPipeline,
+    /// `renderCloudsFancy` first pass: `colorMask(false, ...)`, depth only.
+    cloud_depth_pipe: wgpu::RenderPipeline,
     hand_pipe: wgpu::RenderPipeline,
     line_pipe: wgpu::RenderPipeline,
     /// `renderMiningProgress` blend: source times destination, twice.
@@ -325,7 +327,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -356,6 +358,7 @@ impl Renderer {
             sky_pipe,
             sky_add_pipe,
             cloud_pipe,
+            cloud_depth_pipe,
             hand_pipe,
             line_pipe,
             crack_pipe,
@@ -1320,8 +1323,12 @@ impl Renderer {
             }
             if let Some(m) = &clouds {
                 pass.set_bind_group(0, &self.env_group, &[]);
-                pass.set_pipeline(&self.cloud_pipe);
-                draw_mesh(&mut pass, m);
+                // Fancy clouds draw twice: depth only, then color.
+                let pipes = [&self.cloud_depth_pipe, &self.cloud_pipe];
+                for pipe in &pipes[usize::from(env.clouds != 2)..] {
+                    pass.set_pipeline(pipe);
+                    draw_mesh(&mut pass, m);
+                }
             }
             if let (Some(m), Some(group)) = (&rain, &self.rain_group) {
                 pass.set_bind_group(0, group, &[]);
@@ -1580,7 +1587,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 12] {
+) -> [wgpu::RenderPipeline; 13] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1639,7 +1646,12 @@ fn build_pipelines(
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend,
-                    write_mask: wgpu::ColorWrites::ALL,
+                    // `fs_cloud` writing depth is the depth-only first pass of fancy clouds.
+                    write_mask: if fs == "fs_cloud" && depth_write {
+                        wgpu::ColorWrites::empty()
+                    } else {
+                        wgpu::ColorWrites::ALL
+                    },
                 })],
             }),
             primitive: wgpu::PrimitiveState {
@@ -1754,11 +1766,21 @@ fn build_pipelines(
     );
     let cloud_pipe = pipe(
         "vs_world",
-        "fs_sky",
+        "fs_cloud",
         stride,
         &world_attrs,
         alpha,
         false,
+        true,
+        false,
+    );
+    let cloud_depth_pipe = pipe(
+        "vs_world",
+        "fs_cloud",
+        stride,
+        &world_attrs,
+        None,
+        true,
         true,
         false,
     );
@@ -1821,6 +1843,7 @@ fn build_pipelines(
         sky_pipe,
         sky_add_pipe,
         cloud_pipe,
+        cloud_depth_pipe,
         hand_pipe,
         line_pipe,
         crack_pipe,

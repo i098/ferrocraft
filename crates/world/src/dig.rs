@@ -599,6 +599,12 @@ impl Digger {
     pub fn is_hitting(&self) -> bool {
         self.hitting
     }
+
+    /// The block being dug and its destroy stage `(int)(curBlockDamageMP * 10) - 1`, once that is 0 or more.
+    pub fn stage(&self) -> Option<([i32; 3], u8)> {
+        let stage = (self.progress * 10.0) as i32 - 1;
+        (self.hitting && (0..10).contains(&stage)).then_some((self.current, stage as u8))
+    }
 }
 
 /// Ticks to wait after a creative break or a finished dig: `blockHitDelay`.

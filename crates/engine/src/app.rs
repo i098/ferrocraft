@@ -513,6 +513,7 @@ impl App {
         draws.extend(self_model);
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
+        r.set_cracks(self.game.cracks());
         let verts = self
             .particles
             .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32);

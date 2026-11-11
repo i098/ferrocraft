@@ -103,7 +103,7 @@ impl Neighborhood<'_> {
 }
 
 /// Face directions in `UP, DOWN, NORTH, SOUTH, WEST, EAST` order.
-const DIRS: [[i32; 3]; 6] = [
+pub(crate) const DIRS: [[i32; 3]; 6] = [
     [0, 1, 0],
     [0, -1, 0],
     [0, 0, -1],
@@ -114,7 +114,7 @@ const DIRS: [[i32; 3]; 6] = [
 /// Vanilla per-face brightness.
 const SHADE: [f32; 6] = [1.0, 0.5, 0.8, 0.8, 0.6, 0.6];
 /// Corners of each face, counter-clockwise seen from outside.
-const CORNERS: [[[f32; 3]; 4]; 6] = [
+pub(crate) const CORNERS: [[[f32; 3]; 4]; 6] = [
     [[0., 1., 0.], [0., 1., 1.], [1., 1., 1.], [1., 1., 0.]],
     [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
     [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
@@ -124,7 +124,7 @@ const CORNERS: [[[f32; 3]; 4]; 6] = [
 ];
 
 /// Texture coordinates of the block-local point `p` on `face` (vanilla default model UVs).
-fn face_uv(face: usize, p: [f32; 3]) -> [f32; 2] {
+pub(crate) fn face_uv(face: usize, p: [f32; 3]) -> [f32; 2] {
     match face {
         0 => [p[0], p[2]],
         1 => [p[0], 1.0 - p[2]],
@@ -135,7 +135,7 @@ fn face_uv(face: usize, p: [f32; 3]) -> [f32; 2] {
     }
 }
 
-fn rot_uv([u, v]: [f32; 2], quarter_turns: u8) -> [f32; 2] {
+pub(crate) fn rot_uv([u, v]: [f32; 2], quarter_turns: u8) -> [f32; 2] {
     (0..quarter_turns).fold([u, v], |[u, v], _| [v, 1.0 - u])
 }
 

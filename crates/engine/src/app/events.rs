@@ -328,7 +328,6 @@ impl App {
                 suffix,
                 members,
             } => sb.set_team(&name, mode, &prefix, &suffix, &members),
-            NetEvent::BlockBreakAnim { .. } => {}
             other => return Err(other),
         }
         Ok(())

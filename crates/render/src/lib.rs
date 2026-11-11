@@ -5,6 +5,7 @@ use std::borrow::Cow;
 
 mod assets;
 mod blocks;
+mod crack;
 mod entity;
 mod gpu;
 mod hand;

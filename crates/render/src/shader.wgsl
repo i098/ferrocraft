@@ -81,3 +81,14 @@ fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
 }
 
+
+// Block crack overlay: no light map and no fog; `alphaFunc(GREATER, 0.1)` on the faded alpha.
+@fragment
+fn fs_crack(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    let a = t.a * i.color.a;
+    if (a <= 0.1) {
+        discard;
+    }
+    return vec4<f32>(t.rgb * i.color.rgb, a);
+}

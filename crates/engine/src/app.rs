@@ -861,8 +861,6 @@ impl ApplicationHandler for App {
     }
 }
 
-/// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
-/// that `DefaultPlayerSkin` picks from the uuid.
 /// `Item.getItemUseAction` of an item id, as far as the poses differ.
 fn use_action(id: i16) -> UseAction {
     match id {
@@ -872,6 +870,8 @@ fn use_action(id: i16) -> UseAction {
     }
 }
 
+/// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
+/// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
     e: &Entity,
     partial: f64,

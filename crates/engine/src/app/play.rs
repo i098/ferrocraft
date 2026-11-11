@@ -234,13 +234,7 @@ impl App {
         let block = |x, y, z| g.store.get_block(x, y, z);
         let mut dust = Vec::new();
         let mut add = |pos: [f64; 3], vel: [f64; 3], (width, height): (f32, f32)| {
-            let state = block(
-                pos[0].floor() as i32,
-                (pos[1] - 0.2).floor() as i32,
-                pos[2].floor() as i32,
-            );
-            // Air has render type -1 and makes no dust.
-            if state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block) {
+            if let Some(state) = sprint_dust_state(pos, height, block) {
                 dust.push((pos, vel, width, state));
             }
         };
@@ -1008,9 +1002,37 @@ fn pick_damage(block: u16, meta: u16, subtypes: bool) -> i16 {
         0
     }
 }
+
+/// `Entity.createRunningParticles`: the block state under the feet, or `None` for air or water.
+fn sprint_dust_state(
+    pos: [f64; 3],
+    height: f32,
+    block: impl Fn(i32, i32, i32) -> u16,
+) -> Option<u16> {
+    let state = block(
+        pos[0].floor() as i32,
+        (pos[1] - 0.2).floor() as i32,
+        pos[2].floor() as i32,
+    );
+    // Air has render type -1 and makes no dust.
+    (state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block))
+        .then_some(state)
+}
 #[cfg(test)]
 mod tests {
-    use super::{activates, item_used_on};
+    use super::{activates, item_used_on, sprint_dust_state};
+
+    #[test]
+    fn sprint_dust_needs_a_solid_block_and_no_water() {
+        let grass = 2 << 4;
+        let water = 9 << 4;
+        let pos = [0.5, 64.0, 0.5];
+        let floor = |x: i32, y: i32, z: i32| if y == 63 && (x, z) == (0, 0) { grass } else { 0 };
+        assert_eq!(sprint_dust_state(pos, 1.8, floor), Some(grass));
+        assert_eq!(sprint_dust_state(pos, 1.8, |_, _, _| 0), None);
+        let flooded = |x: i32, y: i32, z: i32| if y >= 64 { water } else { floor(x, y, z) };
+        assert_eq!(sprint_dust_state(pos, 1.8, flooded), None);
+    }
 
     #[test]
     fn right_click_tables_follow_vanilla() {

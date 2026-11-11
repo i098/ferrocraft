@@ -1395,6 +1395,20 @@ mod tests {
     }
 
     #[test]
+    fn sprint_dust_spawns_one_block_crack_shard_at_the_feet() {
+        // Vanilla Entity.doSprintingEffect: one shard within the hitbox width, 0.1 above the feet,
+        // thrown against the motion (4x outweighs the +-0.4 start jitter at vx = 1).
+        let mut ps = Particles::new();
+        ps.sprint_dust([10.0, 64.0, -5.0], [1.0, 0.0, 0.0], 0.6, 0x1234);
+        assert_eq!(ps.len(), 1);
+        let p = ps.list[0];
+        assert!(matches!(p.sprite, Sprite::Block { state: 0x1234, .. }));
+        assert!((p.pos[0] - 10.0).abs() <= 0.3 && (p.pos[2] + 5.0).abs() <= 0.3);
+        assert!((p.pos[1] - 64.1).abs() < 1e-9);
+        assert!(p.vel[0] < 0.0 && p.vel[1] > 0.0);
+    }
+
+    #[test]
     fn particles_rest_on_floor() {
         let mut ps = Particles::new();
         ps.spawn(Kind::BlockCrack, [0.5, 6.5, 0.5], [0.0; 3], 16);

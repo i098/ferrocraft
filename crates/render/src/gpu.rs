@@ -123,6 +123,7 @@ pub struct Renderer {
     /// Lightning bolts `(position, seed)` for the next frames.
     bolts: Vec<([f64; 3], i64)>,
     bolt_pipe: wgpu::RenderPipeline,
+    hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
@@ -321,7 +322,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -357,6 +358,7 @@ impl Renderer {
             crack_pipe,
             cracks: Vec::new(),
             bolt_pipe,
+            hand_glint_pipe,
             bolts: Vec::new(),
             selection: None,
             hand_globals,
@@ -1334,7 +1336,7 @@ impl Renderer {
             draw_mesh(&mut pass, m);
             if let (Some(g), Some(group)) = (glint, &self.hand_glint_group) {
                 pass.set_bind_group(0, group, &[]);
-                pass.set_pipeline(&self.bolt_pipe);
+                pass.set_pipeline(&self.hand_glint_pipe);
                 draw_mesh(&mut pass, g);
             }
         }
@@ -1517,7 +1519,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 11] {
+) -> [wgpu::RenderPipeline; 12] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1583,7 +1585,10 @@ fn build_pipelines(
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH,
                 depth_write_enabled: depth_write,
-                depth_compare: if depth {
+                depth_compare: if fs == "fs_glint" {
+                    // `depthFunc(GL_EQUAL)`: the glint lands only where the held item drew.
+                    wgpu::CompareFunction::Equal
+                } else if depth {
                     wgpu::CompareFunction::LessEqual
                 } else {
                     wgpu::CompareFunction::Always
@@ -1667,6 +1672,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let hand_glint_pipe = pipe(
+        "vs_world",
+        "fs_glint",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        true,
+        false,
+    );
     let cloud_pipe = pipe(
         "vs_world",
         "fs_sky",
@@ -1741,6 +1756,7 @@ fn build_pipelines(
         crack_pipe,
         bolt_pipe,
         fire_pipe,
+        hand_glint_pipe,
     ]
 }
 

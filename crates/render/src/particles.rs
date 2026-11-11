@@ -119,6 +119,7 @@ enum Behavior {
     HugeEmitter,
     LargeExplosion,
     Suspend,
+    SuspendWater,
     Enchant,
     DripWater,
     DripLava,
@@ -484,7 +485,6 @@ impl Particles {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
         if kind == Kind::Suspended {
-            // shortcut: vanilla also removes it outside water; no liquid lookup reaches `tick`.
             p = self.base([pos[0], pos[1] - 0.125, pos[2]], [0.0; 3], sheet(0, false));
             p.vel = [0.0; 3];
             p.color = [0.4, 0.4, 0.7];
@@ -503,7 +503,11 @@ impl Particles {
                 p.color = [1.0; 3];
             }
         }
-        p.behavior = Behavior::Suspend;
+        p.behavior = if kind == Kind::Suspended {
+            Behavior::SuspendWater
+        } else {
+            Behavior::Suspend
+        };
         p
     }
 
@@ -569,7 +573,7 @@ impl Particles {
                 p.max_age = (6.0 / (self.rand() * 0.8 + 0.6)) as u32;
                 p.behavior = Behavior::Crit;
                 // The vanilla constructor ends with one `tick()`; the world is not at hand here.
-                self.tick_one(&mut p, &|_, _, _| false, &mut Vec::new());
+                self.tick_one(&mut p, &|_, _, _| 0, &mut Vec::new());
                 if kind == Kind::MagicCrit {
                     p.color = [p.color[0] * 0.3, p.color[1] * 0.8, p.color[2]];
                     p.sprite = sheet(66, false);
@@ -858,11 +862,11 @@ impl Particles {
         }
     }
 
-    /// One 20 Hz tick (`EntityFX.onUpdate`); `solid(x, y, z)` reports blocks that stop particles.
-    pub fn tick(&mut self, solid: impl Fn(i32, i32, i32) -> bool) {
+    /// One 20 Hz tick (`EntityFX.onUpdate`); `block(x, y, z)` is the block state at that cell.
+    pub fn tick(&mut self, block: impl Fn(i32, i32, i32) -> u16) {
         let mut list = std::mem::take(&mut self.list);
         let mut spawned = Vec::new();
-        list.retain_mut(|p| self.tick_one(p, &solid, &mut spawned));
+        list.retain_mut(|p| self.tick_one(p, &block, &mut spawned));
         self.list = list;
         for (kind, pos, motion) in spawned {
             self.spawn(kind, pos, motion, 0);
@@ -873,18 +877,18 @@ impl Particles {
     fn tick_one(
         &mut self,
         p: &mut Particle,
-        solid: &impl Fn(i32, i32, i32) -> bool,
+        block: &impl Fn(i32, i32, i32) -> u16,
         spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
     ) -> bool {
         p.prev = p.pos;
-        if let Some(alive) = self.tick_special(p, solid, spawned) {
+        if let Some(alive) = self.tick_special(p, block, spawned) {
             return alive;
         }
         if p.age >= p.max_age {
             return false;
         }
         p.age += 1;
-        move_generic(p, solid);
+        move_generic(p, &|x, y, z| crate::is_solid(block(x, y, z)));
         if p.on_ground {
             p.vel[0] *= f64::from(0.7_f32);
             p.vel[2] *= f64::from(0.7_f32);
@@ -896,7 +900,7 @@ impl Particles {
     fn tick_special(
         &mut self,
         p: &mut Particle,
-        solid: &impl Fn(i32, i32, i32) -> bool,
+        block: &impl Fn(i32, i32, i32) -> u16,
         spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
     ) -> Option<bool> {
         Some(match p.behavior {
@@ -929,10 +933,12 @@ impl Particles {
                 p.age += 1;
                 true
             }
-            Behavior::Suspend => {
+            Behavior::Suspend | Behavior::SuspendWater => {
                 p.pos = [0, 1, 2].map(|i| p.pos[i] + p.vel[i]);
                 p.vel = p.vel.map(|v| v * 0.99);
-                let alive = p.age < p.max_age;
+                let c = p.pos.map(|v| v.floor() as i32);
+                let wet = p.behavior == Behavior::Suspend || is_water(block(c[0], c[1], c[2]));
+                let alive = wet && p.age < p.max_age;
                 p.age += 1;
                 alive
             }
@@ -949,16 +955,17 @@ impl Particles {
                 p.age += 1;
                 alive
             }
-            Behavior::DripWater | Behavior::DripLava => tick_drip(p, solid, spawned),
-            Behavior::Rain => self.tick_rain(p, solid),
+            Behavior::DripWater | Behavior::DripLava => tick_drip(p, block, spawned),
+            Behavior::Rain => self.tick_rain(p, block),
             _ => return None,
         })
     }
 
     /// `RainSplashParticle.onUpdate`: gravity is subtracted whole, and a landed drop dies half the time.
-    fn tick_rain(&mut self, p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) -> bool {
+    fn tick_rain(&mut self, p: &mut Particle, block: &impl Fn(i32, i32, i32) -> u16) -> bool {
+        let solid = |x, y, z| crate::is_solid(block(x, y, z));
         p.vel[1] -= p.gravity;
-        step(p, solid);
+        step(p, &solid);
         p.vel = p.vel.map(|v| v * f64::from(0.98_f32));
         let mut dead = p.age >= p.max_age;
         p.age += 1;
@@ -967,10 +974,7 @@ impl Particles {
             p.vel[0] *= f64::from(0.7_f32);
             p.vel[2] *= f64::from(0.7_f32);
         }
-        // shortcut: only solid full cubes are known here, not the liquid level or the real block top.
-        let cell = p.pos.map(f64::floor);
-        dead |= solid(cell[0] as i32, cell[1] as i32, cell[2] as i32) && p.pos[1] < cell[1] + 1.0;
-        !dead
+        !(dead || buried(block, p.pos, true))
     }
 
     /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`.
@@ -1143,9 +1147,10 @@ fn creep_on_floor(p: &mut Particle) {
 /// lava stays as a puddle tile. `leakTime` is `40 - age`.
 fn tick_drip(
     p: &mut Particle,
-    solid: &impl Fn(i32, i32, i32) -> bool,
+    block: &impl Fn(i32, i32, i32) -> u16,
     spawned: &mut Vec<(Kind, [f64; 3], [f64; 3])>,
 ) -> bool {
+    let solid = |x, y, z| crate::is_solid(block(x, y, z));
     let water = p.behavior == Behavior::DripWater;
     let age = p.age as i32;
     p.color = if water {
@@ -1164,7 +1169,7 @@ fn tick_drip(
         base: tile,
         anim: false,
     };
-    step(p, solid);
+    step(p, &solid);
     p.vel = p.vel.map(|v| v * f64::from(0.98_f32));
     let mut dead = p.age >= p.max_age;
     p.age += 1;
@@ -1181,10 +1186,30 @@ fn tick_drip(
         p.vel[0] *= f64::from(0.7_f32);
         p.vel[2] *= f64::from(0.7_f32);
     }
-    // shortcut: only solid full cubes are known here, not the liquid level or the real block top.
-    let cell = p.pos.map(f64::floor);
-    dead |= solid(cell[0] as i32, cell[1] as i32, cell[2] as i32) && p.pos[1] < cell[1] + 1.0;
-    !dead
+    !(dead || buried(block, p.pos, false))
+}
+
+fn is_water(state: u16) -> bool {
+    matches!(state >> 4, 8 | 9)
+}
+
+/// Whether the cell holding `pos` has a liquid surface or solid top above `pos` (`LiquidBlock.getHeightLoss`;
+/// rain splashes use the block's real top, drips the full cell).
+fn buried(block: &impl Fn(i32, i32, i32) -> u16, pos: [f64; 3], real_top: bool) -> bool {
+    let c = pos.map(|v| v.floor() as i32);
+    let state = block(c[0], c[1], c[2]);
+    let top = if matches!(state >> 4, 8..=11) {
+        let level = state & 15;
+        1.0 - f64::from(if level >= 8 { 1 } else { level + 1 }) / 9.0
+    } else if !crate::is_solid(state) {
+        return false;
+    } else if real_top {
+        let at = |p: [i32; 3]| block(p[0], p[1], p[2]);
+        world::dig::selection_box(&at, c).map_or(1.0, |b| b[4])
+    } else {
+        1.0
+    };
+    pos[1] < f64::from(c[1]) + top
 }
 
 /// Moves by `vel` one axis at a time (y, x, z); a blocked axis zeroes its velocity.
@@ -1249,7 +1274,7 @@ mod tests {
         ps.break_block([0, 10, 0], 1 << 4);
         assert_eq!(ps.len(), 64);
         for _ in 0..200 {
-            ps.tick(|_, y, _| y < 5);
+            ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.is_empty());
     }
@@ -1259,7 +1284,7 @@ mod tests {
         let mut ps = Particles::new();
         ps.spawn(Kind::BlockCrack, [0.5, 6.5, 0.5], [0.0; 3], 16);
         for _ in 0..3 {
-            ps.tick(|_, y, _| y < 5);
+            ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.list.iter().all(|p| p.pos[1] >= 5.0));
     }
@@ -1317,11 +1342,11 @@ mod tests {
         ps.spawn(Kind::Portal, [0.0; 3], [1.0, 0.0, 0.0], 0);
         let life = ps.list[0].max_age;
         assert!((40..50).contains(&life));
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         // t = 0: f = 1, so the particle sits at origin + motion and 1 block above.
         assert_eq!(ps.list[0].pos, [1.0, 1.0, 0.0]);
         for _ in 0..life {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         assert!(ps.is_empty());
     }
@@ -1331,7 +1356,7 @@ mod tests {
         let mut ps = Particles::new();
         ps.spawn(Kind::HugeExplode, [0.0; 3], [0.0; 3], 0);
         for _ in 0..8 {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         let large = ps
             .list
@@ -1339,7 +1364,7 @@ mod tests {
             .filter(|p| p.behavior == Behavior::LargeExplosion)
             .count();
         assert!(large > 0 && large <= 48);
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         assert!(ps.list.iter().all(|p| p.behavior != Behavior::HugeEmitter));
     }
 
@@ -1380,10 +1405,10 @@ mod tests {
         ps.spawn(Kind::MobSpell, [0.0, 10.0, 0.0], [1.0, 1.0, 1.0], 0);
         let life = ps.list[0].max_age;
         let y = ps.list[0].pos[1];
-        ps.tick(|_, _, _| false);
+        ps.tick(|_, _, _| 0);
         assert!(ps.list[0].pos[1] > y);
         for _ in 0..=life {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         assert!(ps.is_empty());
     }
@@ -1453,14 +1478,14 @@ mod tests {
         ps.spawn(Kind::Enchant, [0.0, 0.0, 0.0], [1.0, 2.0, 0.0], 0);
         assert_eq!(ps.list[0].pos, [1.0, 2.0, 0.0]);
         for _ in 0..ps.list[0].max_age {
-            ps.tick(|_, _, _| false);
+            ps.tick(|_, _, _| 0);
         }
         assert!(ps.list[0].pos[0].abs() < 0.05, "{:?}", ps.list[0].pos);
     }
 
     #[test]
     fn water_drip_splashes_on_the_ground_and_lava_stays() {
-        let floor = |_: i32, y: i32, _: i32| y < 0;
+        let floor = |_: i32, y: i32, _: i32| if y < 0 { 16 } else { 0 };
         let mut ps = Particles::new();
         ps.spawn(Kind::DripWater, [0.5, 0.2, 0.5], [0.0; 3], 0);
         for _ in 0..200 {
@@ -1473,5 +1498,45 @@ mod tests {
             lava.tick(floor);
         }
         assert!(lava.list.iter().all(|p| p.behavior == Behavior::DripLava));
+    }
+
+    fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {
+        move |x, y, z| if [x, y, z] == cell { state } else { 0 }
+    }
+
+    #[test]
+    fn suspended_dies_on_the_first_tick_outside_water() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::Suspended, [0.5, 0.5, 0.5], [0.0; 3], 0);
+        let cell = ps.list[0].pos.map(|v| v.floor() as i32);
+        ps.tick(at(cell, 9 << 4));
+        assert_eq!(ps.list.len(), 1);
+        ps.tick(|_, _, _| 0);
+        assert!(ps.is_empty());
+        let mut dry = Particles::new();
+        dry.spawn(Kind::Suspended, [0.5, 0.5, 0.5], [0.0; 3], 0);
+        dry.tick(|_, _, _| 0);
+        assert!(dry.is_empty());
+    }
+
+    #[test]
+    fn drip_dies_below_a_liquid_surface_but_not_above_it() {
+        // Water level 7 (height loss 8/9): the surface is 1/9 above the cell floor.
+        let water = |y: f64| {
+            let mut ps = Particles::new();
+            ps.spawn(Kind::DripWater, [0.5, y, 0.5], [0.0; 3], 0);
+            ps.tick(at([0, 0, 0], (9 << 4) | 7));
+            ps.is_empty()
+        };
+        assert!(water(0.05));
+        assert!(!water(0.5));
+    }
+
+    #[test]
+    fn drip_dies_inside_a_solid_cell() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 0.9, 0.5], [0.0; 3], 0);
+        ps.tick(at([0, 0, 0], 1 << 4));
+        assert!(ps.is_empty());
     }
 }

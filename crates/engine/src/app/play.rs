@@ -212,7 +212,7 @@ impl App {
         self.rain_particles();
         self.potion_particles();
         self.particles
-            .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
+            .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
         self.send_state();
         self.send_pose();

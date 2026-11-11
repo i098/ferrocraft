@@ -310,6 +310,18 @@ impl App {
         }
     }
 
+    /// `handleChangeGameState` reason 10: the elder guardian ghost and its sound at the player.
+    fn guardian_curse(&mut self) {
+        let Some(pos) = self.game.player.as_ref().map(|p| p.pos) else {
+            return;
+        };
+        self.particles
+            .spawn_packet(41, pos.map(|v| v as f32), [0.0; 3], 0.0, 0, &[]);
+        if let Some(s) = &mut self.sound {
+            s.play("mob.guardian.curse", Some(pos), 1.0, 1.0);
+        }
+    }
+
     /// Sounds, particles and explosions; `Err` hands back an event it does not own.
     #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn world_event(&mut self, ev: NetEvent, dirty: &mut Dirty) -> Result<(), NetEvent> {
@@ -336,6 +348,7 @@ impl App {
                 .particles
                 .spawn_packet(id, pos, offset, speed, count, &data),
             NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
+            NetEvent::GameState { reason: 10, .. } => self.guardian_curse(),
             NetEvent::Explosion {
                 pos,
                 radius,

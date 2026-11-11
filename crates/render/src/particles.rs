@@ -6,6 +6,7 @@
 //! (16x16 tiles of 8 px) and need that image bound with the same pipeline.
 
 use crate::assets::Atlas;
+use crate::entity::guardian::{self, Curse};
 use crate::mesh::Vertex;
 
 const MAX_PARTICLES: usize = 4000;
@@ -65,11 +66,13 @@ pub enum Kind {
     Barrier,
     /// `iconcrack_` (36): the packet data is the item id and its damage.
     ItemCrack,
+    /// `mobappearance` (41): the elder guardian curse.
+    MobAppearance,
 }
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        const IDS: [(i32, i32, Kind); 38] = [
+        const IDS: [(i32, i32, Kind); 39] = [
             (0, 0, Kind::Explode),
             (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
@@ -108,6 +111,7 @@ impl Kind {
             (33, 33, Kind::Slime),
             (35, 35, Kind::Barrier),
             (36, 36, Kind::ItemCrack),
+            (41, 41, Kind::MobAppearance),
         ];
         IDS.iter()
             .find(|(lo, hi, _)| (*lo..=*hi).contains(&id))
@@ -132,6 +136,8 @@ enum Sprite {
     },
     /// `textures/particle/footprint.png`, a flat quad (`FootstepParticle`).
     Footprint,
+    /// `MobAppearanceParticle`: no quad; the elder guardian model, with its random tail phase.
+    Appearance { tail: f32 },
 }
 
 /// Which vanilla `onUpdate` and size rule a particle follows; `Generic` is `EntityFX.onUpdate`.
@@ -196,6 +202,8 @@ pub struct Quads {
     pub footprint: Vec<Vertex>,
     /// Quads per item `(id, damage)` whose icon texture they sample.
     pub items: Vec<((i16, i16), Vec<Vertex>)>,
+    /// Elder guardians of the curse effect, drawn last (`MobAppearanceParticle` is layer 3).
+    pub curses: Vec<Curse>,
 }
 
 impl Particles {
@@ -284,7 +292,7 @@ impl Particles {
         }
     }
 
-    /// `ItemParticle`, `BarrierParticle` and `FootstepParticle`. `data` is `id | damage << 16` for item crack.
+    /// `ItemParticle`, `BarrierParticle`, `FootstepParticle` and `MobAppearanceParticle`. `data` is `id | damage << 16` for item crack.
     fn spawn_item(
         &mut self,
         kind: Kind,
@@ -310,6 +318,12 @@ impl Particles {
                 p.max_age = 80;
                 p
             }
+            Kind::MobAppearance => {
+                let tail = self.rand() as f32;
+                let mut p = self.base(pos, [0.0; 3], Sprite::Appearance { tail });
+                p.max_age = guardian::LIFETIME;
+                p
+            }
             Kind::Snowball => self.base(pos, [0.0; 3], item(SNOWBALL, 0)),
             Kind::Slime => self.base(pos, [0.0; 3], item(SLIME_BALL, 0)),
             Kind::ItemCrack => {
@@ -321,7 +335,7 @@ impl Particles {
             _ => return None,
         };
         match kind {
-            Kind::Footstep | Kind::Barrier => {
+            Kind::Footstep | Kind::Barrier | Kind::MobAppearance => {
                 p.vel = [0.0; 3];
                 p.gravity = 0.0;
             }
@@ -1148,6 +1162,19 @@ impl Particles {
             }
             let t = f64::from(partial);
             let c = [0, 1, 2].map(|i| (p.prev[i] + (p.pos[i] - p.prev[i]) * t - cam_pos[i]) as f32);
+            if let Sprite::Appearance { tail } = p.sprite {
+                // The entity is made by the first update, so the first frame draws nothing.
+                if p.age >= 1 {
+                    out.curses.push(Curse {
+                        progress: (p.age as f32 + partial) / guardian::LIFETIME as f32,
+                        tail,
+                        partial,
+                        view: [cam_yaw, cam_pitch],
+                        target: cam_pos,
+                    });
+                }
+                continue;
+            }
             let Some((layer, uv)) = sprite_uv(p, atlas, partial) else {
                 continue;
             };
@@ -1259,6 +1286,7 @@ fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32;
             (Layer::Item((id, damage)), [a, b])
         }
         Sprite::Footprint => (Layer::Footprint, [[0.0, 0.0], [1.0, 1.0]]),
+        Sprite::Appearance { .. } => return None,
         Sprite::Explosion => {
             // `LargeExplosionParticle`: 4x4 frames over its life; the quad is mirrored in u.
             let n = ((p.age as f32 + partial) * 15.0 / p.max_age as f32) as u32;

@@ -6,6 +6,7 @@
 //! bar). Name tags are laid out by [`nametags`].
 
 pub(crate) mod fire;
+pub(crate) mod guardian;
 mod projectile;
 mod skin;
 
@@ -921,7 +922,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Creeper => [0.3, 0.7, 0.25],
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
-        Skin::Armor(_) => [0.7; 3],
+        Skin::Armor(_) | Skin::GuardianElder => [0.7; 3],
         Skin::Arrow
         | Skin::Snowball
         | Skin::Egg

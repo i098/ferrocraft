@@ -295,6 +295,74 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     }
 }
 
+/// The elder guardian curse (particle 41) and the item, footprint and barrier particles each change
+/// the frame; with `RENDER_DIR` set the frames are written for a visual check.
+#[test]
+fn curse_and_item_particles_draw() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut frame = |ps: &Particles, partial: f32| {
+        r.set_particles(
+            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, partial, |p| {
+                r.light_at(p)
+            }),
+        );
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let clear = frame(&Particles::new(), 0.0);
+    let mut ps = Particles::new();
+    ps.spawn_packet(41, [8.0, 65.0, 8.0], [0.0; 3], 0.0, 0, &[]);
+    // The entity exists after the first update: nothing is drawn before it.
+    assert_eq!(clear, frame(&ps, 0.5), "no guardian before the first tick");
+    ps.tick(|_, _, _| 0);
+    let early = frame(&ps, 0.5);
+    for _ in 0..13 {
+        ps.tick(|_, _, _| 0);
+    }
+    let mid = frame(&ps, 0.5);
+    assert_ne!(clear, early, "the curse must draw");
+    assert_ne!(early, mid, "the curse fades and turns over its life");
+
+    let mut items = Particles::new();
+    items.spawn_packet(28, [8.5, 64.01, 11.0], [0.0; 3], 0.0, 0, &[]);
+    items.spawn_packet(35, [8.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
+    items.spawn_packet(31, [9.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
+    items.spawn_packet(33, [10.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
+    items.spawn_packet(36, [7.5, 66.0, 11.0], [0.1, 0.1, 0.0], 1.0, 8, &[276]);
+    let shards = frame(&items, 0.0);
+    assert_ne!(
+        clear, shards,
+        "item, footprint and barrier particles must draw"
+    );
+
+    if let Some(dir) = std::env::var_os("RENDER_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, px) in [
+            ("curse_clear", &clear),
+            ("curse_early", &early),
+            ("curse_mid", &mid),
+            ("item_particles", &shards),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
+        }
+    }
+}
+
 /// A 2x2 solid red PNG.
 fn tiny_png() -> Vec<u8> {
     let path = std::env::temp_dir().join(format!("ferrocraft-icon-{}.png", std::process::id()));

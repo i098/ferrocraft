@@ -158,88 +158,122 @@ fn is_tashkeel(c: char) -> bool {
     ('\u{64B}'..='\u{652}').contains(&c)
 }
 
+/// Link state of the scan in `shape`: the current char and the last two relevant ones.
+struct Scan {
+    curr: u32,
+    next: u32,
+    last_link: u32,
+    prev_link: u32,
+    last_pos: isize,
+    nx: isize,
+}
+
+/// The link of the next relevant char before `i`, and its index (`isize::MAX` at the start).
+fn next_relevant(d: &[char], i: isize) -> (u32, isize) {
+    let mut nw = i - 1;
+    loop {
+        if nw == -1 {
+            return (0, isize::MAX);
+        }
+        let l = link(d[nw as usize]);
+        if l & IRRELEVANT == 0 {
+            return (l, nw);
+        }
+        nw -= 1;
+    }
+}
+
+/// The presentation form of `d[i]` given its neighbours' links.
+fn shaped_form(c: char, sc: &Scan) -> char {
+    let flag = special_char(c);
+    let mut shape = SHAPE_TABLE[(sc.next & LINK_MASK) as usize]
+        [(sc.last_link & LINK_MASK) as usize][(sc.curr & LINK_MASK) as usize];
+    if flag == 1 {
+        shape &= 1;
+    } else if flag == 2 {
+        let joins = sc.last_link & LINKL != 0
+            && sc.next & LINKR != 0
+            && c != '\u{64C}'
+            && c != '\u{64D}'
+            && !(sc.next & ALEFTYPE == ALEFTYPE && sc.last_link & LAMTYPE == LAMTYPE);
+        shape = u32::from(joins);
+    }
+    let base = if flag == 2 {
+        0xFE70 + IRRELEVANT_POS[c as usize - 0x64B]
+    } else {
+        0xFE70 + (sc.curr >> 8)
+    };
+    char::from_u32(base + shape).unwrap_or(c)
+}
+
+/// Shapes `d[i]` (or the lam of a lam-alef pair); returns the index that was shaped and whether
+/// a lam-alef pair was merged.
+fn shape_at(d: &mut [char], i: isize, sc: &mut Scan) -> (isize, bool) {
+    let (next, nx) = next_relevant(d, i);
+    sc.next = next;
+    sc.nx = nx;
+    let mut at = i;
+    let mut merged = false;
+    if sc.curr & ALEFTYPE > 0 && sc.last_link & LAMTYPE > 0 {
+        merged = true;
+        let w = change_lam_alef(d[i as usize]);
+        if let Some(w) = w {
+            d[i as usize] = LAMALEF_SPACE_SUB;
+            d[sc.last_pos as usize] = w;
+            at = sc.last_pos;
+        }
+        sc.last_link = sc.prev_link;
+        sc.curr = w.map_or(0, link);
+    }
+    d[at as usize] = shaped_form(d[at as usize], sc);
+    (at, merged)
+}
+
 /// `ArabicShaping.shape`: Arabic letters to their presentation forms; a lam-alef pair becomes
 /// one character.
 fn shape(text: &[char]) -> Vec<char> {
     let mut d: Vec<char> = text.iter().rev().copied().collect();
-    if d.is_empty() {
+    let Some(&first) = d.last() else {
         return Vec::new();
-    }
+    };
     // `normalize`: presentation forms back to the base block.
     for c in &mut d {
         if ('\u{FE70}'..='\u{FEFC}').contains(c) {
             *c = char::from_u32(FE_TO_06[*c as usize - 0xFE70]).unwrap_or(*c);
         }
     }
-    let mut lamalef_found = false;
+    let first = if ('\u{FE70}'..='\u{FEFC}').contains(&first) {
+        d[d.len() - 1]
+    } else {
+        first
+    };
     let mut i = d.len() as isize - 1;
-    let mut curr = link(d[d.len() - 1]);
-    let (mut next, mut prev_link, mut last_link) = (0u32, 0u32, 0u32);
-    let mut last_pos = i;
-    let mut nx: isize = -2;
+    let mut sc = Scan {
+        curr: link(first),
+        next: 0,
+        last_link: 0,
+        prev_link: 0,
+        last_pos: i,
+        nx: -2,
+    };
+    let mut lamalef_found = false;
     while i >= 0 {
-        let iu = i as usize;
-        if curr & 0xFF00 > 0 || is_tashkeel(d[iu]) {
-            let mut nw = i - 1;
-            nx = -2;
-            while nx < 0 {
-                if nw == -1 {
-                    next = 0;
-                    nx = isize::MAX;
-                } else {
-                    next = link(d[nw as usize]);
-                    if next & IRRELEVANT == 0 {
-                        nx = nw;
-                    } else {
-                        nw -= 1;
-                    }
-                }
-            }
-            let mut i_use = iu;
-            if curr & ALEFTYPE > 0 && last_link & LAMTYPE > 0 {
-                lamalef_found = true;
-                let w = change_lam_alef(d[iu]);
-                if let Some(w) = w {
-                    d[iu] = LAMALEF_SPACE_SUB;
-                    d[last_pos as usize] = w;
-                    i = last_pos;
-                    i_use = last_pos as usize;
-                }
-                last_link = prev_link;
-                curr = w.map_or(0, link);
-            }
-            let flag = special_char(d[i_use]);
-            let mut shape = SHAPE_TABLE[(next & LINK_MASK) as usize]
-                [(last_link & LINK_MASK) as usize][(curr & LINK_MASK) as usize];
-            if flag == 1 {
-                shape &= 1;
-            } else if flag == 2 {
-                let c = d[i_use];
-                let joins = last_link & LINKL != 0
-                    && next & LINKR != 0
-                    && c != '\u{64C}'
-                    && c != '\u{64D}'
-                    && !(next & ALEFTYPE == ALEFTYPE && last_link & LAMTYPE == LAMTYPE);
-                shape = u32::from(joins);
-            }
-            d[i_use] = if flag == 2 {
-                let off = IRRELEVANT_POS[d[i_use] as usize - 0x64B];
-                char::from_u32(0xFE70 + off + shape).unwrap_or(d[i_use])
-            } else {
-                char::from_u32(0xFE70 + (curr >> 8) + shape).unwrap_or(d[i_use])
-            };
+        if sc.curr & 0xFF00 > 0 || is_tashkeel(d[i as usize]) {
+            let (at, merged) = shape_at(&mut d, i, &mut sc);
+            i = at;
+            lamalef_found |= merged;
         }
-        if curr & IRRELEVANT == 0 {
-            prev_link = last_link;
-            last_link = curr;
-            last_pos = i;
+        if sc.curr & IRRELEVANT == 0 {
+            sc.prev_link = sc.last_link;
+            sc.last_link = sc.curr;
+            sc.last_pos = i;
         }
         i -= 1;
-        if i == nx {
-            curr = next;
-            nx = -2;
+        if i == sc.nx {
+            sc.curr = sc.next;
+            sc.nx = -2;
         } else if i != -1 {
-            curr = link(d[i as usize]);
+            sc.curr = link(d[i as usize]);
         }
     }
     if lamalef_found {

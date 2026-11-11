@@ -47,6 +47,6 @@ Nothing from Mojang or Forge ships with the project; all derived files are gener
 ## Hard rules
 
 - Vanilla behavior on servers only; no cheats, no anti-cheat bypass.
-- Development and automated tests use local offline servers only.
+- Development and automated tests use local servers only. Default tests run offline. One ignored opt-in test (FC_ONLINE=1) signs in through Mojang's session server against a local online-mode server; no test joins a live public server.
 
 Quality gate: run `sentrux gate .` before a PR; it must pass against `.sentrux/baseline.json`.

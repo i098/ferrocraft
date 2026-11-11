@@ -29,6 +29,7 @@ const SELECTION_VERTICES: u32 = 24;
 const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
 const PARTICLE_SHEET: &str = "textures/particle/particles.png";
 const EXPLOSION_SHEET: &str = "textures/entity/explosion.png";
+const FOOTPRINT_SHEET: &str = "textures/particle/footprint.png";
 /// Outstanding mesh tasks (queued, running or waiting for upload); `ChunkRenderDispatcher.pendingTasks` holds 100.
 const MAX_PENDING_MESHES: usize = 100;
 /// Time per frame for uploading finished meshes, at least one; vanilla `runTasksUntil` stops at the frame's finish time.
@@ -138,6 +139,8 @@ pub struct Renderer {
     gui_pipes: [wgpu::RenderPipeline; 4],
     /// GUI textures by path, loaded on first use.
     textures: HashMap<String, wgpu::BindGroup>,
+    /// Icon texture path of item `(id, damage)`, `None` when its model is not a flat sprite.
+    item_textures: HashMap<(i16, i16), Option<String>>,
     source: Option<AssetSource>,
     atlas: Arc<Atlas>,
     font: Option<Font>,
@@ -371,6 +374,7 @@ impl Renderer {
             particles: Quads::default(),
             gui_pipes,
             textures: HashMap::new(),
+            item_textures: HashMap::new(),
             source,
             mesher: Mesher::new(atlas.clone()),
             atlas,
@@ -910,6 +914,43 @@ impl Renderer {
         Held::Block(hand::held_mesh(state, &self.atlas))
     }
 
+    /// Meshes of the footprint quads and of each item's icon quads, with their textures uploaded.
+    fn textured_particles(
+        &mut self,
+        footprint: Vec<Vertex>,
+        items: Vec<((i16, i16), Vec<Vertex>)>,
+        offset: [f32; 3],
+    ) -> Vec<(String, GpuMesh)> {
+        let mut out = Vec::new();
+        let mut layers = vec![(Some(FOOTPRINT_SHEET.to_string()), footprint)];
+        for ((id, damage), quads) in items {
+            layers.push((self.item_texture(id, damage), quads));
+        }
+        for (tex, quads) in layers {
+            let Some(tex) = tex else { continue };
+            if let Some(m) = self.upload_mesh(quad_mesh(quads), offset) {
+                self.load_texture(&tex);
+                out.push((tex, m));
+            }
+        }
+        out
+    }
+
+    /// The `layer0` texture path of a flat item model, cached.
+    fn item_texture(&mut self, id: i16, damage: i16) -> Option<String> {
+        if let Some(t) = self.item_textures.get(&(id, damage)) {
+            return t.clone();
+        }
+        let name = world::inventory::items::model(id, damage);
+        let source = self.source.as_mut();
+        let found = name.zip(source).and_then(|(name, source)| {
+            let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+            hand::flat_model(&mut read, name).map(|m| m.0)
+        });
+        self.item_textures.insert((id, damage), found.clone());
+        found
+    }
+
     /// The extruded sprite of a `builtin/generated` item model, with its `layer0` texture uploaded.
     /// shortcut: only `layer0`, untinted (leather armor, potions, spawn eggs lose color and overlay).
     fn flat_item(&mut self, id: i16, damage: i16) -> Option<Held> {
@@ -1142,6 +1183,7 @@ impl Renderer {
         if particle_sheet.is_some() {
             self.load_texture(PARTICLE_SHEET);
         }
+        let particle_textured = self.textured_particles(quads.footprint, quads.items, offset);
 
         overlay.iter().for_each(|q| self.load_texture(&q.tex));
         let verts: Vec<GuiVertex> = overlay.iter().flat_map(quad_vertices).collect();
@@ -1243,6 +1285,11 @@ impl Renderer {
             }
             if let Some(m) = &particle_explosion {
                 pass.set_bind_group(0, &self.textures[EXPLOSION_SHEET], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            for (tex, m) in &particle_textured {
+                pass.set_bind_group(0, &self.textures[tex], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }

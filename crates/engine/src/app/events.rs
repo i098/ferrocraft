@@ -407,7 +407,7 @@ impl App {
             }
             2002 => {
                 let (rgb, instant) = world::potion_brew::color_and_instant(data);
-                self.particles.splash_potion(pos, rgb, instant);
+                self.particles.splash_potion(pos, data, rgb, instant);
             }
             2005 => {
                 let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);

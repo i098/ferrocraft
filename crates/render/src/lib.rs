@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 
 mod assets;
+mod biome;
 mod blocks;
 mod crack;
 mod entity;
@@ -118,4 +119,8 @@ pub trait ChunkBlocks {
     fn chunk_z(&self) -> i32;
     /// Block state id at chunk-local `x`, `z` in `0..16` and `y` in `0..256`.
     fn block(&self, x: usize, y: usize, z: usize) -> u16;
+    /// Biome id at chunk-local `x`, `z`; plains (1) unless the source knows better.
+    fn biome(&self, _x: usize, _z: usize) -> u8 {
+        1
+    }
 }

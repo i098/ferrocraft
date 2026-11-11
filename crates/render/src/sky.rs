@@ -108,12 +108,13 @@ fn desaturate(c: [f32; 3], gray_scale: f32, keep: f32) -> [f32; 3] {
 }
 
 impl Environment {
-    pub fn sky_state(&self) -> SkyState {
+    /// Sky, fog and light for this frame; `temperature` is the biome temperature at the camera.
+    pub fn sky_state(&self, temperature: f32) -> SkyState {
         let angle = celestial_angle(self.world_time, self.partial);
         let day = ((angle * PI * 2.0).cos() * 2.0 + 0.5).clamp(0.0, 1.0);
 
-        // Plains temperature 0.8 (`BiomeGenBase.getSkyColorByTemp`).
-        let t = (0.8f32 / 3.0).clamp(-1.0, 1.0);
+        // `BiomeGenBase.getSkyColorByTemp`.
+        let t = (temperature / 3.0).clamp(-1.0, 1.0);
         let mut sky = hsb_to_rgb(0.622_222_24 - t * 0.05, 0.5 + t * 0.1, 1.0).map(|c| c * day);
         if self.rain > 0.0 {
             sky = desaturate(sky, 0.6, 1.0 - self.rain * 0.75);
@@ -617,13 +618,13 @@ mod tests {
 
     #[test]
     fn midday_sky_is_blue_and_midnight_is_dark() {
-        let day = Environment::default().sky_state();
+        let day = Environment::default().sky_state(0.8);
         assert!(day.sky[2] > day.sky[0] && day.sky[2] > 0.9);
         let night = Environment {
             world_time: 18000,
             ..Environment::default()
         }
-        .sky_state();
+        .sky_state(0.8);
         assert!(night.sky.iter().all(|c| *c < 0.05));
         assert!(night.sun_brightness < 0.3 && day.sun_brightness > 0.99);
         assert!(night.star_alpha > 0.4 && day.star_alpha == 0.0);
@@ -637,7 +638,7 @@ mod tests {
                 world_time,
                 ..Environment::default()
             };
-            let layers = build_sky(&env, &env.sky_state(), [0.0; 3]);
+            let layers = build_sky(&env, &env.sky_state(0.8), [0.0; 3]);
             layers.blend.vertices[0].pos[0]
         };
         assert!(glow_x(0) > 90.0, "sunrise {}", glow_x(0));

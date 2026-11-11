@@ -37,6 +37,19 @@ impl JavaRandom {
     pub fn next_double(&mut self) -> f64 {
         (((self.next(26) as i64) << 27) + self.next(27) as i64) as f64 / (1u64 << 53) as f64
     }
+
+    /// Two consecutive `nextGaussian()` results: the polar method yields a pair, the second is cached by Java.
+    pub fn next_gaussian_pair(&mut self) -> (f64, f64) {
+        loop {
+            let v1 = 2.0 * self.next_double() - 1.0;
+            let v2 = 2.0 * self.next_double() - 1.0;
+            let s = v1 * v1 + v2 * v2;
+            if s < 1.0 && s != 0.0 {
+                let m = (-2.0 * s.ln() / s).sqrt();
+                return (v1 * m, v2 * m);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

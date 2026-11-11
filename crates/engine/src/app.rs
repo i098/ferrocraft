@@ -600,15 +600,13 @@ impl App {
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let cam = self.camera(frac);
-        let self_model = (self.perspective != 0)
+        let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
+        // `RenderPlayer.doRender`: the user player draws only as `renderViewEntity`.
+        let self_model = (self.perspective != 0 && spectated.is_none())
             .then(|| self.self_draw(frac))
             .flatten();
         // `isDrawBlockOutline`: only a player view draws the outline and the highlight.
-        let player_view = self
-            .game
-            .camera
-            .and_then(|id| self.game.entities.get(id))
-            .is_none_or(|e| e.kind == Kind::Player);
+        let player_view = spectated.is_none_or(|e| e.kind == Kind::Player);
         let ray = self.view_ray(frac).filter(|_| player_view);
         let pointed = ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
             self.entity_pick(eye, yaw, pitch, id, vehicle)

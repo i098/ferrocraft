@@ -335,7 +335,8 @@ fn view_bob_and_gamma_change_the_frame() {
 #[test]
 fn night_vision_and_blindness_change_the_frame() {
     let frame = |env: Environment| {
-        let mut r = Renderer::new_offscreen(320, 200, None);
+        let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
+        let mut r = Renderer::new_offscreen(320, 200, jar.as_deref());
         r.set_environment(Environment {
             world_time: 18000,
             ..env

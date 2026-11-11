@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn fancy_clouds_show_the_faces_vanilla_draws() {
         let env = Environment::default();
-        let s = env.sky_state();
+        let s = env.sky_state(0.8);
         // One cloud texel, at the camera's own texel.
         let mut texels = vec![false; 256 * 256];
         texels[0] = true;

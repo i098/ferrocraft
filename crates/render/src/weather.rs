@@ -92,7 +92,7 @@ fn column_quad(
     let mut rng = JavaRandom::new(i64::from(seed));
     // `rendererUpdateCount` is a Java int.
     let tick = (env.ticks as i32).wrapping_add(column_hash(x, z)) & 31;
-    let phase = (tick as f32 + env.partial) / 32.0 * (3.0 + rng.next_float());
+    let phase = (tick as f32 + env.partial) / 32.0 * (3.0 + rng.next_double() as f32);
     let (cx, cz) = (
         x as f32 + 0.5 - feet[0] as f32,
         z as f32 + 0.5 - feet[2] as f32,
@@ -100,7 +100,7 @@ fn column_quad(
     let f3 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
     let color = [1.0, 1.0, 1.0, ((1.0 - f3 * f3) * 0.5 + 0.5) * env.rain];
     let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
-    // Each corner's v follows its own height, so the texture moves down as `phase` grows.
+    // Vanilla `renderRainSnow`: the vertex at y = low gets v = low * 0.25 + phase, the one at y = high gets high * 0.25 + phase.
     [
         ([xf - ox, low, zf - oz], [0.0, low * 0.25 + phase], color),
         ([xf + ox, low, zf + oz], [1.0, low * 0.25 + phase], color),
@@ -280,6 +280,29 @@ mod rain_tests {
                 "biome {biome}"
             );
         }
+    }
+
+    #[test]
+    fn snow_uv_follows_the_vanilla_formula() {
+        // Column (0, 0) seeds `java.util.Random(0)`: nextDouble 0.730967787376657, nextGaussian
+        // -1.2895731239084833, nextDouble 0.5504370051176339, nextGaussian 0.6829853173685814 (jshell).
+        // At tick 100, partial 0.5: u = 0.7309678 + 100.5 * 0.01 * -1.2895731, and
+        // v = 100.5 / 512 + 0.5504370 + 100.5 * 0.6829853 * 0.001, plus low * 0.25 per vertex.
+        let env = Environment {
+            rain: 1.0,
+            ticks: 100,
+            partial: 0.5,
+            ..Environment::default()
+        };
+        let q = snow_quad(&env, [3.5, 70.0, 3.5], (0, 0), (64.0, 68.0));
+        let (u, v) = (-0.565_053_2_f32, 0.815_366_f32 + 16.0);
+        assert!((q[0].1[0] - u).abs() < 1e-4, "{}", q[0].1[0]);
+        assert!((q[1].1[0] - (u + 1.0)).abs() < 1e-4);
+        assert!((q[0].1[1] - v).abs() < 1e-3, "{}", q[0].1[1]);
+        assert!((q[2].1[1] - (v + 1.0)).abs() < 1e-3);
+        assert_eq!(q[2].1[0], q[1].1[0]);
+        assert_eq!(q[3].1[0], q[0].1[0]);
+        assert_eq!(q[1].1[1], q[0].1[1]);
     }
 
     #[test]

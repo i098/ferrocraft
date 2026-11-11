@@ -120,6 +120,9 @@ pub enum Effect {
     SettingsSaved,
     /// `Settings::lang` changed: reload the language files (`Minecraft.refreshResources`), then save.
     LanguageChanged,
+    /// "Super Secret Settings...": a random animal, block, mob, player or weather sound instead of
+    /// the click, then `EntityRenderer.activateNextShader`.
+    SuperSecret,
     /// Open a web page in the system browser.
     OpenUrl(&'static str),
 }

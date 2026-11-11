@@ -99,6 +99,10 @@ pub struct Renderer {
     entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
+    fires: Vec<entity::fire::Fire>,
+    on_fire: bool,
+    fire_frames: [u32; 2],
+    fire_pipe: wgpu::RenderPipeline,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     /// `TRANSLUCENT` chunk layer: blended like `water_pipe`, but back faces culled as vanilla does.
@@ -313,7 +317,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -333,6 +337,10 @@ impl Renderer {
             entity_skins,
             entity_tex,
             entity_mesh: None,
+            fires: Vec::new(),
+            on_fire: false,
+            fire_frames: [0; 2],
+            fire_pipe,
             opaque_pipe,
             water_pipe,
             translucent_pipe,
@@ -699,6 +707,20 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
+        self.fires.clear();
+        self.fires.extend(
+            draws
+                .iter()
+                .filter(|d| d.burning)
+                .map(|d| entity::fire::Fire {
+                    pos: d.pos,
+                    size: d.size,
+                }),
+        );
+    }
+
+    pub fn set_on_fire(&mut self, on_fire: bool) {
+        self.on_fire = on_fire;
     }
 
     /// Stores the decoded skin of player `key` and uploads its slot.
@@ -974,6 +996,46 @@ impl Renderer {
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
         let env = self.environment;
+        if (self.on_fire || !self.fires.is_empty()) && self.fire_frames[0] == 0 {
+            for (i, name) in entity::fire::TEXTURES.iter().enumerate() {
+                let image = self
+                    .source
+                    .as_mut()
+                    .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
+                    .and_then(|bytes| decode_png(&bytes));
+                if let Some(image) = image {
+                    self.fire_frames[i] = (image.height / image.width.max(1)).max(1) as u32;
+                } else {
+                    self.fire_frames[i] = 1;
+                }
+                self.load_texture(name);
+            }
+        }
+        let fires = entity::fire::build(
+            &self.fires,
+            cam.yaw,
+            self.environment.ticks,
+            self.fire_frames,
+        )
+        .map(|m| self.upload_mesh(m, [0.0; 3]));
+        let fire_overlay = self.on_fire.then(|| {
+            entity::fire::overlay(
+                w as f32,
+                h as f32,
+                self.environment.ticks,
+                self.fire_frames[1],
+            )
+        });
+        let fire_buf = fire_overlay.as_ref().map(|quads| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("first-person fire"),
+                    contents: bytemuck::cast_slice(
+                        &quads.iter().flat_map(quad_vertices).collect::<Vec<_>>(),
+                    ),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
         let sky = env.sky_state();
         let globals = Globals {
             view_proj: view_proj(cam, w as f32 / h as f32),
@@ -1089,6 +1151,13 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            pass.set_pipeline(&self.fire_pipe);
+            for (i, fire) in fires.iter().enumerate() {
+                if let Some(fire) = fire {
+                    pass.set_bind_group(0, &self.textures[entity::fire::TEXTURES[i]], &[]);
+                    draw_mesh(&mut pass, fire);
+                }
+            }
             // `renderMiningProgress` follows the entities.
             pass.set_pipeline(&self.crack_pipe);
             for (tex, m) in &crack_meshes {
@@ -1165,6 +1234,9 @@ impl Renderer {
                 pass.set_bind_group(0, self.hand_group(*tex), &[]);
                 pass.set_pipeline(&self.hand_pipe);
                 draw_mesh(&mut pass, m);
+            }
+            if let (Some(buf), Some(quads)) = (&fire_buf, &fire_overlay) {
+                self.draw_gui(&mut pass, buf, quads);
             }
             if let Some(buf) = &gui_buf {
                 self.draw_gui(&mut pass, buf, overlay);
@@ -1346,7 +1418,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 10] {
+) -> [wgpu::RenderPipeline; 11] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1548,6 +1620,16 @@ fn build_pipelines(
         true,
         true,
     );
+    let fire_pipe = pipe(
+        "vs_world",
+        "fs_fire",
+        stride,
+        &world_attrs,
+        None,
+        true,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -1559,6 +1641,7 @@ fn build_pipelines(
         line_pipe,
         crack_pipe,
         bolt_pipe,
+        fire_pipe,
     ]
 }
 

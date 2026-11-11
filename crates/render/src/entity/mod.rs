@@ -5,6 +5,7 @@
 //! Not ported yet: sheep wool, villagers, enchant glint, armor textures (armor is a tinted shell),
 //! held item models (a held item is a tinted bar). Name tags are laid out by [`nametags`].
 
+pub(crate) mod fire;
 mod skin;
 
 use crate::mesh::{MeshData, Vertex};
@@ -39,6 +40,7 @@ pub struct EntityDraw {
     /// Ticks into the death animation, 0 when alive.
     pub death_time: f32,
     pub invisible: bool,
+    pub burning: bool,
     /// Hitbox size, used for the generic box.
     pub size: (f32, f32),
     /// Held item id (0 none) and armor item ids for boots, leggings, chestplate, helmet.
@@ -993,6 +995,7 @@ mod tests {
             hurt: false,
             death_time: 0.0,
             invisible: false,
+            burning: false,
             size: (0.6, 1.8),
             held: 0,
             armor: [0; 4],

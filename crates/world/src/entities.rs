@@ -272,7 +272,12 @@ impl Entity {
     }
 
     pub fn burning(&self) -> bool {
-        self.flags & flag::BURNING != 0
+        match self.kind {
+            // Blaze metadata index 16 carries its fire-active bit.
+            Kind::Mob(61) => self.meta.slime.is_some_and(|flags| flags & 1 != 0),
+            Kind::Mob(53 | 56 | 57 | 62 | 64) | Kind::Object(70) => false,
+            _ => self.flags & flag::BURNING != 0,
+        }
     }
 
     /// `Entity.getAlwaysRenderNameTag`: metadata byte 3 is 1.
@@ -1031,5 +1036,31 @@ mod tests {
         assert_eq!(e.textures.as_deref(), Some("dGV4"));
         assert!(e.sneaking());
         assert_eq!(e.equipment[0].unwrap().id, 276);
+    }
+
+    #[test]
+    fn fire_flags_respect_immunity_and_blaze_activity() {
+        let mut entity = Entity::new(1, Kind::Mob(54), [0; 3], 0, 0);
+        entity.flags = flag::BURNING | flag::INVISIBLE;
+        assert!(entity.burning());
+        entity.flags = 0;
+        assert!(!entity.burning());
+        for kind in [
+            Kind::Mob(53),
+            Kind::Mob(56),
+            Kind::Mob(57),
+            Kind::Mob(62),
+            Kind::Mob(64),
+            Kind::Object(70),
+        ] {
+            entity.kind = kind;
+            entity.flags = flag::BURNING;
+            assert!(!entity.burning(), "{kind:?}");
+        }
+        entity.kind = Kind::Mob(61);
+        assert!(!entity.burning());
+        entity.flags = 0;
+        entity.meta.slime = Some(1);
+        assert!(entity.burning());
     }
 }

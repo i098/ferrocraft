@@ -235,6 +235,7 @@ fn textures_property_skins_the_spawned_player() {
         hurt: false,
         death_time: 0.0,
         invisible: false,
+        burning: false,
         size: (0.6, 1.8),
         held: 0,
         armor: [0; 4],

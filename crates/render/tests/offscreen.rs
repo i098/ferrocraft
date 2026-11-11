@@ -168,6 +168,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         hurt: false,
         death_time: 0.0,
         invisible: false,
+        burning: false,
         size: (0.6, 1.8),
         held: 276,
         armor: [0; 4],
@@ -248,4 +249,76 @@ fn view_bob_and_gamma_change_the_frame() {
     assert_eq!(base, frame([0.0; 4], 0.0), "rendering is deterministic");
     assert_ne!(base, frame([0.1, 0.1, 2.0, 1.0], 0.0), "bob moves the view");
     assert_ne!(base, frame([0.0; 4], 1.0), "gamma brightens the terrain");
+}
+
+/// The real fire assets must show flame cutouts, animate, and disappear when extinguished.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn burning_entity_and_first_person_fire() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, -4.0],
+        ..Camera::default()
+    };
+    let mut entity = EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [0.0, 64.0, 0.0],
+        yaw: 180.0,
+        head_yaw: 180.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        burning: false,
+        size: (0.6, 1.8),
+        held: 0,
+        armor: [0; 4],
+        name: None,
+        skin: None,
+    };
+    r.set_entities(&[entity.clone()]);
+    let before = r.render_to_rgba(&cam, &[]).2;
+    entity.burning = true;
+    r.set_entities(&[entity.clone()]);
+    let after = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(before, after, "burning adds the fire geometry");
+    r.set_environment(Environment {
+        ticks: 3,
+        ..Environment::default()
+    });
+    let animated = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(after, animated, "the fire advances to another frame");
+    entity.invisible = true;
+    r.set_entities(&[entity]);
+    let hidden = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&[]);
+    let empty = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(hidden, empty, "invisibility does not hide the fire");
+    r.set_on_fire(true);
+    let first = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(empty, first, "local fire draws with no hand");
+    r.set_on_fire(false);
+    assert_eq!(
+        empty,
+        r.render_to_rgba(&cam, &[]).2,
+        "extinguishing clears the overlay"
+    );
+    if let Some(dir) = std::env::var_os("FIRE_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        for (name, image) in [
+            ("before", before),
+            ("after", after),
+            ("animated", animated),
+            ("invisible", hidden),
+            ("first-person", first),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), 400, 300, &image).unwrap();
+        }
+    }
 }

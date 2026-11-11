@@ -96,6 +96,7 @@ pub struct Game {
     pub entities: Entities,
     /// The local player's entity id, from `JoinGame`.
     pub entity_id: i32,
+    pub entity_flags: u8,
     pub vehicle: Option<i32>,
     /// Creative mode (6 block entity reach instead of 3).
     pub creative: bool,
@@ -165,6 +166,7 @@ impl Game {
             store: ChunkStore::default(),
             entities: Entities::default(),
             entity_id: -1,
+            entity_flags: 0,
             vehicle: None,
             creative: false,
             gamemode: 0,
@@ -342,6 +344,7 @@ impl Game {
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
             NetEvent::Respawn => {
+                self.entity_flags = 0;
                 self.vehicle = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.digger = Digger::default();
@@ -389,6 +392,11 @@ impl Game {
 
     fn apply_state(&mut self, ev: NetEvent) {
         match ev {
+            NetEvent::Entity(EntityEvent::Metadata { id, flags, .. }) if id == self.entity_id => {
+                if let Some(flags) = flags {
+                    self.entity_flags = flags;
+                }
+            }
             NetEvent::Entity(EntityEvent::Velocity { id, vel }) if id == self.entity_id => {
                 if let Some(p) = &mut self.player {
                     p.vel = vel.map(|v| f64::from(v) / 8000.0);
@@ -1060,5 +1068,31 @@ mod tests {
         assert!(g.fly_toggle(false));
         assert_eq!(g.abilities, 6);
         assert!(!g.fly_toggle(false));
+    }
+
+    #[test]
+    fn local_fire_metadata_survives_partial_updates_and_resets_on_respawn() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        let flags = |id, flags| {
+            NetEvent::Entity(EntityEvent::Metadata {
+                id,
+                flags,
+                name: None,
+                health: None,
+                stack: None,
+                size: world::entities::SizeMeta::default(),
+            })
+        };
+        g.apply(flags(8, Some(1)));
+        assert_eq!(g.entity_flags, 0);
+        g.apply(flags(7, Some(1)));
+        g.apply(flags(7, None));
+        assert_eq!(g.entity_flags, 1);
+        g.apply(flags(7, Some(0)));
+        assert_eq!(g.entity_flags, 0);
+        g.apply(flags(7, Some(1)));
+        g.apply(NetEvent::Respawn);
+        assert_eq!(g.entity_flags, 0);
     }
 }

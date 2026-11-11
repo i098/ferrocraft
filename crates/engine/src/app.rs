@@ -476,6 +476,8 @@ impl App {
             hurt: false,
             death_time: 0.0,
             invisible: false,
+            burning: self.game.entity_flags & world::entities::flag::BURNING != 0
+                && self.game.gamemode != 3,
             size: (0.6, 1.8),
             held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
             armor: [slot(8), slot(7), slot(6), slot(5)],
@@ -571,6 +573,12 @@ impl App {
                 lowered,
                 using,
             }),
+        );
+        r.set_on_fire(
+            self.perspective == 0
+                && self.game.gamemode != 3
+                && self.game.player.is_some()
+                && self.game.entity_flags & world::entities::flag::BURNING != 0,
         );
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
@@ -899,6 +907,7 @@ fn entity_draw(
             0.0
         },
         invisible: e.invisible(),
+        burning: e.burning(),
         size: e.size(),
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),

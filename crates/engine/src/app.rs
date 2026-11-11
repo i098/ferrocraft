@@ -768,7 +768,7 @@ fn status_of(game: &Game, update_counter: i32) -> Status {
         withered: game.effects.has(Fx::WITHER),
         hunger: game.effects.has(Fx::HUNGER),
         regen_tick: if game.effects.has(Fx::REGENERATION) {
-            update_counter % (game.health + 5.0).ceil() as i32
+            update_counter % (Status::default().max_health + 5.0).ceil() as i32
         } else {
             -1
         },

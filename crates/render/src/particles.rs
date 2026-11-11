@@ -375,39 +375,45 @@ impl Particles {
             | Kind::MobSpell
             | Kind::MobSpellAmbient
             | Kind::WitchMagic => {
-                // `SpellParticle`: the horizontal start motion is `0.5 - random`, not the packet's.
-                let start = [0.5 - self.rand(), motion[1], 0.5 - self.rand()];
-                let tile = if matches!(kind, Kind::Spell | Kind::MobSpell | Kind::MobSpellAmbient) {
-                    128
-                } else {
-                    144
-                };
-                p = self.base(pos, start, sheet(tile, true));
-                p.vel[1] *= f64::from(0.2_f32);
-                if motion[0] == 0.0 && motion[2] == 0.0 {
-                    p.vel[0] *= f64::from(0.1_f32);
-                    p.vel[2] *= f64::from(0.1_f32);
-                }
-                p.scale *= 0.75;
-                p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.behavior = Behavior::Spell;
-                match kind {
-                    Kind::MobSpell | Kind::MobSpellAmbient => {
-                        p.color = motion.map(|m| m as f32);
-                        if kind == Kind::MobSpellAmbient {
-                            p.alpha = 0.15;
-                        }
-                    }
-                    Kind::WitchMagic => {
-                        let f = (self.rand() * 0.5 + 0.35) as f32;
-                        p.color = [f, 0.0, f];
-                    }
-                    _ => {}
-                }
+                p = self.spell(kind, pos, motion);
             }
             _ => return None,
         }
         Some(p)
+    }
+
+    /// `SpellParticle` and its colored variants.
+    fn spell(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        // The horizontal start motion is `0.5 - random`, not the packet's.
+        let start = [0.5 - self.rand(), motion[1], 0.5 - self.rand()];
+        let tile = if matches!(kind, Kind::Spell | Kind::MobSpell | Kind::MobSpellAmbient) {
+            128
+        } else {
+            144
+        };
+        let mut p = self.base(pos, start, Sprite::Sheet { base: tile, anim: true });
+        p.vel[1] *= f64::from(0.2_f32);
+        if motion[0] == 0.0 && motion[2] == 0.0 {
+            p.vel[0] *= f64::from(0.1_f32);
+            p.vel[2] *= f64::from(0.1_f32);
+        }
+        p.scale *= 0.75;
+        p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        p.behavior = Behavior::Spell;
+        match kind {
+            Kind::MobSpell | Kind::MobSpellAmbient => {
+                p.color = motion.map(|m| m as f32);
+                if kind == Kind::MobSpellAmbient {
+                    p.alpha = 0.15;
+                }
+            }
+            Kind::WitchMagic => {
+                let f = (self.rand() * 0.5 + 0.35) as f32;
+                p.color = [f, 0.0, f];
+            }
+            _ => {}
+        }
+        p
     }
 
     fn spawn_icon(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {

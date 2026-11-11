@@ -43,7 +43,9 @@ const TEMPERATURES: [(&[u8], f32); 11] = [
 ];
 
 /// Biomes with `setDisableRain`: desert, hell, sky, savanna and mesa families.
-const DRY: &[u8] = &[2, 8, 9, 17, 35, 36, 37, 38, 39, 130, 163, 164, 165, 166, 167];
+const DRY: &[u8] = &[
+    2, 8, 9, 17, 35, 36, 37, 38, 39, 130, 163, 164, 165, 166, 167,
+];
 
 /// Precipitation in biome `biome` (1.8.9 id) at height `y`, `None` for the biomes that never rain.
 /// `getFloatTemperature` also subtracts a height noise term below 0.01 in magnitude, which is left out.

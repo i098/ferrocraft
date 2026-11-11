@@ -126,7 +126,9 @@ impl Chunk {
             chunk.sections[s] = Some(sec);
         }
         if ground_up {
-            chunk.biomes.copy_from_slice(&data[needed - BIOME_BYTES..needed]);
+            chunk
+                .biomes
+                .copy_from_slice(&data[needed - BIOME_BYTES..needed]);
         }
         Ok((chunk, needed))
     }

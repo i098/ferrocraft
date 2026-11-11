@@ -22,8 +22,8 @@ jobs:
       - name: Install software Vulkan driver (lavapipe) for the render test
         run: |
           for attempt in 1 2 3; do
-            if sudo apt-get -o Acquire::Retries=5 update &&
-               sudo apt-get -o Acquire::Retries=5 install -y mesa-vulkan-drivers libvulkan1 libasound2-dev; then
+            if timeout 300 sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update &&
+               timeout 600 sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y mesa-vulkan-drivers libvulkan1 libasound2-dev; then
               exit 0
             fi
             echo "apt attempt $attempt failed; retrying"

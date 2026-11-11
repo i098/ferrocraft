@@ -18,7 +18,7 @@ mod sky;
 mod weather;
 
 pub use hand::{Hand, HeldKind, UseAction, Using};
-pub use sky::Environment;
+pub use sky::{Environment, Fluid};
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use entity::{nametags, Class, EntityDraw};
@@ -31,6 +31,20 @@ pub fn is_solid(state: u16) -> bool {
     matches!(
         blocks::look(state).kind,
         blocks::Kind::Opaque | blocks::Kind::Cutout
+    )
+}
+
+/// `Block.isViewBlocking`: an opaque full cube hides the camera inside it.
+pub fn is_view_blocking(state: u16) -> bool {
+    blocks::is_opaque_cube(state)
+}
+
+/// The texture file of the block `state` that fills the screen when the camera is inside it
+/// (`BlockModelShapes.getTexture`, the particle icon).
+pub fn block_texture(state: u16) -> String {
+    format!(
+        "textures/blocks/{}.png",
+        blocks::look(state).tex[blocks::NORTH]
     )
 }
 
@@ -47,6 +61,8 @@ pub struct Camera {
     /// Roll in degrees of `EntityRenderer.applyHurtCam` (hit tilt and death roll), applied
     /// before the bobbing.
     pub hurt_roll: f32,
+    /// Field of view of the hand: `getFOVModifier(partial, false)`, so without the option.
+    pub hand_fov_deg: f32,
 }
 
 impl Default for Camera {
@@ -58,6 +74,7 @@ impl Default for Camera {
             fov_deg: 70.0,
             bob: [0.0; 4],
             hurt_roll: 0.0,
+            hand_fov_deg: 70.0,
         }
     }
 }

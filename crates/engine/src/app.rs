@@ -12,6 +12,7 @@ mod events;
 mod input;
 mod own_sounds;
 mod play;
+mod screen;
 
 use crate::args::Args;
 use crate::game::{eye_height, Game};
@@ -25,8 +26,8 @@ use gui::status::Status;
 use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
-    AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, HeldKind, Particles,
-    Renderer, UseAction, Using,
+    AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand, HeldKind,
+    Particles, Renderer, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -355,6 +356,17 @@ impl App {
     fn camera(&self, frac: f64) -> Camera {
         let mut cam = self.view_camera(frac);
         cam.hurt_roll = self.hurt_roll(frac as f32);
+        // `getFOVModifier`: dying zooms out, being in water zooms in.
+        let mut zoom = 1.0;
+        if self.game.health <= 0.0 {
+            let t = f32::from(self.game.death_ticks) + frac as f32;
+            zoom /= (1.0 - 500.0 / (t + 500.0)) * 2.0 + 1.0;
+        }
+        if self.fluid_at(cam.pos) == Some(Fluid::Water) {
+            zoom *= 60.0 / 70.0;
+        }
+        cam.fov_deg *= zoom;
+        cam.hand_fov_deg *= zoom;
         if self.ui.settings.view_bobbing && self.game.player.is_some() {
             cam.bob = self.view_bob.offsets(frac as f32);
         }
@@ -491,6 +503,7 @@ impl App {
             .then(|| self.self_draw(frac))
             .flatten();
         let using = self.using(frac as f32);
+        let fluid = self.fluid_at(cam.pos);
         let Some(r) = &mut self.renderer else { return };
         for (name, png) in textures {
             r.register_texture(&name, &png);
@@ -508,6 +521,7 @@ impl App {
             thunder,
             render_distance_chunks: self.ui.settings.render_distance as u32,
             gamma: self.ui.settings.gamma,
+            fluid,
         });
         let hand_item = self.equip.2.or(held);
         r.set_hand(
@@ -605,6 +619,7 @@ impl App {
             (self.cursor.1 / factor) as i32,
         );
         let mut g = gui::Gui::new(scale, r.font(), 0);
+        self.draw_screen_effects(&mut g, (w, h), frac as f32);
         let m = Fm(g.metrics());
         let screen_open = self.modal();
         let in_world = self.in_world();

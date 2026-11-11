@@ -3,7 +3,7 @@ struct Globals {
     // xyz: eye position, w: gamma
     eye: vec4<f32>,
     fog_color: vec4<f32>,
-    // x: fog start, y: fog end, z: sun brightness, w: torch flicker factor
+    // x: fog start (negative: exponential fog), y: fog end (or density), z: sun brightness, w: torch flicker factor
     fog: vec4<f32>,
     screen: vec4<f32>,
 };
@@ -64,7 +64,11 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     }
     var rgb = t.rgb * i.color.rgb * lightmap(i.light.x, i.light.y);
     let d = length(i.world - g.eye.xyz);
-    let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
+    var fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
+    if (g.fog.x < 0.0) {
+        // In a liquid: exponential fog of density g.fog.y.
+        fog = exp(-g.fog.y * d);
+    }
     rgb = mix(g.fog_color.rgb, rgb, fog);
     return vec4<f32>(rgb, t.a * i.color.a);
 }

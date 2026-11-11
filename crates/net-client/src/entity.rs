@@ -131,6 +131,7 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
             yaw: p.yaw,
             pitch: p.pitch,
             vel: p.velocity.unwrap_or([0; 3]),
+            data: p.data,
         },
         P::SpawnExperienceOrb(p) => EntityEvent::SpawnExperienceOrb {
             id: p.entity_id.0,

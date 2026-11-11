@@ -8,6 +8,7 @@ use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
 use crate::mesher::{Done, Job, Mesher, SharedBlocks};
 use crate::particles::Quads;
+use crate::post::Post;
 use crate::sky::{
     build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
 };
@@ -150,6 +151,9 @@ pub struct Renderer {
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
+    /// The loaded `shaders/post` effect and whether it runs (F4, `useShader`).
+    post: Option<Post>,
+    post_on: bool,
     blocks: HashMap<(i32, i32), SharedBlocks>,
     /// Biome ids per chunk column, `z << 4 | x`.
     biomes: HashMap<(i32, i32), [u8; 256]>,
@@ -397,6 +401,8 @@ impl Renderer {
             font,
             env_tex,
             environment: Environment::default(),
+            post: None,
+            post_on: false,
             blocks: HashMap::new(),
             biomes: HashMap::new(),
             meshes: HashMap::new(),
@@ -557,6 +563,9 @@ impl Renderer {
             }
         }
         self.depth = depth_view(&self.device, w, h);
+        if let Some(post) = &mut self.post {
+            post.resize(&self.device, &self.queue, w, h);
+        }
     }
 
     pub fn upload_chunk(&mut self, chunk: &impl ChunkBlocks) {
@@ -849,6 +858,32 @@ impl Renderer {
     /// Time of day, weather and render distance for sky, fog and the light curve.
     pub fn set_environment(&mut self, environment: Environment) {
         self.environment = environment;
+    }
+
+    /// `PostChain.close`, then `GameRenderer.loadShader` when `name` (a jar path such as
+    /// `shaders/post/notch.json`) is given: a loaded effect turns effects on, a failed one off.
+    pub fn set_post(&mut self, name: Option<&str>) -> Result<(), String> {
+        self.post = None;
+        let Some(name) = name else { return Ok(()) };
+        let format = match &self.target {
+            Target::Window { config, .. } => config.format,
+            Target::Offscreen { .. } => OFFSCREEN,
+        };
+        let size = self.size();
+        let post = match &mut self.source {
+            Some(source) => {
+                Post::load(&self.device, &self.queue, source, name, format, DEPTH, size)
+            }
+            None => Err("no client assets".to_owned()),
+        };
+        self.post_on = post.is_ok();
+        self.post = Some(post?);
+        Ok(())
+    }
+
+    /// F4, `GameRenderer.switchUseShader`: whether a loaded effect runs.
+    pub fn toggle_post(&mut self) {
+        self.post_on = !self.post_on;
     }
 
     /// First-person hand for the next frames; `None` hides it (F1, third person).
@@ -1213,6 +1248,9 @@ impl Renderer {
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
         let env = self.environment;
+        if let (Some(post), true) = (&mut self.post, self.post_on) {
+            post.advance(env.partial);
+        }
         let fire = self.prepare_fire(cam, w, h);
         let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
         let globals = Self::globals(cam, &env, &sky, (w, h));
@@ -1266,13 +1304,17 @@ impl Renderer {
                 })
         });
 
+        let world = match &self.post {
+            Some(post) if self.post_on => post.main(),
+            _ => view,
+        };
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: world,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1381,7 +1423,7 @@ impl Renderer {
         }
         self.draw_hand_and_gui(
             &mut enc,
-            view,
+            [world, view],
             hand.as_ref(),
             &fire,
             gui_buf.as_ref(),
@@ -1413,34 +1455,15 @@ impl Renderer {
     fn draw_hand_and_gui(
         &self,
         enc: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
+        // The world target (`minecraft:main` while an effect runs), then the window.
+        [world, view]: [&wgpu::TextureView; 2],
         hand: Option<&(GpuMesh, HandTex, Option<GpuMesh>)>,
         fire: &FireFrame,
         gui_buf: Option<&wgpu::Buffer>,
         overlay: &[Quad],
     ) {
         // Vanilla draws the hand on a cleared depth buffer, then the GUI.
-        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+        let mut pass = overlay_pass(enc, world, &self.depth);
         if let Some((m, tex, glint)) = hand {
             pass.set_bind_group(0, self.hand_group(*tex), &[]);
             pass.set_pipeline(&self.hand_pipe);
@@ -1452,6 +1475,13 @@ impl Renderer {
             }
         }
         self.draw_fire_overlay(&mut pass, fire);
+        // `updateCameraAndRender`: the effect runs after the hand and before the GUI.
+        if let Some(post) = self.post.as_ref().filter(|_| self.post_on) {
+            drop(pass);
+            post.process(&self.queue, enc);
+            pass = overlay_pass(enc, view, &self.depth);
+            post.blit(&mut pass);
+        }
         if let Some(buf) = gui_buf {
             self.draw_gui(&mut pass, buf, overlay);
         }
@@ -2041,7 +2071,36 @@ fn depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureVi
         .create_view(&Default::default())
 }
 
-fn upload_texture(
+/// A pass that keeps the color of `view` and clears the depth buffer: the hand, then the GUI.
+fn overlay_pass<'e>(
+    enc: &'e mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+    depth: &wgpu::TextureView,
+) -> wgpu::RenderPass<'e> {
+    enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: None,
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+    })
+}
+
+pub(crate) fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     w: u32,

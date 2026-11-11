@@ -26,6 +26,7 @@ Third person: the engine pushes the local player through `set_entities`. The ren
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.
 The engine disables that overlay in third-person views and spectator mode.
+Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post` chain from the jar, as vanilla `PostChain`; the GLSL 1.20 programs are rewritten to 4.50 for naga (`glsl.rs`). The effect runs after the hand and before the GUI. A failed load returns `Err` and switches effects off; `toggle_post` is F4. `SHADERS` is the "Super Secret Settings..." cycle.
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.
 `render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame; the eight surrounding chunks remesh on the workers because light crosses chunk edges and corners.
 Offscreen renderers wait for every mesh, so `render_to_rgba` shows the whole world.

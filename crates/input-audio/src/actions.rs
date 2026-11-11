@@ -46,6 +46,8 @@ pub enum Action {
     ToggleHud,
     /// F2.
     Screenshot,
+    /// F4: switch the post-process effect off or back on.
+    ToggleShader,
     /// F5.
     TogglePerspective,
     /// F11.

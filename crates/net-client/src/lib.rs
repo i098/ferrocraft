@@ -83,6 +83,8 @@ pub enum NetEvent {
     /// Game mode (0 survival, 1 creative, 2 adventure, 3 spectator) after a respawn or a
     /// game-state change.
     GameMode(u8),
+    /// S43 Camera: the entity the view follows (spectating a mob, or back to the player).
+    Camera(i32),
     /// Spawn, move, metadata or destroy of a remote entity.
     Entity(world::entities::EntityEvent),
     /// S06 UpdateHealth.

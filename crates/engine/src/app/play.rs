@@ -887,7 +887,20 @@ impl App {
         match action {
             Action::ToggleDebug => self.show_debug = !self.show_debug,
             Action::ToggleHud => self.hide_hud = !self.hide_hud,
-            Action::TogglePerspective => self.perspective = (self.perspective + 1) % 3,
+            Action::ToggleShader => {
+                if let Some(r) = &mut self.renderer {
+                    r.toggle_post();
+                }
+            }
+            // `Minecraft.runTick`: first person views as the camera entity, the back view clears.
+            Action::TogglePerspective => {
+                self.perspective = (self.perspective + 1) % 3;
+                match self.perspective {
+                    0 => self.entity_shader(self.game.camera),
+                    1 => self.entity_shader(None),
+                    _ => {}
+                }
+            }
             Action::Debug(DebugCombo::ClearChat) => {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();

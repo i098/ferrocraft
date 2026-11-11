@@ -13,10 +13,12 @@ mod hand;
 mod jrandom;
 mod lightning;
 pub use lightning::Bolts;
+mod glsl;
 mod light;
 mod mesh;
 mod mesher;
 mod particles;
+mod post;
 mod shapes;
 mod sky;
 mod weather;
@@ -28,6 +30,7 @@ pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use entity::{nametags, Class, EntityDraw, NameTag, Thrower};
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
+pub use post::SHADERS;
 pub use weather::{rain_particles, stops_rain};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips

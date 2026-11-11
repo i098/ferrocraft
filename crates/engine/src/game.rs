@@ -98,6 +98,9 @@ pub struct Game {
     pub entity_id: i32,
     pub entity_flags: u8,
     pub vehicle: Option<i32>,
+    /// `Minecraft.renderViewEntity` when it is not the local player: the spectated entity.
+    /// Join and respawn set the player back without a shader change, as vanilla does.
+    pub camera: Option<i32>,
     /// Creative mode (6 block entity reach instead of 3).
     pub creative: bool,
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
@@ -175,6 +178,7 @@ impl Game {
             entity_id: -1,
             entity_flags: 0,
             vehicle: None,
+            camera: None,
             creative: false,
             gamemode: 0,
             digger: Digger::default(),
@@ -254,6 +258,7 @@ impl Game {
                 self.entity_id = entity_id;
                 self.health_seen = false;
                 self.vehicle = None;
+                self.camera = None;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
                 self.reduced_debug = reduced_debug_info;
@@ -383,6 +388,7 @@ impl Game {
             NetEvent::Respawn => {
                 self.entity_flags = 0;
                 self.vehicle = None;
+                self.camera = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.effects.clear();
                 self.speed = world::effects::Speed::default();

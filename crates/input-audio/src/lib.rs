@@ -284,6 +284,7 @@ impl InputState {
                 Action::Pause
             }
             KeyCode::F1 => Action::ToggleHud,
+            KeyCode::F4 => Action::ToggleShader,
             KeyCode::F3 => {
                 self.f3_down = true;
                 Action::ToggleDebug

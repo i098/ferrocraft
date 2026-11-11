@@ -86,6 +86,8 @@ pub struct App {
     hide_hud: bool,
     /// F5: 0 first person, 1 behind the player, 2 in front of the player.
     perspective: u8,
+    /// `GameRenderer.shaderIndex` into `render::SHADERS`; its length means none.
+    shader_index: usize,
     /// The hotbar slot the server last heard of.
     synced_held: u8,
     /// `rightClickDelayTimer`.
@@ -150,6 +152,7 @@ impl App {
             show_debug: false,
             hide_hud: false,
             perspective: 0,
+            shader_index: render::SHADERS.len(),
             synced_held: 0,
             use_delay: 0,
             use_ticks: 0,
@@ -453,19 +456,28 @@ impl App {
                 ..Camera::default()
             };
         };
+        // `renderViewEntity`: a spectated entity lends its eyes and look.
+        let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
+        let (eye, yaw, pitch) = match spectated {
+            Some(e) => {
+                let [x, y, z] = e.lerp_pos(frac);
+                ([x, y + f64::from(e.eye_height()), z], e.yaw, e.pitch)
+            }
+            None => (eye, p.yaw, self.game.pitch),
+        };
         if self.perspective == 0 {
             return Camera {
                 pos: eye,
-                yaw: p.yaw,
-                pitch: self.game.pitch,
+                yaw,
+                pitch,
                 fov_deg: fov,
                 ..Camera::default()
             };
         }
         let (yaw, pitch) = if self.perspective == 2 {
-            (p.yaw + 180.0, -self.game.pitch)
+            (yaw + 180.0, -pitch)
         } else {
-            (p.yaw, self.game.pitch)
+            (yaw, pitch)
         };
         let dir = look_vector(yaw, pitch);
         let mut dist = 0.0;
@@ -624,6 +636,12 @@ impl App {
             }
         }
         draws.extend(self_model);
+        // `RenderGlobal`: the spectated entity is not drawn from its own eyes.
+        if let (0, Some(id)) = (self.perspective, self.game.camera) {
+            if let Some(i) = self.game.entities.iter().position(|e| e.id == id) {
+                draws.remove(i);
+            }
+        }
         let (quads, textures, effects) = self.overlay(frac, eye, &cam, &draws);
         self.run_effects(effects);
         let held = self

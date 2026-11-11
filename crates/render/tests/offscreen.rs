@@ -486,3 +486,84 @@ fn leather_overlay_draws_over_the_dyed_base() {
         "the overlay layer must be visible"
     );
 }
+
+/// Every `shaders/post` effect of the 1.8.9 jar loads and runs between the world and the GUI;
+/// `invert` (the enderman view) inverts the world and leaves the GUI alone.
+#[test]
+fn post_effects_run_between_world_and_gui() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR") else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let (w, h) = (400, 240);
+    let mut r = Renderer::new_offscreen(w, h, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 68.0, -4.0],
+        yaw: 10.0,
+        pitch: 25.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let red = Quad {
+        tex: String::new().into(),
+        blend: Blend::Alpha,
+        pos: [[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]],
+        uv: [[0.0; 2]; 4],
+        color: [0xFFFF_0000; 4],
+    };
+    let frame = |r: &mut Renderer| r.render_to_rgba(&cam, &[red.clone()]).2;
+    let px = |f: &[u8], x: u32, y: u32| f[((y * w + x) * 4) as usize..][..3].to_vec();
+    let plain = frame(&mut r);
+
+    r.set_post(Some("shaders/post/invert.json"))
+        .expect("invert loads");
+    let inverted = frame(&mut r);
+    // `invert.json` sets `InverseAmount` to 0.8: mix(c, 1 - c, 0.8).
+    for (x, y) in [(w / 2, h - 20), (w - 5, 5), (w / 3, h / 2)] {
+        let want: Vec<f32> = px(&plain, x, y)
+            .iter()
+            .map(|&c| f32::from(c) * 0.2 + f32::from(255 - c) * 0.8)
+            .collect();
+        let got = px(&inverted, x, y);
+        let near = want
+            .iter()
+            .zip(&got)
+            .all(|(a, &b)| (a - f32::from(b)).abs() <= 2.0);
+        assert!(near, "({x}, {y}): {got:?} is not 80% inverted {want:?}");
+    }
+    assert_eq!(
+        px(&inverted, 2, 2),
+        [255, 0, 0],
+        "the GUI draws after the effect"
+    );
+
+    r.toggle_post();
+    assert_eq!(frame(&mut r), plain, "F4 switches the effect off");
+
+    let mut frames = Vec::new();
+    for name in render::SHADERS {
+        r.set_post(Some(&format!("shaders/post/{name}.json")))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let f = frame(&mut r);
+        assert_ne!(f, plain, "{name} changes the frame");
+        frames.push((name, f));
+    }
+    r.set_post(None).unwrap();
+    assert_eq!(frame(&mut r), plain, "no effect after `None`");
+
+    if let Some(dir) = std::env::var_os("POST_DIR") {
+        let dir = std::path::Path::new(&dir);
+        encode_png(&dir.join("none.png"), w, h, &plain).expect("write png");
+        for (name, f) in [("invert", &inverted)]
+            .into_iter()
+            .chain(frames.iter().map(|(n, f)| (*n, f)))
+        {
+            encode_png(&dir.join(format!("{name}.png")), w, h, f).expect("write png");
+        }
+    }
+}

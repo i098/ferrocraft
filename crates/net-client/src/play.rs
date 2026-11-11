@@ -65,6 +65,7 @@ fn handle(
                 NetEvent::Difficulty(r.difficulty),
             ]
         }
+        cb::Packet::Camera(c) => vec![NetEvent::Camera(c.camera_id.0)],
         // Reason 3 is "change game mode"; the value is the mode as a float.
         cb::Packet::ChangeGameState(g) if g.reason == 3 => {
             vec![NetEvent::GameMode(g.value as u8 & 7)]

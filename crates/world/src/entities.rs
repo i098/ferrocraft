@@ -595,6 +595,32 @@ pub enum EntityEvent {
 pub struct Entities {
     map: HashMap<i32, Entity>,
     names: HashMap<u128, (String, Option<String>)>,
+    /// Running `EmitterParticle`s from animations 4 and 5.
+    emitters: Vec<Emitter>,
+    /// Particle requests of the last ticks; the engine drains them with `take_fx`.
+    fx: Vec<Fx>,
+}
+
+/// `EmitterParticle`: one burst per tick for `EMITTER_TICKS` ticks, started by animation 4 (crit) or 5 (enchant crit).
+struct Emitter {
+    id: i32,
+    magic: bool,
+    age: u8,
+}
+
+const EMITTER_TICKS: u8 = 3;
+
+/// Particles an entity causes; `size` is `(width, height)` and positions are feet-level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fx {
+    /// One `EmitterParticle.tick` burst around the entity (`magic` is the enchant crit).
+    Hit {
+        magic: bool,
+        pos: [f64; 3],
+        size: (f32, f32),
+    },
+    /// `EntityLivingBase.onDeathUpdate` at tick 20: the 20-particle puff.
+    Death { pos: [f64; 3], size: (f32, f32) },
 }
 
 impl Entities {
@@ -771,7 +797,17 @@ impl Entities {
                     *s = item;
                 }
             }),
-            E::Animation { id, animation } => self.with(id, |e| e.animate(animation)),
+            E::Animation { id, animation } => {
+                if let (4 | 5, true) = (animation, self.map.contains_key(&id)) {
+                    self.emitters.push(Emitter {
+                        id,
+                        magic: animation == 5,
+                        age: 0,
+                    });
+                    self.burst(self.emitters.len() - 1);
+                }
+                self.with(id, |e| e.animate(animation))
+            }
             E::Status { id, status } => self.with(id, |e| e.set_status(status)),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
@@ -799,7 +835,40 @@ impl Entities {
         for e in self.map.values_mut() {
             e.tick();
         }
-        self.map.retain(|_, e| e.death_time <= DEATH_TICKS);
+        for i in 0..self.emitters.len() {
+            self.burst(i);
+        }
+        self.emitters
+            .retain(|m| m.age < EMITTER_TICKS && self.map.contains_key(&m.id));
+        let fx = &mut self.fx;
+        self.map.retain(|_, e| {
+            let keep = e.death_time <= DEATH_TICKS;
+            if !keep {
+                fx.push(Fx::Death {
+                    pos: e.pos,
+                    size: e.size(),
+                });
+            }
+            keep
+        });
+    }
+
+    /// `EmitterParticle.tick` for emitter `i`: one burst request, then one tick older.
+    fn burst(&mut self, i: usize) {
+        let m = &mut self.emitters[i];
+        m.age += 1;
+        if let Some(e) = self.map.get(&m.id) {
+            self.fx.push(Fx::Hit {
+                magic: m.magic,
+                pos: e.pos,
+                size: e.size(),
+            });
+        }
+    }
+
+    /// The particle requests since the last call.
+    pub fn take_fx(&mut self) -> Vec<Fx> {
+        std::mem::take(&mut self.fx)
     }
 
     /// The nearest collidable entity along the view ray within `reach`, ignoring `skip`
@@ -932,6 +1001,30 @@ mod tests {
         }
         es.tick();
         assert!(es.get(3).is_none());
+    }
+
+    #[test]
+    fn crit_animation_bursts_three_ticks_and_death_puffs_once() {
+        let mut es = Entities::default();
+        spawn(&mut es, 3, [0; 3]);
+        es.apply(EntityEvent::Animation {
+            id: 3,
+            animation: 4,
+        });
+        es.tick();
+        es.tick();
+        es.tick();
+        let hits = es
+            .take_fx()
+            .iter()
+            .filter(|f| matches!(f, Fx::Hit { magic: false, .. }))
+            .count();
+        assert_eq!(hits, 3);
+        es.apply(EntityEvent::Status { id: 3, status: 3 });
+        for _ in 0..DEATH_TICKS {
+            es.tick();
+        }
+        assert!(matches!(es.take_fx().as_slice(), [Fx::Death { .. }]));
     }
 
     #[test]

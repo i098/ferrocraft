@@ -816,6 +816,51 @@ impl Particles {
         }
     }
 
+    /// `EmitterParticle.tick`: 16 tries inside a unit sphere around the middle of the entity, each
+    /// flying out along its offset (`magic` spawns enchant crits, else crits).
+    pub fn hit_burst(&mut self, magic: bool, pos: [f64; 3], (width, height): (f32, f32)) {
+        let (w, h) = (f64::from(width), f64::from(height));
+        let kind = if magic { Kind::MagicCrit } else { Kind::Crit };
+        for _ in 0..16 {
+            let d = [0, 1, 2].map(|_| (self.rand() as f32 * 2.0 - 1.0) as f64);
+            if d.iter().map(|v| v * v).sum::<f64>() > 1.0 {
+                continue;
+            }
+            let at = [
+                pos[0] + d[0] * w / 4.0,
+                pos[1] + h / 2.0 + d[1] * h / 4.0,
+                pos[2] + d[2] * w / 4.0,
+            ];
+            self.spawn(kind, at, [d[0], d[1] + 0.2, d[2]], 0);
+        }
+    }
+
+    /// `EntityLivingBase.onDeathUpdate` at tick 20: 20 explosion puffs inside the hitbox.
+    pub fn death_puff(&mut self, pos: [f64; 3], (width, height): (f32, f32)) {
+        let (w, h) = (f64::from(width), f64::from(height));
+        for _ in 0..20 {
+            let m = [0, 1, 2].map(|_| self.gaussian() * 0.02);
+            let at = [
+                pos[0] + self.rand() * w * 2.0 - w,
+                pos[1] + self.rand() * h,
+                pos[2] + self.rand() * w * 2.0 - w,
+            ];
+            self.spawn(Kind::Explode, at, m, 0);
+        }
+    }
+
+    /// `Entity.doSprintingEffect`: one shard of the block `state` under a sprinting entity,
+    /// thrown against its motion `vel`.
+    pub fn sprint_dust(&mut self, pos: [f64; 3], vel: [f64; 3], width: f32, state: u16) {
+        let w = f64::from(width);
+        let at = [
+            pos[0] + (self.rand() - 0.5) * w,
+            pos[1] + 0.1,
+            pos[2] + (self.rand() - 0.5) * w,
+        ];
+        let m = [-vel[0] * 4.0, 1.5, -vel[2] * 4.0];
+        self.spawn(Kind::BlockCrack, at, m, i32::from(state));
+    }
     /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block.
     pub fn break_block(&mut self, [x, y, z]: [i32; 3], state: u16) {
         for i in 0..4 {
@@ -1333,6 +1378,34 @@ mod tests {
             ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn hit_burst_spawns_near_the_entity_and_death_puff_makes_20() {
+        let mut ps = Particles::new();
+        ps.hit_burst(false, [0.0; 3], (0.6, 1.8));
+        assert!(!ps.is_empty() && ps.len() <= 16);
+        assert!(ps
+            .list
+            .iter()
+            .all(|p| p.pos[0].abs() <= 0.5 && (p.pos[1] - 0.9).abs() <= 1.2));
+        let mut ps = Particles::new();
+        ps.death_puff([0.0; 3], (0.6, 1.8));
+        assert_eq!(ps.len(), 20);
+    }
+
+    #[test]
+    fn sprint_dust_spawns_one_block_crack_shard_at_the_feet() {
+        // Vanilla Entity.doSprintingEffect: one shard within the hitbox width, 0.1 above the feet,
+        // thrown against the motion (4x outweighs the +-0.4 start jitter at vx = 1).
+        let mut ps = Particles::new();
+        ps.sprint_dust([10.0, 64.0, -5.0], [1.0, 0.0, 0.0], 0.6, 0x1234);
+        assert_eq!(ps.len(), 1);
+        let p = ps.list[0];
+        assert!(matches!(p.sprite, Sprite::Block { state: 0x1234, .. }));
+        assert!((p.pos[0] - 10.0).abs() <= 0.3 && (p.pos[2] + 5.0).abs() <= 0.3);
+        assert!((p.pos[1] - 64.1).abs() < 1e-9);
+        assert!(p.vel[0] < 0.0 && p.vel[1] > 0.0);
     }
 
     #[test]

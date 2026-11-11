@@ -168,7 +168,6 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         hurt: false,
         death_time: 0.0,
         invisible: false,
-        burning: false,
         size: (0.6, 1.8),
         held: 276,
         armor: [0; 4],
@@ -275,12 +274,17 @@ fn burning_entity_and_first_person_fire() {
         hurt: false,
         death_time: 0.0,
         invisible: false,
-        burning: false,
         size: (0.6, 1.8),
         held: 0,
         armor: [0; 4],
         name: None,
         skin: None,
+        burning: false,
+        eye_height: 1.62,
+        always_name: false,
+        pointed: false,
+        ridden: false,
+        child: false,
     };
     r.set_entities(&[entity.clone()]);
     let before = r.render_to_rgba(&cam, &[]).2;

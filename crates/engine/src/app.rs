@@ -482,7 +482,6 @@ impl App {
             armor: [slot(8), slot(7), slot(6), slot(5)],
             name: None,
             skin: None,
-            burning: false,
             eye_height: eye_height(self.input.sneaking()) as f32,
             always_name: false,
             pointed: false,
@@ -901,7 +900,6 @@ fn entity_draw(
             0.0
         },
         invisible: e.invisible(),
-        burning: e.burning(),
         size: e.size(),
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),

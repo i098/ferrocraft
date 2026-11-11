@@ -271,15 +271,6 @@ impl Entity {
         self.flags & flag::INVISIBLE != 0
     }
 
-    /// `Entity.canBeCollidedWith` for what the crosshair can pick: players, mobs, armor stands without a marker.
-    pub fn pickable(&self) -> bool {
-        match self.kind {
-            Kind::Player | Kind::Mob(_) => true,
-            Kind::Object(78) => self.size() != (0.0, 0.0),
-            _ => false,
-        }
-    }
-
     pub fn burning(&self) -> bool {
         self.flags & flag::BURNING != 0
     }

@@ -458,7 +458,7 @@ pub fn reach(creative: bool) -> f64 {
 }
 
 /// Entry distance and face of the ray `eye + t * dir` into a box, if it enters from outside.
-pub fn enter_box(eye: [f64; 3], dir: [f64; 3], cell: [i32; 3], b: [f64; 6]) -> Option<(f64, u8)> {
+fn enter_box(eye: [f64; 3], dir: [f64; 3], cell: [i32; 3], b: [f64; 6]) -> Option<(f64, u8)> {
     let (mut near, mut far, mut face) = (f64::NEG_INFINITY, f64::INFINITY, 0);
     for a in 0..3 {
         let (lo, hi) = (f64::from(cell[a]) + b[a], f64::from(cell[a]) + b[a + 3]);

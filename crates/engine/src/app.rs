@@ -483,7 +483,7 @@ impl App {
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
-        let pointed = eye.and_then(|e| self.game.pointed_entity(e));
+        let pointed = self.entity_target().map(|(id, _)| id);
         let skins = &mut self.skins;
         let mut renderer = self.renderer.as_mut();
         let ridden: std::collections::HashSet<i32> = self

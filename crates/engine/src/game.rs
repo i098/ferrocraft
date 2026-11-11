@@ -552,41 +552,6 @@ impl Game {
         dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
     }
 
-    /// `EntityRenderer.getMouseOver` entity pick: the id of the living entity or armor stand under the crosshair, nearer
-    /// than any block hit. Hitboxes grow by `getCollisionBorderSize` (0.1); survival ignores hits past 3 blocks.
-    /// Boats and minecarts are not pickable here (they never show a name tag).
-    pub fn pointed_entity(&self, eye: [f64; 3]) -> Option<i32> {
-        let p = self.player.as_ref()?;
-        let dir = dig::look_vector(p.yaw, self.pitch);
-        let far = if self.creative {
-            6.0
-        } else {
-            dig::reach(false)
-        };
-        let limit = self.target_dist(eye).map_or(far, |(_, d)| d);
-        let mut best: Option<(i32, f64)> = None;
-        for e in self.entities.iter().filter(|e| e.pickable()) {
-            let (lo, hi) = e.bounds();
-            let b: [f64; 6] =
-                std::array::from_fn(|i| if i < 3 { lo[i] - 0.1 } else { hi[i - 3] + 0.1 });
-            let inside = (0..3).all(|i| eye[i] >= b[i] && eye[i] <= b[i + 3]);
-            let d = if inside {
-                0.0
-            } else if let Some((d, _)) =
-                dig::enter_box(eye, dir, [0; 3], b).filter(|(d, _)| *d <= far)
-            {
-                d
-            } else {
-                continue;
-            };
-            if d < limit && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((e.id, d));
-            }
-        }
-        best.filter(|&(_, d)| self.creative || d <= 3.0)
-            .map(|(id, _)| id)
-    }
-
     /// A selectable block lies between `from` and `to`.
     pub fn line_blocked(&self, from: [f64; 3], to: [f64; 3]) -> bool {
         let d = [0, 1, 2].map(|i| to[i] - from[i]);

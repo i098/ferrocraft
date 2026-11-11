@@ -12,6 +12,7 @@ Camera yaw and pitch use vanilla degrees; `Camera::pos` is the eye position.
 A `Quad` names its texture by jar path (such as `textures/gui/widgets.png`); `""` is solid white.
 `Blend` gives the vanilla blend modes (alpha, crosshair invert, vignette darken, glint add).
 `register_texture(name, png)` adds a runtime texture (server icons) that quads name by `name`.
+`set_player_skin(key, img)` stores the decoded skin of one player for the entity renderer. `has_player_skin(key)` tells whether it is still stored; the renderer replaces the least recently used skin when its slots are full.
 `set_hand` takes `HeldKind::Block(state)` or `HeldKind::Item { id, damage }`. A `builtin/generated` item model
 draws as the extruded sprite with its `firstperson` transform.
 Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial)` and then `set_particles` before

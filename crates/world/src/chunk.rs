@@ -9,6 +9,7 @@ const SECTION_BLOCKS: usize = 4096;
 const BLOCK_BYTES: usize = SECTION_BLOCKS * 2;
 const LIGHT_BYTES: usize = 2048;
 const BIOME_BYTES: usize = 256;
+const PLAINS: u8 = 1;
 
 /// 16x16x16 block states of one chunk section.
 pub type Section = [u16; SECTION_BLOCKS];
@@ -19,6 +20,7 @@ pub struct Chunk {
     pub x: i32,
     pub z: i32,
     sections: [Option<Box<Section>>; 16],
+    biomes: [u8; BIOME_BYTES],
 }
 
 /// The payload ended before every announced section was read.
@@ -50,7 +52,13 @@ impl Chunk {
             x,
             z,
             sections: Default::default(),
+            biomes: [PLAINS; BIOME_BYTES],
         }
+    }
+
+    /// Biome id at chunk-local `x`, `z` (0..16); plains until a ground-up payload sets it.
+    pub fn biome(&self, x: usize, z: usize) -> u8 {
+        self.biomes[(z & 15) << 4 | (x & 15)]
     }
 
     /// Block state at chunk-local `x`, `z` (0..16) and `y` (0..256). Out of range is air.
@@ -88,7 +96,7 @@ impl Chunk {
     ///
     /// `bitmask` tells which sections are present; `sky_light` tells whether sky light arrays
     /// follow the block light arrays; `ground_up` adds the 256 biome bytes at the end.
-    /// Returns the chunk and the number of bytes used. Light and biomes are read past, not kept.
+    /// Returns the chunk and the number of bytes used. Light is read past, not kept.
     pub fn decode(
         x: i32,
         z: i32,
@@ -116,6 +124,9 @@ impl Chunk {
                 *dst = u16::from_le_bytes(*b);
             }
             chunk.sections[s] = Some(sec);
+        }
+        if ground_up {
+            chunk.biomes.copy_from_slice(&data[needed - BIOME_BYTES..needed]);
         }
         Ok((chunk, needed))
     }
@@ -200,7 +211,7 @@ mod tests {
         let lights = if sky { 2 } else { 1 };
         data.extend(vec![0xFF; sections.len() * lights * LIGHT_BYTES]);
         if biomes {
-            data.extend(vec![1u8; BIOME_BYTES]);
+            data.extend((0..BIOME_BYTES).map(|i| i as u8));
         }
         (mask, data)
     }
@@ -217,6 +228,8 @@ mod tests {
         assert_eq!(c.block(1, 5 * 16 + 2, 3), 4 << 4 | 3);
         assert_eq!(c.block(0, 0, 0), 0);
         assert!(c.section(1).is_none());
+        // Biome bytes are indexed `z << 4 | x`.
+        assert_eq!((c.biome(0, 0), c.biome(3, 2)), (0, 35));
     }
 
     #[test]

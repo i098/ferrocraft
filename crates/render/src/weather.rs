@@ -1,5 +1,4 @@
-//! Rain, ported from vanilla 1.8.9 `EntityRenderer.renderRainSnow`.
-//! Biome data does not reach the renderer, so every biome counts as plains (temperature 0.8): precipitation is always rain, never snow.
+//! Rain and snow, ported from vanilla 1.8.9 `EntityRenderer.renderRainSnow`.
 
 use crate::blocks::{cached, light_opacity, Kind};
 use crate::jrandom::JavaRandom;
@@ -21,15 +20,59 @@ pub fn stops_rain(state: u16) -> bool {
         )
 }
 
-/// Rain quads around `feet` (the player's position, not the eye). `top(x, z)` is the precipitation height: the y above the highest rain-stopping block, `None` for an unloaded column.
-pub fn build_rain(
+/// What falls on a column: `BiomeGenBase.getFloatTemperature(pos) >= 0.15` rains, colder snows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Precipitation {
+    Rain,
+    Snow,
+}
+
+/// Biome ids (1.8.9) of each `BiomeGenBase.temperature`; ids not listed are 0.8 (plains, swamp, beach).
+const TEMPERATURES: [(&[u8], f32); 11] = [
+    (&[10, 11, 12, 13, 140], 0.0),
+    (&[30, 31, 158], -0.5),
+    (&[26], 0.05),
+    (&[3, 20, 25, 34, 131, 162], 0.2),
+    (&[5, 19, 133, 160, 161], 0.25),
+    (&[32, 33], 0.3),
+    (&[0, 7, 24, 127], 0.5),
+    (&[27, 28, 155, 156], 0.6),
+    (&[4, 18, 29, 132, 157], 0.7),
+    (&[14, 15], 0.9),
+    (&[21, 22, 23, 149, 151], 0.95),
+];
+
+/// Biomes with `setDisableRain`: desert, hell, sky, savanna and mesa families.
+const DRY: &[u8] = &[2, 8, 9, 17, 35, 36, 37, 38, 39, 130, 163, 164, 165, 166, 167];
+
+/// Precipitation in biome `biome` (1.8.9 id) at height `y`, `None` for the biomes that never rain.
+/// `getFloatTemperature` also subtracts a height noise term below 0.01 in magnitude, which is left out.
+pub fn precipitation_in(biome: u8, y: i32) -> Option<Precipitation> {
+    if DRY.contains(&biome) {
+        return None;
+    }
+    let base = TEMPERATURES
+        .iter()
+        .find(|(ids, _)| ids.contains(&biome))
+        .map_or(0.8, |&(_, t)| t);
+    let temperature = base - (y - 64).max(0) as f32 * 0.05 / 30.0;
+    Some(if temperature >= 0.15 {
+        Precipitation::Rain
+    } else {
+        Precipitation::Snow
+    })
+}
+
+/// Rain and snow quads around `feet` (the player's position, not the eye), each in the geometry its texture draws.
+/// `top(x, z)` is the precipitation height (the y above the highest rain-stopping block) and what falls there; `None` for an unloaded or dry column.
+pub fn build_precipitation(
     env: &Environment,
     feet: [f64; 3],
-    top: impl Fn(i32, i32) -> Option<i32>,
-) -> SkyGeometry {
-    let mut g = SkyGeometry::default();
+    top: impl Fn(i32, i32) -> Option<(i32, Precipitation)>,
+) -> (SkyGeometry, SkyGeometry) {
+    let (mut rain, mut snow) = (SkyGeometry::default(), SkyGeometry::default());
     if env.rain <= 0.0 {
-        return g;
+        return (rain, snow);
     }
     let (i, j, k) = (
         feet[0].floor() as i32,
@@ -42,17 +85,23 @@ pub fn build_rain(
             if (x, z) == (i, k) {
                 continue;
             }
-            let Some(ground) = top(x, z) else { continue };
+            let Some((ground, kind)) = top(x, z) else {
+                continue;
+            };
             let (low, high) = ((j - RANGE).max(ground), (j + RANGE).max(ground));
             if low != high {
-                g.quad(column_quad(env, feet, (x, z), (low as f32, high as f32)));
+                let heights = (low as f32, high as f32);
+                match kind {
+                    Precipitation::Rain => rain.quad(column_quad(env, feet, (x, z), heights)),
+                    Precipitation::Snow => snow.quad(snow_quad(env, feet, (x, z), heights)),
+                }
             }
         }
     }
-    for v in &mut g.vertices {
+    for v in rain.vertices.iter_mut().chain(&mut snow.vertices) {
         v.light = RAIN_LIGHT;
     }
-    g
+    (rain, snow)
 }
 
 type Corner = ([f32; 3], [f32; 2], [f32; 4]);
@@ -88,6 +137,44 @@ fn column_quad(
         ([xf + ox, high, zf + oz], [1.0, low * 0.25 + phase], color),
         ([xf + ox, low, zf + oz], [1.0, high * 0.25 + phase], color),
         ([xf - ox, low, zf - oz], [0.0, high * 0.25 + phase], color),
+    ]
+}
+
+/// One snow slab; the same slab as rain, scrolled slowly and jittered by the column's random numbers.
+fn snow_quad(
+    env: &Environment,
+    feet: [f64; 3],
+    (x, z): (i32, i32),
+    (low, high): (f32, f32),
+) -> [Corner; 4] {
+    let (dx, dz) = (
+        x as f32 - feet[0].floor() as f32,
+        z as f32 - feet[2].floor() as f32,
+    );
+    let len = (dx * dx + dz * dz).sqrt();
+    let (ox, oz) = (-dz / len * 0.5, dx / len * 0.5);
+    let seed = (x.wrapping_mul(x).wrapping_mul(3121)).wrapping_add(x.wrapping_mul(45_238_971))
+        ^ (z.wrapping_mul(z).wrapping_mul(418_711)).wrapping_add(z.wrapping_mul(13_761));
+    let mut rng = JavaRandom::new(i64::from(seed));
+    let age = (env.ticks as i32) as f32 + env.partial;
+    let scroll = -(((env.ticks as i32) & 511) as f32 + env.partial) / 512.0;
+    let u0 = rng.next_double();
+    let (g0, g1) = rng.next_gaussian_pair();
+    let u = u0 + f64::from(age * 0.01) * f64::from(g0 as f32);
+    let v = rng.next_double() + f64::from(age * g1 as f32) * 0.001;
+    let (u, v) = (u as f32, scroll + v as f32);
+    let (cx, cz) = (
+        x as f32 + 0.5 - feet[0] as f32,
+        z as f32 + 0.5 - feet[2] as f32,
+    );
+    let f6 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
+    let color = [1.0, 1.0, 1.0, ((1.0 - f6 * f6) * 0.3 + 0.5) * env.rain];
+    let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
+    [
+        ([xf - ox, high, zf - oz], [u, low * 0.25 + v], color),
+        ([xf + ox, high, zf + oz], [1.0 + u, low * 0.25 + v], color),
+        ([xf + ox, low, zf + oz], [1.0 + u, high * 0.25 + v], color),
+        ([xf - ox, low, zf - oz], [u, high * 0.25 + v], color),
     ]
 }
 
@@ -188,6 +275,34 @@ mod rain_tests {
     use super::*;
 
     const GRASS: u16 = 2 << 4;
+
+    #[test]
+    fn cold_biomes_snow_and_dry_biomes_stay_dry() {
+        assert_eq!(precipitation_in(1, 64), Some(Precipitation::Rain));
+        assert_eq!(precipitation_in(12, 64), Some(Precipitation::Snow));
+        assert_eq!(precipitation_in(30, 64), Some(Precipitation::Snow));
+        assert_eq!(precipitation_in(2, 64), None);
+        // Taiga is 0.25: rain at sea level, snow above y = 64 + 60.
+        assert_eq!(precipitation_in(5, 64), Some(Precipitation::Rain));
+        assert_eq!(precipitation_in(5, 140), Some(Precipitation::Snow));
+    }
+
+    #[test]
+    fn each_biome_fills_only_its_own_geometry() {
+        let env = Environment {
+            rain: 1.0,
+            ..Environment::default()
+        };
+        let counts = |biome: u8| {
+            let (rain, snow) = build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| {
+                Some(64).zip(precipitation_in(biome, 64))
+            });
+            (rain.vertices.len(), snow.vertices.len())
+        };
+        assert!(matches!(counts(1), (n, 0) if n > 0), "plains rain");
+        assert!(matches!(counts(12), (0, n) if n > 0), "ice plains snow");
+        assert_eq!(counts(2), (0, 0), "desert stays dry");
+    }
 
     #[test]
     fn splashes_land_on_the_ground_and_stop_without_rain() {

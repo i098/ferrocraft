@@ -1036,6 +1036,9 @@ impl ChunkBlocks for View<'_> {
     fn block(&self, x: usize, y: usize, z: usize) -> u16 {
         self.0.block(x, y, z)
     }
+    fn biome(&self, x: usize, z: usize) -> u8 {
+        self.0.biome(x, z)
+    }
 }
 
 /// Builds a screen with no arguments, for effects that open one.

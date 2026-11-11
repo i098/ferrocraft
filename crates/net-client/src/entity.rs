@@ -58,6 +58,11 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         stand: byte(10),
         age: byte(12),
         slime: byte(16),
+        guardian: match find(meta, 16) {
+            Some(MetaValue::Int(i)) => Some(*i),
+            _ => None,
+        },
+        horse: byte(19),
     }
 }
 
@@ -175,6 +180,7 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             id: p.entity_id.0,
             animation: p.animation,
         },
+        P::CollectItem(p) => EntityEvent::Pickup { id: p.collected.0 },
         P::EntityStatus(p) => EntityEvent::Status {
             id: p.entity_id,
             status: p.status,
@@ -307,5 +313,15 @@ mod tests {
             (id, flags, name.as_deref(), health, pos),
             (5, Some(2), Some("Bob"), Some(150.0), [32, 64, 96])
         );
+    }
+
+    #[test]
+    fn collect_item_gives_the_collected_entity() {
+        let p = cb::Packet::from(cb::CollectItem {
+            collected: VarInt(9),
+            collector: VarInt(1),
+        });
+        let decoded = cb::Packet::decode(&p.encode()).unwrap();
+        assert_eq!(events(&decoded), vec![EntityEvent::Pickup { id: 9 }]);
     }
 }

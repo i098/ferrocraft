@@ -11,6 +11,8 @@ use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
 use render::Renderer;
 use std::collections::HashMap;
+use world::entities::{EntityEvent, Kind};
+use world::entity_sound;
 
 /// A change to one tab list entry.
 type TabUpdate = Box<dyn FnOnce(&mut TabEntry)>;
@@ -131,6 +133,7 @@ impl App {
 
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
         self.note_session_state(&ev);
+        self.entity_sound(&ev);
         let ev = match self.world_event(ev, dirty) {
             Ok(()) => return,
             Err(ev) => ev,
@@ -141,6 +144,52 @@ impl App {
         };
         if let Some(e) = self.game.apply(ev) {
             self.game_effect(e, clear, dirty);
+        }
+    }
+
+    /// `handleStatusUpdate` hurt (2) and death (3) sounds, `handleCollectItem` pickup sounds.
+    /// Plays at the entity before `Game` applies the event; the own player is not in `entities`.
+    fn entity_sound(&mut self, ev: &NetEvent) {
+        let NetEvent::Entity(ev) = ev else { return };
+        let (id, status) = match ev {
+            EntityEvent::Status {
+                id,
+                status: s @ (2 | 3),
+            } => (*id, Some(*s)),
+            EntityEvent::Pickup { id } => (*id, None),
+            _ => return,
+        };
+        let own = id == self.game.entity_id;
+        let found = self.game.entities.get(id);
+        let at = match (found, &self.game.player) {
+            (Some(e), _) => e.pos,
+            (None, Some(p)) if own => p.pos,
+            _ => return,
+        };
+        let Some(s) = &mut self.sound else { return };
+        let Some(status) = status else {
+            let orb = found.is_some_and(|e| e.kind == Kind::ExperienceOrb);
+            let (name, jitter) = (if orb { "random.orb" } else { "random.pop" }, s.rand_diff());
+            return s.play(name, Some(at), 0.2, (jitter * 0.7 + 1.0) * 2.0);
+        };
+        let kind = found.map_or(Kind::Player, |e| e.kind);
+        let meta = found.map(|e| e.meta).unwrap_or_default();
+        let water = |at: [f64; 3]| {
+            let state = self.game.store.get_block(
+                at[0].floor() as i32,
+                at[1].floor() as i32,
+                at[2].floor() as i32,
+            );
+            matches!(state >> 4, 8 | 9)
+        };
+        let sound = if status == 2 {
+            entity_sound::hurt(kind, &meta, water(at))
+        } else {
+            entity_sound::death(kind, &meta, water(at))
+        };
+        if let Some((name, volume)) = sound {
+            let jitter = s.rand_diff();
+            s.play(name, Some(at), volume, jitter * 0.2 + 1.0);
         }
     }
 

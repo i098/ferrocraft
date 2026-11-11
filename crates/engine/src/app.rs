@@ -461,7 +461,8 @@ impl App {
         let (eye, yaw, pitch) = match spectated {
             Some(e) => {
                 let [x, y, z] = e.lerp_pos(frac);
-                ([x, y + f64::from(e.eye_height()), z], e.yaw, e.pitch)
+                let (yaw, pitch) = e.lerp_look(frac as f32);
+                ([x, y + f64::from(e.eye_height()), z], yaw, pitch)
             }
             None => (eye, p.yaw, self.game.pitch),
         };
@@ -678,15 +679,24 @@ impl App {
         r.set_lightning(self.game.bolts.shapes());
         let hand_item = self.equip.2.or(held);
         r.set_hand(
-            (!self.hide_hud && self.perspective == 0 && self.game.player.is_some()).then(|| Hand {
-                held: hand_item.map(|(id, damage, _)| HeldKind::Item { id, damage }),
-                swing,
-                lowered,
-                using,
-                glint: hand_item.is_some_and(|h| h.2),
-            }),
+            (!self.hide_hud
+                && self.perspective == 0
+                && self.game.player.is_some()
+                && self.game.gamemode != 3)
+                .then(|| Hand {
+                    held: hand_item.map(|(id, damage, _)| HeldKind::Item { id, damage }),
+                    swing,
+                    lowered,
+                    using,
+                    glint: hand_item.is_some_and(|h| h.2),
+                }),
         );
-        r.set_on_fire(self.perspective == 0 && self.game.player.is_some() && self.game.burning());
+        r.set_on_fire(
+            self.perspective == 0
+                && self.game.player.is_some()
+                && self.game.gamemode != 3
+                && self.game.burning(),
+        );
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
         r.set_cracks(self.game.cracks());

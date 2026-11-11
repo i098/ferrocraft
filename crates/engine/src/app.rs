@@ -515,6 +515,17 @@ impl App {
                     .as_ref()
                     .and_then(|s| s.nbt.as_ref()?.dye())
             }),
+            armor_glint: [8, 7, 6, 5].map(|i| {
+                self.game.inv.player[i]
+                    .as_ref()
+                    .is_some_and(world::inventory::glint)
+            }),
+            held_glint: self
+                .game
+                .inv
+                .held_stack()
+                .as_ref()
+                .is_some_and(world::inventory::glint),
             name: None,
             skin: None,
             eye_height: eye_height(self.input.sneaking()) as f32,
@@ -969,6 +980,8 @@ fn entity_draw(
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
         armor_dye: [1, 2, 3, 4].map(|s| e.equipment[s].and_then(|i| i.dye)),
+        armor_glint: [1, 2, 3, 4].map(|s| e.equipment[s].is_some_and(|i| i.glint)),
+        held_glint: e.equipment[0].is_some_and(|i| i.glint),
         name: e.name.clone(),
         skin,
         burning: e.burning(),

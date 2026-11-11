@@ -101,6 +101,7 @@ pub struct Renderer {
     entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
+    glint_mesh: Option<GpuMesh>,
     fires: Vec<entity::fire::Fire>,
     on_fire: bool,
     fire_frames: [u32; 2],
@@ -339,6 +340,7 @@ impl Renderer {
             entity_skins,
             entity_tex,
             entity_mesh: None,
+            glint_mesh: None,
             fires: Vec::new(),
             on_fire: false,
             fire_frames: [0; 2],
@@ -709,6 +711,11 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
+        let glint = entity::build_glint(draws);
+        if !glint.is_empty() {
+            self.load_texture(entity::GLINT_TEXTURE);
+        }
+        self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
         self.fires.clear();
         self.fires.extend(
             draws
@@ -1164,6 +1171,13 @@ impl Renderer {
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &self.glint_mesh {
+                pass.set_pipeline(&self.bolt_pipe);
+                pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.opaque_pipe);
             }
             self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.

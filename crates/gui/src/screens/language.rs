@@ -15,6 +15,7 @@ pub struct Language {
     pub code: String,
     pub name: String,
     pub region: String,
+    // Not applied yet: vanilla `setBidiFlag` reordering, https://github.com/i098/ferrocraft/issues/115
     pub bidirectional: bool,
 }
 
@@ -100,9 +101,9 @@ impl Screen for LanguageScreen {
         match press(&mut self.buttons, x, y, mb, ctx) {
             Some(DONE) => return self.parent.take().map(Nav::Open),
             Some(FORCE_UNICODE) => {
-                // `setOptionValue` saves; the engine then rescales and calls `init` again.
                 ctx.settings.cycle(Opt::ForceUnicode);
                 ctx.save_settings();
+                self.buttons[0].label = ctx.settings.label(Opt::ForceUnicode, ctx.texts);
                 return None;
             }
             _ => {}
@@ -117,8 +118,10 @@ impl Screen for LanguageScreen {
             .then(|| self.list.row_at(x, y, n))
             .flatten()?;
         ctx.settings.lang = ctx.texts.languages[row].code.clone();
+        if let Err(e) = ctx.settings.save() {
+            eprintln!("Failed to save options: {e}");
+        }
         ctx.effects.push(Effect::LanguageChanged);
-        ctx.save_settings();
         None
     }
 

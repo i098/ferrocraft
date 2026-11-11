@@ -392,10 +392,12 @@ impl Game {
 
     fn apply_state(&mut self, ev: NetEvent) {
         match ev {
-            NetEvent::Entity(EntityEvent::Metadata { id, flags, .. }) if id == self.entity_id => {
-                if let Some(flags) = flags {
-                    self.entity_flags = flags;
-                }
+            NetEvent::Entity(EntityEvent::Metadata {
+                id,
+                flags: Some(flags),
+                ..
+            }) if id == self.entity_id => {
+                self.entity_flags = flags;
             }
             NetEvent::Entity(EntityEvent::Velocity { id, vel }) if id == self.entity_id => {
                 if let Some(p) = &mut self.player {

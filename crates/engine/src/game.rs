@@ -112,6 +112,8 @@ pub struct Game {
     pub pitch: f32,
     pub disconnected: Option<String>,
     pub weather: Weather,
+    /// Lightning bolts of Spawn Global Entity and the flash they cause.
+    pub bolts: render::Bolts,
     pub swing: Swing,
     /// Time of day from Time Update; the packet sends a negative value while the cycle is frozen.
     pub world_time: i64,
@@ -174,6 +176,7 @@ impl Game {
             pitch: 0.0,
             disconnected: None,
             weather: Weather::default(),
+            bolts: render::Bolts::default(),
             swing: Swing::default(),
             world_time: 6000,
             daylight_cycle: true,
@@ -201,6 +204,14 @@ impl Game {
             held_replaced: false,
             finished_use: false,
         }
+    }
+
+    /// Spawn a lightning bolt; the seed only shapes the bolt, so any entropy will do.
+    fn strike(&mut self, pos: [f64; 3]) {
+        let entropy = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as i64);
+        self.bolts.spawn(pos, entropy);
     }
 
     pub fn apply(&mut self, ev: NetEvent) -> Option<Effect> {
@@ -335,6 +346,7 @@ impl Game {
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.digger = Digger::default();
                 self.cracks.clear();
+                self.bolts.clear();
                 self.store.clear();
                 return Some(Effect::Clear);
             }
@@ -355,6 +367,7 @@ impl Game {
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
             NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
+            NetEvent::Lightning { pos } => self.strike(pos),
             ev => self.apply_state(ev),
         }
         None
@@ -493,6 +506,7 @@ impl Game {
             self.world_time += 1;
         }
         self.weather.tick();
+        self.bolts.tick();
         self.swing.tick();
         for b in &mut self.bob {
             *b = (*b - 1).max(0);
@@ -703,6 +717,23 @@ mod tests {
         sneak: false,
         fly_speed: None,
     };
+
+    #[test]
+    fn lightning_event_flashes_the_sky_until_the_bolt_expires() {
+        let mut g = Game::new();
+        assert_eq!(g.bolts.flash(0.0), 0.0);
+        g.apply(NetEvent::Lightning {
+            pos: [1.0, 64.0, 1.0],
+        });
+        g.tick(IDLE);
+        assert!(g.bolts.flash(0.0) > 0.0);
+        // A bolt strikes at most 3 times, each followed by a delay under 10 ticks.
+        for _ in 0..100 {
+            g.tick(IDLE);
+        }
+        assert!(g.bolts.is_empty());
+        assert_eq!(g.bolts.flash(0.0), 0.0);
+    }
 
     #[test]
     fn a_new_held_stack_or_slot_ends_the_item_use() {

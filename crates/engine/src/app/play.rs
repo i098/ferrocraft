@@ -209,6 +209,7 @@ impl App {
         self.use_ticks = (self.use_ticks - 1).max(0);
         self.boss_tick();
         self.step_sound();
+        self.rain_particles();
         self.particles
             .tick(|x, y, z| render::is_solid(self.game.store.get_block(x, y, z)));
         self.equip_tick();
@@ -250,6 +251,37 @@ impl App {
             self.hud.chat.reset_scroll();
         }
         self.chat_open = chat_open;
+    }
+
+    /// `EntityRenderer.addRainParticles`, run once per client tick.
+    fn rain_particles(&mut self) {
+        let Some(p) = self.game.player.as_ref() else {
+            return;
+        };
+        let store = &self.game.store;
+        let top = |x: i32, z: i32| {
+            store.get(x >> 4, z >> 4)?;
+            Some(
+                (0..256)
+                    .rev()
+                    .find(|&y| render::stops_rain(store.get_block(x, y, z)))
+                    .map_or(0, |y| y + 1),
+            )
+        };
+        let (rain, _) = self.game.weather.strengths(1.0);
+        let settings = &self.ui.settings;
+        let drops = render::rain_particles(
+            rain,
+            settings.fancy_graphics,
+            settings.particles,
+            self.game.ticks,
+            p.pos,
+            top,
+            |x, y, z| store.get_block(x, y, z),
+        );
+        for (kind, at) in drops {
+            self.particles.spawn(kind, at, [0.0; 3], 0);
+        }
     }
 
     fn sound_tick(&mut self) {

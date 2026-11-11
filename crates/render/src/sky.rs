@@ -2,6 +2,7 @@
 //! (`World.getSkyColor`, `RenderGlobal.renderSky`, `RenderGlobal.renderClouds`).
 
 use crate::assets::{decode_png, AssetSource, Image};
+use crate::jrandom::JavaRandom;
 use crate::mesh::Vertex;
 use std::f32::consts::PI;
 
@@ -16,6 +17,8 @@ pub struct Environment {
     pub partial: f32,
     pub rain: f32,
     pub thunder: f32,
+    /// Lightning flash `0..=1` (`World.lightningCooldown - partialTick`, capped at 1).
+    pub flash: f32,
     pub render_distance_chunks: u32,
     /// Brightness option `gameSettings.gammaSetting`, `0..1`.
     pub gamma: f32,
@@ -30,6 +33,7 @@ impl Default for Environment {
             partial: 0.0,
             rain: 0.0,
             thunder: 0.0,
+            flash: 0.0,
             render_distance_chunks: 8,
             gamma: 0.0,
         }
@@ -102,6 +106,14 @@ impl Environment {
         if self.thunder > 0.0 {
             sky = desaturate(sky, 0.2, 1.0 - self.thunder * 0.75);
         }
+        if self.flash > 0.0 {
+            let f = self.flash * 0.45;
+            sky = [
+                sky[0] * (1.0 - f) + 0.8 * f,
+                sky[1] * (1.0 - f) + 0.8 * f,
+                sky[2] * (1.0 - f) + f,
+            ];
+        }
 
         let mut fog = [
             0.752_941_2 * (day * 0.94 + 0.06),
@@ -130,6 +142,10 @@ impl Environment {
         let mut sun = 1.0 - (1.0 - ((angle * PI * 2.0).cos() * 2.0 + 0.2)).clamp(0.0, 1.0);
         sun *= 1.0 - self.rain * 5.0 / 16.0;
         sun *= 1.0 - self.thunder * 5.0 / 16.0;
+        if self.flash > 0.0 {
+            // `updateLightmap`: the lightning flash skips the ambient scaling of sky light.
+            sun = 1.0;
+        }
 
         // `World.getStarBrightness`
         let s = (1.0 - ((angle * PI * 2.0).cos() * 2.0 + 0.25)).clamp(0.0, 1.0);
@@ -220,7 +236,7 @@ fn env_uv(x: f32, y: f32) -> [f32; 2] {
     [x / ENV_W as f32, y / ENV_H as f32]
 }
 
-fn white_uv() -> [f32; 2] {
+pub(crate) fn white_uv() -> [f32; 2] {
     env_uv(4.0, WHITE_Y + 4.0)
 }
 
@@ -377,25 +393,6 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
         solid,
         blend,
         additive,
-    }
-}
-
-/// `java.util.Random` (48-bit LCG), enough for vanilla's star field.
-struct JavaRandom(i64);
-
-impl JavaRandom {
-    fn new(seed: i64) -> Self {
-        JavaRandom((seed ^ 0x5DEECE66D) & ((1 << 48) - 1))
-    }
-    fn next(&mut self, bits: u32) -> i32 {
-        self.0 = (self.0.wrapping_mul(0x5DEECE66D).wrapping_add(0xB)) & ((1 << 48) - 1);
-        (self.0 >> (48 - bits)) as i32
-    }
-    fn next_float(&mut self) -> f32 {
-        self.next(24) as f32 / (1 << 24) as f32
-    }
-    fn next_double(&mut self) -> f64 {
-        (((self.next(26) as i64) << 27) + self.next(27) as i64) as f64 / (1u64 << 53) as f64
     }
 }
 

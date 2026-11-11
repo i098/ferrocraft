@@ -1642,7 +1642,6 @@ fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
     )
 }
 
-/// `T(x, y, 0) * Rz(roll) * Rx(pitch)` of `EntityRenderer.setupViewBobbing`, column-major.
 /// `rotatef(roll, 0, 0, 1)` of `applyHurtCam`.
 fn hurt_matrix(roll: f32) -> [[f32; 4]; 4] {
     let (s, c) = roll.to_radians().sin_cos();
@@ -1654,6 +1653,7 @@ fn hurt_matrix(roll: f32) -> [[f32; 4]; 4] {
     ]
 }
 
+/// `T(x, y, 0) * Rz(roll) * Rx(pitch)` of `EntityRenderer.setupViewBobbing`, column-major.
 fn bob_matrix([x, y, roll, pitch]: [f32; 4]) -> [[f32; 4]; 4] {
     let (sr, cr) = roll.to_radians().sin_cos();
     let (sp, cp) = pitch.to_radians().sin_cos();

@@ -21,7 +21,7 @@ jobs:
           components: rustfmt, clippy
       - name: Install software Vulkan driver (lavapipe) for the render test
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+          sudo sed -i -e 's|http://azure.archive.ubuntu.com/ubuntu|http://mirrors.edge.kernel.org/ubuntu|g' -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://mirrors.edge.kernel.org/ubuntu|g' -e 's|mirror://[^ ]*|http://mirrors.edge.kernel.org/ubuntu|g' /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
           for attempt in 1 2 3; do
             if timeout 300 sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update &&
                timeout 600 sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y mesa-vulkan-drivers libvulkan1 libasound2-dev; then

@@ -6,6 +6,13 @@ use crate::jrandom::JavaRandom;
 use crate::mesh::Vertex;
 use std::f32::consts::PI;
 
+/// The liquid the camera is in (`Camera.getBlockInside` material).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fluid {
+    Water,
+    Lava,
+}
+
 /// What the world tells the renderer about time and weather.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Environment {
@@ -22,6 +29,8 @@ pub struct Environment {
     pub render_distance_chunks: u32,
     /// Brightness option `gameSettings.gammaSetting`, `0..1`.
     pub gamma: f32,
+    /// The liquid around the camera: its own fog color and density.
+    pub fluid: Option<Fluid>,
 }
 
 impl Default for Environment {
@@ -36,6 +45,7 @@ impl Default for Environment {
             flash: 0.0,
             render_distance_chunks: 8,
             gamma: 0.0,
+            fluid: None,
         }
     }
 }
@@ -51,6 +61,8 @@ pub struct SkyState {
     pub star_alpha: f32,
     pub fog_start: f32,
     pub fog_end: f32,
+    /// `GL_EXP` density in a liquid; the linear `fog_start`..`fog_end` applies otherwise.
+    pub fog_density: Option<f32>,
 }
 
 /// `WorldProvider.calculateCelestialAngle`: 0 at noon, 0.5 at midnight.
@@ -130,6 +142,17 @@ impl Environment {
             fog = fog.map(|c| c * (1.0 - self.thunder * 0.5));
         }
 
+        // `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog.
+        let (fog, fog_density) = match self.fluid {
+            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
+            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
+            None => (fog, None),
+        };
+        // The sky dome sits in that fog.
+        if fog_density.is_some() {
+            sky = fog;
+        }
+
         let mut cloud = [day * 0.9 + 0.1, day * 0.9 + 0.1, day * 0.85 + 0.15];
         if self.rain > 0.0 {
             cloud = desaturate(cloud, 0.6, 1.0 - self.rain * 0.95);
@@ -161,6 +184,7 @@ impl Environment {
             star_alpha,
             fog_start: far * 0.75,
             fog_end: far,
+            fog_density,
         }
     }
 

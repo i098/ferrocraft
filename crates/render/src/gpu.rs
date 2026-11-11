@@ -917,7 +917,7 @@ impl Renderer {
         let [w, h, ..] = world.screen;
         let globals = Globals {
             view_proj: mul(
-                projection(70.0, w / h),
+                projection(cam.hand_fov_deg, w / h),
                 mul(
                     hurt_matrix(cam.hurt_roll),
                     mul(bob_matrix(cam.bob), draw.model),
@@ -973,7 +973,11 @@ impl Renderer {
             ],
             fog_color: [sky.fog[0], sky.fog[1], sky.fog[2], 1.0],
             // Torch flicker is a slow random walk around 0 in vanilla, so the factor stays near 1.5.
-            fog: [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
+            fog: match sky.fog_density {
+                // A negative start tells `fs_world` to use `exp(-density * d)`.
+                Some(d) => [-d, d, sky.sun_brightness, 1.5],
+                None => [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
+            },
             screen: [w as f32, h as f32, 0.0, 0.0],
         };
         self.queue
@@ -983,9 +987,7 @@ impl Renderer {
         let sky_solid = self.upload_geometry(&layers.solid);
         let sky_blend = self.upload_geometry(&layers.blend);
         let sky_add = self.upload_geometry(&layers.additive);
-        let clouds = self
-            .env_tex
-            .has_clouds
+        let clouds = (self.env_tex.has_clouds && env.fluid.is_none())
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
 

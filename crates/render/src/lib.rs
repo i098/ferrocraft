@@ -43,6 +43,9 @@ pub struct Camera {
     /// View bobbing of `EntityRenderer.setupViewBobbing`: translate x, translate y, roll and
     /// pitch in degrees, applied in view space before the camera rotation.
     pub bob: [f32; 4],
+    /// Roll in degrees of `EntityRenderer.applyHurtCam` (hit tilt and death roll), applied
+    /// before the bobbing.
+    pub hurt_roll: f32,
 }
 
 impl Default for Camera {
@@ -53,6 +56,7 @@ impl Default for Camera {
             pitch: 0.0,
             fov_deg: 70.0,
             bob: [0.0; 4],
+            hurt_roll: 0.0,
         }
     }
 }

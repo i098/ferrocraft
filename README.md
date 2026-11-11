@@ -7,15 +7,15 @@ In development. The engine joins 1.8.9 servers in offline mode and online mode (
 
 ## Install
 
-No Rust toolchain needed. The repo is private, so install [`gh`](https://cli.github.com) and run `gh auth login` first. The installer downloads the release archive for your OS with `gh`. Once the repo is public, `curl` or `Invoke-WebRequest` works without `gh`.
+No Rust toolchain needed. The installer downloads the release archive for your OS and runs it.
 
 macOS and Linux (x86_64, or Apple silicon):
 
-    gh release download --repo i098/ferrocraft --pattern install.sh -O - | sh
+    curl -fsSL https://github.com/i098/ferrocraft/releases/latest/download/install.sh | sh
 
 Windows (PowerShell):
 
-    gh release download --repo i098/ferrocraft --pattern install.ps1 -O - | Out-String | iex
+    irm https://github.com/i098/ferrocraft/releases/latest/download/install.ps1 | iex
 
 The installer installs into every launcher it finds:
 

@@ -16,76 +16,99 @@ pub fn death(kind: Kind, meta: &SizeMeta, in_water: bool) -> Option<Living> {
     sound(kind, meta, in_water, false)
 }
 
+/// Mobs with fixed sounds: (type id, hurt, death, volume). `getHurtSound`/`getDeathSound` and
+/// `getSoundVolume` of each 1.8.9 class. Slimes, guardians and horses depend on metadata.
+const FIXED: &[(u8, &str, &str, f32)] = &[
+    (50, "mob.creeper.say", "mob.creeper.death", 1.0),
+    (51, "mob.skeleton.hurt", "mob.skeleton.death", 1.0),
+    (52, "mob.spider.say", "mob.spider.death", 1.0),
+    (59, "mob.spider.say", "mob.spider.death", 1.0),
+    (54, "mob.zombie.hurt", "mob.zombie.death", 1.0),
+    (56, "mob.ghast.scream", "mob.ghast.death", 10.0),
+    (57, "mob.zombiepig.zpighurt", "mob.zombiepig.zpigdeath", 1.0),
+    (58, "mob.endermen.hit", "mob.endermen.death", 1.0),
+    (60, "mob.silverfish.hit", "mob.silverfish.kill", 1.0),
+    (67, "mob.silverfish.hit", "mob.silverfish.kill", 1.0),
+    (61, "mob.blaze.hit", "mob.blaze.death", 1.0),
+    (63, "mob.enderdragon.hit", "game.neutral.die", 5.0),
+    (64, "mob.wither.hurt", "mob.wither.death", 1.0),
+    (65, "mob.bat.hurt", "mob.bat.death", 0.1),
+    (90, "mob.pig.say", "mob.pig.death", 1.0),
+    (91, "mob.sheep.say", "mob.sheep.say", 1.0),
+    (92, "mob.cow.hurt", "mob.cow.hurt", 0.4),
+    (96, "mob.cow.hurt", "mob.cow.hurt", 0.4),
+    (93, "mob.chicken.hurt", "mob.chicken.hurt", 1.0),
+    (95, "mob.wolf.hurt", "mob.wolf.death", 0.4),
+    (98, "mob.cat.hitt", "mob.cat.hitt", 0.4),
+    (99, "mob.irongolem.hit", "mob.irongolem.death", 1.0),
+    (101, "mob.rabbit.hurt", "mob.rabbit.death", 1.0),
+    (120, "mob.villager.hit", "mob.villager.death", 1.0),
+    // Giant: `EntityMob` defaults.
+    (53, "game.hostile.hurt", "game.hostile.die", 1.0),
+    (49, "game.hostile.hurt", "game.hostile.die", 1.0),
+];
+
+/// Mobs that play no hurt or death sound: witch, squid and snowman.
+const SILENT: &[u8] = &[66, 94, 97];
+
+/// Guardian sound: elder variants and the land variants depend on metadata and water.
+fn guardian(elder: bool, in_water: bool, hurt: bool) -> &'static str {
+    const NAMES: [[&str; 2]; 3] = [
+        ["mob.guardian.land.hit", "mob.guardian.land.death"],
+        ["mob.guardian.hit", "mob.guardian.death"],
+        ["mob.guardian.elder.hit", "mob.guardian.elder.death"],
+    ];
+    let row = usize::from(in_water) + usize::from(in_water && elder);
+    NAMES[row][usize::from(!hurt)]
+}
+
+/// Horse sound by `getType`: 0 horse, 1 donkey, 2 mule, 3 zombie, 4 skeleton.
+fn horse(kind: u8, hurt: bool) -> &'static str {
+    const NAMES: [[&str; 2]; 4] = [
+        ["mob.horse.hit", "mob.horse.death"],
+        ["mob.horse.donkey.hit", "mob.horse.donkey.death"],
+        ["mob.horse.zombie.hit", "mob.horse.zombie.death"],
+        ["mob.horse.skeleton.hit", "mob.horse.skeleton.death"],
+    ];
+    let row = match kind {
+        1 | 2 => 1,
+        3 => 2,
+        4 => 3,
+        _ => 0,
+    };
+    NAMES[row][usize::from(!hurt)]
+}
+
 fn sound(kind: Kind, meta: &SizeMeta, in_water: bool, hurt: bool) -> Option<Living> {
     let pick = |h, d| if hurt { h } else { d };
-    let one = |h, d| Some((pick(h, d), 1.0));
-    match kind {
-        Kind::Player => one("game.player.hurt", "game.player.die"),
-        Kind::Mob(id) => match id {
-            50 => one("mob.creeper.say", "mob.creeper.death"),
-            51 => one("mob.skeleton.hurt", "mob.skeleton.death"),
-            52 | 59 => one("mob.spider.say", "mob.spider.death"),
-            54 => one("mob.zombie.hurt", "mob.zombie.death"),
-            55 | 62 => {
-                let name = if meta.slime.unwrap_or(1) > 1 {
-                    "mob.slime.big"
-                } else {
-                    "mob.slime.small"
-                };
-                Some((name, 0.4 * f32::from(meta.slime.unwrap_or(1))))
-            }
-            56 => Some((pick("mob.ghast.scream", "mob.ghast.death"), 10.0)),
-            57 => one("mob.zombiepig.zpighurt", "mob.zombiepig.zpigdeath"),
-            58 => one("mob.endermen.hit", "mob.endermen.death"),
-            60 | 67 => one("mob.silverfish.hit", "mob.silverfish.kill"),
-            61 => one("mob.blaze.hit", "mob.blaze.death"),
-            63 => Some((pick("mob.enderdragon.hit", "game.neutral.die"), 5.0)),
-            64 => one("mob.wither.hurt", "mob.wither.death"),
-            65 => Some((pick("mob.bat.hurt", "mob.bat.death"), 0.1)),
-            66 | 94 => None,
-            68 => {
-                let elder = meta.guardian.is_some_and(|g| g & 4 != 0);
-                Some((
-                    match (in_water, elder, hurt) {
-                        (false, _, true) => "mob.guardian.land.hit",
-                        (false, _, false) => "mob.guardian.land.death",
-                        (true, true, true) => "mob.guardian.elder.hit",
-                        (true, true, false) => "mob.guardian.elder.death",
-                        (true, false, true) => "mob.guardian.hit",
-                        (true, false, false) => "mob.guardian.death",
-                    },
-                    1.0,
-                ))
-            }
-            90 => one("mob.pig.say", "mob.pig.death"),
-            91 => one("mob.sheep.say", "mob.sheep.say"),
-            92 | 96 => Some(("mob.cow.hurt", 0.4)),
-            93 => one("mob.chicken.hurt", "mob.chicken.hurt"),
-            95 => Some((pick("mob.wolf.hurt", "mob.wolf.death"), 0.4)),
-            97 => None,
-            98 => Some(("mob.cat.hitt", 0.4)),
-            99 => one("mob.irongolem.hit", "mob.irongolem.death"),
-            100 => {
-                let name = match (meta.horse.unwrap_or(0), hurt) {
-                    (3, true) => "mob.horse.zombie.hit",
-                    (3, false) => "mob.horse.zombie.death",
-                    (4, true) => "mob.horse.skeleton.hit",
-                    (4, false) => "mob.horse.skeleton.death",
-                    (1 | 2, true) => "mob.horse.donkey.hit",
-                    (1 | 2, false) => "mob.horse.donkey.death",
-                    (_, true) => "mob.horse.hit",
-                    (_, false) => "mob.horse.death",
-                };
-                Some((name, 0.8))
-            }
-            101 => one("mob.rabbit.hurt", "mob.rabbit.death"),
-            120 => one("mob.villager.hit", "mob.villager.death"),
-            // Giant, unknown living mobs: `EntityMob`/`EntityLivingBase` defaults.
-            53 | 49 => one("game.hostile.hurt", "game.hostile.die"),
-            _ => one("game.neutral.hurt", "game.neutral.die"),
-        },
-        _ => None,
+    let id = match kind {
+        Kind::Player => return Some((pick("game.player.hurt", "game.player.die"), 1.0)),
+        Kind::Mob(id) => id,
+        _ => return None,
+    };
+    if SILENT.contains(&id) {
+        return None;
     }
+    if let Some(&(_, h, d, v)) = FIXED.iter().find(|r| r.0 == id) {
+        return Some((pick(h, d), v));
+    }
+    let size = meta.slime.unwrap_or(1);
+    Some(match id {
+        55 | 62 => (
+            if size > 1 {
+                "mob.slime.big"
+            } else {
+                "mob.slime.small"
+            },
+            0.4 * f32::from(size),
+        ),
+        68 => (
+            guardian(meta.guardian.is_some_and(|g| g & 4 != 0), in_water, hurt),
+            1.0,
+        ),
+        100 => (horse(meta.horse.unwrap_or(0), hurt), 0.8),
+        _ => (pick("game.neutral.hurt", "game.neutral.die"), 1.0),
+    })
 }
 
 #[cfg(test)]

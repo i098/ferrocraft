@@ -3,7 +3,7 @@
 //! draw as a tinted box of their hitbox size.
 //!
 //! Not ported yet: sheep wool, villagers, enchant glint, armor textures (armor is a tinted shell),
-//! held item models (a held item is a tinted bar), name tags (see [`nametags`]).
+//! held item models (a held item is a tinted bar). Name tags are laid out by [`nametags`].
 
 mod skin;
 
@@ -47,6 +47,18 @@ pub struct EntityDraw {
     pub name: Option<String>,
     /// Player whose downloaded skin to draw; the default skin when none is stored.
     pub skin: Option<u128>,
+    /// Metadata 0 bit 0: drawn full-bright (`RenderManager.renderEntityStatic`).
+    pub burning: bool,
+    /// `Entity.getEyeHeight`: the light is read at feet plus this.
+    pub eye_height: f32,
+    /// Metadata byte 3 (`getAlwaysRenderNameTag`).
+    pub always_name: bool,
+    /// The entity under the crosshair (`RenderManager.pointedEntity`).
+    pub pointed: bool,
+    /// Another entity rides this one (`riddenByEntity != null`), which hides its tag.
+    pub ridden: bool,
+    /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
+    pub child: bool,
 }
 
 /// A box of a model, in vanilla model pixels (y down).
@@ -551,11 +563,25 @@ fn rotate(p: V3, rot: V3) -> V3 {
     [x, y, z]
 }
 
-/// Skin or flat color of one draw, meshes appended to `out`.
-pub fn build(draws: &[EntityDraw], skins: &Skins) -> MeshData {
+/// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
+/// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
+pub fn build(
+    draws: &[EntityDraw],
+    skins: &Skins,
+    light: impl Fn([f64; 3]) -> [f32; 2],
+) -> MeshData {
     let mut out = MeshData::default();
     for d in draws.iter().filter(|d| !d.invisible) {
+        let start = out.vertices.len();
         draw_entity(&mut out, d, skins);
+        let level = if d.burning {
+            [1.0, 1.0]
+        } else {
+            light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
+        };
+        for v in &mut out.vertices[start..] {
+            v.light = level;
+        }
     }
     out
 }
@@ -868,33 +894,61 @@ fn dot(a: V3, b: V3) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// Screen position and text of every name tag in range, for the HUD to draw: players and named
-/// mobs, above the hitbox (`RenderLivingBase.canRenderName`, 64 blocks, sneaking hides at 32).
-/// `view_proj` maps world space to clip space; the result is in `0..width` by `0..height` pixels.
+/// One name tag for the HUD: `screen` is the top-centre of the text in pixels, `scale` the pixels
+/// per font pixel (vanilla's 0.02666667 blocks per font pixel, so tags shrink with distance), and
+/// `anchor` the world point the tag hangs from. A `sneaking` tag is faint only: no solid pass.
+pub struct NameTag {
+    pub screen: [f32; 2],
+    pub scale: f32,
+    pub anchor: [f64; 3],
+    pub sneaking: bool,
+    pub text: String,
+}
+
+/// `canRenderName` of the entity's renderer, before the distance test: armor stands follow the
+/// always-show byte alone, other mobs need it or the crosshair, players only need to be visible.
+fn shows_name(d: &EntityDraw) -> bool {
+    match d.class {
+        Class::Object(78) => d.always_name,
+        Class::Mob(_) => !d.invisible && !d.ridden && (d.always_name || d.pointed),
+        Class::Player { .. } => !d.invisible && !d.ridden,
+        _ => d.always_name,
+    }
+}
+
+/// Name tags in range, above the hitbox (`RendererLivingEntity.renderName`: 64 blocks, sneaking 32,
+/// measured from the viewer's feet). `view_proj` maps world space to clip space; positions are in
+/// `0..width` by `0..height` pixels.
 pub fn nametags(
     draws: &[EntityDraw],
-    eye: [f64; 3],
+    viewer: [f64; 3],
     view_proj: &[[f32; 4]; 4],
+    fov_deg: f32,
     width: f32,
     height: f32,
-) -> Vec<(f32, f32, String)> {
+) -> Vec<NameTag> {
+    let px_per_block = height * 0.5 / (fov_deg.to_radians() * 0.5).tan();
     draws
         .iter()
         .filter_map(|d| {
             let name = d.name.as_ref()?;
-            let dist = (0..3)
-                .map(|i| (d.pos[i] - eye[i]).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            let limit = if d.sneaking { 32.0 } else { 64.0 };
-            if dist > limit || d.invisible {
+            if !shows_name(d) {
                 return None;
             }
-            let p = [
-                d.pos[0] as f32,
-                (d.pos[1] + f64::from(d.size.1) + 0.5) as f32,
-                d.pos[2] as f32,
-            ];
+            let dist_sq: f64 = (0..3).map(|i| (d.pos[i] - viewer[i]).powi(2)).sum();
+            let limit = if d.sneaking { 32.0 } else { 64.0 };
+            if dist_sq >= limit * limit {
+                return None;
+            }
+            let mut y = d.pos[1] + f64::from(d.size.1) + 0.5;
+            if d.child {
+                y -= f64::from(d.size.1) / 2.0;
+            }
+            if d.sneaking {
+                y -= 0.25;
+            }
+            let anchor = [d.pos[0], y, d.pos[2]];
+            let p = anchor.map(|v| v as f32);
             let c: Vec<f32> = (0..4)
                 .map(|r| {
                     view_proj[0][r] * p[0]
@@ -906,11 +960,16 @@ pub fn nametags(
             if c[3] <= 0.0 {
                 return None;
             }
-            Some((
-                (c[0] / c[3] * 0.5 + 0.5) * width,
-                (0.5 - c[1] / c[3] * 0.5) * height,
-                name.clone(),
-            ))
+            Some(NameTag {
+                screen: [
+                    (c[0] / c[3] * 0.5 + 0.5) * width,
+                    (0.5 - c[1] / c[3] * 0.5) * height,
+                ],
+                scale: 0.026_666_67 * px_per_block / c[3],
+                anchor,
+                sneaking: d.sneaking,
+                text: name.clone(),
+            })
         })
         .collect()
 }
@@ -939,6 +998,12 @@ mod tests {
             armor: [0; 4],
             name: None,
             skin: None,
+            burning: false,
+            eye_height: 1.62,
+            always_name: false,
+            pointed: false,
+            ridden: false,
+            child: false,
         }
     }
 
@@ -946,7 +1011,7 @@ mod tests {
     fn skeleton_left_limbs_sample_the_mirrored_right_limb_regions() {
         // Rows 48..64 of the 64x64 layout hold the player's left arm (u 32..48) and leg (u 16..32).
         let in_left_limb_rows = |d: EntityDraw| {
-            build(&[d], &Skins::flat())
+            build(&[d], &Skins::flat(), |_| [1.0, 1.0])
                 .vertices
                 .iter()
                 .filter(|p| {
@@ -963,7 +1028,7 @@ mod tests {
 
     #[test]
     fn standing_player_spans_the_hitbox_height() {
-        let m = build(&[steve()], &Skins::flat());
+        let m = build(&[steve()], &Skins::flat(), |_| [1.0, 1.0]);
         let ys = m.vertices.iter().map(|v| v.pos[1]);
         let (lo, hi) = (
             ys.clone().fold(f32::MAX, f32::min),
@@ -981,7 +1046,7 @@ mod tests {
             let mut d = steve();
             d.yaw = yaw;
             d.head_yaw = yaw;
-            let m = build(&[d], &Skins::flat());
+            let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
             let v = |y: f32| (512.0 + y) / Skins::height() as f32;
             let q: Vec<_> = m
                 .vertices
@@ -1001,7 +1066,7 @@ mod tests {
         let mut d = steve();
         d.class = Class::Object(50);
         d.size = (1.0, 1.0);
-        let m = build(&[d], &Skins::flat());
+        let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
         let center = [10.0, 64.5, 10.0];
         assert_eq!(m.indices.len(), 36);
         for tri in m.indices.chunks(3) {
@@ -1017,8 +1082,8 @@ mod tests {
         let mut d = steve();
         d.limb_swing = 1.0;
         d.limb_swing_amount = 1.0;
-        let walking = build(&[d], &Skins::flat());
-        let idle = build(&[steve()], &Skins::flat());
+        let walking = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
+        let idle = build(&[steve()], &Skins::flat(), |_| [1.0, 1.0]);
         assert_ne!(walking.vertices.len(), 0);
         assert_ne!(walking.vertices[100].pos, idle.vertices[100].pos);
     }
@@ -1053,9 +1118,98 @@ mod tests {
         let mut d = steve();
         d.class = Class::Mob(54);
         d.death_time = 20.0;
-        let m = build(&[d], &Skins::flat());
+        let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
         let top = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
         // Lying on its side the highest point is the half-width of the model, not the 1.8 block height.
         assert!(top < 64.0 + 0.6, "{top}");
+    }
+
+    #[test]
+    fn light_comes_from_the_eye_cell_and_fire_stays_full_bright() {
+        let seen = std::cell::Cell::new([0.0; 3]);
+        let probe = |p: [f64; 3]| {
+            seen.set(p);
+            [0.2, 0.0]
+        };
+        let mut d = steve();
+        d.eye_height = 1.62;
+        let m = build(&[d.clone()], &Skins::flat(), probe);
+        assert!(m.vertices.iter().all(|v| v.light == [0.2, 0.0]));
+        assert!((seen.get()[1] - 65.62).abs() < 1e-3);
+        d.burning = true;
+        let m = build(&[d], &Skins::flat(), |_| [0.2, 0.0]);
+        assert!(m.vertices.iter().all(|v| v.light == [1.0, 1.0]));
+    }
+
+    #[test]
+    fn name_tag_rules_follow_the_renderer_class() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        // Looking down -z from the origin: clip w = -z, so put entities at z < 0.
+        let tags = |mut d: EntityDraw| {
+            d.pos = [0.0, 0.0, -10.0];
+            d.name = Some("N".into());
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0).len()
+        };
+        let mut stand = steve();
+        stand.class = Class::Object(78);
+        stand.invisible = true;
+        assert_eq!(tags(stand.clone()), 0, "stand without the byte");
+        stand.always_name = true;
+        assert_eq!(tags(stand), 1, "invisible stand with the byte");
+        let mut mob = steve();
+        mob.class = Class::Mob(54);
+        assert_eq!(tags(mob.clone()), 0, "named mob out of the crosshair");
+        mob.pointed = true;
+        assert_eq!(tags(mob.clone()), 1);
+        mob.pointed = false;
+        mob.always_name = true;
+        assert_eq!(tags(mob), 1);
+        let mut player = steve();
+        assert_eq!(tags(player.clone()), 1);
+        player.invisible = true;
+        assert_eq!(tags(player), 0, "invisible player");
+        let mut far = steve();
+        far.pos = [0.0, 0.0, -64.0];
+        far.name = Some("N".into());
+        assert!(nametags(&[far], [0.0; 3], &flip(id), 70.0, 800.0, 600.0).is_empty());
+    }
+
+    #[test]
+    fn sneaking_ridden_and_child_tags_follow_render_name() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let tag = |f: &dyn Fn(&mut EntityDraw)| {
+            let mut d = steve();
+            d.pos = [0.0, 0.0, -10.0];
+            d.name = Some("N".into());
+            f(&mut d);
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0)
+        };
+        assert!(!tag(&|_| {})[0].sneaking);
+        let sneak = &tag(&|d| d.sneaking = true)[0];
+        assert!(sneak.sneaking);
+        assert!((sneak.anchor[1] - (steve().size.1 as f64 + 0.5 - 0.25)).abs() < 1e-6);
+        let child = &tag(&|d| {
+            d.child = true;
+            d.size = (0.3, 0.9);
+        })[0];
+        assert!((child.anchor[1] - (0.9 + 0.5 - 0.45)).abs() < 1e-6);
+        assert!(tag(&|d| d.ridden = true).is_empty());
+    }
+
+    /// `w = -z` so a point at negative z is in front, like the real projection.
+    fn flip(mut m: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+        m[2][3] = -1.0;
+        m[3][3] = 0.0;
+        m
     }
 }

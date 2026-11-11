@@ -481,6 +481,12 @@ impl App {
             armor: [slot(8), slot(7), slot(6), slot(5)],
             name: None,
             skin: None,
+            burning: false,
+            eye_height: eye_height(self.input.sneaking()) as f32,
+            always_name: false,
+            pointed: false,
+            ridden: false,
+            child: false,
         })
     }
 
@@ -489,7 +495,42 @@ impl App {
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let cam = self.camera(frac);
         let eye = self.eye(frac);
-        let (quads, textures, effects) = self.overlay(frac, eye);
+        let self_model = (self.perspective != 0)
+            .then(|| self.self_draw(frac))
+            .flatten();
+        let pointed = self.entity_target().map(|(id, _)| id);
+        let skins = &mut self.skins;
+        let mut renderer = self.renderer.as_mut();
+        let ridden: std::collections::HashSet<i32> = self
+            .game
+            .entities
+            .iter()
+            .filter_map(|e| e.vehicle)
+            .chain(self.game.vehicle)
+            .collect();
+        let mut draws: Vec<EntityDraw> = self
+            .game
+            .entities
+            .iter()
+            .map(|e| {
+                let skin = e.uuid.filter(|_| e.kind == Kind::Player).and_then(|u| {
+                    renderer
+                        .as_deref_mut()
+                        .and_then(|r| skins.show(r, u, e.textures.as_deref()))
+                });
+                let slim = skin.and_then(|u| skins.slim(u));
+                entity_draw(
+                    e,
+                    frac,
+                    skin,
+                    slim,
+                    pointed == Some(e.id),
+                    ridden.contains(&e.id),
+                )
+            })
+            .collect();
+        draws.extend(self_model);
+        let (quads, textures, effects) = self.overlay(frac, eye, &cam, &draws);
         self.run_effects(effects);
         let held = self
             .game
@@ -499,9 +540,6 @@ impl App {
             .map(|s| (s.id, s.damage));
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);
-        let self_model = (self.perspective != 0)
-            .then(|| self.self_draw(frac))
-            .flatten();
         let using = self.using(frac as f32);
         let fluid = self.fluid_at(cam.pos);
         let Some(r) = &mut self.renderer else { return };
@@ -534,21 +572,6 @@ impl App {
                 using,
             }),
         );
-        let skins = &mut self.skins;
-        let mut draws: Vec<EntityDraw> = self
-            .game
-            .entities
-            .iter()
-            .map(|e| {
-                let skin = e
-                    .uuid
-                    .filter(|_| e.kind == Kind::Player)
-                    .and_then(|u| skins.show(r, u, e.textures.as_deref()));
-                let slim = skin.and_then(|u| skins.slim(u));
-                entity_draw(e, frac, skin, slim)
-            })
-            .collect();
-        draws.extend(self_model);
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
         r.set_cracks(self.game.cracks());
@@ -604,7 +627,13 @@ impl App {
 
     /// The HUD, the open container and the menu screens as quads, plus the textures they
     /// registered and the effects they raised.
-    fn overlay(&mut self, frac: f64, eye: Option<[f64; 3]>) -> Overlay {
+    fn overlay(
+        &mut self,
+        frac: f64,
+        eye: Option<[f64; 3]>,
+        cam: &Camera,
+        draws: &[EntityDraw],
+    ) -> Overlay {
         let Some(r) = &self.renderer else {
             return (Vec::new(), Vec::new(), Vec::new());
         };
@@ -628,6 +657,7 @@ impl App {
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
         if show_hud {
+            draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
             let debug = self.debug_lines(eye);
             let status = status_of(&self.game, self.input.sneaking());
             self.hud.selected_slot = i32::from(self.game.inv.held);
@@ -686,6 +716,33 @@ impl App {
         let mut textures = std::mem::take(&mut c.pending_textures);
         textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
+    }
+}
+
+/// `Render.renderLivingLabel`: a 25% black plate and the name at vanilla's world scale. Vanilla draws the text twice,
+/// faint without the depth test and solid with it; the overlay has no depth buffer, so a block on the line of
+/// sight to the tag stands in for the depth test.
+fn draw_name_tags(
+    g: &mut gui::Gui,
+    game: &Game,
+    cam: &Camera,
+    draws: &[EntityDraw],
+    (w, h): (u32, u32),
+    factor: f32,
+) {
+    let Some(player) = &game.player else { return };
+    let vp = render::view_proj(cam, w as f32 / h as f32);
+    for tag in render::nametags(draws, player.pos, &vp, cam.fov_deg, w as f32, h as f32) {
+        let half = g.width(&tag.text) / 2;
+        g.push();
+        g.translate(tag.screen[0] / factor, tag.screen[1] / factor);
+        g.scale(tag.scale / factor, tag.scale / factor);
+        g.fill(-half - 1, -1, half + 1, 8, 0x4000_0000);
+        g.text_plain(&tag.text, -half as f32, 0.0, 0x20FF_FFFF);
+        if !tag.sneaking && !game.line_blocked(cam.pos, tag.anchor) {
+            g.text_plain(&tag.text, -half as f32, 0.0, 0xFFFF_FFFF);
+        }
+        g.pop();
     }
 }
 
@@ -802,7 +859,14 @@ impl ApplicationHandler for App {
 
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
-fn entity_draw(e: &Entity, partial: f64, skin: Option<u128>, slim: Option<bool>) -> EntityDraw {
+fn entity_draw(
+    e: &Entity,
+    partial: f64,
+    skin: Option<u128>,
+    slim: Option<bool>,
+    pointed: bool,
+    ridden: bool,
+) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
             slim: slim.unwrap_or_else(|| {
@@ -840,6 +904,12 @@ fn entity_draw(e: &Entity, partial: f64, skin: Option<u128>, slim: Option<bool>)
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
         name: e.name.clone(),
         skin,
+        burning: e.burning(),
+        eye_height: e.eye_height(),
+        always_name: e.always_name(),
+        pointed,
+        ridden,
+        child: e.is_child(),
     }
 }
 

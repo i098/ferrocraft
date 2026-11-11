@@ -697,7 +697,7 @@ impl Renderer {
         for key in draws.iter().filter_map(|d| d.skin) {
             self.entity_skins.touch(key);
         }
-        let mesh = entity::build(draws, &self.entity_skins);
+        let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
     }
 
@@ -728,6 +728,18 @@ impl Renderer {
     /// Whether the skin of player `key` is stored; a replaced one has to be sent again.
     pub fn has_player_skin(&self, key: u128) -> bool {
         self.entity_skins.player(key).is_some()
+    }
+
+    /// `Entity.getBrightnessForRender`: `[sky, block]` light (`0..=1`) in the block at `p`, 0 when its chunk is not loaded.
+    fn light_at(&self, p: [f64; 3]) -> [f32; 2] {
+        let [x, y, z] = p.map(|v| v.floor() as i32);
+        self.meshes
+            .get(&(x >> 4, z >> 4))
+            .and_then(|m| m.light.as_ref())
+            .map_or([0.0; 2], |l| {
+                let (s, b) = l.get(x & 15, y, z & 15);
+                [f32::from(s) / 15.0, f32::from(b) / 15.0]
+            })
     }
 
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
@@ -1734,7 +1746,7 @@ fn create_texture(
 }
 
 /// Column-major view-projection (OpenGL-style camera math, wgpu 0..1 depth).
-fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
+pub fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
     let (yaw, pitch) = (cam.yaw.to_radians(), cam.pitch.to_radians());
     let fwd = [
         -yaw.sin() * pitch.cos(),

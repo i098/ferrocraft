@@ -574,6 +574,19 @@ impl Game {
         dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
     }
 
+    /// A selectable block lies between `from` and `to`.
+    pub fn line_blocked(&self, from: [f64; 3], to: [f64; 3]) -> bool {
+        let d = [0, 1, 2].map(|i| to[i] - from[i]);
+        let len = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if len < 1e-6 {
+            return false;
+        }
+        let yaw = (-d[0]).atan2(d[2]).to_degrees() as f32;
+        let pitch = (-d[1] / len).asin().to_degrees() as f32;
+        let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
+        dig::raycast_dist(&at, from, yaw, pitch, len).is_some()
+    }
+
     /// `Entity.getPositionEyes(1)` of the local player.
     pub fn eye(&self, sneaking: bool) -> Option<[f64; 3]> {
         let p = self.player.as_ref()?;

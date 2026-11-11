@@ -25,7 +25,7 @@ use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
     AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Hand, HeldKind, Particles,
-    Renderer,
+    Renderer, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -374,6 +374,23 @@ impl App {
         roll
     }
 
+    /// The pose of a timed use of the held item (`EnumAction`), for the first-person hand.
+    fn using(&self, frac: f32) -> Option<Using> {
+        if self.use_ticks <= 0 {
+            return None;
+        }
+        let id = self.game.inv.held_stack().as_ref()?.id;
+        let action = match id {
+            261 => UseAction::Bow,
+            267 | 268 | 272 | 276 | 283 => UseAction::Block,
+            _ => UseAction::Consume,
+        };
+        Some(Using {
+            action,
+            timer: self.use_ticks as f32 - frac + 1.0,
+        })
+    }
+
     fn view_camera(&self, frac: f64) -> Camera {
         let fov = self.ui.settings.fov
             * (self.fov_mod.1 + (self.fov_mod.0 - self.fov_mod.1) * frac as f32);
@@ -470,6 +487,7 @@ impl App {
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
+        let using = self.using(frac as f32);
         let Some(r) = &mut self.renderer else { return };
         for (name, png) in textures {
             r.register_texture(&name, &png);
@@ -494,6 +512,7 @@ impl App {
                 held: hand_item.map(|(id, damage)| HeldKind::Item { id, damage }),
                 swing,
                 lowered,
+                using,
             }),
         );
         let skins = &mut self.skins;

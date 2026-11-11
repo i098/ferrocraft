@@ -103,6 +103,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         held: None,
         swing: 0.0,
         lowered: 0.0,
+        using: None,
     };
     let clear = frame(&mut r, 0.0, None);
     let rainy = frame(&mut r, 1.0, None);

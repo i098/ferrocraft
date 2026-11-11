@@ -28,6 +28,35 @@ pub struct Hand {
     pub swing: f32,
     /// `1 - equippedProgress`: 0 with the item fully raised, 1 fully lowered.
     pub lowered: f32,
+    /// A timed use in progress (`getItemUseTimer() > 0`).
+    pub using: Option<Using>,
+}
+
+/// `EnumAction` of the item being used, as far as the first-person pose differs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UseAction {
+    /// `EAT` and `DRINK`.
+    Consume,
+    /// `BLOCK`: swords.
+    Block,
+    Bow,
+}
+
+impl UseAction {
+    /// `Item.getMaxItemUseDuration`.
+    fn duration(self) -> f32 {
+        match self {
+            UseAction::Consume => 32.0,
+            UseAction::Block | UseAction::Bow => 72_000.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Using {
+    pub action: UseAction,
+    /// `getItemUseTimer() - partialTicks + 1`.
+    pub timer: f32,
 }
 
 /// One frame of hand geometry: vertices in model space and the matrix that places them in eye space.
@@ -108,6 +137,61 @@ fn item_transform(swing: f32, lowered: f32) -> Mat {
     ])
 }
 
+/// `ItemRenderer.renderItemInFirstPerson`: the pose of the held item. While it is in use the
+/// swing is skipped and the action's transform joins the plain first-person one.
+fn held_transform(hand: &Hand) -> Mat {
+    let Some(Using { action, timer }) = hand.using else {
+        return item_transform(hand.swing, hand.lowered);
+    };
+    let base = item_transform(0.0, hand.lowered);
+    match action {
+        UseAction::Consume => {
+            let progress = timer / action.duration();
+            let bob = if progress >= 0.8 {
+                0.0
+            } else {
+                (timer / 4.0 * PI).cos().abs() * 0.1
+            };
+            let c = 1.0 - progress.powi(27);
+            chain(&[
+                translate(0.0, bob, 0.0),
+                translate(c * 0.6, c * -0.5, 0.0),
+                rotate(c * 90.0, 1),
+                rotate(c * 10.0, 0),
+                rotate(c * 30.0, 2),
+                base,
+            ])
+        }
+        UseAction::Block => chain(&[
+            base,
+            translate(-0.5, 0.2, 0.0),
+            rotate(30.0, 1),
+            rotate(-80.0, 0),
+            rotate(60.0, 1),
+        ]),
+        UseAction::Bow => {
+            let ticks = action.duration() - timer;
+            let t = ticks / 20.0;
+            let draw = ((t * t + t * 2.0) / 3.0).min(1.0);
+            let lift = if draw > 0.1 {
+                ((ticks - 0.1) * 1.3).sin() * (draw - 0.1) * 0.01
+            } else {
+                0.0
+            };
+            chain(&[
+                base,
+                rotate(-18.0, 2),
+                rotate(-12.0, 1),
+                rotate(-8.0, 0),
+                translate(-0.9, 0.2, 0.0),
+                translate(0.0, lift, 0.0),
+                translate(0.0, 0.0, draw * 0.1),
+                scale3([1.0, 1.0, 1.0 + draw * 0.2]),
+            ])
+        }
+    }
+}
+
 /// A single block centred on the origin, as `RenderItem.renderItem` draws it (`scale(0.5)` follows in the model matrix).
 pub fn held_mesh(state: u16, atlas: &Atlas) -> MeshData {
     let mut blocks = vec![0u16; 16 * HEIGHT * 16];
@@ -132,7 +216,7 @@ pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
     Draw {
         vertices: mesh.vertices.clone(),
         indices: mesh.indices.clone(),
-        model: mul(item_transform(hand.swing, hand.lowered), scale(0.5)),
+        model: mul(held_transform(hand), scale(0.5)),
     }
 }
 
@@ -266,7 +350,7 @@ impl Flat {
 /// (`scale(0.5)`, `translate(-0.5)`), lit per face like the arm.
 pub fn flat(hand: &Hand, f: &Flat) -> Draw {
     let model = chain(&[
-        item_transform(hand.swing, hand.lowered),
+        held_transform(hand),
         f.display,
         scale(0.5),
         translate(-0.5, -0.5, -0.5),
@@ -397,6 +481,7 @@ mod tests {
                 held: None,
                 swing: 0.0,
                 lowered: 0.0,
+                using: None,
             },
             64,
         );
@@ -430,5 +515,25 @@ mod tests {
         assert_eq!(f.normals.len(), 6);
         assert_eq!(f.mesh.vertices.len(), 24);
         assert_eq!(f.mesh.indices.len(), 36);
+    }
+
+    /// Eating drives the item toward the mouth: at the start of a use it matches the plain pose,
+    /// near its end the translation and rotation of `applyConsuming` are in full effect.
+    #[test]
+    fn consuming_pose_starts_at_rest_and_moves_the_item_toward_the_mouth() {
+        let at = |timer| {
+            held_transform(&Hand {
+                held: None,
+                swing: 0.0,
+                lowered: 0.0,
+                using: Some(Using {
+                    action: UseAction::Consume,
+                    timer,
+                }),
+            })
+        };
+        let rest = item_transform(0.0, 0.0);
+        assert!((at(32.0)[3][1] - rest[3][1]).abs() < 0.1);
+        assert!(at(8.0)[3][0] < rest[3][0] + 0.6 * 0.4 + 1e-3 && at(8.0)[3] != rest[3]);
     }
 }

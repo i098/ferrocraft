@@ -60,10 +60,14 @@ impl Sound {
         self.rng
     }
 
+    /// A uniform float in `[0, 1)`, for callers that draw a pitch or volume like `Random.nextFloat`.
+    pub fn roll(&mut self) -> f32 {
+        (self.rand() >> 8) as f32 / (1u32 << 24) as f32
+    }
+
     /// `rand.nextFloat() - rand.nextFloat()`: the pitch jitter of vanilla entity sounds, in -1..1.
     pub fn rand_diff(&mut self) -> f32 {
-        let f = |s: &mut Self| (s.rand() >> 8) as f32 / (1u32 << 24) as f32;
-        f(self) - f(self)
+        self.roll() - self.roll()
     }
 
     pub fn set_listener(&mut self, pos: [f64; 3]) {
@@ -152,6 +156,12 @@ impl Sound {
     pub fn step(&mut self, block_id: u16, at: [f64; 3]) {
         let (e, v, p) = BlockSound::of(block_id).step();
         self.play(&e, Some(at), v, p);
+    }
+
+    /// Landing after a fall: the step sound at half volume and three quarters pitch (`takeFallDamage`).
+    pub fn land(&mut self, block_id: u16, at: [f64; 3]) {
+        let (e, v, p) = BlockSound::of(block_id).step();
+        self.play(&e, Some(at), v * 0.5, p * 0.75);
     }
 
     /// Dig hit while breaking a block; the caller fires it every 4 ticks.

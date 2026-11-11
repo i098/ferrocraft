@@ -11,6 +11,12 @@ use world::entities::Kind;
 use world::inventory::ItemStack;
 use world::place::{self, Click, Outcome};
 
+/// Items with the EAT use action: every food of 1.8.9.
+pub(super) const FOOD: [i16; 26] = [
+    260, 282, 297, 319, 320, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392, 393, 394,
+    396, 400, 411, 412, 413, 423, 424,
+];
+
 /// `rightClickDelayTimer` after a use.
 const USE_DELAY: i32 = 4;
 
@@ -189,7 +195,9 @@ impl App {
             world::Input::default()
         };
         let mut abilities = self.game.fly_toggle(input.jump);
+        self.water_sounds();
         self.game.tick(input);
+        self.fall_sounds();
         abilities |= self.game.fly_land();
         if abilities {
             self.send_abilities();
@@ -197,6 +205,7 @@ impl App {
         if std::mem::take(&mut self.game.held_replaced) {
             self.use_ticks = 0;
         }
+        self.consume_sounds();
         self.use_ticks = (self.use_ticks - 1).max(0);
         self.boss_tick();
         self.step_sound();
@@ -321,6 +330,7 @@ impl App {
             return;
         }
         self.next_step = self.walked as i32 + 1;
+        self.swim_sound(d, at);
         if let (Some(s), false) = (&mut self.sound, (8..=11).contains(&id)) {
             s.step(id, at);
         }
@@ -516,10 +526,6 @@ impl App {
     /// `Item.getMaxItemUseDuration` of an item whose right click starts a timed use
     /// (`setItemInUse`): food, potions and milk 32 ticks, bows and swords 72000; 0 for others.
     fn use_duration(&self, s: &ItemStack) -> i32 {
-        const FOOD: [i16; 26] = [
-            260, 282, 297, 319, 320, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392,
-            393, 394, 396, 400, 411, 412, 413, 423, 424,
-        ];
         let g = &self.game;
         let uses = match s.id {
             261 => {

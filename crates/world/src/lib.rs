@@ -12,6 +12,7 @@ pub mod dig;
 pub mod entities;
 pub mod entity_sound;
 pub mod inventory;
+pub mod motion_sound;
 pub mod place;
 
 use std::sync::LazyLock;

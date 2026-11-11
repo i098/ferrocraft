@@ -153,6 +153,8 @@ pub struct Game {
     /// The held slot got another item stack or another index: vanilla's `EntityPlayer.onUpdate`
     /// then clears the item use. The app takes the flag each tick.
     pub held_replaced: bool,
+    /// Status 9 for the own player (`finishUsingItem`); the app takes the flag each tick.
+    pub finished_use: bool,
 }
 
 impl Game {
@@ -197,6 +199,7 @@ impl Game {
             jump_held: false,
             bob: [0; 9],
             held_replaced: false,
+            finished_use: false,
         }
     }
 
@@ -357,12 +360,29 @@ impl Game {
         None
     }
 
+    fn apply_entity(&mut self, e: EntityEvent) {
+        if let EntityEvent::Destroy(ids) = &e {
+            if self.vehicle.is_some_and(|v| ids.contains(&v)) {
+                self.vehicle = None;
+            }
+        }
+        if let EntityEvent::Attach { id, vehicle } = &e {
+            if *id == self.entity_id {
+                self.vehicle = (*vehicle >= 0).then_some(*vehicle);
+            }
+        }
+        self.entities.apply(e)
+    }
+
     fn apply_state(&mut self, ev: NetEvent) {
         match ev {
             NetEvent::Entity(EntityEvent::Velocity { id, vel }) if id == self.entity_id => {
                 if let Some(p) = &mut self.player {
                     p.vel = vel.map(|v| f64::from(v) / 8000.0);
                 }
+            }
+            NetEvent::Entity(EntityEvent::Status { id, status: 9 }) if id == self.entity_id => {
+                self.finished_use = true;
             }
             NetEvent::Entity(EntityEvent::Status {
                 id,
@@ -372,19 +392,7 @@ impl Game {
             NetEvent::Entity(
                 EntityEvent::Status { id, status: 2 } | EntityEvent::Animation { id, animation: 1 },
             ) if id == self.entity_id => self.hurt_timer = HURT_TICKS,
-            NetEvent::Entity(e) => {
-                if let EntityEvent::Destroy(ids) = &e {
-                    if self.vehicle.is_some_and(|v| ids.contains(&v)) {
-                        self.vehicle = None;
-                    }
-                }
-                if let EntityEvent::Attach { id, vehicle } = &e {
-                    if *id == self.entity_id {
-                        self.vehicle = (*vehicle >= 0).then_some(*vehicle);
-                    }
-                }
-                self.entities.apply(e)
-            }
+            NetEvent::Entity(e) => self.apply_entity(e),
             NetEvent::PlayerPosLook {
                 x,
                 y,

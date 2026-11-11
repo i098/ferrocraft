@@ -5,8 +5,9 @@ use crate::assets::{decode_png, AssetSource, Image};
 
 pub const SLOT: u32 = 64;
 
-/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`.
-const SKINS: [&str; 15] = [
+/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The last
+/// twelve are the armor layers (see [`Skin::armor`]).
+const SKINS: [&str; 27] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -22,7 +23,21 @@ const SKINS: [&str; 15] = [
     "items/fireball.png",
     "particle/particles.png",
     "items/potion_bottle_splash.png",
+    "models/armor/leather_layer_1.png",
+    "models/armor/leather_layer_2.png",
+    "models/armor/chainmail_layer_1.png",
+    "models/armor/chainmail_layer_2.png",
+    "models/armor/iron_layer_1.png",
+    "models/armor/iron_layer_2.png",
+    "models/armor/diamond_layer_1.png",
+    "models/armor/diamond_layer_2.png",
+    "models/armor/gold_layer_1.png",
+    "models/armor/gold_layer_2.png",
+    "models/armor/leather_layer_1_overlay.png",
+    "models/armor/leather_layer_2_overlay.png",
 ];
+/// Index of the first armor layer in `SKINS`.
+const ARMOR_FIRST: u8 = 15;
 
 /// Slots from this index on hold sprites and projectile textures, not player-layout skins.
 const FIRST_SPRITE: usize = 8;
@@ -50,6 +65,8 @@ pub enum Skin {
     /// The bobber cell of `particles.png`, cropped to 8x8.
     Bobber,
     SplashPotion,
+    /// An armor texture, by index into the armor part of the slot table.
+    Armor(u8),
     /// Plain white: shapes take their color from the vertex tint.
     White,
     /// A downloaded player skin in dynamic slot `n`.
@@ -68,6 +85,24 @@ pub struct Skins {
     /// Owner key and last-use tick of each dynamic slot.
     players: [Option<(u128, u64)>; PLAYER_SLOTS],
     clock: u64,
+}
+
+impl Skin {
+    /// The texture of an armor item (`ArmorLayer`): `layer` 1 covers head, chest, arms and boots, 2
+    /// the leggings. `overlay` is the undyed part of leather armor. `None` for any other item.
+    pub fn armor(item: i16, layer: u8, overlay: bool) -> Option<Skin> {
+        let material = match item {
+            298..=317 => (item - 298) / 4,
+            _ => return None,
+        } as u8;
+        let layer = layer - 1;
+        Some(Skin::Armor(match (overlay, material) {
+            (true, 0) => 10 + layer,
+            (true, _) => return None,
+            // The table orders the materials leather, chainmail, iron, diamond, gold.
+            (false, m) => m * 2 + layer,
+        }))
+    }
 }
 
 impl Skins {
@@ -171,7 +206,7 @@ impl Skins {
             };
             if i == BOBBER_SLOT {
                 s.blit_plain(i as u32, &crop(&img, BOBBER_CELL));
-            } else if i >= FIRST_SPRITE {
+            } else if i >= FIRST_SPRITE && i < ARMOR_FIRST as usize {
                 s.blit_plain(i as u32, &img);
             } else {
                 s.blit(i as u32, &img);
@@ -263,8 +298,8 @@ fn crop(img: &Image, (x, y, size): (usize, usize, usize)) -> Image {
     }
 }
 
-/// Skins in `SKINS` order.
-const FIXED: [Skin; SKINS.len()] = [
+/// Skins in `SKINS` order, before the armor layers.
+const FIXED: [Skin; ARMOR_FIRST as usize] = [
     Skin::Steve,
     Skin::Alex,
     Skin::Zombie,
@@ -286,6 +321,7 @@ fn slot(skin: Skin) -> Option<u32> {
     match skin {
         Skin::Player(i) => Some(SLOTS + u32::from(i)),
         Skin::White => None,
+        Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
         fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
     }
 }

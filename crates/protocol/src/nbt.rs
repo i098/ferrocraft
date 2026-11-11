@@ -27,6 +27,20 @@ pub struct Nbt {
     pub root: Compound,
 }
 
+impl Nbt {
+    /// `display.color` of dyed leather armor.
+    pub fn dye(&self) -> Option<i32> {
+        let display = self.root.iter().find(|(k, _)| k == "display")?;
+        let Tag::Compound(c) = &display.1 else {
+            return None;
+        };
+        match c.iter().find(|(k, _)| k == "color")?.1 {
+            Tag::Int(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 const MAX_DEPTH: usize = 512;
 
 impl Tag {

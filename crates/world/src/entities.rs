@@ -140,6 +140,8 @@ pub const EQUIPMENT_SLOTS: usize = 5;
 pub struct ItemRef {
     pub id: i16,
     pub damage: i16,
+    /// Leather armor color (`display.color`).
+    pub dye: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -696,6 +698,7 @@ impl Entities {
                     e.equipment[0] = Some(ItemRef {
                         id: held,
                         damage: 0,
+                        dye: None,
                     });
                 }
                 (id, e)

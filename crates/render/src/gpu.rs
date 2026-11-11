@@ -1528,7 +1528,7 @@ fn build_pipelines(
                 format: DEPTH,
                 depth_write_enabled: depth_write,
                 depth_compare: if depth {
-                    wgpu::CompareFunction::Less
+                    wgpu::CompareFunction::LessEqual
                 } else {
                     wgpu::CompareFunction::Always
                 },

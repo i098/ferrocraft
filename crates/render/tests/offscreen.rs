@@ -171,6 +171,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         size: (0.6, 1.8),
         held: 276,
         armor: [0; 4],
+        armor_dye: [None; 4],
         name: None,
         skin: None,
         burning: false,
@@ -280,6 +281,7 @@ fn burning_entity_and_first_person_fire() {
         size: (0.6, 1.8),
         held: 0,
         armor: [0; 4],
+        armor_dye: [None; 4],
         name: None,
         skin: None,
         burning: false,
@@ -331,4 +333,75 @@ fn burning_entity_and_first_person_fire() {
             encode_png(&dir.join(format!("{name}.png")), 400, 300, &image).unwrap();
         }
     }
+}
+
+/// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
+fn leather_assets(overlay: bool) -> std::path::PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("ferrocraft-armor-{}-{overlay}", std::process::id()));
+    let armor = dir.join("assets/minecraft/textures/models/armor");
+    std::fs::create_dir_all(&armor).unwrap();
+    let solid = |rgba: [u8; 4]| rgba.repeat(64 * 32);
+    encode_png(&armor.join("leather_layer_1.png"), 64, 32, &solid([255; 4])).unwrap();
+    if overlay {
+        let blue = solid([0, 0, 255, 255]);
+        encode_png(&armor.join("leather_layer_1_overlay.png"), 64, 32, &blue).unwrap();
+    }
+    dir
+}
+
+/// A player in a leather tunic (chest slot).
+fn player_in_leather() -> EntityDraw {
+    EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [0.0, 64.0, 0.0],
+        yaw: 180.0,
+        head_yaw: 180.0,
+        size: (0.6, 1.8),
+        armor: [0, 0, 299, 0],
+        armor_dye: [None; 4],
+        eye_height: 1.62,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        held: 0,
+        using: None,
+        name: None,
+        skin: None,
+        burning: false,
+        always_name: false,
+        pointed: false,
+        ridden: false,
+        child: false,
+        view: [0.0; 2],
+        line: None,
+    }
+}
+
+/// Vanilla draws with `GL_LEQUAL`, so the leather overlay box, coplanar with the dyed base, shows.
+#[test]
+fn leather_overlay_draws_over_the_dyed_base() {
+    let cam = Camera {
+        pos: [0.0, 65.0, -4.0],
+        ..Camera::default()
+    };
+    let frame = |overlay: bool| {
+        let dir = leather_assets(overlay);
+        let mut r = Renderer::new_offscreen(400, 300, Some(&dir));
+        r.set_entities(&[player_in_leather()]);
+        let image = r.render_to_rgba(&cam, &[]).2;
+        std::fs::remove_dir_all(&dir).ok();
+        image
+    };
+    assert_ne!(
+        frame(false),
+        frame(true),
+        "the overlay layer must be visible"
+    );
 }

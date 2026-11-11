@@ -510,6 +510,11 @@ impl App {
             size: (0.6, 1.8),
             held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
             armor: [slot(8), slot(7), slot(6), slot(5)],
+            armor_dye: [8, 7, 6, 5].map(|i| {
+                self.game.inv.player[i]
+                    .as_ref()
+                    .and_then(|s| s.nbt.as_ref()?.dye())
+            }),
             name: None,
             skin: None,
             eye_height: eye_height(self.input.sneaking()) as f32,
@@ -963,6 +968,7 @@ fn entity_draw(
         size: e.size(),
         held: e.equipment[0].map_or(0, |i| i.id),
         armor: [1, 2, 3, 4].map(|s| e.equipment[s].map_or(0, |i| i.id)),
+        armor_dye: [1, 2, 3, 4].map(|s| e.equipment[s].and_then(|i| i.dye)),
         name: e.name.clone(),
         skin,
         burning: e.burning(),

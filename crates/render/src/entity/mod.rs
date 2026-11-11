@@ -2,8 +2,8 @@
 //! and `ModelCow`: box geometry, texture layout and limb animation. Mobs without a ported model
 //! draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: sheep wool, villagers, enchant glint, armor textures (armor is a tinted shell),
-//! held item models (a held item is a tinted bar). Name tags are laid out by [`nametags`].
+//! Not ported yet: sheep wool, villagers, enchant glint, held item models (a held item is a tinted
+//! bar). Name tags are laid out by [`nametags`].
 
 pub(crate) mod fire;
 mod projectile;
@@ -48,6 +48,8 @@ pub struct EntityDraw {
     /// Held item id (0 none) and armor item ids for boots, leggings, chestplate, helmet.
     pub held: i16,
     pub armor: [i16; 4],
+    /// `display.color` of each worn leather piece.
+    pub armor_dye: [Option<i32>; 4],
     pub name: Option<String>,
     /// Player whose downloaded skin to draw; the default skin when none is stored.
     pub skin: Option<u128>,
@@ -78,8 +80,6 @@ struct Part {
     size: [f32; 3],
     uv: (f32, f32),
     rot: [f32; 3],
-    /// Armor slot (0 boots .. 3 helmet) that covers this part.
-    armor: Option<(usize, f32)>,
     /// Second texture box over the first (hat layer).
     inflate: f32,
     /// `ModelRenderer.mirror`: the box samples the opposite-hand texture layout, flipped.
@@ -94,14 +94,9 @@ impl Part {
             size,
             uv,
             rot: [0.0; 3],
-            armor: None,
             inflate: 0.0,
             mirror: false,
         }
-    }
-    fn armor(mut self, slot: usize, scale: f32) -> Part {
-        self.armor = Some((slot, scale));
-        self
     }
     fn rot(mut self, rot: [f32; 3]) -> Part {
         self.rot = rot;
@@ -289,20 +284,16 @@ fn biped(
     };
     let parts = vec![
         Part::new(head_pivot, [-4.0, -8.0, -4.0], [8.0; 3], (0.0, 0.0))
-            .rot([head_rot_x, head_rot_y, 0.0])
-            .armor(3, 1.0),
+            .rot([head_rot_x, head_rot_y, 0.0]),
         hat,
-        Part::new([0.0; 3], [-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], (16.0, 16.0))
-            .rot(body_rot)
-            .armor(2, 1.0),
+        Part::new([0.0; 3], [-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], (16.0, 16.0)).rot(body_rot),
         Part::new(
             r_arm_pivot,
             [arm_min, -2.0, arm_z],
             [arm_w, 12.0, arm_d],
             (40.0, 16.0),
         )
-        .rot(r_arm)
-        .armor(2, 1.0),
+        .rot(r_arm),
         Part::new(
             l_arm_pivot,
             [l_arm_min, -2.0, arm_z],
@@ -310,16 +301,14 @@ fn biped(
             l_arm_uv,
         )
         .rot(l_arm)
-        .mirrored(mirrored)
-        .armor(2, 1.0),
+        .mirrored(mirrored),
         Part::new(
             leg_pivots[0],
             [limb_min, 0.0, arm_z],
             [limb_w, 12.0, arm_d],
             (0.0, 16.0),
         )
-        .rot(r_leg)
-        .armor(1, 0.5),
+        .rot(r_leg),
         Part::new(
             leg_pivots[1],
             [limb_min, 0.0, arm_z],
@@ -327,8 +316,7 @@ fn biped(
             l_leg_uv,
         )
         .rot(l_leg)
-        .mirrored(mirrored)
-        .armor(1, 0.5),
+        .mirrored(mirrored),
     ];
     Model { skin, tint, parts }
 }
@@ -761,19 +749,74 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
     {
         emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
     }
-    for part in m.parts.iter().filter(|p| p.inflate == 0.0) {
-        let worn = part
-            .armor
-            .and_then(|(slot, scale)| Some((armor_tint(d.armor[slot])?, scale)));
-        if let Some((color, scale)) = worn {
-            emit_part(out, &xf, part, scale * 0.5 + 0.2, color, white);
-        }
-    }
     let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
+    if holds {
+        emit_armor(out, &xf, &m, d, skins);
+    }
     if let Some(arm) = m.parts.get(3).filter(|_| d.held != 0 && holds) {
         emit_part(out, &xf, &held_bar(arm), 0.0, [0.75, 0.6, 0.35], white);
     }
 }
+
+/// `ArmorLayer`: head, chest and arms, leggings and boots draw the armor texture over the body,
+/// grown by 1 pixel (layer 1) or half a pixel (leggings, layer 2).
+fn emit_armor(out: &mut MeshData, xf: &Xf, m: &Model, d: &EntityDraw, skins: &Skins) {
+    // (slot: boots, leggings, chest, helmet), part indices, grow, texture layer
+    const PIECES: [(usize, &[usize], f32, u8); 4] = [
+        (0, &[5, 6], 1.0, 1),
+        (1, &[2, 5, 6], 0.5, 2),
+        (2, &[2, 3, 4], 1.0, 1),
+        (3, &[0], 1.0, 1),
+    ];
+    for (slot, parts, grow, layer) in PIECES {
+        let item = d.armor[slot];
+        let Some(base) = Skin::armor(item, layer, false) else {
+            continue;
+        };
+        let leather = item <= 301;
+        let dye = d.armor_dye[slot].unwrap_or(LEATHER_DEFAULT);
+        let dye = [16, 8, 0].map(|shift| ((dye >> shift) & 0xFF) as f32 / 255.0);
+        let (tint, layers) = if leather { (dye, 2) } else { ([1.0; 3], 1) };
+        for pass in 0..layers {
+            let Some((v_off, color)) = armor_pass(item, layer, pass, base, tint, skins) else {
+                break;
+            };
+            for &i in parts {
+                emit_part(out, xf, &m.parts[i], grow, color, v_off);
+            }
+        }
+    }
+}
+
+/// Texture v offset and color of one armor pass; `None` when the overlay pass has no texture.
+fn armor_pass(
+    item: i16,
+    layer: u8,
+    pass: u8,
+    base: Skin,
+    tint: [f32; 3],
+    skins: &Skins,
+) -> Option<(f32, [f32; 3])> {
+    let skin = if pass == 0 {
+        base
+    } else {
+        Skin::armor(item, layer, true).filter(|o| skins.has(*o))?
+    };
+    Some(if skins.has(skin) {
+        (
+            skins.v_offset(skin),
+            if pass == 0 { tint } else { [1.0; 3] },
+        )
+    } else {
+        (
+            skins.v_offset(Skin::White),
+            armor_tint(item).unwrap_or([1.0; 3]),
+        )
+    })
+}
+
+/// Color of undyed leather armor, `ItemArmor.getColor`.
+const LEATHER_DEFAULT: i32 = 0xA0_65_40;
 
 fn fallback_tint(skin: Skin) -> [f32; 3] {
     match skin {
@@ -784,6 +827,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Creeper => [0.3, 0.7, 0.25],
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
+        Skin::Armor(_) => [0.7; 3],
         Skin::Arrow
         | Skin::Snowball
         | Skin::Egg
@@ -1039,6 +1083,7 @@ mod tests {
             size: (0.6, 1.8),
             held: 0,
             armor: [0; 4],
+            armor_dye: [None; 4],
             name: None,
             skin: None,
             burning: false,
@@ -1139,6 +1184,33 @@ mod tests {
         assert_ne!(idle, verts(261, Some(UseAction::Bow)));
         assert_ne!(verts(267, None), verts(267, Some(UseAction::Block)));
         assert_eq!(idle, verts(261, Some(UseAction::Consume)));
+    }
+
+    #[test]
+    fn worn_armor_adds_one_box_per_covered_part() {
+        let count = |armor: [i16; 4]| {
+            let mut d = steve();
+            d.armor = armor;
+            build(&[d], &Skins::flat(), |_| [1.0, 1.0]).vertices.len()
+        };
+        let bare = count([0; 4]);
+        // boots 2 boxes, leggings 3, chestplate 3, helmet 1; a box has 24 vertices.
+        assert_eq!(count([309, 0, 0, 0]) - bare, 2 * 24);
+        assert_eq!(count([0, 308, 0, 0]) - bare, 3 * 24);
+        assert_eq!(count([0, 0, 307, 0]) - bare, 3 * 24);
+        assert_eq!(count([0, 0, 0, 306]) - bare, 24);
+        assert_eq!(count([309, 308, 307, 306]) - bare, 9 * 24);
+    }
+
+    #[test]
+    fn armor_items_map_to_their_layer_textures() {
+        assert_eq!(Skin::armor(298, 1, false), Some(Skin::Armor(0)));
+        assert_eq!(Skin::armor(300, 2, false), Some(Skin::Armor(1)));
+        assert_eq!(Skin::armor(310, 1, false), Some(Skin::Armor(6)));
+        assert_eq!(Skin::armor(317, 2, false), Some(Skin::Armor(9)));
+        assert_eq!(Skin::armor(299, 2, true), Some(Skin::Armor(11)));
+        assert_eq!(Skin::armor(306, 1, true), None);
+        assert_eq!(Skin::armor(276, 1, false), None);
     }
 
     #[test]

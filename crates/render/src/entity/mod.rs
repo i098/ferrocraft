@@ -1051,7 +1051,37 @@ mod tests {
     }
 
     #[test]
-    fn bow_and_block_poses_move_the_arms() {
+    fn bow_and_block_poses_match_vanilla_model_biped_angles() {
+        // Vanilla 1.8.9 ModelBiped.setRotationAngles, age 0: sway z = 0.1, sway x = 0.
+        let mut pose = Pose {
+            r_arm: [0.0; 3],
+            l_arm: [0.0; 3],
+            body_rot: [0.0; 3],
+            r_arm_pivot: [0.0; 3],
+            l_arm_pivot: [0.0; 3],
+            head_pivot: [0.0; 3],
+            leg_pivots: [[0.0; 3]; 2],
+        };
+        pose.aim_bow(0.25, 0.5, 0.0);
+        let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        let arm_x = -FRAC_PI_2 + 0.25;
+        assert!(close(pose.r_arm, [arm_x, 0.4, 0.1]), "{:?}", pose.r_arm);
+        assert!(close(pose.l_arm, [arm_x, 1.0, -0.1]), "{:?}", pose.l_arm);
+
+        // itemInRightHand 1: x * 0.5 - 0.314159265; 3 (blocking): x * 0.5 - 3 * 0.314159265, yaw -PI/6.
+        let mut held = [0.8, 0.2, 0.0];
+        hold_item(&mut held, false);
+        assert!(close(held, [0.4 - 0.314_159_27, 0.2, 0.0]));
+        let mut blocking = [0.8, 0.2, 0.0];
+        hold_item(&mut blocking, true);
+        assert!(close(
+            blocking,
+            [0.4 - 3.0 * 0.314_159_27, -std::f32::consts::PI / 6.0, 0.0]
+        ));
+    }
+
+    #[test]
+    fn build_applies_bow_and_block_but_not_consume() {
         let verts = |held, using| {
             let d = EntityDraw {
                 held,

@@ -1215,39 +1215,14 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
             }
         }
-        {
-            // Vanilla draws the hand on a cleared depth buffer, then the GUI.
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            if let Some((m, tex)) = &hand {
-                pass.set_bind_group(0, self.hand_group(*tex), &[]);
-                pass.set_pipeline(&self.hand_pipe);
-                draw_mesh(&mut pass, m);
-            }
-            self.draw_fire_overlay(&mut pass, &fire);
-            if let Some(buf) = &gui_buf {
-                self.draw_gui(&mut pass, buf, overlay);
-            }
-        }
+        self.draw_hand_and_gui(
+            &mut enc,
+            view,
+            hand.as_ref(),
+            &fire,
+            gui_buf.as_ref(),
+            overlay,
+        );
         self.queue.submit([enc.finish()]);
     }
 
@@ -1276,7 +1251,7 @@ impl Renderer {
         enc: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         hand: Option<&(GpuMesh, HandTex)>,
-        fire: Option<(&wgpu::Buffer, &[Quad])>,
+        fire: &FireFrame,
         gui_buf: Option<&wgpu::Buffer>,
         overlay: &[Quad],
     ) {
@@ -1307,9 +1282,7 @@ impl Renderer {
             pass.set_pipeline(&self.hand_pipe);
             draw_mesh(&mut pass, m);
         }
-        if let Some((buf, quads)) = fire {
-            self.draw_gui(&mut pass, buf, quads);
-        }
+        self.draw_fire_overlay(&mut pass, fire);
         if let Some(buf) = gui_buf {
             self.draw_gui(&mut pass, buf, overlay);
         }

@@ -189,6 +189,14 @@ impl Pose {
     }
 }
 
+/// `RenderPlayer.setModelVisibilities`: `itemInRightHand` is 3 while blocking, else 1.
+fn hold_item(r_arm: &mut [f32; 3], blocking: bool) {
+    r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27 * if blocking { 3.0 } else { 1.0 };
+    if blocking {
+        r_arm[1] = -FRAC_PI_6;
+    }
+}
+
 /// `ModelBiped.setRotationAngles` and the box layout. `arm_w` and `limb` are the arm and leg
 /// widths (4 for a player, 3 for alex, 2 for a skeleton).
 fn biped(
@@ -223,12 +231,7 @@ fn biped(
         l_arm_pivot[1] = 2.5;
     }
     if d.held != 0 && !raised {
-        // `RenderPlayer.setModelVisibilities`: `itemInRightHand` is 3 while blocking, else 1.
-        let blocking = d.using == Some(UseAction::Block);
-        r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27 * if blocking { 3.0 } else { 1.0 };
-        if blocking {
-            r_arm[1] = -FRAC_PI_6;
-        }
+        hold_item(&mut r_arm, d.using == Some(UseAction::Block));
     }
     let mut pose = Pose {
         r_arm,

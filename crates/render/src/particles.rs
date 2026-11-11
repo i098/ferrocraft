@@ -451,83 +451,111 @@ impl Particles {
     /// Drifting, dripping, enchanting, snow and firework particles.
     fn spawn_misc(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
-        let mut p;
-        match kind {
-            Kind::DepthSuspend | Kind::HappyVillager => {
-                // `DepthSuspendParticle`; the happy villager variant is tile 82, white.
-                p = self.base(pos, motion, sheet(0, false));
-                let g = (self.rand() * 0.1 + 0.2) as f32;
-                p.color = [g; 3];
-                p.half = 0.01;
-                p.scale *= (self.rand() * 0.6 + 0.5) as f32;
-                p.vel = p.vel.map(|v| v * f64::from(0.02_f32));
-                p.max_age = (20.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.behavior = Behavior::Suspend;
-                if kind == Kind::HappyVillager {
-                    p.sprite = sheet(82, false);
-                    p.color = [1.0; 3];
-                }
+        let p = match kind {
+            Kind::DepthSuspend | Kind::HappyVillager | Kind::Suspended => {
+                self.suspended(kind, pos, motion)
             }
-            Kind::Suspended => {
-                // shortcut: vanilla also removes it outside water; no liquid lookup reaches `tick`.
-                p = self.base([pos[0], pos[1] - 0.125, pos[2]], [0.0; 3], sheet(0, false));
-                p.vel = [0.0; 3];
-                p.color = [0.4, 0.4, 0.7];
-                p.half = 0.005;
-                p.scale *= (self.rand() * 0.6 + 0.2) as f32;
-                p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.behavior = Behavior::Suspend;
-            }
-            Kind::Enchant => {
-                // `EnchantingParticle`: a fixed curve from `pos + motion` back to `pos`.
-                let tile = 225 + (self.rand() * 26.0) as u32;
-                p = self.base(pos, [0.0; 3], sheet(tile, false));
-                p.vel = motion;
-                p.origin = pos;
-                p.pos = [0, 1, 2].map(|i| pos[i] + motion[i]);
-                p.prev = p.pos;
-                let f = (self.rand() * 0.6 + 0.4) as f32;
-                p.color = [f * 0.9, f * 0.9, f];
-                p.scale = (self.rand() * 0.5 + 0.2) as f32;
-                p.max_age = (self.rand() * 10.0) as u32 + 30;
-                p.behavior = Behavior::Enchant;
-            }
-            Kind::DripWater | Kind::DripLava => {
-                p = self.base(pos, [0.0; 3], sheet(113, false));
-                p.vel = [0.0; 3];
-                let water = kind == Kind::DripWater;
-                p.color = if water {
-                    [0.0, 0.0, 1.0]
-                } else {
-                    [1.0, 0.0, 0.0]
-                };
-                p.half = 0.005;
-                p.gravity = f64::from(0.06_f32);
-                p.max_age = (64.0 / (self.rand() * 0.8 + 0.2)) as u32;
-                p.behavior = if water {
-                    Behavior::DripWater
-                } else {
-                    Behavior::DripLava
-                };
-            }
+            Kind::Enchant => self.enchant(pos, motion),
+            Kind::DripWater | Kind::DripLava => self.drip(kind, pos),
             Kind::SnowShovel => {
-                p = self.damped(pos, sheet(0, true), 1.0, motion);
+                let mut p = self.damped(pos, sheet(0, true), 1.0, motion);
                 p.color = [1.0 - (self.rand() * f64::from(0.3_f32)) as f32; 3];
                 p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
                 p.behavior = Behavior::Snow;
+                p
             }
             Kind::FireworksSpark => {
-                p = self.base(pos, [0.0; 3], sheet(160, true));
+                let mut p = self.base(pos, [0.0; 3], sheet(160, true));
                 p.vel = motion;
                 p.scale *= 0.75;
                 p.init_scale = p.scale;
                 p.alpha = 0.99;
                 p.max_age = 48 + (self.rand() * 12.0) as u32;
                 p.behavior = Behavior::Spark;
+                p
             }
             _ => return None,
-        }
+        };
         Some(p)
+    }
+
+    /// `DepthSuspendParticle` (the happy villager variant is tile 82, white) and `SuspendedParticle`.
+    fn suspended(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        let sheet = |base, anim| Sprite::Sheet { base, anim };
+        let mut p;
+        if kind == Kind::Suspended {
+            // shortcut: vanilla also removes it outside water; no liquid lookup reaches `tick`.
+            p = self.base([pos[0], pos[1] - 0.125, pos[2]], [0.0; 3], sheet(0, false));
+            p.vel = [0.0; 3];
+            p.color = [0.4, 0.4, 0.7];
+            p.half = 0.005;
+            p.scale *= (self.rand() * 0.6 + 0.2) as f32;
+            p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        } else {
+            p = self.base(pos, motion, sheet(0, false));
+            p.color = [(self.rand() * 0.1 + 0.2) as f32; 3];
+            p.half = 0.01;
+            p.scale *= (self.rand() * 0.6 + 0.5) as f32;
+            p.vel = p.vel.map(|v| v * f64::from(0.02_f32));
+            p.max_age = (20.0 / (self.rand() * 0.8 + 0.2)) as u32;
+            if kind == Kind::HappyVillager {
+                p.sprite = sheet(82, false);
+                p.color = [1.0; 3];
+            }
+        }
+        p.behavior = Behavior::Suspend;
+        p
+    }
+
+    /// `EnchantingParticle`: a fixed curve from `pos + motion` back to `pos`.
+    fn enchant(&mut self, pos: [f64; 3], motion: [f64; 3]) -> Particle {
+        let tile = 225 + (self.rand() * 26.0) as u32;
+        let mut p = self.base(
+            pos,
+            [0.0; 3],
+            Sprite::Sheet {
+                base: tile,
+                anim: false,
+            },
+        );
+        p.vel = motion;
+        p.origin = pos;
+        p.pos = [0, 1, 2].map(|i| pos[i] + motion[i]);
+        p.prev = p.pos;
+        let f = (self.rand() * 0.6 + 0.4) as f32;
+        p.color = [f * 0.9, f * 0.9, f];
+        p.scale = (self.rand() * 0.5 + 0.2) as f32;
+        p.max_age = (self.rand() * 10.0) as u32 + 30;
+        p.behavior = Behavior::Enchant;
+        p
+    }
+
+    /// `LiquidDripParticle` constructor.
+    fn drip(&mut self, kind: Kind, pos: [f64; 3]) -> Particle {
+        let mut p = self.base(
+            pos,
+            [0.0; 3],
+            Sprite::Sheet {
+                base: 113,
+                anim: false,
+            },
+        );
+        p.vel = [0.0; 3];
+        let water = kind == Kind::DripWater;
+        p.color = if water {
+            [0.0, 0.0, 1.0]
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        p.half = 0.005;
+        p.gravity = f64::from(0.06_f32);
+        p.max_age = (64.0 / (self.rand() * 0.8 + 0.2)) as u32;
+        p.behavior = if water {
+            Behavior::DripWater
+        } else {
+            Behavior::DripLava
+        };
+        p
     }
 
     fn spawn_icon(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) -> Option<Particle> {
@@ -696,43 +724,49 @@ impl Particles {
     pub fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
         let b = pos.map(f64::from);
         match id {
-            2000 => {
-                let (dx, dz) = (f64::from(data % 3 - 1), f64::from(data / 3 % 3 - 1));
-                let c = [b[0] + dx * 0.6 + 0.5, b[1] + 0.5, b[2] + dz * 0.6 + 0.5];
-                for _ in 0..10 {
-                    let d = self.rand() * 0.2 + 0.01;
-                    let at = [
-                        c[0] + dx * 0.01 + (self.rand() - 0.5) * dz * 0.5,
-                        c[1] + (self.rand() - 0.5) * 0.5,
-                        c[2] + dz * 0.01 + (self.rand() - 0.5) * dx * 0.5,
-                    ];
-                    let m = [
-                        dx * d + self.gaussian() * 0.01,
-                        -0.03 + self.gaussian() * 0.01,
-                        dz * d + self.gaussian() * 0.01,
-                    ];
-                    self.spawn(Kind::Smoke, at, m, 0);
-                }
-            }
-            2003 => {
-                let (x, z) = (b[0] + 0.5, b[2] + 0.5);
-                let mut a = 0.0_f64;
-                while a < std::f64::consts::TAU {
-                    for k in [-5.0, -7.0] {
-                        let at = [x + a.cos() * 5.0, b[1] - 0.4, z + a.sin() * 5.0];
-                        self.spawn(Kind::Portal, at, [a.cos() * k, 0.0, a.sin() * k], 0);
-                    }
-                    a += 0.157_079_632_679_489_66;
-                }
-            }
-            2004 => {
-                for _ in 0..20 {
-                    let at = [0, 1, 2].map(|i| b[i] + 0.5 + (self.rand() - 0.5) * 2.0);
-                    self.spawn(Kind::Smoke, at, [0.0; 3], 0);
-                    self.spawn(Kind::Flame, at, [0.0; 3], 0);
-                }
-            }
+            2000 => self.dispenser_smoke(b, data),
+            2003 => self.eye_portal_ring(b),
+            2004 => self.spawner_burst(b),
             _ => {}
+        }
+    }
+
+    fn dispenser_smoke(&mut self, b: [f64; 3], data: i32) {
+        let (dx, dz) = (f64::from(data % 3 - 1), f64::from(data / 3 % 3 - 1));
+        let c = [b[0] + dx * 0.6 + 0.5, b[1] + 0.5, b[2] + dz * 0.6 + 0.5];
+        for _ in 0..10 {
+            let d = self.rand() * 0.2 + 0.01;
+            let at = [
+                c[0] + dx * 0.01 + (self.rand() - 0.5) * dz * 0.5,
+                c[1] + (self.rand() - 0.5) * 0.5,
+                c[2] + dz * 0.01 + (self.rand() - 0.5) * dx * 0.5,
+            ];
+            let m = [
+                dx * d + self.gaussian() * 0.01,
+                -0.03 + self.gaussian() * 0.01,
+                dz * d + self.gaussian() * 0.01,
+            ];
+            self.spawn(Kind::Smoke, at, m, 0);
+        }
+    }
+
+    fn eye_portal_ring(&mut self, b: [f64; 3]) {
+        let (x, z) = (b[0] + 0.5, b[2] + 0.5);
+        let mut a = 0.0_f64;
+        while a < std::f64::consts::TAU {
+            for k in [-5.0, -7.0] {
+                let at = [x + a.cos() * 5.0, b[1] - 0.4, z + a.sin() * 5.0];
+                self.spawn(Kind::Portal, at, [a.cos() * k, 0.0, a.sin() * k], 0);
+            }
+            a += 0.157_079_632_679_489_66;
+        }
+    }
+
+    fn spawner_burst(&mut self, b: [f64; 3]) {
+        for _ in 0..20 {
+            let at = [0, 1, 2].map(|i| b[i] + 0.5 + (self.rand() - 0.5) * 2.0);
+            self.spawn(Kind::Smoke, at, [0.0; 3], 0);
+            self.spawn(Kind::Flame, at, [0.0; 3], 0);
         }
     }
 

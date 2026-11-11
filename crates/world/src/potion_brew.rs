@@ -98,10 +98,15 @@ fn parse(r: &[u8], from: i32, to: i32, meta: i32) -> i32 {
         let (a, b) = (parse(r, from, i - 1, meta), parse(r, i + 1, to, meta));
         return if a <= 0 || b <= 0 { 0 } else { a.max(b) };
     }
+    parse_terms(&r[from as usize..to as usize], meta)
+}
+
+/// A run of `!`, `-`, `=`, `<`, `>`, `+` terms with digits and `*` multipliers, summed.
+fn parse_terms(r: &[u8], meta: i32) -> i32 {
     let (mut invert, mut star, mut multiply, mut negate) = (false, false, false, false);
     let (mut op, mut operand, mut mult, mut has_operand) = (-1, 0, 0, false);
     let mut total = 0;
-    for &c in &r[from as usize..to as usize] {
+    for &c in r {
         if c.is_ascii_digit() {
             let d = i32::from(c - b'0');
             if star {

@@ -333,7 +333,8 @@ fn burning_entity_and_first_person_fire() {
 
 /// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
 fn leather_assets(overlay: bool) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ferrocraft-armor-{}-{overlay}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("ferrocraft-armor-{}-{overlay}", std::process::id()));
     let armor = dir.join("assets/minecraft/textures/models/armor");
     std::fs::create_dir_all(&armor).unwrap();
     let solid = |rgba: [u8; 4]| rgba.repeat(64 * 32);
@@ -392,5 +393,9 @@ fn leather_overlay_draws_over_the_dyed_base() {
         std::fs::remove_dir_all(&dir).ok();
         image
     };
-    assert_ne!(frame(false), frame(true), "the overlay layer must be visible");
+    assert_ne!(
+        frame(false),
+        frame(true),
+        "the overlay layer must be visible"
+    );
 }

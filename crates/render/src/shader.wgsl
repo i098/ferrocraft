@@ -97,11 +97,20 @@ fn fs_flat(i: WorldOut) -> @location(0) vec4<f32> {
     return i.color;
 }
 
-// Sky, stars, sun, moon and clouds: no light map, no fog.
+// Sky, stars, sun and moon: no light map, no fog.
 @fragment
 fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
     return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
+}
+
+// Clouds: vertex color and alpha in the world fog (`renderClouds` runs after `setupFog(0)`), no light map.
+@fragment
+fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    let d = length(i.world - g.eye.xyz);
+    let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
+    return vec4<f32>(mix(g.fog_color.rgb, t.rgb * i.color.rgb, fog), t.a * i.color.a);
 }
 
 

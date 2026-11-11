@@ -280,6 +280,21 @@ impl Game {
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
             }
+            NetEvent::Abilities {
+                flags,
+                fly_speed,
+                walk_speed,
+            } => (self.abilities, self.fly_speed, self.walk_speed) = (flags, fly_speed, walk_speed),
+            NetEvent::GameMode(mode) => self.set_gamemode(mode),
+            other => return self.apply_effects(other).map(|()| None),
+        }
+        Ok(None)
+    }
+
+    /// Potion effects and attributes of the local player. `Err` hands back an event it does not own.
+    #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
+    fn apply_effects(&mut self, ev: NetEvent) -> Result<(), NetEvent> {
+        match ev {
             NetEvent::EntityEffect { entity_id, effect } if entity_id == self.entity_id => {
                 self.effects.add(effect);
             }
@@ -294,15 +309,9 @@ impl Game {
             NetEvent::EntityEffect { .. }
             | NetEvent::RemoveEntityEffect { .. }
             | NetEvent::MovementSpeed { .. } => {}
-            NetEvent::Abilities {
-                flags,
-                fly_speed,
-                walk_speed,
-            } => (self.abilities, self.fly_speed, self.walk_speed) = (flags, fly_speed, walk_speed),
-            NetEvent::GameMode(mode) => self.set_gamemode(mode),
             other => return Err(other),
         }
-        Ok(None)
+        Ok(())
     }
 
     /// `S2FSetSlot`: also starts the pick-up pop and flags a replaced held stack.

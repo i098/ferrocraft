@@ -184,6 +184,8 @@ pub struct Entity {
     pub age: u32,
     /// Metadata index 7: the mixed colour of the active potion effects, 0 for none.
     pub potion_color: i32,
+    /// Fishing bobbers: id of the player who cast it (the `SpawnObject` data), 0 for any other entity.
+    pub owner: i32,
     /// Metadata index 8: every active effect is ambient (beacon).
     pub potion_ambient: bool,
 }
@@ -250,6 +252,7 @@ impl Entity {
             age: 0,
             potion_color: 0,
             potion_ambient: false,
+            owner: 0,
         }
     }
 
@@ -499,6 +502,7 @@ pub enum EntityEvent {
         yaw: i8,
         pitch: i8,
         vel: [i16; 3],
+        data: i32,
     },
     SpawnExperienceOrb {
         id: i32,
@@ -726,9 +730,13 @@ impl Entities {
                 yaw,
                 pitch,
                 vel,
+                data,
             } => {
                 let mut e = Entity::new(id, Kind::Object(kind), pos, yaw, pitch);
                 e.vel = velocity(vel);
+                if kind == 90 {
+                    e.owner = data;
+                }
                 (id, e)
             }
             _ => return,
@@ -951,6 +959,7 @@ mod tests {
             yaw: 0,
             pitch: 0,
             vel: [0; 3],
+            data: 0,
         });
         let size = |es: &Entities| es.get(5).unwrap().size();
         assert_eq!(size(&es), (0.5, 1.975));

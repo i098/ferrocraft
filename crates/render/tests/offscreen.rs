@@ -180,6 +180,8 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         ridden: false,
         child: false,
         using: None,
+        view: [0.0; 2],
+        line: None,
     }]);
     let third = frame(&mut r, 0.0, None);
     r.set_entities(&[]);
@@ -286,6 +288,9 @@ fn burning_entity_and_first_person_fire() {
         pointed: false,
         ridden: false,
         child: false,
+        using: None,
+        view: [0.0; 2],
+        line: None,
     };
     r.set_entities(&[entity.clone()]);
     let before = r.render_to_rgba(&cam, &[]).2;

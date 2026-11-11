@@ -1461,6 +1461,58 @@ mod tests {
         let mut ps = Particles::new();
         ps.world_effect(2004, [0, 64, 0], 0);
         assert_eq!(ps.len(), 40);
+        let smoke = ps.list.iter().filter(|p| p.behavior == Behavior::Smoke).count();
+        let flames = ps
+            .list
+            .iter()
+            .filter(|p| matches!(p.sprite, Sprite::Sheet { base: 48, .. }))
+            .count();
+        assert_eq!((smoke, flames), (20, 20));
+    }
+
+    #[test]
+    fn splash_potion_uses_the_instant_or_plain_spell_sprite() {
+        let tile = |instant| {
+            let mut ps = Particles::new();
+            ps.splash_potion([0, 0, 0], 0xF8_2423, instant);
+            assert!(ps.list.iter().all(|p| p.behavior == Behavior::Spell));
+            ps.list
+                .iter()
+                .map(|p| match p.sprite {
+                    Sprite::Sheet { base, .. } => base,
+                    _ => 0,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(tile(true).iter().all(|&b| b == 144));
+        assert!(tile(false).iter().all(|&b| b == 128));
+    }
+
+    #[test]
+    fn dispenser_effect_puffs_10_smoke_ahead_of_its_facing() {
+        // `data` 5 is facing +x: x offset 1, z offset 0 (WorldRenderer.doEvent case 2000).
+        let mut ps = Particles::new();
+        ps.world_effect(2000, [0, 64, 0], 5);
+        assert_eq!(ps.len(), 10);
+        assert!(ps.list.iter().all(|p| p.behavior == Behavior::Smoke));
+        // Spawn x is 0.5 + 0.6 + 0.01; the sideways spread acts on z only.
+        assert!(ps.list.iter().all(|p| (p.pos[0] - 1.11).abs() < 1e-9));
+        assert!(ps.list.iter().all(|p| (0.25..=0.75).contains(&p.pos[2])));
+    }
+
+    #[test]
+    fn bone_meal_effect_spawns_15_sparkles_by_default_or_data_many_in_the_block() {
+        let mut ps = Particles::new();
+        ps.bone_meal([2, 5, 3], 0, 0.5);
+        assert_eq!(ps.len(), 15);
+        let mut ps = Particles::new();
+        ps.bone_meal([2, 5, 3], 7, 0.5);
+        assert_eq!(ps.len(), 7);
+        for p in &ps.list {
+            assert!((2.0..=3.0).contains(&p.pos[0]) && (3.0..=4.0).contains(&p.pos[2]));
+            assert!((5.0..=5.5).contains(&p.pos[1]), "y {}", p.pos[1]);
+            assert!(matches!(p.sprite, Sprite::Sheet { base: 82, anim: false }));
+        }
     }
 
     #[test]

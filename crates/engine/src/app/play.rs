@@ -1027,7 +1027,13 @@ mod tests {
         let grass = 2 << 4;
         let water = 9 << 4;
         let pos = [0.5, 64.0, 0.5];
-        let floor = |x: i32, y: i32, z: i32| if y == 63 && (x, z) == (0, 0) { grass } else { 0 };
+        let floor = |x: i32, y: i32, z: i32| {
+            if y == 63 && (x, z) == (0, 0) {
+                grass
+            } else {
+                0
+            }
+        };
         assert_eq!(sprint_dust_state(pos, 1.8, floor), Some(grass));
         assert_eq!(sprint_dust_state(pos, 1.8, |_, _, _| 0), None);
         let flooded = |x: i32, y: i32, z: i32| if y >= 64 { water } else { floor(x, y, z) };

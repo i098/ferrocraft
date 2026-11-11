@@ -712,7 +712,12 @@ mod tests {
         let got = fog_at(12000, [-1.0, 0.0, 0.0]);
         let want = [0.736_666, 0.693_448, 0.668_878];
         for i in 0..3 {
-            assert!((got[i] - want[i]).abs() < 1e-4, "{i}: {} vs {}", got[i], want[i]);
+            assert!(
+                (got[i] - want[i]).abs() < 1e-4,
+                "{i}: {} vs {}",
+                got[i],
+                want[i]
+            );
         }
     }
 

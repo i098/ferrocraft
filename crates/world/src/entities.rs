@@ -117,6 +117,7 @@ pub struct SizeMeta {
     pub guardian: Option<i32>,
     pub horse: Option<u8>,
     pub always_name: Option<u8>,
+    pub skeleton: Option<u8>,
 }
 
 impl SizeMeta {
@@ -127,6 +128,7 @@ impl SizeMeta {
         self.guardian = new.guardian.or(self.guardian);
         self.horse = new.horse.or(self.horse);
         self.always_name = new.always_name.or(self.always_name);
+        self.skeleton = new.skeleton.or(self.skeleton);
     }
 }
 
@@ -271,13 +273,20 @@ impl Entity {
         self.flags & flag::INVISIBLE != 0
     }
 
-    pub fn burning(&self) -> bool {
+    fn immune_to_fire(&self) -> bool {
         match self.kind {
-            // Blaze metadata index 16 carries its fire-active bit.
-            Kind::Mob(61) => self.meta.slime.is_some_and(|flags| flags & 1 != 0),
-            Kind::Mob(53 | 56 | 57 | 62 | 64) | Kind::Object(70) => false,
-            _ => self.flags & flag::BURNING != 0,
+            Kind::Mob(51) => self.meta.skeleton == Some(1),
+            Kind::Mob(56 | 57 | 62 | 63 | 64) | Kind::Object(50) => true,
+            _ => false,
         }
+    }
+
+    pub fn burning(&self) -> bool {
+        if self.kind == Kind::Mob(61) {
+            // Blaze metadata index 16 carries its fire-active bit.
+            return self.meta.slime.is_some_and(|flags| flags & 1 != 0);
+        }
+        !self.immune_to_fire() && self.flags & flag::BURNING != 0
     }
 
     /// `Entity.getAlwaysRenderNameTag`: metadata byte 3 is 1.
@@ -1046,17 +1055,28 @@ mod tests {
         entity.flags = 0;
         assert!(!entity.burning());
         for kind in [
-            Kind::Mob(53),
             Kind::Mob(56),
             Kind::Mob(57),
             Kind::Mob(62),
+            Kind::Mob(63),
             Kind::Mob(64),
-            Kind::Object(70),
+            Kind::Object(50),
         ] {
             entity.kind = kind;
             entity.flags = flag::BURNING;
             assert!(!entity.burning(), "{kind:?}");
         }
+        for kind in [Kind::Mob(53), Kind::Object(70)] {
+            entity.kind = kind;
+            entity.flags = flag::BURNING;
+            assert!(entity.burning(), "{kind:?}");
+        }
+        entity.kind = Kind::Mob(51);
+        entity.flags = flag::BURNING;
+        entity.meta.skeleton = Some(0);
+        assert!(entity.burning());
+        entity.meta.skeleton = Some(1);
+        assert!(!entity.burning());
         entity.kind = Kind::Mob(61);
         assert!(!entity.burning());
         entity.flags = 0;

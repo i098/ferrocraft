@@ -1281,6 +1281,8 @@ impl Renderer {
             self.load_texture(PARTICLE_SHEET);
         }
         let particle_textured = self.textured_particles(quads.footprint, quads.items, offset);
+        let curse = entity::guardian::build(&quads.curses, &self.entity_skins);
+        let particle_curse = self.upload_mesh(curse, offset);
 
         overlay.iter().for_each(|q| self.load_texture(&q.tex));
         let verts: Vec<GuiVertex> = overlay.iter().flat_map(quad_vertices).collect();
@@ -1388,6 +1390,11 @@ impl Renderer {
             }
             for (tex, m) in &particle_textured {
                 pass.set_bind_group(0, &self.textures[tex], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &particle_curse {
+                pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }

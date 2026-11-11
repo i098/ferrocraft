@@ -5,9 +5,9 @@ use crate::assets::{decode_png, AssetSource, Image};
 
 pub const SLOT: u32 = 64;
 
-/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The last
-/// twelve are the armor layers (see [`Skin::armor`]).
-const SKINS: [&str; 27] = [
+/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
+/// armor layers (see [`Skin::armor`]) come before the elder guardian.
+const SKINS: [&str; 28] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -35,9 +35,12 @@ const SKINS: [&str; 27] = [
     "models/armor/gold_layer_2.png",
     "models/armor/leather_layer_1_overlay.png",
     "models/armor/leather_layer_2_overlay.png",
+    "entity/guardian_elder.png",
 ];
 /// Index of the first armor layer in `SKINS`.
 const ARMOR_FIRST: u8 = 15;
+/// Slot of `guardian_elder.png`, the last one in `SKINS`.
+const ELDER_SLOT: u32 = SKINS.len() as u32 - 1;
 
 /// Slots from this index on hold sprites and projectile textures, not player-layout skins.
 const FIRST_SPRITE: usize = 8;
@@ -65,6 +68,8 @@ pub enum Skin {
     /// The bobber cell of `particles.png`, cropped to 8x8.
     Bobber,
     SplashPotion,
+    /// `textures/entity/guardian_elder.png`, drawn by the curse effect.
+    GuardianElder,
     /// An armor texture, by index into the armor part of the slot table.
     Armor(u8),
     /// Plain white: shapes take their color from the vertex tint.
@@ -322,6 +327,7 @@ fn slot(skin: Skin) -> Option<u32> {
         Skin::Player(i) => Some(SLOTS + u32::from(i)),
         Skin::White => None,
         Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
+        Skin::GuardianElder => Some(ELDER_SLOT),
         fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
     }
 }

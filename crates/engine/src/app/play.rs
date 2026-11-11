@@ -211,12 +211,49 @@ impl App {
         self.step_sound();
         self.rain_particles();
         self.potion_particles();
+        self.entity_fx();
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
         self.send_state();
         self.send_pose();
         self.sound_tick();
+    }
+
+    /// Crit bursts, death puffs and the sprint dust of every sprinting entity not in water.
+    fn entity_fx(&mut self) {
+        for fx in self.game.entities.take_fx() {
+            match fx {
+                world::entities::Fx::Hit { magic, pos, size } => {
+                    self.particles.hit_burst(magic, pos, size)
+                }
+                world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
+            }
+        }
+        let g = &self.game;
+        let block = |x, y, z| g.store.get_block(x, y, z);
+        let mut dust = Vec::new();
+        let mut add = |pos: [f64; 3], vel: [f64; 3], (width, height): (f32, f32)| {
+            let state = block(
+                pos[0].floor() as i32,
+                (pos[1] - 0.2).floor() as i32,
+                pos[2].floor() as i32,
+            );
+            // Air has render type -1 and makes no dust.
+            if state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block) {
+                dust.push((pos, vel, width, state));
+            }
+        };
+        for e in g.entities.iter().filter(|e| e.sprinting()) {
+            let vel = [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]);
+            add(e.pos, vel, e.size());
+        }
+        if let Some(p) = g.player.as_ref().filter(|p| p.sprinting) {
+            add(p.pos, p.vel, (0.6, 1.8));
+        }
+        for (pos, vel, width, state) in dust {
+            self.particles.sprint_dust(pos, vel, width, state);
+        }
     }
 
     /// `EntityLivingBase.onEntityUpdate`: swirls of every living entity with potion effects.

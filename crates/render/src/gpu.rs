@@ -10,7 +10,7 @@ use crate::particles::Quads;
 use crate::sky::{
     build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
 };
-use crate::weather::{build_precipitation, precipitation_height, precipitation_in, Precipitation};
+use crate::weather::{Precipitation, build_precipitation, precipitation_height, precipitation_in};
 use crate::{Camera, ChunkBlocks, Quad};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -564,8 +564,10 @@ impl Renderer {
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
         self.blocks.insert(key, Arc::new(data));
-        self.biomes
-            .insert(key, std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)));
+        self.biomes.insert(
+            key,
+            std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)),
+        );
         self.mark_around(key);
     }
 

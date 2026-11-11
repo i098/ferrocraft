@@ -41,6 +41,11 @@ impl Ui {
         self.screens.is_open()
     }
 
+    /// `Minecraft.isUnicode`: the language or `forceUnicodeFont` asks for the unicode glyphs.
+    pub fn unicode(&self) -> bool {
+        self.settings.force_unicode || self.texts.unicode
+    }
+
     /// Runs `f` with a `Ctx`; returns the effects the screens pushed.
     fn run<R>(
         &mut self,

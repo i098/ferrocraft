@@ -74,6 +74,26 @@ impl App {
             }
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
+            UiEffect::LanguageChanged => {
+                // `refreshResources`, then the font flag and a rescale, which relabels the screen.
+                self.load_texts();
+                self.apply_settings();
+                self.resize_screens();
+            }
+            UiEffect::OpenUrl(url) => {
+                let opener = if cfg!(target_os = "macos") {
+                    "open"
+                } else if cfg!(windows) {
+                    "explorer"
+                } else {
+                    "xdg-open"
+                };
+                match std::process::Command::new(opener).arg(url).spawn() {
+                    // Reap the opener so it does not stay a zombie.
+                    Ok(mut c) => drop(std::thread::spawn(move || c.wait())),
+                    Err(e) => crate::log::line(&format!("Couldn't open link: {e}")),
+                }
+            }
         }
     }
 

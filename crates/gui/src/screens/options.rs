@@ -1,9 +1,10 @@
 //! `GameSettings` with its `options.txt` format, and the option screens: `GuiOptions`,
-//! `GuiVideoSettings`, `GuiControls`, `GuiScreenOptionsSounds`, `ScreenChatOptions`, `GuiCustomizeSkin`.
+//! `GuiVideoSettings`, `GuiControls`, `GuiScreenOptionsSounds`, `ScreenChatOptions`, `GuiCustomizeSkin`,
+//! `GuiStreamUnavailable`.
 
 use super::{
-    button, centered, default_background, draw_buttons, press, release_all, text, Button, Canvas,
-    Ctx, Effect, Mods, Nav, Screen, ScrollList, Texts, WHITE,
+    button, centered, default_background, draw_buttons, press, release_all, text, wrap, Button,
+    Canvas, Ctx, Effect, Mods, Nav, Screen, ScrollList, Texts, WHITE,
 };
 use std::fmt::Write as _;
 use std::io;
@@ -135,10 +136,12 @@ pub enum Opt {
     ReducedDebugInfo,
     EntityShadows,
     RealmsNotifications,
+    ForceUnicode,
+    Snooper,
 }
 
 impl Opt {
-    const ALL: [Opt; 32] = [
+    const ALL: [Opt; 34] = [
         Opt::InvertMouse,
         Opt::Sensitivity,
         Opt::Fov,
@@ -171,6 +174,8 @@ impl Opt {
         Opt::ReducedDebugInfo,
         Opt::EntityShadows,
         Opt::RealmsNotifications,
+        Opt::ForceUnicode,
+        Opt::Snooper,
     ];
 
     fn from_id(id: i32) -> Option<Opt> {
@@ -178,7 +183,7 @@ impl Opt {
     }
 
     pub fn key(self) -> &'static str {
-        const KEYS: [&str; 32] = [
+        const KEYS: [&str; 34] = [
             "options.invertMouse",
             "options.sensitivity",
             "options.fov",
@@ -211,6 +216,8 @@ impl Opt {
             "options.reducedDebugInfo",
             "options.entityShadows",
             "options.realmsNotifications",
+            "options.forceUnicodeFont",
+            "options.snooper",
         ];
         KEYS[self as usize]
     }
@@ -249,6 +256,8 @@ impl Opt {
                 | ReducedDebugInfo
                 | EntityShadows
                 | RealmsNotifications
+                | ForceUnicode
+                | Snooper
         )
     }
 
@@ -469,6 +478,12 @@ const FLAGS: &[Flag] = &[
         |s| s.realms_notifications,
         |s| &mut s.realms_notifications,
     ),
+    (
+        Opt::ForceUnicode,
+        |s| s.force_unicode,
+        |s| &mut s.force_unicode,
+    ),
+    (Opt::Snooper, |s| s.snooper, |s| &mut s.snooper),
 ];
 
 fn parse_f(v: &str) -> Option<f32> {
@@ -1382,6 +1397,10 @@ impl Options {
                 CONTROLS => Box::new(Controls::new(me)),
                 CHAT => Box::new(OptionPage::new(me, Page::Chat)),
                 SKIN => Box::new(OptionPage::new(me, Page::Skin)),
+                LANGUAGE => Box::new(super::language::LanguageScreen::new(me)),
+                SNOOPER => Box::new(super::snooper::Snooper::new(me)),
+                // Ferrocraft has no Twitch SDK, as a vanilla client whose natives fail to load (`ErrorTwitchStream`).
+                STREAM => Box::new(StreamUnavailable::new(me)),
                 _ => Box::new(OptionPage::new(me, Page::Sounds)),
             }
         }))
@@ -1437,8 +1456,8 @@ impl Screen for Options {
         b.push(row(RESOURCE_PACKS, false, 144, "options.resourcepack"));
         b.push(row(SNOOPER, true, 144, "options.snooper.view"));
         b.push(Button::wide(DONE, w / 2 - 100, h / 6 + 168, t("gui.done")));
-        // shortcut: no shaders, Twitch, language, resource pack or snooper screens yet; their buttons stay disabled.
-        for id in [SUPER_SECRET, STREAM, LANGUAGE, RESOURCE_PACKS, SNOOPER] {
+        // shortcut: no post-processing shaders or resource pack screen yet; their buttons stay disabled.
+        for id in [SUPER_SECRET, RESOURCE_PACKS] {
             button(&mut b, id).enabled = false;
         }
         self.buttons = b;
@@ -1458,7 +1477,7 @@ impl Screen for Options {
                 ctx.save_settings();
                 self.parent.take().map(Nav::Open)
             }
-            VIDEO | CONTROLS | CHAT | SKIN | SOUNDS => {
+            VIDEO | CONTROLS | CHAT | SKIN | SOUNDS | LANGUAGE | SNOOPER | STREAM => {
                 ctx.save_settings();
                 Some(Self::child(id))
             }
@@ -1807,6 +1826,77 @@ impl Screen for Controls {
     fn scroll(&mut self, dir: i32, _ctx: &mut Ctx) {
         let n = self.rows.len();
         self.list.wheel(dir, n);
+    }
+}
+
+/// `GuiStreamUnavailable` with `Reason.LIBRARY_FAILURE`.
+pub struct StreamUnavailable {
+    parent: Option<Box<dyn Screen>>,
+    lines: Vec<String>,
+    buttons: Vec<Button>,
+}
+
+impl StreamUnavailable {
+    const REPORT: i32 = 1;
+
+    pub fn new(parent: Box<dyn Screen>) -> StreamUnavailable {
+        StreamUnavailable {
+            parent: Some(parent),
+            lines: Vec::new(),
+            buttons: Vec::new(),
+        }
+    }
+}
+
+impl Screen for StreamUnavailable {
+    fn init(&mut self, ctx: &mut Ctx) {
+        let (w, h) = (ctx.width, ctx.height);
+        if self.lines.is_empty() {
+            let reason = ctx.tr("stream.unavailable.library_failure");
+            self.lines = wrap(ctx.metrics, &reason, (w as f32 * 0.75) as i32);
+        }
+        self.buttons = vec![
+            Button::new(0, w / 2 - 155, h - 50, 150, 20, ctx.tr("gui.cancel")),
+            Button::new(
+                Self::REPORT,
+                w / 2 - 155 + 160,
+                h - 50,
+                150,
+                20,
+                ctx.tr("stream.unavailable.report_to_mojang"),
+            ),
+        ];
+    }
+
+    fn draw(&mut self, c: &mut dyn Canvas, mx: i32, my: i32, ctx: &mut Ctx) {
+        default_background(c, ctx);
+        let n = self.lines.len() as f32 * 9.0;
+        let mut y = ((f64::from(ctx.height) * 0.85 / 2.0 - f64::from(n / 2.0)) as i32).max(50);
+        centered(
+            c,
+            &ctx.tr("stream.unavailable.title"),
+            ctx.width / 2,
+            y - 18,
+            WHITE,
+        );
+        for line in &self.lines {
+            centered(c, line, ctx.width / 2, y, 0xa0a0a0);
+            y += 9;
+        }
+        draw_buttons(&mut self.buttons, c, mx, my);
+    }
+
+    fn click(&mut self, x: i32, y: i32, mb: i32, ctx: &mut Ctx) -> Option<Nav> {
+        let id = press(&mut self.buttons, x, y, mb, ctx)?;
+        if id == Self::REPORT {
+            ctx.effects
+                .push(Effect::OpenUrl("http://bugs.mojang.com/browse/MC"));
+        }
+        self.parent.take().map(Nav::Open)
+    }
+
+    fn release(&mut self, _x: i32, _y: i32, _b: i32, _ctx: &mut Ctx) {
+        release_all(&mut self.buttons);
     }
 }
 

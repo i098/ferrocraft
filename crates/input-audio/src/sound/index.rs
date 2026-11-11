@@ -94,11 +94,13 @@ impl Event {
     }
 }
 
-pub struct SoundIndex {
-    events: HashMap<String, Event>,
+/// The launcher's `assets/indexes/<version>.json`: asset name -> file under `assets/objects`.
+pub struct AssetIndex {
+    objects_dir: PathBuf,
+    objects: HashMap<String, String>,
 }
 
-impl SoundIndex {
+impl AssetIndex {
     /// `minecraft_dir` holds `assets/indexes` and `assets/objects`, as the vanilla launcher lays them out.
     pub fn load(minecraft_dir: &Path, version: &str) -> Result<Self, String> {
         let assets = minecraft_dir.join("assets");
@@ -108,15 +110,33 @@ impl SoundIndex {
             .find(|p| p.is_file())
             .ok_or("no asset index in assets/indexes")?;
         let objects = parse_objects(&std::fs::read(&index).map_err(|e| e.to_string())?)?;
-        let object = |name: &str| {
-            objects
-                .get(name)
-                .map(|h| assets.join("objects").join(&h[..2]).join(h))
-        };
-        let json_path = object("minecraft/sounds.json").ok_or("sounds.json not in asset index")?;
+        Ok(Self {
+            objects_dir: assets.join("objects"),
+            objects,
+        })
+    }
+
+    /// The file of asset `name`, such as `minecraft/sounds.json` or `pack.mcmeta`.
+    pub fn path(&self, name: &str) -> Option<PathBuf> {
+        self.objects
+            .get(name)
+            .map(|h| self.objects_dir.join(&h[..2]).join(h))
+    }
+}
+
+pub struct SoundIndex {
+    events: HashMap<String, Event>,
+}
+
+impl SoundIndex {
+    pub fn load(minecraft_dir: &Path, version: &str) -> Result<Self, String> {
+        let assets = AssetIndex::load(minecraft_dir, version)?;
+        let json_path = assets
+            .path("minecraft/sounds.json")
+            .ok_or("sounds.json not in asset index")?;
         let json = std::fs::read(&json_path).map_err(|e| e.to_string())?;
         Self::from_json(&json, |name| {
-            object(&format!("minecraft/sounds/{name}.ogg"))
+            assets.path(&format!("minecraft/sounds/{name}.ogg"))
         })
     }
 

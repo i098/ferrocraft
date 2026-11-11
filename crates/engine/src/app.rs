@@ -21,8 +21,9 @@ use crate::skins::PlayerSkins;
 use crate::ui::{Fm, Ui};
 use gui::inventory::icons::Icons;
 use gui::inventory::ContainerScreen;
-use gui::screens::{Screen, Texts};
+use gui::screens::{languages, Screen, Texts};
 use gui::status::Status;
+use input_audio::sound::index::AssetIndex;
 use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
@@ -184,24 +185,48 @@ impl App {
 
     /// Loads language texts, item icons and sounds once the window and its assets exist.
     fn load_assets(&mut self) {
+        self.load_texts();
         let Some(mut src) = self.args.assets_dir.as_deref().and_then(AssetSource::open) else {
             return;
         };
-        let mut text = |name: &str| {
-            src.read(&format!("assets/minecraft/{name}"))
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default()
-        };
-        let lang = text(&format!("lang/{}.lang", self.ui.settings.lang));
-        let lang = if lang.is_empty() {
-            text("lang/en_US.lang")
-        } else {
-            lang
-        };
-        self.ui.texts = Texts::parse(&lang, &text("texts/splashes.txt"));
         self.icons = Some(Icons::new(|name| {
             src.read(&format!("assets/minecraft/{name}"))
         }));
+    }
+
+    /// `LanguageManager.onResourceManagerReload`: `en_US` with the chosen language over it, the
+    /// splashes and the `pack.mcmeta` language list. Only `en_US` is in the client jar; the other
+    /// languages and `pack.mcmeta` come from the launcher's asset index.
+    fn load_texts(&mut self) {
+        let mut src = self.args.assets_dir.as_deref().and_then(AssetSource::open);
+        let index = [
+            Some(self.args.game_dir.as_path()),
+            self.args.game_dir.parent(),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|d| AssetIndex::load(d, "1.8.9").ok());
+        let file = |name: &str| {
+            index
+                .as_ref()?
+                .path(name)
+                .and_then(|p| std::fs::read(p).ok())
+        };
+        let mut text = |name: &str| {
+            src.as_mut()
+                .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
+                .or_else(|| file(&format!("minecraft/{name}")))
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default()
+        };
+        let mut lang = text("lang/en_US.lang");
+        if self.ui.settings.lang != "en_US" {
+            lang.push('\n');
+            lang += &text(&format!("lang/{}.lang", self.ui.settings.lang));
+        }
+        let mut texts = Texts::parse(&lang, &text("texts/splashes.txt"));
+        texts.languages = file("pack.mcmeta").map_or_else(Vec::new, |b| languages(&b));
+        self.ui.texts = texts;
     }
 
     fn load_sound(&mut self) {
@@ -247,12 +272,12 @@ impl App {
             height_focused: s.chat_height_focused,
             height_unfocused: s.chat_height_unfocused,
         };
-        let (fullscreen, vsync, force_unicode) = (s.fullscreen, s.vsync, s.force_unicode);
+        let (fullscreen, vsync, unicode) = (s.fullscreen, s.vsync, self.ui.unicode());
         let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
         let unicode = self
             .renderer
             .as_mut()
-            .is_some_and(|r| r.set_force_unicode(force_unicode));
+            .is_some_and(|r| r.set_force_unicode(unicode));
         if unicode || self.hud.chat.settings != chat_settings {
             self.hud.chat.settings = chat_settings;
             let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
@@ -699,7 +724,7 @@ impl App {
             w,
             h,
             u32::from(self.ui.settings.gui_scale),
-            self.ui.settings.force_unicode,
+            self.ui.unicode(),
         );
         let factor = scale.factor.max(1) as f64;
         let (mx, my) = (
@@ -750,7 +775,7 @@ impl App {
                 w as i32,
                 h as i32,
                 i32::from(self.ui.settings.gui_scale),
-                self.ui.settings.force_unicode,
+                self.ui.unicode(),
                 self.screen_open(),
                 (self.cursor.0 as i32, self.cursor.1 as i32),
             );

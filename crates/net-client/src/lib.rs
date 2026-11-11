@@ -396,10 +396,7 @@ fn login(
 
 /// Vanilla 1.8.9 `ServerAddress.getServerAddress`: the typed host and port, replaced by the
 /// `_minecraft._tcp` SRV target only when the port is the default one.
-fn resolve_target(
-    addr: &str,
-    srv: impl FnOnce(&str) -> Option<(String, u16)>,
-) -> (String, u16) {
+fn resolve_target(addr: &str, srv: impl FnOnce(&str) -> Option<(String, u16)>) -> (String, u16) {
     let (host, port) = split_address(addr);
     if port == DEFAULT_PORT {
         if let Some((target, srv_port)) = srv(&host) {
@@ -411,7 +408,9 @@ fn resolve_target(
 
 fn srv_lookup(host: &str) -> Option<(String, u16)> {
     let resolver = hickory_resolver::Resolver::from_system_conf().ok()?;
-    let records = resolver.srv_lookup(format!("_minecraft._tcp.{host}.")).ok()?;
+    let records = resolver
+        .srv_lookup(format!("_minecraft._tcp.{host}."))
+        .ok()?;
     let srv = records.iter().next()?;
     Some((srv.target().to_utf8(), srv.port()))
 }

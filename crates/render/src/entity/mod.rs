@@ -767,29 +767,41 @@ fn emit_armor(out: &mut MeshData, xf: &Xf, m: &Model, d: &EntityDraw, skins: &Sk
         let dye = [16, 8, 0].map(|shift| ((dye >> shift) & 0xFF) as f32 / 255.0);
         let (tint, layers) = if leather { (dye, 2) } else { ([1.0; 3], 1) };
         for pass in 0..layers {
-            let skin = if pass == 0 {
-                base
-            } else if let Some(o) = Skin::armor(item, layer, true).filter(|o| skins.has(*o)) {
-                o
-            } else {
+            let Some((v_off, color)) = armor_pass(item, layer, pass, base, tint, skins) else {
                 break;
-            };
-            let (v_off, color) = if skins.has(skin) {
-                (
-                    skins.v_offset(skin),
-                    if pass == 0 { tint } else { [1.0; 3] },
-                )
-            } else {
-                (
-                    skins.v_offset(Skin::White),
-                    armor_tint(item).unwrap_or([1.0; 3]),
-                )
             };
             for &i in parts {
                 emit_part(out, xf, &m.parts[i], grow, color, v_off);
             }
         }
     }
+}
+
+/// Texture v offset and color of one armor pass; `None` when the overlay pass has no texture.
+fn armor_pass(
+    item: i16,
+    layer: u8,
+    pass: u8,
+    base: Skin,
+    tint: [f32; 3],
+    skins: &Skins,
+) -> Option<(f32, [f32; 3])> {
+    let skin = if pass == 0 {
+        base
+    } else {
+        Skin::armor(item, layer, true).filter(|o| skins.has(*o))?
+    };
+    Some(if skins.has(skin) {
+        (
+            skins.v_offset(skin),
+            if pass == 0 { tint } else { [1.0; 3] },
+        )
+    } else {
+        (
+            skins.v_offset(Skin::White),
+            armor_tint(item).unwrap_or([1.0; 3]),
+        )
+    })
 }
 
 /// Color of undyed leather armor, `ItemArmor.getColor`.

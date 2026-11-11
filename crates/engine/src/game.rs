@@ -591,6 +591,11 @@ impl Game {
                 fly_speed: flying.then_some(self.fly_speed),
                 ..input
             };
+            p.speed_attr = Some(self.speed.value(input.sprint));
+            p.jump_boost = self
+                .effects
+                .get(world::effects::id::JUMP_BOOST)
+                .map_or(0.0, |e| f32::from(e.amplifier) + 1.0);
             p.tick(&Collision(&self.store), input);
         }
     }

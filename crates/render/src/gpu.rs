@@ -1406,7 +1406,7 @@ impl Renderer {
                 Some(d) => [-d, d, sky.sun_brightness, 1.5],
                 None => [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
             },
-            screen: [w as f32, h as f32, 0.0, 0.0],
+            screen: [w as f32, h as f32, env.night_vision, 0.0],
         }
     }
 

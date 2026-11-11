@@ -137,6 +137,11 @@ pub struct Player {
     pub sprinting: bool,
     pub collided_horizontally: bool,
     pub collided_vertically: bool,
+    /// `generic.movementSpeed` value for this tick, sprint modifier included; `None` before the
+    /// engine sets it.
+    pub speed_attr: Option<f64>,
+    /// Jump Boost level (`amplifier + 1`), 0 without the effect.
+    pub jump_boost: f32,
     jump_movement_factor: f32,
     jump_ticks: i32,
     bb: Aabb,
@@ -163,6 +168,8 @@ impl Player {
             sprinting: false,
             collided_horizontally: false,
             collided_vertically: false,
+            speed_attr: None,
+            jump_boost: 0.0,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
             bb: Aabb {
@@ -226,8 +233,12 @@ impl Player {
         }
     }
 
-    /// `PlayerEntity.getSpeed`: the movement speed attribute, with the sprint modifier (operation 2).
+    /// `PlayerEntity.getSpeed`: the movement speed attribute. Without a server value, the walk speed
+    /// with the sprint modifier (operation 2).
     fn speed(&self) -> f32 {
+        if let Some(attr) = self.speed_attr {
+            return attr as f32;
+        }
         let mut speed = f64::from(WALK_SPEED);
         if self.sprinting {
             speed *= 1.0 + SPRINT_BOOST;
@@ -238,6 +249,7 @@ impl Player {
     /// `LivingEntity.jump`.
     fn jump(&mut self) {
         self.vel[1] = f64::from(0.42_f32);
+        self.vel[1] += f64::from(self.jump_boost * 0.1_f32);
         if self.sprinting {
             let f = self.yaw * 0.017_453_292_f32;
             self.vel[0] -= f64::from(sin(f) * 0.2_f32);
@@ -688,5 +700,51 @@ mod tests {
             .collect();
         s.floor = Block::Stone;
         s.check("edge");
+    }
+
+    fn peak_height(boost: f32) -> f64 {
+        let world = TestWorld {
+            floor: Block::Stone,
+            blocks: HashMap::new(),
+        };
+        let mut p = Player::new([0.5, 64.0, 0.5], 0.0);
+        p.jump_boost = boost;
+        let jump = input(0.0, 0.0, true, false);
+        let mut top = 64.0_f64;
+        for _ in 0..30 {
+            p.tick(&world, jump);
+            top = top.max(p.pos[1]);
+        }
+        top
+    }
+
+    #[test]
+    fn jump_boost_raises_the_jump_by_a_tenth_of_a_block_speed_per_level() {
+        let (plain, one, two) = (peak_height(0.0), peak_height(1.0), peak_height(2.0));
+        assert!(plain < one && one < two);
+        assert!(
+            (plain - 65.25).abs() < 0.01,
+            "plain jump is 1.25 blocks: {plain}"
+        );
+    }
+
+    #[test]
+    fn the_movement_attribute_drives_ground_speed() {
+        let world = TestWorld {
+            floor: Block::Stone,
+            blocks: HashMap::new(),
+        };
+        let walked = |attr: Option<f64>| {
+            let mut p = Player::new([0.5, 64.0, 0.5], 0.0);
+            p.speed_attr = attr;
+            for _ in 0..10 {
+                p.tick(&world, input(1.0, 0.0, false, false));
+            }
+            p.pos[2].abs()
+        };
+        let base = walked(None);
+        assert_eq!(walked(Some(0.100_000_001_490_116_12)), base);
+        assert!(walked(Some(0.12)) > base);
+        assert!(walked(Some(0.05)) < base);
     }
 }

@@ -544,7 +544,7 @@ impl App {
             sneaking: self.input.sneaking(),
             hurt: false,
             death_time: 0.0,
-            invisible: false,
+            invisible: self.game.effects.has(Fx::INVISIBILITY),
             burning: self.game.burning(),
             size: (0.6, 1.8),
             held: self.game.inv.held_stack().as_ref().map_or(0, |s| s.id),
@@ -656,6 +656,11 @@ impl App {
             gamma: self.ui.settings.gamma,
             fluid,
             clouds: self.ui.settings.clouds as u8,
+            blindness: self.game.effects.get(Fx::BLINDNESS).map(|e| e.duration),
+            night_vision: self.game.effects.get(Fx::NIGHT_VISION).map_or(0.0, |e| {
+                world::effects::night_vision_brightness(e.duration, frac as f32)
+            }),
+            view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
         });
         r.set_lightning(self.game.bolts.shapes());
         let hand_item = self.equip.2.or(held);

@@ -176,6 +176,7 @@ impl App {
         }
         self.limb_tick();
         let host = self.host_player_tick();
+        self.input.blind = self.game.effects.has(world::effects::id::BLINDNESS);
         let input = if playing {
             let native = |s: &mut Self| {
                 s.game

@@ -294,7 +294,11 @@ mod tests {
     fn read_all_returns_every_layer_bottom_first() {
         let root = std::env::temp_dir().join(format!("assets_read_all_{}", std::process::id()));
         let (top, bottom, empty) = (root.join("top"), root.join("bottom"), root.join("empty"));
-        for (dir, text) in [(&top, Some("top")), (&bottom, Some("bottom")), (&empty, None)] {
+        for (dir, text) in [
+            (&top, Some("top")),
+            (&bottom, Some("bottom")),
+            (&empty, None),
+        ] {
             std::fs::create_dir_all(dir.join("assets/minecraft/lang")).unwrap();
             if let Some(text) = text {
                 std::fs::write(dir.join("assets/minecraft/lang/en_US.lang"), text).unwrap();
@@ -306,7 +310,10 @@ mod tests {
             AssetSource::Dir(bottom),
         ]);
         let name = "assets/minecraft/lang/en_US.lang";
-        assert_eq!(src.read_all(name), vec![b"bottom".to_vec(), b"top".to_vec()]);
+        assert_eq!(
+            src.read_all(name),
+            vec![b"bottom".to_vec(), b"top".to_vec()]
+        );
         assert_eq!(src.read(name), Some(b"top".to_vec()));
         std::fs::remove_dir_all(root).unwrap();
     }

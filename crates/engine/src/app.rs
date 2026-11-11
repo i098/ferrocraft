@@ -218,8 +218,14 @@ impl App {
         };
         let mut merged = |name: &str| {
             let base = file(&format!("minecraft/{name}"));
-            let packs = src.as_mut().map(|s| s.read_all(&format!("assets/minecraft/{name}")));
-            join(base.into_iter().chain(packs.into_iter().flatten()).collect())
+            let packs = src
+                .as_mut()
+                .map(|s| s.read_all(&format!("assets/minecraft/{name}")));
+            join(
+                base.into_iter()
+                    .chain(packs.into_iter().flatten())
+                    .collect(),
+            )
         };
         let mut lang = merged("lang/en_US.lang");
         if self.ui.settings.lang != "en_US" {

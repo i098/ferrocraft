@@ -31,8 +31,8 @@ static TOKEN: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// The client's snooper map (`Snooper.getCurrentStats`), sorted by key as the `TreeMap` in `initGui`.
-fn rows(ctx: &Ctx) -> Vec<(String, String)> {
+/// `Snooper.fixedData`: the machine and build, fixed for the run.
+fn fixed_rows() -> [(&'static str, String); 7] {
     let os = match std::env::consts::OS {
         "linux" => "Linux",
         "macos" => "Mac OS X",
@@ -44,55 +44,45 @@ fn rows(ctx: &Ctx) -> Vec<(String, String)> {
         other => other,
     };
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let packs: Vec<String> = serde_json::from_str(&ctx.settings.resource_packs).unwrap_or_default();
-    let rows = [
+    [
         ("client_brand", "vanilla".to_owned()),
         ("cpu_cores", cores.to_string()),
-        (
-            "current_action",
-            if ctx.in_world {
-                "multiplayer"
-            } else {
-                "out_of_game"
-            }
-            .to_owned(),
-        ),
-        (
-            "display_type",
-            if ctx.settings.fullscreen {
-                "fullscreen"
-            } else {
-                "windowed"
-            }
-            .to_owned(),
-        ),
-        (
-            "endianness",
-            if cfg!(target_endian = "little") {
-                "little"
-            } else {
-                "big"
-            }
-            .to_owned(),
-        ),
         ("launched_version", "1.8.9".to_owned()),
         ("os_architecture", arch.to_owned()),
         ("os_name", os.to_owned()),
         ("snooper_token", TOKEN.clone()),
         ("version", "1.8.9".to_owned()),
-        ("vsync_enabled", ctx.settings.vsync.to_string()),
+    ]
+}
+
+/// The client's snooper map (`Snooper.getCurrentStats`), sorted by key as the `TreeMap` in `initGui`.
+fn rows(ctx: &Ctx) -> Vec<(String, String)> {
+    let s = &ctx.settings;
+    let packs: Vec<String> = serde_json::from_str(&s.resource_packs).unwrap_or_default();
+    let pick = |on: bool, yes: &str, no: &str| if on { yes } else { no }.to_owned();
+    // `Minecraft.populateSnooper`.
+    let dynamic = [
+        (
+            "current_action",
+            pick(ctx.in_world, "multiplayer", "out_of_game"),
+        ),
+        ("display_type", pick(s.fullscreen, "fullscreen", "windowed")),
+        (
+            "endianness",
+            pick(cfg!(target_endian = "little"), "little", "big"),
+        ),
+        ("vsync_enabled", s.vsync.to_string()),
         // Vanilla's formula: the run time in milliseconds / 60 * 1000.
         ("run_time", (ctx.now_ms / 60 * 1000).to_string()),
         ("resource_packs", packs.len().to_string()),
     ];
-    let mut rows: Vec<(String, String)> =
-        rows.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-    rows.extend(
-        packs
-            .into_iter()
-            .enumerate()
-            .map(|(i, p)| (format!("resource_pack[{i}]"), p)),
-    );
+    let mut rows: Vec<(String, String)> = fixed_rows()
+        .into_iter()
+        .chain(dynamic)
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
+    let named = packs.into_iter().enumerate();
+    rows.extend(named.map(|(i, p)| (format!("resource_pack[{i}]"), p)));
     rows.sort();
     rows
 }

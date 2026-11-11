@@ -101,6 +101,7 @@ pub struct Renderer {
     entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
+    glint_mesh: Option<GpuMesh>,
     fires: Vec<entity::fire::Fire>,
     on_fire: bool,
     fire_frames: [u32; 2],
@@ -122,12 +123,14 @@ pub struct Renderer {
     /// Lightning bolts `(position, seed)` for the next frames.
     bolts: Vec<([f64; 3], i64)>,
     bolt_pipe: wgpu::RenderPipeline,
+    hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
+    hand_glint_group: Option<wgpu::BindGroup>,
     held: Option<(HeldKind, Held)>,
     /// Camera-relative particle quads for the next frame.
     particles: Quads,
@@ -319,7 +322,7 @@ impl Renderer {
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -339,6 +342,7 @@ impl Renderer {
             entity_skins,
             entity_tex,
             entity_mesh: None,
+            glint_mesh: None,
             fires: Vec::new(),
             on_fire: false,
             fire_frames: [0; 2],
@@ -354,6 +358,7 @@ impl Renderer {
             crack_pipe,
             cracks: Vec::new(),
             bolt_pipe,
+            hand_glint_pipe,
             bolts: Vec::new(),
             selection: None,
             hand_globals,
@@ -361,6 +366,7 @@ impl Renderer {
             hand_skin,
             rain_group,
             hand: None,
+            hand_glint_group: None,
             held: None,
             particles: Quads::default(),
             gui_pipes,
@@ -500,6 +506,15 @@ impl Renderer {
             &self.sampler,
             &view,
         );
+        if tex == entity::GLINT_TEXTURE {
+            self.hand_glint_group = Some(bind_group(
+                &self.device,
+                &self.layout_bg,
+                &self.hand_globals,
+                &self.sampler,
+                &view,
+            ));
+        }
         self.textures.insert(tex.to_owned(), group);
     }
 
@@ -709,6 +724,11 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
+        let glint = entity::build_glint(draws);
+        if !glint.is_empty() {
+            self.load_texture(entity::GLINT_TEXTURE);
+        }
+        self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
         self.fires.clear();
         self.fires.extend(
             draws
@@ -936,8 +956,26 @@ impl Renderer {
         cam: &Camera,
         world: &Globals,
         sun_brightness: f32,
-    ) -> Option<(GpuMesh, HandTex)> {
+    ) -> Option<(GpuMesh, HandTex, Option<GpuMesh>)> {
         let (mut draw, tex) = self.hand_draw()?;
+        let glint = self.hand.is_some_and(|h| h.glint && h.held.is_some());
+        if glint {
+            self.load_texture(entity::GLINT_TEXTURE);
+        }
+        let age = self.environment.ticks as f32 + self.environment.partial;
+        let glint_vertices: Vec<Vertex> = if glint {
+            draw.vertices
+                .iter()
+                .map(|v| Vertex {
+                    uv: entity::glint_uv(v.pos, age),
+                    color: entity::GLINT_COLOR,
+                    light: [1.0; 2],
+                    ..*v
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let eye = cam.pos.map(|p| p.floor() as i32);
         let light = self
             .meshes
@@ -966,11 +1004,19 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
+        let glint = if glint {
+            self.upload_geometry(&SkyGeometry {
+                vertices: glint_vertices,
+                indices: draw.indices.clone(),
+            })
+        } else {
+            None
+        };
         let geometry = SkyGeometry {
             vertices: draw.vertices,
             indices: draw.indices,
         };
-        Some((self.upload_geometry(&geometry)?, tex))
+        Some((self.upload_geometry(&geometry)?, tex, glint))
     }
 
     fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
@@ -1165,6 +1211,13 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            if let Some(m) = &self.glint_mesh {
+                pass.set_pipeline(&self.bolt_pipe);
+                pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.opaque_pipe);
+            }
             self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.
             pass.set_pipeline(&self.crack_pipe);
@@ -1250,7 +1303,7 @@ impl Renderer {
         &self,
         enc: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        hand: Option<&(GpuMesh, HandTex)>,
+        hand: Option<&(GpuMesh, HandTex, Option<GpuMesh>)>,
         fire: &FireFrame,
         gui_buf: Option<&wgpu::Buffer>,
         overlay: &[Quad],
@@ -1277,10 +1330,15 @@ impl Renderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        if let Some((m, tex)) = hand {
+        if let Some((m, tex, glint)) = hand {
             pass.set_bind_group(0, self.hand_group(*tex), &[]);
             pass.set_pipeline(&self.hand_pipe);
             draw_mesh(&mut pass, m);
+            if let (Some(g), Some(group)) = (glint, &self.hand_glint_group) {
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.hand_glint_pipe);
+                draw_mesh(&mut pass, g);
+            }
         }
         self.draw_fire_overlay(&mut pass, fire);
         if let Some(buf) = gui_buf {
@@ -1461,7 +1519,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 11] {
+) -> [wgpu::RenderPipeline; 12] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1527,7 +1585,10 @@ fn build_pipelines(
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH,
                 depth_write_enabled: depth_write,
-                depth_compare: if depth {
+                depth_compare: if fs == "fs_glint" {
+                    // `depthFunc(GL_EQUAL)`: the glint lands only where the held item drew.
+                    wgpu::CompareFunction::Equal
+                } else if depth {
                     wgpu::CompareFunction::LessEqual
                 } else {
                     wgpu::CompareFunction::Always
@@ -1611,6 +1672,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let hand_glint_pipe = pipe(
+        "vs_world",
+        "fs_glint",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        true,
+        false,
+    );
     let cloud_pipe = pipe(
         "vs_world",
         "fs_sky",
@@ -1685,6 +1756,7 @@ fn build_pipelines(
         crack_pipe,
         bolt_pipe,
         fire_pipe,
+        hand_glint_pipe,
     ]
 }
 

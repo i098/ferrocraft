@@ -12,6 +12,7 @@ fn item(slot: &Slot) -> Option<ItemRef> {
         id: s.id,
         damage: s.damage,
         dye: s.nbt.as_ref().and_then(|n| n.dye()),
+        glint: world::inventory::glint(s),
     })
 }
 

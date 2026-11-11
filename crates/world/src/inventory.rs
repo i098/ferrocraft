@@ -13,7 +13,15 @@ pub mod items;
 
 pub use ferrocraft_protocol::codec::{ItemStack, Slot};
 pub use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
-use items::Item;
+use items::{Item, ENCHANTED_BOOK};
+
+/// `ItemStack.hasEffect`: enchanted stacks plus the items that always shine.
+pub fn glint(s: &ItemStack) -> bool {
+    let count = |key| s.nbt.as_ref().map_or(0, |n| n.list_len(key));
+    count("ench") > 0
+        || (s.id == ENCHANTED_BOOK && count("StoredEnchantments") > 0)
+        || items::variant(s.id, s.damage).is_some_and(|v| v.glint)
+}
 
 /// Slot id of a click outside the window: drop the cursor stack.
 pub const OUTSIDE: i16 = -999;

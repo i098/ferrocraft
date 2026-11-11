@@ -142,6 +142,8 @@ pub struct ItemRef {
     pub damage: i16,
     /// Leather armor color (`display.color`).
     pub dye: Option<i32>,
+    /// `ItemStack.hasEffect`: the enchantment glint.
+    pub glint: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -699,6 +701,7 @@ impl Entities {
                         id: held,
                         damage: 0,
                         dye: None,
+                        glint: false,
                     });
                 }
                 (id, e)

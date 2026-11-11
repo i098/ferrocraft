@@ -239,6 +239,8 @@ fn textures_property_skins_the_spawned_player() {
         held: 0,
         armor: [0; 4],
         armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
         name: None,
         skin,
         burning: true,

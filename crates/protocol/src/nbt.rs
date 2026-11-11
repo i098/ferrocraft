@@ -28,6 +28,14 @@ pub struct Nbt {
 }
 
 impl Nbt {
+    /// Number of entries in the list tag `key` of the root compound; 0 when it is absent.
+    pub fn list_len(&self, key: &str) -> usize {
+        match self.root.iter().find(|(k, _)| k == key) {
+            Some((_, Tag::List(l))) => l.len(),
+            _ => 0,
+        }
+    }
+
     /// `display.color` of dyed leather armor.
     pub fn dye(&self) -> Option<i32> {
         let display = self.root.iter().find(|(k, _)| k == "display")?;

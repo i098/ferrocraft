@@ -2,7 +2,7 @@
 //! and `ModelCow`: box geometry, texture layout and limb animation. Mobs without a ported model
 //! draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: sheep wool, villagers, enchant glint, held item models (a held item is a tinted
+//! Not ported yet: sheep wool, villagers, held item models (a held item is a tinted
 //! bar). Name tags are laid out by [`nametags`].
 
 pub(crate) mod fire;
@@ -50,6 +50,9 @@ pub struct EntityDraw {
     pub armor: [i16; 4],
     /// `display.color` of each worn leather piece.
     pub armor_dye: [Option<i32>; 4],
+    /// `ItemStack.hasEffect` of each armor piece (boots first) and of the held item.
+    pub armor_glint: [bool; 4],
+    pub held_glint: bool,
     pub name: Option<String>,
     /// Player whose downloaded skin to draw; the default skin when none is stored.
     pub skin: Option<u128>,
@@ -581,6 +584,62 @@ fn rotate(p: V3, rot: V3) -> V3 {
     [x, y, z]
 }
 
+/// Texture of the enchantment glint, `RenderItem.renderEffect` and `LayerArmorBase.renderGlint`.
+pub const GLINT_TEXTURE: &str = "textures/misc/enchanted_item_glint.png";
+
+/// Texture coordinates of the glint at a model-space point (`age` in ticks), for the third-person
+/// layer and the first-person hand alike: scaled, turned 30 degrees, then scrolled.
+pub fn glint_uv(p: [f32; 3], age: f32) -> [f32; 2] {
+    let shift = (age * 0.05 % 3.0) / 3.0 * 8.0 * 0.02;
+    let (s, c) = 30f32.to_radians().sin_cos();
+    let (x, y) = (p[0] + p[2], p[1]);
+    [
+        (x * c - y * s) / 3.0 * 4.0 + shift,
+        (x * s + y * c) / 3.0 * 4.0 + shift * 1.5,
+    ]
+}
+
+/// Glint tint, 0.5 * 0.76, 0.25 * 0.76, 0.8 * 0.76 as `renderGlint` sets it.
+pub const GLINT_COLOR: [f32; 4] = [0.38, 0.19, 0.608, 1.0];
+
+/// The glint layer: the glowing armor pieces and held items again, with texture coordinates that
+/// scroll over the surface. Drawn additively at the same depth as the model.
+pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
+    let mut out = MeshData::default();
+    for d in draws {
+        let m = model(d);
+        let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
+        if !holds {
+            continue;
+        }
+        let xf = Xf::new(d, false);
+        let start = out.vertices.len();
+        for (slot, parts, grow, layer) in ARMOR_PIECES {
+            if d.armor_glint[slot] && Skin::armor(d.armor[slot], layer, false).is_some() {
+                for &i in parts {
+                    emit_part(&mut out, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
+                }
+            }
+        }
+        if d.held_glint && d.held != 0 {
+            if let Some(arm) = m.parts.get(3) {
+                emit_part(&mut out, &xf, &held_bar(arm), 0.0, [1.0; 3], 0.0);
+            }
+        }
+        for v in &mut out.vertices[start..] {
+            let rel = [
+                v.pos[0] - xf.pos[0] as f32,
+                v.pos[1] - xf.pos[1] as f32,
+                v.pos[2] - xf.pos[2] as f32,
+            ];
+            v.uv = glint_uv(rel, d.age);
+            v.color = GLINT_COLOR;
+            v.light = [1.0; 2];
+        }
+    }
+    out
+}
+
 /// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
 /// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
 pub fn build(
@@ -759,17 +818,18 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
     }
 }
 
+/// (slot: boots, leggings, chest, helmet), part indices, grow, texture layer
+const ARMOR_PIECES: [(usize, &[usize], f32, u8); 4] = [
+    (0, &[5, 6], 1.0, 1),
+    (1, &[2, 5, 6], 0.5, 2),
+    (2, &[2, 3, 4], 1.0, 1),
+    (3, &[0], 1.0, 1),
+];
+
 /// `ArmorLayer`: head, chest and arms, leggings and boots draw the armor texture over the body,
 /// grown by 1 pixel (layer 1) or half a pixel (leggings, layer 2).
 fn emit_armor(out: &mut MeshData, xf: &Xf, m: &Model, d: &EntityDraw, skins: &Skins) {
-    // (slot: boots, leggings, chest, helmet), part indices, grow, texture layer
-    const PIECES: [(usize, &[usize], f32, u8); 4] = [
-        (0, &[5, 6], 1.0, 1),
-        (1, &[2, 5, 6], 0.5, 2),
-        (2, &[2, 3, 4], 1.0, 1),
-        (3, &[0], 1.0, 1),
-    ];
-    for (slot, parts, grow, layer) in PIECES {
+    for (slot, parts, grow, layer) in ARMOR_PIECES {
         let item = d.armor[slot];
         let Some(base) = Skin::armor(item, layer, false) else {
             continue;
@@ -1088,6 +1148,8 @@ mod tests {
             held: 0,
             armor: [0; 4],
             armor_dye: [None; 4],
+            armor_glint: [false; 4],
+            held_glint: false,
             name: None,
             skin: None,
             burning: false,
@@ -1248,6 +1310,19 @@ mod tests {
         assert_eq!(Skin::armor(299, 2, true), Some(Skin::Armor(11)));
         assert_eq!(Skin::armor(306, 1, true), None);
         assert_eq!(Skin::armor(276, 1, false), None);
+    }
+
+    #[test]
+    fn glint_layer_covers_only_enchanted_pieces() {
+        let mut d = steve();
+        d.armor = [313, 0, 0, 0];
+        d.held = 276;
+        assert!(build_glint(&[d.clone()]).is_empty());
+        d.armor_glint = [true, false, false, false];
+        let boots = build_glint(&[d.clone()]).vertices.len();
+        assert_eq!(boots, 2 * 24, "two boot boxes");
+        d.held_glint = true;
+        assert_eq!(build_glint(&[d]).vertices.len(), boots + 24);
     }
 
     #[test]

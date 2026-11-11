@@ -87,10 +87,7 @@ pub fn enchanted(s: &ItemStack) -> bool {
 
 /// `ItemStack.hasEffect`: enchanted stacks plus the items that always shine.
 pub fn glint(s: &ItemStack) -> bool {
-    enchanted(s)
-        || (s.id == ENCHANTED_BOOK
-            && tag(s).is_some_and(|t| !list(t, "StoredEnchantments").is_empty()))
-        || items::variant(s.id, s.damage).is_some_and(|v| v.glint)
+    world::inventory::glint(s)
 }
 
 /// `ItemStack.getRarity` color code.

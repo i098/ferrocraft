@@ -104,6 +104,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         swing: 0.0,
         lowered: 0.0,
         using: None,
+        glint: false,
     };
     let clear = frame(&mut r, 0.0, None);
     let rainy = frame(&mut r, 1.0, None);
@@ -137,6 +138,19 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     assert_ne!(armed, holding, "a held block must differ from the arm");
     assert_ne!(holding, sword, "a flat sword must differ from a held block");
     assert_ne!(sword, torch, "a flat torch must differ from the sword");
+    let enchanted = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            glint: true,
+            ..bare
+        }),
+    );
+    assert_ne!(
+        sword, enchanted,
+        "an enchanted sword must glint in the hand"
+    );
 
     let mut ps = Particles::new();
     ps.break_block([7, 66, 12], 1 << 4);
@@ -172,6 +186,8 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         held: 276,
         armor: [0; 4],
         armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
         name: None,
         skin: None,
         burning: false,
@@ -282,6 +298,8 @@ fn burning_entity_and_first_person_fire() {
         held: 0,
         armor: [0; 4],
         armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
         name: None,
         skin: None,
         burning: false,
@@ -360,6 +378,8 @@ fn player_in_leather() -> EntityDraw {
         size: (0.6, 1.8),
         armor: [0, 0, 299, 0],
         armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
         eye_height: 1.62,
         pitch: 0.0,
         limb_swing: 0.0,

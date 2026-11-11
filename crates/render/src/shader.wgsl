@@ -85,6 +85,13 @@ fn fs_fire(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb, fog), t.a);
 }
 
+// The hand glint: like fs_sky, drawn with an equal depth test so it follows the item's shape.
+@fragment
+fn fs_glint(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
+}
+
 @fragment
 fn fs_flat(i: WorldOut) -> @location(0) vec4<f32> {
     return i.color;

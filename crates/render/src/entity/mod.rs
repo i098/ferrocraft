@@ -55,6 +55,10 @@ pub struct EntityDraw {
     pub always_name: bool,
     /// The entity under the crosshair (`RenderManager.pointedEntity`).
     pub pointed: bool,
+    /// Another entity rides this one (`riddenByEntity != null`), which hides its tag.
+    pub ridden: bool,
+    /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
+    pub child: bool,
 }
 
 /// A box of a model, in vanilla model pixels (y down).
@@ -892,11 +896,12 @@ fn dot(a: V3, b: V3) -> f32 {
 
 /// One name tag for the HUD: `screen` is the top-centre of the text in pixels, `scale` the pixels
 /// per font pixel (vanilla's 0.02666667 blocks per font pixel, so tags shrink with distance), and
-/// `anchor` the world point the tag hangs from.
+/// `anchor` the world point the tag hangs from. A `sneaking` tag is faint only: no solid pass.
 pub struct NameTag {
     pub screen: [f32; 2],
     pub scale: f32,
     pub anchor: [f64; 3],
+    pub sneaking: bool,
     pub text: String,
 }
 
@@ -905,8 +910,8 @@ pub struct NameTag {
 fn shows_name(d: &EntityDraw) -> bool {
     match d.class {
         Class::Object(78) => d.always_name,
-        Class::Mob(_) => !d.invisible && (d.always_name || d.pointed),
-        Class::Player { .. } => !d.invisible,
+        Class::Mob(_) => !d.invisible && !d.ridden && (d.always_name || d.pointed),
+        Class::Player { .. } => !d.invisible && !d.ridden,
         _ => d.always_name,
     }
 }
@@ -935,7 +940,14 @@ pub fn nametags(
             if dist_sq >= limit * limit {
                 return None;
             }
-            let anchor = [d.pos[0], d.pos[1] + f64::from(d.size.1) + 0.5, d.pos[2]];
+            let mut y = d.pos[1] + f64::from(d.size.1) + 0.5;
+            if d.child {
+                y -= f64::from(d.size.1) / 2.0;
+            }
+            if d.sneaking {
+                y -= 0.25;
+            }
+            let anchor = [d.pos[0], y, d.pos[2]];
             let p = anchor.map(|v| v as f32);
             let c: Vec<f32> = (0..4)
                 .map(|r| {
@@ -955,6 +967,7 @@ pub fn nametags(
                 ],
                 scale: 0.026_666_67 * px_per_block / c[3],
                 anchor,
+                sneaking: d.sneaking,
                 text: name.clone(),
             })
         })
@@ -989,6 +1002,8 @@ mod tests {
             eye_height: 1.62,
             always_name: false,
             pointed: false,
+            ridden: false,
+            child: false,
         }
     }
 
@@ -1162,6 +1177,33 @@ mod tests {
         far.pos = [0.0, 0.0, -64.0];
         far.name = Some("N".into());
         assert!(nametags(&[far], [0.0; 3], &flip(id), 70.0, 800.0, 600.0).is_empty());
+    }
+
+    #[test]
+    fn sneaking_ridden_and_child_tags_follow_render_name() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let tag = |f: &dyn Fn(&mut EntityDraw)| {
+            let mut d = steve();
+            d.pos = [0.0, 0.0, -10.0];
+            d.name = Some("N".into());
+            f(&mut d);
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0)
+        };
+        assert!(!tag(&|_| {})[0].sneaking);
+        let sneak = &tag(&|d| d.sneaking = true)[0];
+        assert!(sneak.sneaking);
+        assert!((sneak.anchor[1] - (steve().size.1 as f64 + 0.5 - 0.25)).abs() < 1e-6);
+        let child = &tag(&|d| {
+            d.child = true;
+            d.size = (0.3, 0.9);
+        })[0];
+        assert!((child.anchor[1] - (0.9 + 0.5 - 0.45)).abs() < 1e-6);
+        assert!(tag(&|d| d.ridden = true).is_empty());
     }
 
     /// `w = -z` so a point at negative z is in front, like the real projection.

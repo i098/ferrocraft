@@ -93,6 +93,7 @@ pub mod flag {
 
 /// `EntityArmorStand` status byte (metadata index 10).
 pub mod stand {
+    pub const SMALL: u8 = 1;
     pub const MARKER: u8 = 16;
 }
 
@@ -288,12 +289,20 @@ impl Entity {
         self.meta.always_name == Some(1)
     }
 
-    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height, else 0.85.
+    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height (0.5 when small), else 0.85.
     pub fn eye_height(&self) -> f32 {
         match self.kind {
             Kind::Player => 1.62 - if self.sneaking() { 0.08 } else { 0.0 },
-            Kind::Object(78) => self.size().1 * 0.9,
+            Kind::Object(78) => self.size().1 * if self.is_child() { 0.5 } else { 0.9 },
             _ => self.size().1 * 0.85,
+        }
+    }
+
+    /// `isChild`: a small armor stand, a baby zombie or a baby ageable mob.
+    pub fn is_child(&self) -> bool {
+        match self.kind {
+            Kind::Object(78) => self.meta.stand.unwrap_or(0) & stand::SMALL != 0,
+            kind => is_baby(kind, &self.meta),
         }
     }
 
@@ -302,8 +311,8 @@ impl Entity {
         bounds_at(self.pos, self.size())
     }
 
-    /// Hitbox `(width, height)`: armor stands, baby mobs and slimes size themselves from
-    /// metadata (`EntityArmorStand`, `EntityAgeable.setScaleForAge`, `EntitySlime.setSlimeSize`).
+    /// Hitbox `(width, height)`: armor stands (marker only; 1.8.9 keeps the box of a small one), baby mobs and
+    /// slimes size themselves from metadata (`EntityArmorStand`, `EntityAgeable.setScaleForAge`, `EntitySlime.setSlimeSize`).
     pub fn size(&self) -> (f32, f32) {
         let (w, h) = self.kind.size();
         let m = self.meta;
@@ -314,9 +323,7 @@ impl Entity {
                 let s = 0.51000005 * f32::from(m.slime.unwrap_or(1).max(1));
                 (s, s)
             }
-            Kind::Mob(54 | 57 | 90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => {
-                half(is_baby(self.kind, &m))
-            }
+            Kind::Mob(54 | 57 | 90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => half(self.is_child()),
             _ => (w, h),
         }
     }
@@ -381,13 +388,8 @@ impl Entity {
         if let Some(f) = flags {
             self.flags = f;
         }
-        // Players keep their player-list name; index 2 only fills in when the list has none.
-        match (self.kind, name) {
-            (Kind::Mob(_) | Kind::Object(78), Some(n)) => {
-                self.name = Some(n).filter(|n| !n.is_empty());
-            }
-            (Kind::Player, Some(n)) if self.name.is_none() && !n.is_empty() => self.name = Some(n),
-            _ => {}
+        if let (Kind::Mob(_) | Kind::Object(78), Some(n)) = (self.kind, name) {
+            self.name = Some(n).filter(|n| !n.is_empty());
         }
         if stack.is_some() {
             self.stack = stack;

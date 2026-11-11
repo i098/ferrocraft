@@ -177,6 +177,8 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         eye_height: 1.62,
         always_name: false,
         pointed: false,
+        ridden: false,
+        child: false,
     }]);
     let third = frame(&mut r, 0.0, None);
     r.set_entities(&[]);

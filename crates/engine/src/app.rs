@@ -470,6 +470,8 @@ impl App {
             eye_height: eye_height(self.input.sneaking()) as f32,
             always_name: false,
             pointed: false,
+            ridden: false,
+            child: false,
         })
     }
 
@@ -484,6 +486,13 @@ impl App {
         let pointed = eye.and_then(|e| self.game.pointed_entity(e));
         let skins = &mut self.skins;
         let mut renderer = self.renderer.as_mut();
+        let ridden: std::collections::HashSet<i32> = self
+            .game
+            .entities
+            .iter()
+            .filter_map(|e| e.vehicle)
+            .chain(self.game.vehicle)
+            .collect();
         let mut draws: Vec<EntityDraw> = self
             .game
             .entities
@@ -495,7 +504,7 @@ impl App {
                         .and_then(|r| skins.show(r, u, e.textures.as_deref()))
                 });
                 let slim = skin.and_then(|u| skins.slim(u));
-                entity_draw(e, frac, skin, slim, pointed == Some(e.id))
+                entity_draw(e, frac, skin, slim, pointed == Some(e.id), ridden.contains(&e.id))
             })
             .collect();
         draws.extend(self_model);
@@ -703,7 +712,7 @@ fn draw_name_tags(
         g.scale(tag.scale / factor, tag.scale / factor);
         g.fill(-half - 1, -1, half + 1, 8, 0x4000_0000);
         g.text_plain(&tag.text, -half as f32, 0.0, 0x20FF_FFFF);
-        if !game.line_blocked(cam.pos, tag.anchor) {
+        if !tag.sneaking && !game.line_blocked(cam.pos, tag.anchor) {
             g.text_plain(&tag.text, -half as f32, 0.0, 0xFFFF_FFFF);
         }
         g.pop();
@@ -829,6 +838,7 @@ fn entity_draw(
     skin: Option<u128>,
     slim: Option<bool>,
     pointed: bool,
+    ridden: bool,
 ) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
@@ -871,6 +881,8 @@ fn entity_draw(
         eye_height: e.eye_height(),
         always_name: e.always_name(),
         pointed,
+        ridden,
+        child: e.is_child(),
     }
 }
 

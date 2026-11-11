@@ -7,9 +7,10 @@
 
 mod skin;
 
+use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
 pub use skin::{Skin, Skins};
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
 /// What to draw; mob and object ids are the 1.8.9 network type ids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,8 @@ pub struct EntityDraw {
     pub ridden: bool,
     /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
     pub child: bool,
+    /// Action of the timed item use in progress (`getItemUseTimer() > 0`), players only.
+    pub using: Option<UseAction>,
 }
 
 /// A box of a model, in vanilla model pixels (y down).
@@ -165,6 +168,15 @@ impl Pose {
         self.l_arm = [arm_x - sway_x, 0.1 - f * 0.6, -sway_z];
     }
 
+    /// `ModelBiped.aimingBow`: both arms point where the head looks; the swing is ignored.
+    fn aim_bow(&mut self, head_rot_x: f32, head_rot_y: f32, age: f32) {
+        let sway_z = cos(age * 0.09) * 0.05 + 0.05;
+        let sway_x = (age * 0.067).sin() * 0.05;
+        let arm_x = -FRAC_PI_2 + head_rot_x;
+        self.r_arm = [arm_x + sway_x, -0.1 + head_rot_y, sway_z];
+        self.l_arm = [arm_x - sway_x, 0.1 + head_rot_y + 0.4, -sway_z];
+    }
+
     fn sneak(&mut self) {
         self.body_rot[0] = 0.5;
         self.r_arm[0] += 0.4;
@@ -174,6 +186,14 @@ impl Pose {
             leg[2] = 4.0;
         }
         self.head_pivot[1] = 1.0;
+    }
+}
+
+/// `RenderPlayer.setModelVisibilities`: `itemInRightHand` is 3 while blocking, else 1.
+fn hold_item(r_arm: &mut [f32; 3], blocking: bool) {
+    r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27 * if blocking { 3.0 } else { 1.0 };
+    if blocking {
+        r_arm[1] = -FRAC_PI_6;
     }
 }
 
@@ -211,7 +231,7 @@ fn biped(
         l_arm_pivot[1] = 2.5;
     }
     if d.held != 0 && !raised {
-        r_arm[0] = r_arm[0] * 0.5 - 0.314_159_27;
+        hold_item(&mut r_arm, d.using == Some(UseAction::Block));
     }
     let mut pose = Pose {
         r_arm,
@@ -231,6 +251,9 @@ fn biped(
     }
     if raised {
         pose.raise(swing, d.age);
+    }
+    if d.using == Some(UseAction::Bow) {
+        pose.aim_bow(head_rot_x, head_rot_y, d.age);
     }
     let Pose {
         r_arm,
@@ -1004,6 +1027,7 @@ mod tests {
             pointed: false,
             ridden: false,
             child: false,
+            using: None,
         }
     }
 
@@ -1024,6 +1048,52 @@ mod tests {
         skeleton.class = Class::Mob(51);
         assert!(in_left_limb_rows(steve()) > 0);
         assert_eq!(in_left_limb_rows(skeleton), 0);
+    }
+
+    #[test]
+    fn bow_and_block_poses_match_vanilla_model_biped_angles() {
+        // Vanilla 1.8.9 ModelBiped.setRotationAngles, age 0: sway z = 0.1, sway x = 0.
+        let mut pose = Pose {
+            r_arm: [0.0; 3],
+            l_arm: [0.0; 3],
+            body_rot: [0.0; 3],
+            r_arm_pivot: [0.0; 3],
+            l_arm_pivot: [0.0; 3],
+            head_pivot: [0.0; 3],
+            leg_pivots: [[0.0; 3]; 2],
+        };
+        pose.aim_bow(0.25, 0.5, 0.0);
+        let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        let arm_x = -FRAC_PI_2 + 0.25;
+        assert!(close(pose.r_arm, [arm_x, 0.4, 0.1]), "{:?}", pose.r_arm);
+        assert!(close(pose.l_arm, [arm_x, 1.0, -0.1]), "{:?}", pose.l_arm);
+
+        // itemInRightHand 1: x * 0.5 - 0.314159265; 3 (blocking): x * 0.5 - 3 * 0.314159265, yaw -PI/6.
+        let mut held = [0.8, 0.2, 0.0];
+        hold_item(&mut held, false);
+        assert!(close(held, [0.4 - 0.314_159_27, 0.2, 0.0]));
+        let mut blocking = [0.8, 0.2, 0.0];
+        hold_item(&mut blocking, true);
+        assert!(close(
+            blocking,
+            [0.4 - 3.0 * 0.314_159_27, -std::f32::consts::PI / 6.0, 0.0]
+        ));
+    }
+
+    #[test]
+    fn build_applies_bow_and_block_but_not_consume() {
+        let verts = |held, using| {
+            let d = EntityDraw {
+                held,
+                using,
+                ..steve()
+            };
+            build(&[d], &Skins::flat(), |_| [1.0, 1.0]).vertices
+        };
+        let idle = verts(261, None);
+        assert_ne!(idle, verts(261, Some(UseAction::Bow)));
+        assert_ne!(verts(267, None), verts(267, Some(UseAction::Block)));
+        assert_eq!(idle, verts(261, Some(UseAction::Consume)));
     }
 
     #[test]

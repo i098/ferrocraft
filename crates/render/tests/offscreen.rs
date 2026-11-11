@@ -295,15 +295,41 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     }
 }
 
-/// The elder guardian curse (particle 41) and the item, footprint and barrier particles each change
-/// the frame; with `RENDER_DIR` set the frames are written for a visual check.
+/// Changed-pixel bounding box `(x0, y0, x1, y1)` of `frame` against `base`.
+fn changed_box(base: &[u8], frame: &[u8], w: usize) -> Option<(usize, usize, usize, usize)> {
+    let mut b: Option<(usize, usize, usize, usize)> = None;
+    for (i, (a, c)) in base.chunks(4).zip(frame.chunks(4)).enumerate() {
+        if a != c {
+            let (x, y) = (i % w, i / w);
+            b = Some(b.map_or((x, y, x, y), |(x0, y0, x1, y1)| {
+                (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+            }));
+        }
+    }
+    b
+}
+
+/// Pinhole projection of a world point for a Minecraft camera (yaw 0 faces +z, positive pitch looks
+/// down, `fov` is vertical), in pixels.
+fn project(cam: &Camera, p: [f64; 3], w: f64, h: f64) -> (f64, f64) {
+    let (sy, cy) = f64::from(cam.yaw).to_radians().sin_cos();
+    let (sp, cp) = f64::from(cam.pitch).to_radians().sin_cos();
+    let f = [-sy * cp, -sp, cy * cp];
+    let r = [-cy, 0.0, -sy];
+    let u = [-sy * sp, cp, cy * sp];
+    let d = [p[0] - cam.pos[0], p[1] - cam.pos[1], p[2] - cam.pos[2]];
+    let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+    let t = (f64::from(cam.fov_deg).to_radians() / 2.0).tan();
+    let (x, y) = (dot(r) / dot(f) / (t * w / h), dot(u) / dot(f) / t);
+    ((x + 1.0) * w / 2.0, (1.0 - y) * h / 2.0)
+}
+
+/// The elder guardian curse (particle 41) draws in front of the camera, and the item, footprint and
+/// barrier particles each draw at their world position; with `RENDER_DIR` set the frames are written.
 #[test]
 fn curse_and_item_particles_draw() {
-    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
-        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
-        return;
-    };
-    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
+    let mut r = Renderer::new_offscreen(854, 480, jar.as_deref());
     for cx in -1..=1 {
         for cz in 0..=2 {
             r.upload_chunk(&Synthetic(cx, cz));
@@ -324,6 +350,7 @@ fn curse_and_item_particles_draw() {
         );
         r.render_to_rgba(&cam, &[]).2
     };
+    let (w, h) = (854usize, 480usize);
     let clear = frame(&Particles::new(), 0.0);
     let mut ps = Particles::new();
     ps.spawn_packet(41, [8.0, 65.0, 8.0], [0.0; 3], 0.0, 0, &[]);
@@ -335,29 +362,52 @@ fn curse_and_item_particles_draw() {
         ps.tick(|_, _, _| 0);
     }
     let mid = frame(&ps, 0.5);
-    assert_ne!(clear, early, "the curse must draw");
     assert_ne!(early, mid, "the curse fades and turns over its life");
-
-    let mut items = Particles::new();
-    items.spawn_packet(28, [8.5, 64.01, 11.0], [0.0; 3], 0.0, 0, &[]);
-    items.spawn_packet(35, [8.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
-    items.spawn_packet(31, [9.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
-    items.spawn_packet(33, [10.5, 66.0, 11.0], [0.0; 3], 0.0, 0, &[]);
-    items.spawn_packet(36, [7.5, 66.0, 11.0], [0.1, 0.1, 0.0], 1.0, 8, &[276]);
-    let shards = frame(&items, 0.0);
-    assert_ne!(
-        clear, shards,
-        "item, footprint and barrier particles must draw"
+    // The guardian floats 1.5 blocks ahead of the eyes, so it covers the middle of the screen.
+    let (_, ey0, _, ey1) = changed_box(&clear, &early, w).expect("the early curse must draw");
+    let (x0, y0, x1, y1) = changed_box(&clear, &mid, w).expect("the mid curse must draw");
+    let (cx, cy) = ((x0 + x1) / 2, (y0 + y1) / 2);
+    assert!(
+        (w / 4..3 * w / 4).contains(&cx) && (h / 4..3 * h / 4).contains(&cy),
+        "mid curse centre ({cx}, {cy}) must be near the screen centre"
     );
+    assert!(x1 - x0 > w / 8 && y1 - y0 > h / 8, "mid curse is a large model");
+    // `renderParticle` tilts the model by 60 - 150 * progress - pitch: it swings in from above.
+    assert!((ey0 + ey1) / 2 < cy, "the early curse sits above the mid curse");
+
+    if jar.is_none() {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping the item, footprint and barrier particles");
+        return;
+    }
+    let mut shots = Vec::new();
+    for (id, pos, vel, speed, count, args) in [
+        (28, [8.5, 64.01, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (35, [8.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (31, [9.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (33, [10.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (36, [7.5, 66.0, 11.0], [0.1, 0.1, 0.0], 1.0, 8, vec![276]),
+    ] {
+        let mut one = Particles::new();
+        one.spawn_packet(id, pos, vel, speed, count, &args);
+        let px = frame(&one, 0.0);
+        let (x0, y0, x1, y1) = changed_box(&clear, &px, w)
+            .unwrap_or_else(|| panic!("particle {id} must draw"));
+        let (ex, ey) = project(&cam, pos.map(f64::from), w as f64, h as f64);
+        let (cx, cy) = (((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64);
+        assert!(
+            (cx - ex).abs() < 100.0 && (cy - ey).abs() < 100.0,
+            "particle {id} drew around ({cx}, {cy}), expected near ({ex:.0}, {ey:.0})"
+        );
+        shots.push((format!("particle_{id}"), px));
+    }
 
     if let Some(dir) = std::env::var_os("RENDER_DIR") {
         let dir = std::path::Path::new(&dir);
-        for (name, px) in [
-            ("curse_clear", &clear),
-            ("curse_early", &early),
-            ("curse_mid", &mid),
-            ("item_particles", &shards),
-        ] {
+        for (name, px) in [("curse_clear", &clear), ("curse_early", &early), ("curse_mid", &mid)]
+            .into_iter()
+            .map(|(n, p)| (n.to_string(), p))
+            .chain(shots.iter().map(|(n, p)| (n.clone(), p)))
+        {
             encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
         }
     }
@@ -666,4 +716,59 @@ fn post_effects_run_between_world_and_gui() {
     }
     r.set_post(None).unwrap();
     assert_eq!(frame(&mut r), plain, "no effect after `None`");
+}
+
+/// Calibrates `project` without assets: a player model draws centred on its world position.
+#[test]
+fn projection_matches_a_drawn_entity() {
+    let mut r = Renderer::new_offscreen(854, 480, None);
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let clear = r.render_to_rgba(&cam, &[]).2;
+    let at = [5.5, 64.0, 13.0];
+    r.set_entities(&[EntityDraw {
+        class: Class::Player { slim: false },
+        pos: at,
+        yaw: 180.0,
+        head_yaw: 180.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        size: (0.6, 1.8),
+        held: 0,
+        armor: [0; 4],
+        armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
+        name: None,
+        skin: None,
+        burning: false,
+        eye_height: 1.62,
+        always_name: false,
+        pointed: false,
+        ridden: false,
+        child: false,
+        using: None,
+        view: [0.0; 2],
+        line: None,
+    }]);
+    let px = r.render_to_rgba(&cam, &[]).2;
+    let (x0, y0, x1, y1) = changed_box(&clear, &px, 854).expect("the player must draw");
+    let (ex, ey) = project(&cam, [at[0], at[1] + 0.9, at[2]], 854.0, 480.0);
+    let (cx, cy) = (((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64);
+    assert!(
+        (cx - ex).abs() < 30.0 && (cy - ey).abs() < 30.0,
+        "player drew around ({cx}, {cy}), expected near ({ex:.0}, {ey:.0})"
+    );
 }

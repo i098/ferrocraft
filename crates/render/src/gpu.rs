@@ -993,23 +993,19 @@ impl Renderer {
         })
     }
 
-    fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
-        let (w, h) = self.size();
-        let env = self.environment;
+    /// Fire meshes, first-person overlay quads and their vertex buffer for this frame.
+    fn prepare_fire(
+        &mut self,
+        cam: &Camera,
+        w: u32,
+        h: u32,
+    ) -> (
+        [Option<GpuMesh>; 2],
+        Option<[Quad; 2]>,
+        Option<wgpu::Buffer>,
+    ) {
         if (self.on_fire || !self.fires.is_empty()) && self.fire_frames[0] == 0 {
-            for (i, name) in entity::fire::TEXTURES.iter().enumerate() {
-                let image = self
-                    .source
-                    .as_mut()
-                    .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
-                    .and_then(|bytes| decode_png(&bytes));
-                if let Some(image) = image {
-                    self.fire_frames[i] = (image.height / image.width.max(1)).max(1) as u32;
-                } else {
-                    self.fire_frames[i] = 1;
-                }
-                self.load_texture(name);
-            }
+            self.load_fire_textures();
         }
         let fires = entity::fire::build(
             &self.fires,
@@ -1018,7 +1014,7 @@ impl Renderer {
             self.fire_frames,
         )
         .map(|m| self.upload_mesh(m, [0.0; 3]));
-        let fire_overlay = self.on_fire.then(|| {
+        let overlay = self.on_fire.then(|| {
             entity::fire::overlay(
                 w as f32,
                 h as f32,
@@ -1026,7 +1022,7 @@ impl Renderer {
                 self.fire_frames[1],
             )
         });
-        let fire_buf = fire_overlay.as_ref().map(|quads| {
+        let buf = overlay.as_ref().map(|quads| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("first-person fire"),
@@ -1036,6 +1032,27 @@ impl Renderer {
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
+        (fires, overlay, buf)
+    }
+
+    /// Reads each fire texture's frame count (`height / width`) and uploads it.
+    fn load_fire_textures(&mut self) {
+        for (i, name) in entity::fire::TEXTURES.iter().enumerate() {
+            let image = self
+                .source
+                .as_mut()
+                .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
+                .and_then(|bytes| decode_png(&bytes));
+            self.fire_frames[i] =
+                image.map_or(1, |image| (image.height / image.width.max(1)).max(1) as u32);
+            self.load_texture(name);
+        }
+    }
+
+    fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
+        let (w, h) = self.size();
+        let env = self.environment;
+        let (fires, fire_overlay, fire_buf) = self.prepare_fire(cam, w, h);
         let sky = env.sky_state();
         let globals = Globals {
             view_proj: view_proj(cam, w as f32 / h as f32),

@@ -472,6 +472,11 @@ impl Game {
         self.pitch = (self.pitch + dpitch).clamp(-90.0, 90.0);
     }
 
+    /// Whether the local player burns visibly (spectators show no fire).
+    pub fn burning(&self) -> bool {
+        self.entity_flags & world::entities::flag::BURNING != 0 && self.gamemode != 3
+    }
+
     /// The flight toggle of `EntityPlayerSP.onLivingUpdate`, before the movement: a second jump press within
     /// 7 ticks flips `isFlying` of a player that may fly, and a spectator always flies. `true` means `abilities`
     /// changed and vanilla's `sendPlayerAbilities` (C13) is due.

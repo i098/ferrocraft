@@ -11,6 +11,13 @@ use crate::mesh::Vertex;
 const MAX_PARTICLES: usize = 4000;
 
 /// Particle types of the 1.8.9 `EnumParticleTypes` ids carried by Particle 0x2A.
+const BARRIER: i16 = 166;
+const SNOWBALL: i16 = 332;
+const SLIME_BALL: i16 = 341;
+const POTION: i16 = 373;
+const ENDER_EYE: i16 = 381;
+const FOOTPRINT_LIFE: u32 = 200;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Explode,
@@ -50,11 +57,19 @@ pub enum Kind {
     SnowShovel,
     /// `blockcrack`/`blockdust`: `id | meta << 12` in the packet data.
     BlockCrack,
+    /// `footstep` (28).
+    Footstep,
+    /// `snowballpoof` (31), `slime` (33), `barrier` (35).
+    Snowball,
+    Slime,
+    Barrier,
+    /// `iconcrack_` (36): the packet data is the item id and its damage.
+    ItemCrack,
 }
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        const IDS: [(i32, i32, Kind); 33] = [
+        const IDS: [(i32, i32, Kind); 38] = [
             (0, 0, Kind::Explode),
             (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
@@ -88,6 +103,11 @@ impl Kind {
             (22, 22, Kind::DepthSuspend),
             (25, 25, Kind::Enchant),
             (32, 32, Kind::SnowShovel),
+            (28, 28, Kind::Footstep),
+            (31, 31, Kind::Snowball),
+            (33, 33, Kind::Slime),
+            (35, 35, Kind::Barrier),
+            (36, 36, Kind::ItemCrack),
         ];
         IDS.iter()
             .find(|(lo, hi, _)| (*lo..=*hi).contains(&id))
@@ -103,6 +123,15 @@ enum Sprite {
     Sheet { base: u32, anim: bool },
     /// 4x4 frames of `textures/entity/explosion.png`, picked by age (`LargeExplosionParticle`).
     Explosion,
+    /// Texture of item `(id, damage)`; `quarter` picks a 4x4 sub-square like `ItemParticle`, `None` the
+    /// whole icon (`BarrierParticle`).
+    Item {
+        id: i16,
+        damage: i16,
+        quarter: Option<[f32; 2]>,
+    },
+    /// `textures/particle/footprint.png`, a flat quad (`FootstepParticle`).
+    Footprint,
 }
 
 /// Which vanilla `onUpdate` and size rule a particle follows; `Generic` is `EntityFX.onUpdate`.
@@ -163,6 +192,10 @@ pub struct Quads {
     pub block: Vec<Vertex>,
     pub sheet: Vec<Vertex>,
     pub explosion: Vec<Vertex>,
+    /// Quads of `textures/particle/footprint.png`.
+    pub footprint: Vec<Vertex>,
+    /// Quads per item `(id, damage)` whose icon texture they sample.
+    pub items: Vec<((i16, i16), Vec<Vertex>)>,
 }
 
 impl Particles {
@@ -244,10 +277,68 @@ impl Particles {
             .spawn_motion(kind, pos, motion, data)
             .or_else(|| self.spawn_timed(kind, pos, motion))
             .or_else(|| self.spawn_misc(kind, pos, motion))
-            .or_else(|| self.spawn_icon(kind, pos, motion));
+            .or_else(|| self.spawn_icon(kind, pos, motion))
+            .or_else(|| self.spawn_item(kind, pos, motion, data));
         if let Some(p) = made {
             self.push(p);
         }
+    }
+
+    /// `ItemParticle`, `BarrierParticle` and `FootstepParticle`. `data` is `id | damage << 16` for item crack.
+    fn spawn_item(
+        &mut self,
+        kind: Kind,
+        pos: [f64; 3],
+        motion: [f64; 3],
+        data: i32,
+    ) -> Option<Particle> {
+        let item = |id, damage| Sprite::Item {
+            id,
+            damage,
+            quarter: None,
+        };
+        let mut p = match kind {
+            Kind::Footstep => {
+                let mut p = self.base(pos, [0.0; 3], Sprite::Footprint);
+                // `FootstepParticle.tick` removes it at the 200th tick; the generic rule one tick later.
+                p.max_age = FOOTPRINT_LIFE - 1;
+                p
+            }
+            Kind::Barrier => {
+                let mut p = self.base(pos, [0.0; 3], item(BARRIER, 0));
+                p.scale = 5.0;
+                p.max_age = 80;
+                p
+            }
+            Kind::Snowball => self.base(pos, [0.0; 3], item(SNOWBALL, 0)),
+            Kind::Slime => self.base(pos, [0.0; 3], item(SLIME_BALL, 0)),
+            Kind::ItemCrack => {
+                let (id, damage) = ((data & 0xFFFF) as i16, (data >> 16) as i16);
+                let mut p = self.base(pos, [0.0; 3], item(id, damage));
+                p.vel = [0, 1, 2].map(|i| p.vel[i] * f64::from(0.1_f32) + motion[i]);
+                p
+            }
+            _ => return None,
+        };
+        match kind {
+            Kind::Footstep | Kind::Barrier => {
+                p.vel = [0.0; 3];
+                p.gravity = 0.0;
+            }
+            _ => {
+                let quarter = [(self.rand() * 3.0) as f32, (self.rand() * 3.0) as f32];
+                if let Sprite::Item { id, damage, .. } = p.sprite {
+                    p.sprite = Sprite::Item {
+                        id,
+                        damage,
+                        quarter: Some(quarter),
+                    };
+                }
+                p.gravity = 1.0;
+                p.scale /= 2.0;
+            }
+        }
+        Some(p)
     }
 
     /// `Particle(world, x, y, z, 0, 0, 0)` with its motion scaled by 0.1 and `motion * factor` added: the
@@ -633,11 +724,11 @@ impl Particles {
         let Some(kind) = Kind::from_id(id) else {
             return;
         };
-        let data0 = if kind == Kind::BlockCrack {
-            let d = data.first().copied().unwrap_or(0);
-            ((d & 0xfff) << 4) | ((d >> 12) & 0xf)
-        } else {
-            0
+        let d = data.first().copied().unwrap_or(0);
+        let data0 = match kind {
+            Kind::BlockCrack => ((d & 0xfff) << 4) | ((d >> 12) & 0xf),
+            Kind::ItemCrack => (d & 0xFFFF) | (data.get(1).copied().unwrap_or(0) << 16),
+            _ => 0,
         };
         let pos = pos.map(f64::from);
         if count == 0 {
@@ -729,7 +820,10 @@ impl Particles {
         let b = pos.map(f64::from);
         match id {
             2000 => self.dispenser_smoke(b, data),
-            2003 => self.eye_portal_ring(b),
+            2003 => {
+                self.item_shards([b[0] + 0.5, b[1], b[2] + 0.5], i32::from(ENDER_EYE));
+                self.eye_portal_ring(b);
+            }
             2004 => self.spawner_burst(b),
             _ => {}
         }
@@ -754,6 +848,18 @@ impl Particles {
         }
     }
 
+    /// Eight item shards flying out of `at` (`data` is `id | damage << 16`).
+    fn item_shards(&mut self, at: [f64; 3], data: i32) {
+        for _ in 0..8 {
+            let m = [
+                self.gaussian() * 0.15,
+                self.rand() * 0.2,
+                self.gaussian() * 0.15,
+            ];
+            self.spawn(Kind::ItemCrack, at, m, data);
+        }
+    }
+
     fn eye_portal_ring(&mut self, b: [f64; 3]) {
         let (x, z) = (b[0] + 0.5, b[2] + 0.5);
         let mut a = 0.0_f64;
@@ -775,7 +881,7 @@ impl Particles {
     }
 
     /// World effect 2002: a splash potion shatters into 100 swirls tinted by the potion `rgb`.
-    pub fn splash_potion(&mut self, pos: [i32; 3], rgb: i32, instant: bool) {
+    pub fn splash_potion(&mut self, pos: [i32; 3], damage: i32, rgb: i32, instant: bool) {
         let b = pos.map(f64::from);
         let kind = if instant {
             Kind::InstantSpell
@@ -783,6 +889,7 @@ impl Particles {
             Kind::Spell
         };
         let tint = [16, 8, 0].map(|shift| (rgb >> shift & 255) as f32 / 255.0);
+        self.item_shards(b, i32::from(POTION) | (damage << 16));
         for _ in 0..100 {
             let d = self.rand() * 4.0;
             let a = self.rand() * std::f64::consts::TAU;
@@ -1042,10 +1149,16 @@ impl Particles {
             let Some((layer, uv)) = sprite_uv(p, atlas, partial) else {
                 continue;
             };
+            if let Layer::Footprint = layer {
+                push_footprint(&mut out.footprint, p, partial, c);
+                continue;
+            }
             let target = match layer {
                 Layer::Block => &mut out.block,
                 Layer::Sheet => &mut out.sheet,
                 Layer::Explosion => &mut out.explosion,
+                Layer::Item(key) => item_quads(&mut out.items, key),
+                Layer::Footprint => continue,
             };
             push_quad(target, p, render_scale(p, partial), c, uv, right, up);
         }
@@ -1058,6 +1171,8 @@ enum Layer {
     Block,
     Sheet,
     Explosion,
+    Footprint,
+    Item((i16, i16)),
 }
 
 /// Particle size at draw time: smoke, redstone and crit grow in over the first 1/32 of their life,
@@ -1088,6 +1203,18 @@ fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32;
             let (u, v) = ((tile % 16) as f32 / 16.0, (tile / 16) as f32 / 16.0);
             (Layer::Sheet, [[u, v], [u + 1.0 / 16.0, v + 1.0 / 16.0]])
         }
+        Sprite::Item {
+            id,
+            damage,
+            quarter,
+        } => {
+            let (a, b) = match quarter {
+                Some([j, k]) => ([j / 4.0, k / 4.0], [(j + 1.0) / 4.0, (k + 1.0) / 4.0]),
+                None => ([0.0, 0.0], [1.0, 1.0]),
+            };
+            (Layer::Item((id, damage)), [a, b])
+        }
+        Sprite::Footprint => (Layer::Footprint, [[0.0, 0.0], [1.0, 1.0]]),
         Sprite::Explosion => {
             // `LargeExplosionParticle`: 4x4 frames over its life; the quad is mirrored in u.
             let n = ((p.age as f32 + partial) * 15.0 / p.max_age as f32) as u32;
@@ -1098,6 +1225,35 @@ fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32;
             (Layer::Explosion, [[u + 0.24975, v], [u, v + 0.24975]])
         }
     })
+}
+
+/// The quads that sample item `key`'s icon, appended to its group.
+fn item_quads(groups: &mut Vec<((i16, i16), Vec<Vertex>)>, key: (i16, i16)) -> &mut Vec<Vertex> {
+    let i = groups.iter().position(|g| g.0 == key).unwrap_or_else(|| {
+        groups.push((key, Vec::new()));
+        groups.len() - 1
+    });
+    &mut groups[i].1
+}
+
+/// `FootstepParticle.render`: a flat 0.25 block square that fades out over its life.
+fn push_footprint(target: &mut Vec<Vertex>, p: &Particle, partial: f32, c: [f32; 3]) {
+    let t = (p.age as f32 + partial) / FOOTPRINT_LIFE as f32;
+    let alpha = (2.0 - t * t * 2.0).min(1.0) * 0.2;
+    let color = [1.0, 1.0, 1.0, alpha];
+    for (dx, dz, u, v) in [
+        (-1.0, 1.0, 0.0, 1.0),
+        (1.0, 1.0, 1.0, 1.0),
+        (1.0, -1.0, 1.0, 0.0),
+        (-1.0, -1.0, 0.0, 0.0),
+    ] {
+        target.push(Vertex {
+            pos: [c[0] + dx * 0.125, c[1], c[2] + dz * 0.125],
+            uv: [u, v],
+            color,
+            light: [1.0, 1.0],
+        });
+    }
 }
 
 fn push_quad(
@@ -1592,10 +1748,10 @@ mod tests {
     fn splash_potion_uses_the_instant_or_plain_spell_sprite() {
         let tile = |instant| {
             let mut ps = Particles::new();
-            ps.splash_potion([0, 0, 0], 0xF8_2423, instant);
-            assert!(ps.list.iter().all(|p| p.behavior == Behavior::Spell));
+            ps.splash_potion([0, 0, 0], 16_421, 0xF8_2423, instant);
             ps.list
                 .iter()
+                .filter(|p| p.behavior == Behavior::Spell)
                 .map(|p| match p.sprite {
                     Sprite::Sheet { base, .. } => base,
                     _ => 0,
@@ -1642,16 +1798,25 @@ mod tests {
     #[test]
     fn splash_potion_tints_100_swirls_and_ender_eye_ring_is_portal() {
         let mut ps = Particles::new();
-        ps.splash_potion([0, 0, 0], 0xF8_2423, true);
-        assert_eq!(ps.len(), 100);
-        assert!(ps
+        ps.splash_potion([0, 0, 0], 16_421, 0xF8_2423, true);
+        let swirls: Vec<_> = ps
             .list
+            .iter()
+            .filter(|p| p.behavior == Behavior::Spell)
+            .collect();
+        assert_eq!(swirls.len(), 100);
+        assert!(swirls
             .iter()
             .all(|p| p.color[0] > p.color[1] && p.color[0] <= 1.0));
         let mut ring = Particles::new();
         ring.world_effect(2003, [0, 0, 0], 0);
-        assert_eq!(ring.len(), 2 * 40);
-        assert!(ring.list.iter().all(|p| p.behavior == Behavior::Portal));
+        let portal = |ps: &Particles| {
+            ps.list
+                .iter()
+                .filter(|p| p.behavior == Behavior::Portal)
+                .count()
+        };
+        assert_eq!(portal(&ring), 2 * 40);
     }
 
     #[test]
@@ -1741,5 +1906,66 @@ mod tests {
         snow.spawn(Kind::DripLava, [0.5, 0.9, 0.5], [0.0; 3], 0);
         snow.tick(at([0, 0, 0], 78 << 4));
         assert!(!snow.is_empty());
+    }
+
+    fn item_of(p: &Particle) -> Option<(i16, i16)> {
+        match p.sprite {
+            Sprite::Item { id, damage, .. } => Some((id, damage)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn splash_potion_and_ender_eye_shed_eight_item_shards_each() {
+        let mut potion = Particles::new();
+        potion.splash_potion([0, 0, 0], 16_421, 0xF8_2423, false);
+        let shards =
+            |ps: &Particles, item| ps.list.iter().filter(|p| item_of(p) == Some(item)).count();
+        assert_eq!(shards(&potion, (POTION, 16_421)), 8);
+        let mut eye = Particles::new();
+        eye.world_effect(2003, [0, 0, 0], 0);
+        assert_eq!(shards(&eye, (ENDER_EYE, 0)), 8);
+    }
+
+    #[test]
+    fn item_crack_packet_reads_the_item_and_adds_the_motion_to_a_tenth_of_the_random_start() {
+        let mut ps = Particles::new();
+        ps.spawn_packet(36, [0.0; 3], [0.0, 1.0, 0.0], 1.0, 0, &[332, 0]);
+        let p = &ps.list[0];
+        assert_eq!(item_of(p), Some((332, 0)));
+        // base speed <= 0.4 * 0.1, plus the 1.0 upward motion.
+        assert!(p.vel[1] > 0.9 && p.vel[1] <= 1.05);
+        assert_eq!(p.gravity, 1.0);
+    }
+
+    #[test]
+    fn snowball_slime_and_barrier_use_their_item_icons() {
+        let icon = |id| {
+            let mut ps = Particles::new();
+            ps.spawn_packet(id, [0.0; 3], [0.0; 3], 0.0, 0, &[]);
+            (item_of(&ps.list[0]), ps.list[0].max_age)
+        };
+        assert_eq!(icon(31).0, Some((SNOWBALL, 0)));
+        assert_eq!(icon(33).0, Some((SLIME_BALL, 0)));
+        // The barrier hovers still for 80 ticks as a whole block-sized icon.
+        assert_eq!(icon(35), (Some((BARRIER, 0)), 80));
+    }
+
+    #[test]
+    fn footprint_stays_flat_for_200_ticks_and_fades() {
+        let mut ps = Particles::new();
+        ps.spawn_packet(28, [0.0, 5.0, 0.0], [0.0; 3], 0.0, 0, &[]);
+        let floor = |_, _, _| 0_u16;
+        for _ in 0..199 {
+            ps.tick(floor);
+        }
+        assert_eq!(ps.len(), 1);
+        assert_eq!(ps.list[0].pos, [0.0, 5.0, 0.0]);
+        let atlas = crate::assets::Atlas::flat();
+        let fresh = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0).footprint;
+        assert_eq!(fresh.len(), 4);
+        assert!(fresh.iter().all(|v| v.color[3] < 0.05 && v.pos[1] == 5.0));
+        ps.tick(floor);
+        assert!(ps.is_empty());
     }
 }

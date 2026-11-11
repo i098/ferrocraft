@@ -545,25 +545,11 @@ fn post_effects_run_between_world_and_gui() {
     r.toggle_post();
     assert_eq!(frame(&mut r), plain, "F4 switches the effect off");
 
-    let mut frames = Vec::new();
     for name in render::SHADERS {
         r.set_post(Some(&format!("shaders/post/{name}.json")))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let f = frame(&mut r);
-        assert_ne!(f, plain, "{name} changes the frame");
-        frames.push((name, f));
+        assert_ne!(frame(&mut r), plain, "{name} changes the frame");
     }
     r.set_post(None).unwrap();
     assert_eq!(frame(&mut r), plain, "no effect after `None`");
-
-    if let Some(dir) = std::env::var_os("POST_DIR") {
-        let dir = std::path::Path::new(&dir);
-        encode_png(&dir.join("none.png"), w, h, &plain).expect("write png");
-        for (name, f) in [("invert", &inverted)]
-            .into_iter()
-            .chain(frames.iter().map(|(n, f)| (*n, f)))
-        {
-            encode_png(&dir.join(format!("{name}.png")), w, h, f).expect("write png");
-        }
-    }
 }

@@ -599,12 +599,8 @@ impl App {
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
-        // `renderWorldPass`: the selection box only when `renderViewEntity instanceof EntityPlayer`.
-        let player_view = self
-            .game
-            .camera
-            .and_then(|id| self.game.entities.get(id))
-            .is_none_or(|e| e.kind == Kind::Player);
+        // `getMouseOver` casts from `renderViewEntity`; the player's own ray matches only its own view.
+        let player_view = self.game.camera.is_none();
         let pointed = self
             .entity_target()
             .map(|(id, _)| id)

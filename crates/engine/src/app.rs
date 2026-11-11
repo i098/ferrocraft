@@ -599,7 +599,16 @@ impl App {
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
-        let pointed = self.entity_target().map(|(id, _)| id);
+        // `renderWorldPass`: the selection box only when `renderViewEntity instanceof EntityPlayer`.
+        let player_view = self
+            .game
+            .camera
+            .and_then(|id| self.game.entities.get(id))
+            .is_none_or(|e| e.kind == Kind::Player);
+        let pointed = self
+            .entity_target()
+            .map(|(id, _)| id)
+            .filter(|_| player_view);
         let skins = &mut self.skins;
         let mut renderer = self.renderer.as_mut();
         let ridden: std::collections::HashSet<i32> = self
@@ -698,7 +707,10 @@ impl App {
                 && self.game.burning(),
         );
         r.set_entities(&draws);
-        r.set_selection(eye.and_then(|e| self.game.selection(e)));
+        r.set_selection(
+            eye.filter(|_| player_view)
+                .and_then(|e| self.game.selection(e)),
+        );
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles

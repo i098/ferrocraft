@@ -1129,7 +1129,8 @@ impl Particles {
         !(dead || buried(block, p.pos, true))
     }
 
-    /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`.
+    /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`. `light` is
+    /// `[sky, block]` (`0..=1`) in the block at a position, 0 when its chunk is not loaded (`Renderer::light_at`).
     pub fn vertices(
         &self,
         atlas: &Atlas,
@@ -1137,6 +1138,7 @@ impl Particles {
         cam_pitch: f32,
         cam_pos: [f64; 3],
         partial: f32,
+        light: impl Fn([f64; 3]) -> [f32; 2],
     ) -> Quads {
         let (right, up) = basis(cam_yaw, cam_pitch);
         let mut out = Quads::default();
@@ -1150,7 +1152,7 @@ impl Particles {
                 continue;
             };
             if let Layer::Footprint = layer {
-                push_footprint(&mut out.footprint, p, partial, c);
+                push_footprint(&mut out.footprint, p, partial, c, light(p.pos));
                 continue;
             }
             let target = match layer {
@@ -1160,7 +1162,16 @@ impl Particles {
                 Layer::Item(key) => item_quads(&mut out.items, key),
                 Layer::Footprint => continue,
             };
-            push_quad(target, p, render_scale(p, partial), c, uv, right, up);
+            push_quad(
+                target,
+                p,
+                render_scale(p, partial),
+                c,
+                uv,
+                right,
+                up,
+                particle_light(p, partial, &light),
+            );
         }
         out
     }
@@ -1185,6 +1196,39 @@ fn render_scale(p: &Particle, partial: f32) -> f32 {
         }
         Behavior::Portal => p.init_scale * (1.0 - (1.0 - t) * (1.0 - t)),
         _ => p.scale,
+    }
+}
+
+/// `getLightLevel` of the particle classes as `[sky, block]` in `0..=1` (a packed lightmap coordinate / 240).
+fn particle_light(p: &Particle, partial: f32, light: &impl Fn([f64; 3]) -> [f32; 2]) -> [f32; 2] {
+    // `Entity.getLightLevel`: the block at eye height, 0.85 of the box height (particle boxes are square).
+    let own = || light([p.pos[0], p.pos[1] + p.half * 1.7, p.pos[2]]);
+    match (p.behavior, p.sprite) {
+        // `FireworksParticles.Spark`: 0xF000F0.
+        (Behavior::Spark, _) => [1.0, 1.0],
+        // `LargeExplosionParticle` 0xF0F0 and lava `LiquidDripParticle` 257: full block light, no sky light.
+        (Behavior::LargeExplosion | Behavior::DripLava, _) => [0.0, 1.0],
+        // `PortalParticle`, `EnchantingParticle`: sky light rises by (age/lifetime)^4.
+        (Behavior::Portal | Behavior::Enchant, _) => {
+            let t = (p.age as f32 / p.max_age.max(1) as f32).powi(4);
+            let [s, b] = own();
+            [(s + t).min(1.0), b]
+        }
+        // `FlameParticle` (tile 48): block light rises over its life.
+        (_, Sprite::Sheet { base: 48, .. }) => {
+            let t = ((p.age as f32 + partial) / p.max_age.max(1) as f32).clamp(0.0, 1.0);
+            let [s, b] = own();
+            [s, (b + t).min(1.0)]
+        }
+        // `LavaParticle` (tile 49): full block light.
+        (_, Sprite::Sheet { base: 49, .. }) => [own()[0], 1.0],
+        // `BlockParticle`: a dark spot takes the light of the source block.
+        // shortcut: the source is the spawn cell; vanilla uses the hit block for `dig_hit`, which only differs when it is lit.
+        (_, Sprite::Block { .. }) => match own() {
+            [0.0, 0.0] => light(p.origin),
+            l => l,
+        },
+        _ => own(),
     }
 }
 
@@ -1236,8 +1280,15 @@ fn item_quads(groups: &mut Vec<((i16, i16), Vec<Vertex>)>, key: (i16, i16)) -> &
     &mut groups[i].1
 }
 
-/// `FootstepParticle.render`: a flat 0.25 block square that fades out over its life.
-fn push_footprint(target: &mut Vec<Vertex>, p: &Particle, partial: f32, c: [f32; 3]) {
+/// `FootstepParticle.render`: a flat 0.25 block square that fades out over its life, shaded by the light at it
+/// (`World.getBrightness`).
+fn push_footprint(
+    target: &mut Vec<Vertex>,
+    p: &Particle,
+    partial: f32,
+    c: [f32; 3],
+    light: [f32; 2],
+) {
     let t = (p.age as f32 + partial) / FOOTPRINT_LIFE as f32;
     let alpha = (2.0 - t * t * 2.0).min(1.0) * 0.2;
     let color = [1.0, 1.0, 1.0, alpha];
@@ -1251,11 +1302,12 @@ fn push_footprint(target: &mut Vec<Vertex>, p: &Particle, partial: f32, c: [f32;
             pos: [c[0] + dx * 0.125, c[1], c[2] + dz * 0.125],
             uv: [u, v],
             color,
-            light: [1.0, 1.0],
+            light,
         });
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_quad(
     target: &mut Vec<Vertex>,
     p: &Particle,
@@ -1264,6 +1316,7 @@ fn push_quad(
     uv: [[f32; 2]; 2],
     right: [f32; 3],
     up: [f32; 3],
+    light: [f32; 2],
 ) {
     let half = 0.1 * scale;
     let color = [p.color[0], p.color[1], p.color[2], p.alpha];
@@ -1278,7 +1331,7 @@ fn push_quad(
             pos,
             uv: [uv[u][0], uv[v][1]],
             color,
-            light: [1.0, 1.0],
+            light,
         });
     }
 }
@@ -1962,10 +2015,55 @@ mod tests {
         assert_eq!(ps.len(), 1);
         assert_eq!(ps.list[0].pos, [0.0, 5.0, 0.0]);
         let atlas = crate::assets::Atlas::flat();
-        let fresh = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0).footprint;
+        let fresh = ps
+            .vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, |_| [1.0; 2])
+            .footprint;
         assert_eq!(fresh.len(), 4);
         assert!(fresh.iter().all(|v| v.color[3] < 0.05 && v.pos[1] == 5.0));
         ps.tick(floor);
         assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn particles_take_the_world_light_at_eye_height_like_vanilla() {
+        // Dark below y 6, sky 0.5 and block 0.25 from y 6 up.
+        let light = |p: [f64; 3]| if p[1] < 6.0 { [0.0; 2] } else { [0.5, 0.25] };
+        let atlas = crate::assets::Atlas::flat();
+        let lights = |ps: &Particles| {
+            let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, light);
+            let mut v: Vec<[f32; 2]> = [q.sheet, q.block, q.explosion]
+                .into_iter()
+                .flatten()
+                .chain(q.items.into_iter().flat_map(|g| g.1))
+                .map(|v| v.light)
+                .collect();
+            v.dedup();
+            v
+        };
+        let one = |id, y, data: &[i32]| {
+            let mut ps = Particles::new();
+            ps.spawn_packet(id, [0.0, y, 0.0], [0.0; 3], 0.0, 0, data);
+            ps
+        };
+        // Slime at y 5.9: eye height 0.17 reaches the lit block; at 5.8 it stays dark.
+        assert_eq!(lights(&one(33, 5.9, &[])), [[0.5, 0.25]]);
+        assert_eq!(lights(&one(33, 5.8, &[])), [[0.0, 0.0]]);
+        // Lava: full block light, world sky light.
+        assert_eq!(lights(&one(27, 6.0, &[])), [[0.5, 1.0]]);
+        // Firework spark: full bright even in the dark.
+        assert_eq!(lights(&one(3, 0.0, &[])), [[1.0, 1.0]]);
+        // Large explosion: block light only.
+        assert_eq!(lights(&one(1, 6.0, &[])), [[0.0, 1.0]]);
+        // Flame and portal brighten with age: block light for the flame, sky light for the portal.
+        let mut flame = one(26, 6.0, &[]);
+        flame.list[0].age = flame.list[0].max_age;
+        assert_eq!(lights(&flame), [[0.5, 1.0]]);
+        let mut portal = one(24, 6.0, &[]);
+        (portal.list[0].age, portal.list[0].max_age) = (20, 40);
+        assert_eq!(lights(&portal), [[0.5 + 0.0625, 0.25]]);
+        // Block crack in a dark spot takes the light of its source cell.
+        let mut crack = one(37, 6.0, &[1]);
+        crack.list[0].pos[1] = 0.0;
+        assert_eq!(lights(&crack), [[0.5, 0.25]]);
     }
 }

@@ -15,8 +15,9 @@ A `Quad` names its texture by jar path (such as `textures/gui/widgets.png`); `""
 `set_player_skin(key, img)` stores the decoded skin of one player for the entity renderer. `has_player_skin(key)` tells whether it is still stored; the renderer replaces the least recently used skin when its slots are full.
 `set_hand` takes `HeldKind::Block(state)` or `HeldKind::Item { id, damage }`. A `builtin/generated` item model
 draws as the extruded sprite with its `firstperson` transform.
-Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial)` and then `set_particles` before
-each `render`. The quads are relative to that frame's camera.
+Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial, |p| renderer.light_at(p))` and then
+`set_particles` before each `render`. The quads are relative to that frame's camera; each particle is lit by the world
+light at its position like the 1.8.9 particle classes.
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.

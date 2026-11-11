@@ -573,9 +573,7 @@ impl App {
                 using,
             }),
         );
-        r.set_on_fire(
-            self.perspective == 0 && self.game.player.is_some() && self.game.burning(),
-        );
+        r.set_on_fire(self.perspective == 0 && self.game.player.is_some() && self.game.burning());
         r.set_entities(&draws);
         r.set_selection(eye.and_then(|e| self.game.selection(e)));
         r.set_cracks(self.game.cracks());

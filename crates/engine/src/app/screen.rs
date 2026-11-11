@@ -174,4 +174,14 @@ mod tests {
             Some(1 << 4)
         );
     }
+
+    #[test]
+    fn overlay_texture_is_stone_inside_stone_and_none_in_air_glass_or_water() {
+        let at = |s: u16| wall_block(&move |_, _, _| s, render::is_view_blocking, [0.5, 70.0, 0.5], 1.62);
+        let stone = at(1 << 4).expect("stone blocks the view");
+        assert_eq!(render::block_texture(stone), "textures/blocks/stone.png");
+        assert_eq!(at(0), None);
+        assert_eq!(at(20 << 4), None, "glass is transparent");
+        assert_eq!(at(9 << 4), None, "water is a liquid");
+    }
 }

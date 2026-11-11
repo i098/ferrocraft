@@ -289,7 +289,6 @@ fn burning_entity_and_first_person_fire() {
         pointed: false,
         ridden: false,
         child: false,
-        using: None,
     };
     r.set_entities(&[entity.clone()]);
     let before = r.render_to_rgba(&cam, &[]).2;

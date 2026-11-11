@@ -866,7 +866,10 @@ impl Renderer {
         let globals = Globals {
             view_proj: mul(
                 projection(70.0, w / h),
-                mul(bob_matrix(cam.bob), draw.model),
+                mul(
+                    hurt_matrix(cam.hurt_roll),
+                    mul(bob_matrix(cam.bob), draw.model),
+                ),
             ),
             eye: [0.0, 0.0, 0.0, self.environment.gamma],
             fog_color: world.fog_color,
@@ -1635,8 +1638,19 @@ fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
     ];
     mul(
         projection(cam.fov_deg, aspect),
-        mul(bob_matrix(cam.bob), view),
+        mul(hurt_matrix(cam.hurt_roll), mul(bob_matrix(cam.bob), view)),
     )
+}
+
+/// `rotatef(roll, 0, 0, 1)` of `applyHurtCam`.
+fn hurt_matrix(roll: f32) -> [[f32; 4]; 4] {
+    let (s, c) = roll.to_radians().sin_cos();
+    [
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 /// `T(x, y, 0) * Rz(roll) * Rx(pitch)` of `EntityRenderer.setupViewBobbing`, column-major.

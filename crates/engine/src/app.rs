@@ -351,10 +351,27 @@ impl App {
 
     fn camera(&self, frac: f64) -> Camera {
         let mut cam = self.view_camera(frac);
+        cam.hurt_roll = self.hurt_roll(frac as f32);
         if self.ui.settings.view_bobbing && self.game.player.is_some() {
             cam.bob = self.view_bob.offsets(frac as f32);
         }
         cam
+    }
+
+    /// `EntityRenderer.applyHurtCam`; the hit direction is always 0 on the client, so the
+    /// yaw rotations around the roll cancel.
+    fn hurt_roll(&self, frac: f32) -> f32 {
+        let g = &self.game;
+        let mut roll = 0.0;
+        if g.health <= 0.0 {
+            roll += 40.0 - 8000.0 / (f32::from(g.death_ticks) + frac + 200.0);
+        }
+        let t = f32::from(g.hurt_timer) - frac;
+        if t >= 0.0 {
+            let t = t / 10.0;
+            roll -= (t * t * t * t * std::f32::consts::PI).sin() * 14.0;
+        }
+        roll
     }
 
     fn view_camera(&self, frac: f64) -> Camera {

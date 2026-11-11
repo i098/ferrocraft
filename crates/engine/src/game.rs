@@ -18,6 +18,8 @@ pub fn eye_height(sneaking: bool) -> f64 {
     }
 }
 
+/// `damagedTime`: length of the hit animation in ticks.
+const HURT_TICKS: u8 = 10;
 const CREATIVE: u8 = 1;
 const SPECTATOR: u8 = 3;
 
@@ -123,6 +125,12 @@ pub struct Game {
     pub hardcore: bool,
     pub difficulty: u8,
     pub health: f32,
+    /// `EntityPlayerSP.hasValidHealth`: the first health packet after a join or respawn is no damage.
+    health_seen: bool,
+    /// `EntityLivingBase.hurtTime`: ticks left of the hit animation.
+    pub hurt_timer: u8,
+    /// `EntityLivingBase.deathTime`: ticks since health reached zero, capped at 20.
+    pub death_ticks: u8,
     pub food: i32,
     pub saturation: f32,
     pub xp_bar: f32,
@@ -171,6 +179,9 @@ impl Game {
             hardcore: false,
             difficulty: 1,
             health: 20.0,
+            health_seen: false,
+            hurt_timer: 0,
+            death_ticks: 0,
             food: 20,
             saturation: 5.0,
             xp_bar: 0.0,
@@ -210,6 +221,7 @@ impl Game {
                 ..
             } => {
                 self.entity_id = entity_id;
+                self.health_seen = false;
                 self.vehicle = None;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
@@ -224,6 +236,10 @@ impl Game {
                 saturation,
             } => {
                 let was_alive = self.health > 0.0;
+                if self.health_seen && health < self.health {
+                    self.hurt_timer = HURT_TICKS;
+                }
+                self.health_seen = true;
                 (self.health, self.food, self.saturation) = (health, food, saturation);
                 return Ok((was_alive && health <= 0.0).then_some(Effect::Died));
             }
@@ -309,6 +325,7 @@ impl Game {
         match ev {
             NetEvent::Respawn => {
                 self.vehicle = None;
+                (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.digger = Digger::default();
                 self.store.clear();
                 return Some(Effect::Clear);
@@ -345,6 +362,10 @@ impl Game {
                 id,
                 status: s @ (22 | 23),
             }) if id == self.entity_id => self.reduced_debug = s == 22,
+            // `doEvent(2)` and animation 1 (`animateDamage`) start the hit tilt.
+            NetEvent::Entity(
+                EntityEvent::Status { id, status: 2 } | EntityEvent::Animation { id, animation: 1 },
+            ) if id == self.entity_id => self.hurt_timer = HURT_TICKS,
             NetEvent::Entity(e) => {
                 if let EntityEvent::Destroy(ids) = &e {
                     if self.vehicle.is_some_and(|v| ids.contains(&v)) {
@@ -453,6 +474,12 @@ impl Game {
         for b in &mut self.bob {
             *b = (*b - 1).max(0);
         }
+        self.hurt_timer = self.hurt_timer.saturating_sub(1);
+        self.death_ticks = if self.health > 0.0 {
+            0
+        } else {
+            (self.death_ticks + 1).min(20)
+        };
         self.entities.tick();
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
@@ -786,6 +813,30 @@ mod tests {
         g.apply(NetEvent::Chunk(floor_chunk()));
         assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
         assert!(g.store.is_empty());
+    }
+
+    #[test]
+    fn health_loss_and_status_start_hurt_and_death_counts_to_twenty() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        let hp = |health| NetEvent::Health {
+            health,
+            food: 20,
+            saturation: 5.0,
+        };
+        g.apply(hp(20.0));
+        assert_eq!(g.hurt_timer, 0, "first packet is no damage");
+        g.apply(hp(16.0));
+        assert_eq!(g.hurt_timer, 10);
+        g.tick(IDLE);
+        assert_eq!(g.hurt_timer, 9);
+        g.apply(NetEvent::Entity(EntityEvent::Status { id: 7, status: 2 }));
+        assert_eq!(g.hurt_timer, 10);
+        g.apply(hp(0.0));
+        for _ in 0..30 {
+            g.tick(IDLE);
+        }
+        assert_eq!(g.death_ticks, 20);
     }
 
     #[test]

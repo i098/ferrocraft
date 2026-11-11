@@ -107,9 +107,39 @@ fn desaturate(c: [f32; 3], gray_scale: f32, keep: f32) -> [f32; 3] {
     c.map(|v| v * keep + g * (1.0 - keep))
 }
 
+/// `WorldProvider.calcSunriseSunsetColors`: the glow RGBA, or `None` away from sunrise and sunset.
+fn sunrise_glow(angle: f32) -> Option<[f32; 4]> {
+    let c = (angle * PI * 2.0).cos();
+    if !(-0.4..=0.4).contains(&c) {
+        return None;
+    }
+    let f3 = c / 0.4 * 0.5 + 0.5;
+    let mut a = 1.0 - (1.0 - (f3 * PI).sin()) * 0.99;
+    a *= a;
+    Some([f3 * 0.3 + 0.7, f3 * f3 * 0.7 + 0.2, 0.2, a])
+}
+
+/// `updateFogColor`: the sunrise glow tints the fog toward the sun, weighted by the look component.
+fn glow_fog(fog: [f32; 3], angle: f32, look_x: f32) -> [f32; 3] {
+    let toward_sun = if (angle * PI * 2.0).sin() > 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let weight = (look_x * toward_sun).max(0.0);
+    match sunrise_glow(angle) {
+        Some(glow) if weight > 0.0 => {
+            let w = weight * glow[3];
+            [0, 1, 2].map(|i| fog[i] * (1.0 - w) + glow[i] * w)
+        }
+        _ => fog,
+    }
+}
+
 impl Environment {
-    /// Sky, fog and light for this frame; `temperature` is the biome temperature at the camera.
-    pub fn sky_state(&self, temperature: f32) -> SkyState {
+    /// Sky, fog and light for this frame; `temperature` is the biome temperature at the camera
+    /// and `look` the camera look vector (`Entity.getLook`).
+    pub fn sky_state(&self, temperature: f32, look: [f32; 3]) -> SkyState {
         let angle = celestial_angle(self.world_time, self.partial);
         let day = ((angle * PI * 2.0).cos() * 2.0 + 0.5).clamp(0.0, 1.0);
 
@@ -136,6 +166,9 @@ impl Environment {
             0.847_058_83 * (day * 0.94 + 0.06),
             day * 0.91 + 0.09,
         ];
+        if self.render_distance_chunks >= 4 {
+            fog = glow_fog(fog, angle, look[0]);
+        }
         let f = 1.0 - (0.25 + 0.75 * self.render_distance_chunks as f32 / 32.0).powf(0.25);
         fog = [0, 1, 2].map(|i| fog[i] + (sky[i] - fog[i]) * f);
         if self.rain > 0.0 {
@@ -363,12 +396,8 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
     }
 
     // Sunrise and sunset glow (`WorldProvider.calcSunriseSunsetColors`).
-    let c = (s.angle * PI * 2.0).cos();
-    if (-0.4..=0.4).contains(&c) {
-        let f3 = c / 0.4 * 0.5 + 0.5;
-        let mut a = 1.0 - (1.0 - (f3 * PI).sin()) * 0.99;
-        a *= a;
-        let col = [f3 * 0.3 + 0.7, f3 * f3 * 0.7 + 0.2, 0.2, a];
+    if let Some(col) = sunrise_glow(s.angle) {
+        let a = col[3];
         let flip = (s.angle * PI * 2.0).sin() < 0.0;
         // GL post-multiplies, so the last `glRotatef` of `renderSky` (z 90) hits the vertex first.
         let place = |v: [f32; 3]| {
@@ -618,16 +647,94 @@ mod tests {
 
     #[test]
     fn midday_sky_is_blue_and_midnight_is_dark() {
-        let day = Environment::default().sky_state(0.8);
+        let day = Environment::default().sky_state(0.8, [0.0; 3]);
         assert!(day.sky[2] > day.sky[0] && day.sky[2] > 0.9);
         let night = Environment {
             world_time: 18000,
             ..Environment::default()
         }
-        .sky_state(0.8);
+        .sky_state(0.8, [0.0; 3]);
         assert!(night.sky.iter().all(|c| *c < 0.05));
         assert!(night.sun_brightness < 0.3 && day.sun_brightness > 0.99);
         assert!(night.star_alpha > 0.4 && day.star_alpha == 0.0);
+    }
+
+    /// Fog at tick `time` for a camera that looks along `look`, in clear weather.
+    fn fog_at(time: i64, look: [f32; 3]) -> [f32; 3] {
+        Environment {
+            world_time: time,
+            ..Environment::default()
+        }
+        .sky_state(0.8, look)
+        .fog
+    }
+
+    #[test]
+    fn sunset_fog_turns_orange_toward_the_sun_only() {
+        // Tick 12000 is the sunset: the sun sets in -x, so looking at -x is toward it.
+        let toward = fog_at(12000, [-1.0, 0.0, 0.0]);
+        let away = fog_at(12000, [1.0, 0.0, 0.0]);
+        let sideways = fog_at(12000, [0.0, 0.0, 1.0]);
+        assert!(toward[0] > toward[2] + 0.05, "{toward:?}");
+        assert!(away[2] > away[0], "{away:?}");
+        assert_eq!(
+            away, sideways,
+            "no glow without a look component toward the sun"
+        );
+        // Sunrise: the sun rises in +x.
+        let rise = fog_at(0, [1.0, 0.0, 0.0]);
+        assert!(rise[0] > rise[2] + 0.05, "{rise:?}");
+    }
+
+    #[test]
+    fn fog_glow_is_off_at_noon_and_below_four_chunks() {
+        assert_eq!(
+            fog_at(6000, [-1.0, 0.0, 0.0]),
+            fog_at(6000, [1.0, 0.0, 0.0])
+        );
+        let near = |look| {
+            Environment {
+                world_time: 12000,
+                render_distance_chunks: 3,
+                ..Environment::default()
+            }
+            .sky_state(0.8, look)
+            .fog
+        };
+        assert_eq!(near([-1.0, 0.0, 0.0]), near([1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn fog_glow_matches_the_vanilla_blend() {
+        // Worked by hand from vanilla 1.8.9 `updateFogColor` at tick 12000, 8 chunks, temperature 0.8:
+        // angle 0.21548, glow alpha 0.445, glow-mixed fog (0.8047, 0.7126, 0.6088), then the
+        // distance blend toward the sky color.
+        let got = fog_at(12000, [-1.0, 0.0, 0.0]);
+        let want = [0.736_666, 0.693_448, 0.668_878];
+        for i in 0..3 {
+            assert!(
+                (got[i] - want[i]).abs() < 1e-4,
+                "{i}: {} vs {}",
+                got[i],
+                want[i]
+            );
+        }
+    }
+
+    #[test]
+    fn rain_and_thunder_darken_the_glowing_fog() {
+        let at = |rain, thunder| {
+            Environment {
+                world_time: 12000,
+                rain,
+                thunder,
+                ..Environment::default()
+            }
+            .sky_state(0.8, [-1.0, 0.0, 0.0])
+            .fog
+        };
+        let (clear, rain, storm) = (at(0.0, 0.0), at(1.0, 0.0), at(1.0, 1.0));
+        assert!(rain[0] < clear[0] && storm[0] < rain[0]);
     }
 
     #[test]
@@ -638,7 +745,7 @@ mod tests {
                 world_time,
                 ..Environment::default()
             };
-            let layers = build_sky(&env, &env.sky_state(0.8), [0.0; 3]);
+            let layers = build_sky(&env, &env.sky_state(0.8, [0.0; 3]), [0.0; 3]);
             layers.blend.vertices[0].pos[0]
         };
         assert!(glow_x(0) > 90.0, "sunrise {}", glow_x(0));
@@ -648,7 +755,7 @@ mod tests {
     #[test]
     fn fancy_clouds_show_the_faces_vanilla_draws() {
         let env = Environment::default();
-        let s = env.sky_state(0.8);
+        let s = env.sky_state(0.8, [0.0; 3]);
         // One cloud texel, at the camera's own texel.
         let mut texels = vec![false; 256 * 256];
         texels[0] = true;

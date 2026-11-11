@@ -963,16 +963,30 @@ impl Renderer {
             self.load_texture(entity::GLINT_TEXTURE);
         }
         let age = self.environment.ticks as f32 + self.environment.partial;
+        // `renderEffect` draws two passes; a flat item's sprite uv covers 16 px of the atlas.
+        let uv_scale = if matches!(tex, HandTex::Item) {
+            entity::ITEM_UV_SCALE
+        } else {
+            1.0
+        };
         let glint_vertices: Vec<Vertex> = if glint {
-            draw.vertices
-                .iter()
-                .map(|v| Vertex {
-                    uv: entity::glint_uv(v.pos, age),
-                    color: entity::GLINT_COLOR,
-                    light: [1.0; 2],
-                    ..*v
+            (0..2)
+                .flat_map(|pass| {
+                    draw.vertices.iter().map(move |v| Vertex {
+                        uv: entity::glint_uv_item(v.uv.map(|c| c * uv_scale), age * 50.0, pass),
+                        color: entity::GLINT_COLOR,
+                        light: [1.0; 2],
+                        ..*v
+                    })
                 })
                 .collect()
+        } else {
+            Vec::new()
+        };
+        let n = draw.vertices.len() as u32;
+        let glint_indices: Vec<u32> = if glint {
+            let second = draw.indices.iter().map(|i| i + n);
+            draw.indices.iter().copied().chain(second).collect()
         } else {
             Vec::new()
         };
@@ -1007,7 +1021,7 @@ impl Renderer {
         let glint = if glint {
             self.upload_geometry(&SkyGeometry {
                 vertices: glint_vertices,
-                indices: draw.indices.clone(),
+                indices: glint_indices,
             })
         } else {
             None
@@ -1212,7 +1226,7 @@ impl Renderer {
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             if let Some(m) = &self.glint_mesh {
-                pass.set_pipeline(&self.bolt_pipe);
+                pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
@@ -1541,6 +1555,15 @@ fn build_pipelines(
         },
         alpha: wgpu::BlendComponent::OVER,
     });
+    // `LayerArmorBase.renderGlint` and `RenderItem.renderEffect`: `blendFunc(SRC_COLOR, ONE)`.
+    let glint_blend = Some(wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Src,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent::OVER,
+    });
     let pipe = |vs: &str,
                 fs: &str,
                 stride: usize,
@@ -1677,7 +1700,7 @@ fn build_pipelines(
         "fs_glint",
         stride,
         &world_attrs,
-        additive,
+        glint_blend,
         false,
         true,
         false,

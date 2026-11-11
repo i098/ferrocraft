@@ -587,23 +587,44 @@ fn rotate(p: V3, rot: V3) -> V3 {
 /// Texture of the enchantment glint, `RenderItem.renderEffect` and `LayerArmorBase.renderGlint`.
 pub const GLINT_TEXTURE: &str = "textures/misc/enchanted_item_glint.png";
 
-/// Texture coordinates of the glint at a model-space point (`age` in ticks), for the third-person
-/// layer and the first-person hand alike: scaled, turned 30 degrees, then scrolled.
-pub fn glint_uv(p: [f32; 3], age: f32) -> [f32; 2] {
-    let shift = (age * 0.05 % 3.0) / 3.0 * 8.0 * 0.02;
-    let (s, c) = 30f32.to_radians().sin_cos();
-    let (x, y) = (p[0] + p[2], p[1]);
+/// `LayerArmorBase.renderGlint`, pass `pass` (0 or 1): the texture matrix is scale 1/3, rotate
+/// `30 - 60 * pass` degrees, translate `(0, ticks * (0.001 + 0.003 * pass) * 20)`, applied to the
+/// model's own texture coordinates (`uv` in `0..1` of the 64x32 armor texture).
+pub fn glint_uv_armor(uv: [f32; 2], age: f32, pass: usize) -> [f32; 2] {
+    let (s, c) = (30.0 - 60.0 * pass as f32).to_radians().sin_cos();
+    let (x, y) = (uv[0], uv[1] + age * (0.001 + 0.003 * pass as f32) * 20.0);
     [
-        (x * c - y * s) / 3.0 * 4.0 + shift,
-        (x * s + y * c) / 3.0 * 4.0 + shift * 1.5,
+        (x * c - y * s) * 0.333_333_34,
+        (x * s + y * c) * 0.333_333_34,
     ]
 }
+
+/// `RenderItem.renderEffect`, pass `pass`: scale 8, translate `(+-t / 8, 0)`, rotate -50 or 10
+/// degrees. `t` is `(ms % 3000) / 3000` or `(ms % 4873) / 4873`. `uv` are the item sprite's
+/// coordinates in the block/item atlas; `ms` is the game clock in milliseconds.
+pub fn glint_uv_item(uv: [f32; 2], ms: f32, pass: usize) -> [f32; 2] {
+    let (period, angle, sign) = if pass == 0 {
+        (3000.0, -50.0f32, 1.0)
+    } else {
+        (4873.0, 10.0f32, -1.0)
+    };
+    let shift = sign * (ms % period) / period / 8.0;
+    let (s, c) = angle.to_radians().sin_cos();
+    [
+        (uv[0] * c - uv[1] * s + shift) * 8.0,
+        (uv[0] * s + uv[1] * c) * 8.0,
+    ]
+}
+
+/// Item sprites are 16 px of the atlas; vanilla 1.8.9 stitches a 512 px wide atlas.
+pub const ITEM_UV_SCALE: f32 = 16.0 / 512.0;
 
 /// Glint tint, 0.5 * 0.76, 0.25 * 0.76, 0.8 * 0.76 as `renderGlint` sets it.
 pub const GLINT_COLOR: [f32; 4] = [0.38, 0.19, 0.608, 1.0];
 
-/// The glint layer: the glowing armor pieces and held items again, with texture coordinates that
-/// scroll over the surface. Drawn additively at the same depth as the model.
+/// The glint layer: the glowing armor pieces and held items again, once per vanilla pass, with
+/// texture coordinates that scroll over the surface. Blended `SRC_COLOR, ONE` at the same depth as
+/// the model.
 pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
     let mut out = MeshData::default();
     for d in draws {
@@ -613,28 +634,38 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
             continue;
         }
         let xf = Xf::new(d, false);
-        let start = out.vertices.len();
-        for (slot, parts, grow, layer) in ARMOR_PIECES {
-            if d.armor_glint[slot] && Skin::armor(d.armor[slot], layer, false).is_some() {
-                for &i in parts {
-                    emit_part(&mut out, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
+        let [sw, sh] = skin_dims();
+        for pass in 0..2 {
+            let start = out.vertices.len();
+            for (slot, parts, grow, layer) in ARMOR_PIECES {
+                if d.armor_glint[slot] && Skin::armor(d.armor[slot], layer, false).is_some() {
+                    for &i in parts {
+                        emit_part(&mut out, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
+                    }
                 }
             }
-        }
-        if d.held_glint && d.held != 0 {
-            if let Some(arm) = m.parts.get(3) {
-                emit_part(&mut out, &xf, &held_bar(arm), 0.0, [1.0; 3], 0.0);
+            let armor_end = out.vertices.len();
+            if d.held_glint && d.held != 0 {
+                if let Some(arm) = m.parts.get(3) {
+                    emit_part(&mut out, &xf, &held_bar(arm), 0.0, [1.0; 3], 0.0);
+                }
             }
-        }
-        for v in &mut out.vertices[start..] {
-            let rel = [
-                v.pos[0] - xf.pos[0] as f32,
-                v.pos[1] - xf.pos[1] as f32,
-                v.pos[2] - xf.pos[2] as f32,
-            ];
-            v.uv = glint_uv(rel, d.age);
-            v.color = GLINT_COLOR;
-            v.light = [1.0; 2];
+            for (n, v) in out.vertices[start..].iter_mut().enumerate() {
+                v.uv = if start + n < armor_end {
+                    glint_uv_armor([v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0], d.age, pass)
+                } else {
+                    // shortcut: the held bar has no sprite; its model-space position stands in.
+                    let rel = [
+                        v.pos[0] - xf.pos[0] as f32,
+                        v.pos[1] - xf.pos[1] as f32,
+                        v.pos[2] - xf.pos[2] as f32,
+                    ];
+                    let uv = [(rel[0] + rel[2]) * ITEM_UV_SCALE, rel[1] * ITEM_UV_SCALE];
+                    glint_uv_item(uv, d.age * 50.0, pass)
+                };
+                v.color = GLINT_COLOR;
+                v.light = [1.0; 2];
+            }
         }
     }
     out
@@ -1320,9 +1351,25 @@ mod tests {
         assert!(build_glint(&[d.clone()]).is_empty());
         d.armor_glint = [true, false, false, false];
         let boots = build_glint(&[d.clone()]).vertices.len();
-        assert_eq!(boots, 2 * 24, "two boot boxes");
+        assert_eq!(boots, 2 * 2 * 24, "two boot boxes, two passes");
         d.held_glint = true;
-        assert_eq!(build_glint(&[d]).vertices.len(), boots + 24);
+        assert_eq!(build_glint(&[d]).vertices.len(), boots + 2 * 24);
+    }
+
+    #[test]
+    fn glint_uv_follows_vanilla_matrices() {
+        // Armor pass 0: scale 1/3 after a 30 degree turn; pass 1 turns -30 degrees.
+        let [x, y] = glint_uv_armor([1.0, 0.0], 0.0, 0);
+        assert!((x - 30f32.to_radians().cos() / 3.0).abs() < 1e-6);
+        assert!((y - 30f32.to_radians().sin() / 3.0).abs() < 1e-6);
+        let [_, y] = glint_uv_armor([1.0, 0.0], 0.0, 1);
+        assert!(y < 0.0);
+        // Item pass 0 at ms 0: scale 8 and a -50 degree turn; the scroll adds 1 after 3000 ms.
+        let [x, y] = glint_uv_item([1.0, 0.0], 0.0, 0);
+        assert!((x - 8.0 * 50f32.to_radians().cos()).abs() < 1e-5);
+        assert!((y + 8.0 * 50f32.to_radians().sin()).abs() < 1e-5);
+        let near = glint_uv_item([0.0, 0.0], 2999.0, 0);
+        assert!((near[0] - 8.0 * 2999.0 / 3000.0 / 8.0).abs() < 1e-5);
     }
 
     #[test]

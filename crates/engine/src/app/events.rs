@@ -57,15 +57,7 @@ impl App {
                     s.play_ui(name);
                 }
             }
-            UiEffect::Connect { host, port } => {
-                self.game = Game::new();
-                let addr = if host.contains(':') {
-                    format!("[{host}]:{port}")
-                } else {
-                    format!("{host}:{port}")
-                };
-                self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
-            }
+            UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
             UiEffect::Respawn => {
@@ -85,6 +77,16 @@ impl App {
             }
             UiEffect::ResourcesChanged => self.refresh_resources(),
         }
+    }
+
+    fn connect(&mut self, host: &str, port: u16) {
+        self.game = Game::new();
+        let addr = if host.contains(':') {
+            format!("[{host}]:{port}")
+        } else {
+            format!("{host}:{port}")
+        };
+        self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
     }
 
     /// `Minecraft.refreshResources` after a resource pack change: a new renderer over the new

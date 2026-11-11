@@ -174,34 +174,49 @@ impl PacksScreen {
         if self.packs[l][i].path.is_none() || ex > 32 {
             return None;
         }
-        let list = &mut self.packs[l];
         if l == 0 {
-            self.changed = true;
-            let format = list[i].format;
-            if format != FORMAT {
-                self.confirming = Some(i);
-                let kind = if format > FORMAT { "new" } else { "old" };
-                let q = ctx.tr("resourcePack.incompatible.confirm.title");
-                let m = ctx.tr(&format!("resourcePack.incompatible.confirm.{kind}"));
-                let (y, n) = (ctx.tr("gui.yes"), ctx.tr("gui.no"));
-                return Some(Nav::Child(Box::new(move |me| {
-                    Box::new(YesNo::new(me, q, m, y, n, 0))
-                })));
-            }
-            let p = list.remove(i);
-            self.packs[1].insert(0, p);
-        } else if ex < 16 {
-            let p = list.remove(i);
-            self.packs[0].insert(0, p);
-            self.changed = true;
-        } else if ey < 16 && i > 0 {
-            list.swap(i, i - 1);
-            self.changed = true;
-        } else if ey > 16 && i + 1 < list.len() && list[i + 1].path.is_some() {
-            list.swap(i, i + 1);
-            self.changed = true;
+            return self.select(i, ctx);
         }
+        self.changed |= self.move_selected(i, ex, ey);
         None
+    }
+
+    /// The select arrow of available pack `i`; an incompatible pack asks first.
+    fn select(&mut self, i: usize, ctx: &Ctx) -> Option<Nav> {
+        self.changed = true;
+        let format = self.packs[0][i].format;
+        if format == FORMAT {
+            let p = self.packs[0].remove(i);
+            self.packs[1].insert(0, p);
+            return None;
+        }
+        self.confirming = Some(i);
+        let kind = if format > FORMAT { "new" } else { "old" };
+        let q = ctx.tr("resourcePack.incompatible.confirm.title");
+        let m = ctx.tr(&format!("resourcePack.incompatible.confirm.{kind}"));
+        let (y, n) = (ctx.tr("gui.yes"), ctx.tr("gui.no"));
+        Some(Nav::Child(Box::new(move |me| {
+            Box::new(YesNo::new(me, q, m, y, n, 0))
+        })))
+    }
+
+    /// The remove, up and down arrows of selected pack `i`; whether the pack moved.
+    fn move_selected(&mut self, i: usize, ex: i32, ey: i32) -> bool {
+        if ex < 16 {
+            let p = self.packs[1].remove(i);
+            self.packs[0].insert(0, p);
+            return true;
+        }
+        let list = &mut self.packs[1];
+        if ey < 16 && i > 0 {
+            list.swap(i, i - 1);
+            return true;
+        }
+        let down = ey > 16 && list.get(i + 1).is_some_and(|n| n.path.is_some());
+        if down {
+            list.swap(i, i + 1);
+        }
+        down
     }
 
     /// `actionPerformed` for Done: save the order bottom first, then reload the resources.
@@ -233,8 +248,7 @@ impl PacksScreen {
         hover: Option<(i32, i32)>,
         ctx: &Ctx,
     ) {
-        let list = &self.packs[l];
-        let p = &list[i];
+        let p = &self.packs[l][i];
         if p.format != FORMAT {
             c.fill(x - 1, y - 1, x + LIST_W - 9, y + 32 + 1, 0xff770000);
         }
@@ -248,29 +262,13 @@ impl PacksScreen {
             0xffffffff,
         );
         let (mut name, mut desc) = (p.name.clone(), p.description.clone());
-        let movable = p.path.is_some();
-        if let Some((mx, my)) = hover.filter(|_| movable) {
+        if let Some((mx, my)) = hover.filter(|_| p.path.is_some()) {
             c.fill(x, y, x + 32, y + 32, 0xa0909090);
-            let (ex, ey) = (mx - x, my - y);
+            self.draw_arrows(c, l, i, (x, y), (mx - x, my - y));
             if p.format != FORMAT {
-                name = ctx.tr("resourcePack.incompatible");
                 let kind = if p.format > FORMAT { "new" } else { "old" };
+                name = ctx.tr("resourcePack.incompatible");
                 desc = ctx.tr(&format!("resourcePack.incompatible.{kind}"));
-            }
-            let arrow = |c: &mut dyn Canvas, u: i32, lit: bool| {
-                blit256(c, ARROWS, x, y, u, if lit { 32 } else { 0 }, 32, 32);
-            };
-            if l == 0 {
-                arrow(c, 0, ex < 32);
-            } else {
-                arrow(c, 32, ex < 16);
-                let in_right = ex < 32 && ex > 16;
-                if i > 0 {
-                    arrow(c, 96, in_right && ey < 16);
-                }
-                if list.get(i + 1).is_some_and(|n| n.path.is_some()) {
-                    arrow(c, 64, in_right && ey > 16);
-                }
             }
         }
         if ctx.metrics.width(&name) > 157 {
@@ -279,6 +277,32 @@ impl PacksScreen {
         text(c, &name, x + 32 + 2, y + 1, WHITE);
         for (j, line) in wrap(ctx.metrics, &desc, 157).iter().take(2).enumerate() {
             text(c, line, x + 32 + 2, y + 12 + 10 * j as i32, 0x808080);
+        }
+    }
+
+    /// The hovered entry's arrows at `at`, lit under the mouse at `(ex, ey)` in the entry.
+    fn draw_arrows(
+        &self,
+        c: &mut dyn Canvas,
+        l: usize,
+        i: usize,
+        at: (i32, i32),
+        (ex, ey): (i32, i32),
+    ) {
+        let arrow = |c: &mut dyn Canvas, u: i32, lit: bool| {
+            blit256(c, ARROWS, at.0, at.1, u, if lit { 32 } else { 0 }, 32, 32);
+        };
+        if l == 0 {
+            arrow(c, 0, ex < 32);
+            return;
+        }
+        arrow(c, 32, ex < 16);
+        let in_right = ex < 32 && ex > 16;
+        if i > 0 {
+            arrow(c, 96, in_right && ey < 16);
+        }
+        if self.packs[1].get(i + 1).is_some_and(|n| n.path.is_some()) {
+            arrow(c, 64, in_right && ey > 16);
         }
     }
 

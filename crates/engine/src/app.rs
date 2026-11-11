@@ -199,38 +199,17 @@ impl App {
     /// languages and `pack.mcmeta` come from the launcher's asset index.
     fn load_texts(&mut self) {
         let mut src = self.asset_source();
-        let index = [
-            Some(self.args.game_dir.as_path()),
-            self.args.game_dir.parent(),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(|d| AssetIndex::load(d, "1.8.9").ok());
+        let index = self.asset_index();
         let file = |name: &str| {
             index
                 .as_ref()?
                 .path(name)
                 .and_then(|p| std::fs::read(p).ok())
         };
-        let join = |parts: Vec<Vec<u8>>| {
-            let parts: Vec<_> = parts.iter().map(|b| String::from_utf8_lossy(b)).collect();
-            parts.join("\n")
-        };
-        let mut merged = |name: &str| {
-            let base = file(&format!("minecraft/{name}"));
-            let packs = src
-                .as_mut()
-                .map(|s| s.read_all(&format!("assets/minecraft/{name}")));
-            join(
-                base.into_iter()
-                    .chain(packs.into_iter().flatten())
-                    .collect(),
-            )
-        };
-        let mut lang = merged("lang/en_US.lang");
+        let mut lang = merged_lang(&file, src.as_mut(), "en_US");
         if self.ui.settings.lang != "en_US" {
             lang.push('\n');
-            lang += &merged(&format!("lang/{}.lang", self.ui.settings.lang));
+            lang += &merged_lang(&file, src.as_mut(), &self.ui.settings.lang);
         }
         let splashes = src
             .as_mut()
@@ -246,6 +225,16 @@ impl App {
         let jar = self.args.assets_dir.as_deref().and_then(AssetSource::open);
         texts.default_pack = (jar.and_then(|mut j| j.read("pack.png")), desc);
         self.ui.texts = texts;
+    }
+
+    fn asset_index(&self) -> Option<AssetIndex> {
+        [
+            Some(self.args.game_dir.as_path()),
+            self.args.game_dir.parent(),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
     }
 
     /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
@@ -823,6 +812,23 @@ impl App {
         textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
     }
+}
+
+/// One language's `.lang` text: the asset index copy, then every pack's copy over it
+/// (`getAllResources`).
+fn merged_lang(
+    file: &dyn Fn(&str) -> Option<Vec<u8>>,
+    src: Option<&mut AssetSource>,
+    code: &str,
+) -> String {
+    let base = file(&format!("minecraft/lang/{code}.lang"));
+    let packs = src.map(|s| s.read_all(&format!("assets/minecraft/lang/{code}.lang")));
+    let parts: Vec<_> = base
+        .into_iter()
+        .chain(packs.into_iter().flatten())
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .collect();
+    parts.join("\n")
 }
 
 /// `Render.renderLivingLabel`: a 25% black plate and the name at vanilla's world scale. Vanilla draws the text twice,

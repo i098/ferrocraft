@@ -5,17 +5,31 @@ use crate::assets::{decode_png, AssetSource, Image};
 
 pub const SLOT: u32 = 64;
 
-/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/entity/`.
-const SKINS: [&str; 8] = [
-    "steve.png",
-    "alex.png",
-    "zombie/zombie.png",
-    "skeleton/skeleton.png",
-    "zombie_pigman.png",
-    "creeper/creeper.png",
-    "pig/pig.png",
-    "cow/cow.png",
+/// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The last
+/// twelve are the armor layers (see [`Skin::armor`]).
+const SKINS: [&str; 20] = [
+    "entity/steve.png",
+    "entity/alex.png",
+    "entity/zombie/zombie.png",
+    "entity/skeleton/skeleton.png",
+    "entity/zombie_pigman.png",
+    "entity/creeper/creeper.png",
+    "entity/pig/pig.png",
+    "entity/cow/cow.png",
+    "models/armor/leather_layer_1.png",
+    "models/armor/leather_layer_2.png",
+    "models/armor/chainmail_layer_1.png",
+    "models/armor/chainmail_layer_2.png",
+    "models/armor/iron_layer_1.png",
+    "models/armor/iron_layer_2.png",
+    "models/armor/diamond_layer_1.png",
+    "models/armor/diamond_layer_2.png",
+    "models/armor/gold_layer_1.png",
+    "models/armor/gold_layer_2.png",
+    "models/armor/leather_layer_1_overlay.png",
+    "models/armor/leather_layer_2_overlay.png",
 ];
+const ARMOR_FIRST: u8 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Skin {
@@ -27,6 +41,8 @@ pub enum Skin {
     Creeper,
     Pig,
     Cow,
+    /// An armor texture, by index into the armor part of the slot table.
+    Armor(u8),
     /// Plain white: shapes take their color from the vertex tint.
     White,
     /// A downloaded player skin in dynamic slot `n`.
@@ -45,6 +61,24 @@ pub struct Skins {
     /// Owner key and last-use tick of each dynamic slot.
     players: [Option<(u128, u64)>; PLAYER_SLOTS],
     clock: u64,
+}
+
+impl Skin {
+    /// The texture of an armor item (`ArmorLayer`): `layer` 1 covers head, chest, arms and boots, 2
+    /// the leggings. `overlay` is the undyed part of leather armor. `None` for any other item.
+    pub fn armor(item: i16, layer: u8, overlay: bool) -> Option<Skin> {
+        let material = match item {
+            298..=317 => (item - 298) / 4,
+            _ => return None,
+        } as u8;
+        let layer = layer - 1;
+        Some(Skin::Armor(match (overlay, material) {
+            (true, 0) => 10 + layer,
+            (true, _) => return None,
+            // The table orders the materials leather, chainmail, iron, diamond, gold.
+            (false, m) => m * 2 + layer,
+        }))
+    }
 }
 
 impl Skins {
@@ -142,7 +176,7 @@ impl Skins {
     pub fn from_assets(source: &mut AssetSource) -> Skins {
         let mut s = Skins::flat();
         for (i, name) in SKINS.iter().enumerate() {
-            let path = format!("assets/minecraft/textures/entity/{name}");
+            let path = format!("assets/minecraft/textures/{name}");
             let Some(img) = source.read(&path).and_then(|b| decode_png(&b)) else {
                 continue;
             };
@@ -217,6 +251,7 @@ fn slot(skin: Skin) -> Option<u32> {
         Skin::Creeper => 5,
         Skin::Pig => 6,
         Skin::Cow => 7,
+        Skin::Armor(i) => u32::from(ARMOR_FIRST + i),
         Skin::Player(i) => SLOTS + u32::from(i),
         Skin::White => return None,
     })

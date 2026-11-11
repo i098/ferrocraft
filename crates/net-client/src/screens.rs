@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 /// Netty's `ReadTimeoutHandler(30)` in vanilla `NetworkManager`.
 const TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_PORT: u16 = 25565;
+pub(crate) const DEFAULT_PORT: u16 = 25565;
 
 /// One server-list ping answer (`ServerData` fields the multiplayer screen draws).
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +42,7 @@ pub enum PingError {
 }
 
 /// Vanilla `ServerAddress.func_78860_a`: `host[:port]`, `[v6]:port`, default port 25565.
-/// shortcut: no `_minecraft._tcp` SRV lookup, add it when a test server needs SRV.
+/// No SRV lookup here: `Session::connect` adds it (`resolve_target`), a status ping stays on the typed host.
 pub fn split_address(addr: &str) -> (String, u16) {
     let addr = addr.trim();
     if let Some(rest) = addr.strip_prefix('[') {

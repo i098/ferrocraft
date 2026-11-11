@@ -1,4 +1,4 @@
-//! Framed packet reader and writer over a `TcpStream` (compression, no encryption).
+//! Framed packet reader and writer over a `TcpStream` (compression, optional AES/CFB8).
 
 use ferrocraft_protocol::frame::{FrameDecoder, FrameEncoder};
 use ferrocraft_protocol::{Error, PacketSet};
@@ -20,6 +20,11 @@ impl Reader {
 
     pub fn set_compression(&mut self, threshold: i32) {
         self.decoder.set_compression(threshold);
+    }
+
+    /// Decrypts all bytes read from now on.
+    pub fn enable_encryption(&mut self, secret: &[u8; 16]) {
+        self.decoder.enable_encryption(secret);
     }
 
     /// Next packet; an id that `P` does not know is an error.
@@ -68,6 +73,11 @@ impl Writer {
 
     pub fn set_compression(&mut self, threshold: i32) {
         self.encoder.set_compression(threshold);
+    }
+
+    /// Encrypts everything sent from now on.
+    pub fn enable_encryption(&mut self, secret: &[u8; 16]) {
+        self.encoder.enable_encryption(secret);
     }
 
     pub fn send<P: PacketSet>(&mut self, packet: &P) -> io::Result<()> {

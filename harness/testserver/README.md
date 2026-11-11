@@ -1,6 +1,6 @@
 # testserver
 
-Local vanilla 1.8.9 server for network and engine tests. It runs in offline mode on `127.0.0.1:25565`.
+Local vanilla 1.8.9 server for network and engine tests. It runs in offline mode on `127.0.0.1:25565`. `FC_ONLINE=1` starts it with `online-mode=true` for the login test (`online_mode_login_joins_the_local_server`: set `FC_ACCESS_TOKEN`, `FC_UUID`, `FC_USERNAME`).
 Never use it to reach a live server.
 
 Owner: fc-session

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Runs a vanilla 1.8.9 server in offline mode on 127.0.0.1:25565 (local tests only).
-# Env: FC_JAVA (java binary, default `java`), FC_TESTSERVER_DIR (default: $TMPDIR/ferrocraft-testserver).
+# Runs a vanilla 1.8.9 server in offline mode (online mode with FC_ONLINE=1) on 127.0.0.1:25565 (local tests only).
+# Env: FC_ONLINE=1 (online-mode=true), FC_JAVA (java binary, default `java`), FC_TESTSERVER_DIR (default: $TMPDIR/ferrocraft-testserver).
 set -euo pipefail
 
 URL="https://launcher.mojang.com/v1/objects/b58b2ceb36e01bcd8dbf49c8fb66c55a9f0676cd/server.jar"
 SHA1="b58b2ceb36e01bcd8dbf49c8fb66c55a9f0676cd"
 DIR="${FC_TESTSERVER_DIR:-${TMPDIR:-/tmp}/ferrocraft-testserver}"
 JAVA="${FC_JAVA:-java}"
+ONLINE=false; [ -n "${FC_ONLINE:-}" ] && ONLINE=true
 
 mkdir -p "$DIR"
 cd "$DIR"
@@ -20,7 +21,7 @@ fi
 
 echo "eula=true" > eula.txt
 cat > server.properties <<PROPS
-online-mode=false
+online-mode=$ONLINE
 server-ip=127.0.0.1
 server-port=25565
 level-type=FLAT

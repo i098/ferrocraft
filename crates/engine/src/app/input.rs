@@ -250,6 +250,7 @@ mod tests {
     fn f2_screenshots_while_a_container_is_open() {
         let mut app = App::new(Args {
             username: "Player".into(),
+            auth: None,
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),

@@ -31,10 +31,11 @@ public final class PreLaunch implements PreLaunchEntrypoint {
         File engine = findEngine(loader.getGameDir());
         List<String> cmd = new ArrayList<String>();
         cmd.add(engine.getPath());
-        // Unsanitized, because the sanitized list also drops --username; the engine ignores the token, so keep it out of its argv.
+        // Unsanitized, because the sanitized list also drops --username. The token goes to the engine in its environment, not its argv: other users can read argv.
         String[] launchArgs = loader.getLaunchArguments(false);
+        String token = null;
         for (int i = 0; i < launchArgs.length; i++) {
-            if (launchArgs[i].equals("--accessToken")) i++;
+            if (launchArgs[i].equals("--accessToken") && i + 1 < launchArgs.length) token = launchArgs[++i];
             else cmd.add(launchArgs[i]);
         }
         File jar = findClientJar(loader);
@@ -44,7 +45,9 @@ public final class PreLaunch implements PreLaunchEntrypoint {
         }
         System.out.println("ferrocraft-fabric: starting " + cmd);
         long start = System.currentTimeMillis();
-        int code = new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
+        if (token != null) pb.environment().put("FERROCRAFT_ACCESS_TOKEN", token);
+        int code = pb.start().waitFor();
         // Java reports 128+N when the engine died from signal N; the engine's own exit reasons are in ~/.ferrocraft/engine.log.
         System.out.println("ferrocraft-fabric: engine exited with code " + code + " after " + (System.currentTimeMillis() - start) / 1000 + "s");
         return code;

@@ -553,7 +553,7 @@ fn cases() -> Vec<Case> {
 fn client_prediction_equals_the_server() {
     let addr = std::env::var("FC_SERVER").unwrap_or_else(|_| "127.0.0.1:25565".into());
     let mut b = Bot {
-        s: Session::connect(&addr, "Ferro").expect("login"),
+        s: Session::connect(&addr, "Ferro", None).expect("login"),
         store: ChunkStore::default(),
         entities: Entities::default(),
         changes: vec![],

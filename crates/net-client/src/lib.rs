@@ -1,9 +1,9 @@
-//! Client session for Minecraft 1.8.9 (protocol 47): offline login, then a reader thread that
-//! answers keepalive and turns play packets into [`NetEvent`] values.
-//!
-//! Only for servers with `online-mode=false`: no encryption, no Microsoft sign-in.
+//! Client session for Minecraft 1.8.9 (protocol 47): login (offline, or online with an [`Auth`]
+//! from the launcher), then a reader thread that answers keepalive and turns play packets into
+//! [`NetEvent`] values.
 
 mod actions;
+mod auth;
 mod chat;
 mod entity;
 mod events;
@@ -11,7 +11,7 @@ mod link;
 mod play;
 mod screens;
 
-use ferrocraft_protocol::codec::{Position, VarInt};
+use ferrocraft_protocol::codec::{Bytes, Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
 use ferrocraft_protocol::{handshake, login, PROTOCOL_VERSION};
 use link::{Reader, Writer};
@@ -21,8 +21,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub use auth::Auth;
 pub use chat::{formatted_text, plain_text, styled, Styled};
 pub use events::{PlayerInfo, PlayerListEvent};
+use screens::DEFAULT_PORT;
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
@@ -229,19 +231,21 @@ fn invalid(msg: impl Into<String>) -> io::Error {
 }
 
 impl Session {
-    /// Connects, logs in with `username` (offline mode) and starts the reader thread.
-    /// Returns once the server accepted the login; `JoinGame` arrives through [`Session::poll`].
-    pub fn connect(addr: &str, username: &str) -> io::Result<Session> {
-        let sock = addr
+    /// Connects, logs in with `username` and starts the reader thread. A server in online mode
+    /// needs `auth`; without it such a server is refused. Returns once the server accepted the
+    /// login; `JoinGame` arrives through [`Session::poll`].
+    pub fn connect(addr: &str, username: &str, auth: Option<&Auth>) -> io::Result<Session> {
+        let (host, port) = resolve_target(addr, srv_lookup);
+        let sock = (host.as_str(), port)
             .to_socket_addrs()?
             .next()
-            .ok_or_else(|| invalid(format!("cannot resolve {addr}")))?;
+            .ok_or_else(|| invalid(format!("cannot resolve {host}:{port}")))?;
         let stream = TcpStream::connect_timeout(&sock, LOGIN_TIMEOUT)?;
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(LOGIN_TIMEOUT))?;
         let mut reader = Reader::new(stream.try_clone()?);
         let writer = Arc::new(Mutex::new(Writer::new(stream.try_clone()?)));
-        login(&mut reader, &writer, sock, username)?;
+        login(&mut reader, &writer, &host, port, username, auth)?;
         stream.set_read_timeout(None)?;
 
         let (tx, events) = mpsc::channel();
@@ -334,15 +338,17 @@ pub(crate) fn send(writer: &Mutex<Writer>, packet: sb::Packet) -> io::Result<()>
 fn login(
     reader: &mut Reader,
     writer: &Mutex<Writer>,
-    sock: std::net::SocketAddr,
+    host: &str,
+    port: u16,
     username: &str,
+    auth: Option<&Auth>,
 ) -> io::Result<()> {
     use login::clientbound::Packet as Login;
     let mut w = writer.lock().map_err(|_| invalid("writer poisoned"))?;
     w.send(&handshake::Serverbound::from(handshake::Handshake {
         protocol_version: VarInt(PROTOCOL_VERSION),
-        server_address: sock.ip().to_string(),
-        server_port: sock.port(),
+        server_address: host.to_owned(),
+        server_port: port,
         next_state: VarInt(2),
     }))?;
     w.send(&login::serverbound::Packet::from(
@@ -367,13 +373,46 @@ fn login(
                     plain_text(&d.reason),
                 ))
             }
-            Login::EncryptionRequest(_) => {
-                return Err(invalid(
-                    "server requires online mode; use online-mode=false",
-                ))
+            Login::EncryptionRequest(r) => {
+                let auth = auth.ok_or_else(|| {
+                    invalid("server requires online mode: start with --accessToken and --uuid")
+                })?;
+                let h =
+                    auth::answer_request(auth, &r.server_id, &r.public_key.0, &r.verify_token.0)?;
+                // The response itself goes out in clear; everything after it is encrypted.
+                let mut w = writer.lock().map_err(|_| invalid("writer poisoned"))?;
+                w.send(&login::serverbound::Packet::from(
+                    login::serverbound::EncryptionResponse {
+                        shared_secret: Bytes(h.encrypted_secret),
+                        verify_token: Bytes(h.encrypted_token),
+                    },
+                ))?;
+                w.enable_encryption(&h.secret);
+                reader.enable_encryption(&h.secret);
             }
         }
     }
+}
+
+/// Vanilla 1.8.9 `ServerAddress.getServerAddress`: the typed host and port, replaced by the
+/// `_minecraft._tcp` SRV target only when the port is the default one.
+fn resolve_target(addr: &str, srv: impl FnOnce(&str) -> Option<(String, u16)>) -> (String, u16) {
+    let (host, port) = split_address(addr);
+    if port == DEFAULT_PORT {
+        if let Some((target, srv_port)) = srv(&host) {
+            return (target.trim_end_matches('.').to_owned(), srv_port);
+        }
+    }
+    (host, port)
+}
+
+fn srv_lookup(host: &str) -> Option<(String, u16)> {
+    let resolver = hickory_resolver::Resolver::from_system_conf().ok()?;
+    let records = resolver
+        .srv_lookup(format!("_minecraft._tcp.{host}."))
+        .ok()?;
+    let srv = records.iter().next()?;
+    Some((srv.target().to_utf8(), srv.port()))
 }
 
 #[cfg(test)]
@@ -384,5 +423,38 @@ mod chat_limit_tests {
         assert_eq!(super::truncate_chat("hi"), "hi");
         let s = format!("{}\u{1F600}", "a".repeat(99));
         assert_eq!(super::truncate_chat(&s), "a".repeat(99));
+    }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::resolve_target;
+
+    fn no_srv(_: &str) -> Option<(String, u16)> {
+        None
+    }
+
+    #[test]
+    fn typed_host_is_kept() {
+        assert_eq!(
+            resolve_target("mc.example.net", no_srv),
+            ("mc.example.net".into(), 25565)
+        );
+        assert_eq!(resolve_target("[::1]:25566", no_srv), ("::1".into(), 25566));
+    }
+
+    #[test]
+    fn srv_applies_on_default_port_and_trims_trailing_dot() {
+        let r = resolve_target("example.net", |h| {
+            assert_eq!(h, "example.net");
+            Some(("play.example.net.".into(), 25599))
+        });
+        assert_eq!(r, ("play.example.net".into(), 25599));
+    }
+
+    #[test]
+    fn explicit_port_skips_srv() {
+        let r = resolve_target("example.net:25566", |_| panic!("SRV must not be queried"));
+        assert_eq!(r, ("example.net".into(), 25566));
     }
 }

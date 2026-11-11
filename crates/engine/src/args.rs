@@ -1,10 +1,13 @@
 //! Vanilla launch arguments, as the boot jar passes them.
 
+use ferrocraft_net_client::Auth;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 pub struct Args {
     pub username: String,
+    /// `--accessToken` (or `FERROCRAFT_ACCESS_TOKEN`) with `--uuid`: needed for online-mode servers.
+    pub auth: Option<Auth>,
     pub assets_dir: Option<PathBuf>,
     /// `--server`/`--port`/`FERROCRAFT_SERVER`: join this server at once; without it the title screen opens.
     pub server: Option<String>,
@@ -12,8 +15,9 @@ pub struct Args {
     pub game_dir: PathBuf,
 }
 
-/// Parse `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server` and `--port`; other
-/// vanilla flags (`--accessToken`, ...) are ignored. A flag takes the next token as its value
+/// Parse `--username`, `--uuid`, `--accessToken`, `--assetsDir`, `--gameDir`, `--version`,
+/// `--server` and `--port`; other vanilla flags are ignored. The Fabric mod hands the token over
+/// in `FERROCRAFT_ACCESS_TOKEN`, so it stays out of the process list. A flag takes the next token as its value
 /// unless that token is another `--flag`, so `--demo` and `--fullscreen` need no value.
 /// `env_server` is the `FERROCRAFT_SERVER` fallback. `--server` accepts `host` or `host:port`.
 pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String> {
@@ -21,6 +25,8 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
     let mut assets_dir = None;
     let mut game_dir = None;
     let mut version = None;
+    let mut uuid = None;
+    let mut token = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
     let mut host = None;
     let mut port = None;
     let mut it = args.iter().peekable();
@@ -32,6 +38,8 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
         let need = || val.ok_or(format!("{flag} needs a value"));
         match flag.as_str() {
             "--username" => username = need()?.clone(),
+            "--uuid" => uuid = Some(need()?.clone()),
+            "--accessToken" => token = Some(need()?.clone()),
             "--assetsDir" => assets_dir = Some(PathBuf::from(need()?)),
             "--gameDir" => game_dir = Some(PathBuf::from(need()?)),
             "--version" => version = Some(need()?.clone()),
@@ -44,6 +52,10 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
     let game_dir = game_dir.clone().unwrap_or_else(default_game_dir);
     Ok(Args {
         username,
+        auth: token
+            .zip(uuid)
+            .filter(|(t, _)| !t.is_empty())
+            .map(|(t, u)| Auth::new(t, &u)),
         assets_dir: resolve_assets(assets_dir, Some(&game_dir), version.as_deref()),
         server,
         game_dir,
@@ -150,5 +162,23 @@ mod tests {
             Some("h:9".into())
         );
         assert!(parse(&v("--port x"), None).is_err());
+    }
+
+    #[test]
+    fn auth_needs_token_and_uuid_and_never_prints_the_token() {
+        let a = parse(
+            &v("--accessToken sekrit --uuid 12345678-1234-1234-1234-123456789abc"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            a.auth,
+            Some(Auth::new(
+                "sekrit".into(),
+                "12345678123412341234123456789abc"
+            ))
+        );
+        assert!(!format!("{a:?}").contains("sekrit"));
+        assert_eq!(parse(&v("--uuid abc"), None).unwrap().auth, None);
     }
 }

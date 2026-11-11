@@ -33,6 +33,12 @@ pub struct Environment {
     pub fluid: Option<Fluid>,
     /// `gameSettings.clouds`: 0 off, 1 fast, 2 fancy.
     pub clouds: u8,
+    /// Remaining ticks of Blindness, `None` without the effect.
+    pub blindness: Option<i32>,
+    /// Night Vision light boost `getNightVisionBrightness`, 0 without the effect.
+    pub night_vision: f32,
+    /// Feet height of the viewer, for the Blindness fog color.
+    pub view_y: f32,
 }
 
 impl Default for Environment {
@@ -49,8 +55,29 @@ impl Default for Environment {
             gamma: 0.0,
             fluid: None,
             clouds: 2,
+            blindness: None,
+            night_vision: 0.0,
+            view_y: 64.0,
         }
     }
+}
+
+/// Blindness: `setupFog` closes the fog to 5 blocks (opening over the last second) and `updateFogColor`
+/// darkens the color by the void factor. Returns the color, fog start and fog end.
+fn blind_fog(fog: [f32; 3], far: f32, ticks: i32, view_y: f32) -> ([f32; 3], f32, f32) {
+    let k = if ticks < 20 {
+        1.0 - ticks as f32 / 20.0
+    } else {
+        0.0
+    };
+    let end = 5.0 + (far - 5.0) * k;
+    let void = view_y / 32.0 * k;
+    let dark = if void < 1.0 {
+        void.max(0.0).powi(2)
+    } else {
+        1.0
+    };
+    (fog.map(|c| c * dark), end * 0.25, end)
 }
 
 /// Everything derived from `Environment` for one frame.
@@ -179,14 +206,9 @@ impl Environment {
             fog = fog.map(|c| c * (1.0 - self.thunder * 0.5));
         }
 
-        // `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog.
-        let (fog, fog_density) = match self.fluid {
-            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
-            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
-            None => (fog, None),
-        };
+        let (fog, fog_start, fog_end, fog_density) = self.final_fog(fog);
         // The sky dome sits in that fog.
-        if fog_density.is_some() {
+        if fog_density.is_some() || self.blindness.is_some() {
             sky = fog;
         }
 
@@ -217,7 +239,6 @@ impl Environment {
         let s = (1.0 - ((angle * PI * 2.0).cos() * 2.0 + 0.25)).clamp(0.0, 1.0);
         let star_alpha = s * s * 0.5 * (1.0 - self.rain);
 
-        let far = (self.render_distance_chunks * 16) as f32;
         SkyState {
             angle,
             sky,
@@ -225,9 +246,27 @@ impl Environment {
             cloud,
             sun_brightness: sun * 0.8 + 0.2,
             star_alpha,
-            fog_start: far * 0.75,
-            fog_end: far,
+            fog_start,
+            fog_end,
             fog_density,
+        }
+    }
+
+    /// `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog;
+    /// Blindness replaces both with a short linear fog. Returns color, start, end and density.
+    fn final_fog(&self, fog: [f32; 3]) -> ([f32; 3], f32, f32, Option<f32>) {
+        let (fog, density) = match self.fluid {
+            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
+            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
+            None => (fog, None),
+        };
+        let far = (self.render_distance_chunks * 16) as f32;
+        match self.blindness {
+            Some(ticks) => {
+                let (fog, start, end) = blind_fog(fog, far, ticks, self.view_y);
+                (fog, start, end, None)
+            }
+            None => (fog, far * 0.75, far, density),
         }
     }
 
@@ -791,5 +830,31 @@ mod tests {
         let mut r = JavaRandom::new(42);
         let d = r.next_double();
         assert!((d - 0.7275636800328681).abs() < 1e-12, "{d}");
+    }
+
+    #[test]
+    fn blindness_closes_the_fog_to_five_blocks_and_darkens_it() {
+        let env = Environment {
+            blindness: Some(100),
+            fluid: Some(Fluid::Water),
+            ..Environment::default()
+        };
+        let s = env.sky_state(0.8, [0.0; 3]);
+        assert_eq!((s.fog_start, s.fog_end), (1.25, 5.0));
+        assert!(
+            s.fog_density.is_none(),
+            "the linear fog replaces the liquid fog"
+        );
+        assert_eq!(s.fog, [0.0; 3]);
+        assert_eq!(s.sky, s.fog);
+        let ending = Environment {
+            blindness: Some(0),
+            ..env
+        }
+        .sky_state(0.8, [0.0; 3]);
+        assert_eq!(
+            ending.fog_end, 128.0,
+            "the fog reopens over the last second"
+        );
     }
 }

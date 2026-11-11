@@ -4,9 +4,12 @@
 
 /// `Potion.id` values the client reads.
 pub mod id {
+    pub const JUMP_BOOST: i8 = 8;
     pub const NAUSEA: i8 = 9;
     pub const REGENERATION: i8 = 10;
     pub const INVISIBILITY: i8 = 14;
+    pub const BLINDNESS: i8 = 15;
+    pub const NIGHT_VISION: i8 = 16;
     pub const HUNGER: i8 = 17;
     pub const POISON: i8 = 19;
     pub const WITHER: i8 = 20;
@@ -48,6 +51,11 @@ impl Effects {
     /// `isPotionActive`.
     pub fn has(&self, id: i8) -> bool {
         self.0.iter().any(|e| e.id == id)
+    }
+
+    /// `getActivePotionEffect`.
+    pub fn get(&self, id: i8) -> Option<&Effect> {
+        self.0.iter().find(|e| e.id == id)
     }
 
     /// `handleEntityEffect` then `addPotionEffect`: a new effect is stored, a known id is combined.
@@ -208,6 +216,15 @@ pub fn icon(id: i8) -> Option<i32> {
     Some(col + row * 8)
 }
 
+/// `EntityRenderer.getNightVisionBrightness`: full above 200 ticks, then a fading flicker.
+pub fn night_vision_brightness(duration: i32, partial: f32) -> f32 {
+    if duration > 200 {
+        1.0
+    } else {
+        0.7 + super::sin((duration as f32 - partial) * std::f32::consts::PI * 0.2) * 0.3
+    }
+}
+
 /// `StringUtils.ticksToElapsedTime`: `m:ss`, or `**:**` for a maxed duration.
 pub fn duration_string(e: &Effect) -> String {
     if e.permanent {
@@ -275,6 +292,13 @@ mod tests {
             operation: 2,
         });
         assert!((s.value(true) - walk * 1.300_000_011_920_929).abs() < 1e-12);
+    }
+
+    #[test]
+    fn night_vision_flickers_only_in_the_last_ten_seconds() {
+        assert_eq!(night_vision_brightness(201, 0.5), 1.0);
+        let b = night_vision_brightness(100, 0.0);
+        assert!((0.4..=1.0).contains(&b) && b != 1.0);
     }
 
     #[test]

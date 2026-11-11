@@ -50,7 +50,12 @@ fn lightmap(sky: f32, block: f32) -> vec3<f32> {
     let f3 = f1 * (g.fog.z * 0.65 + 0.35);
     let f6 = f2 * ((f2 * 0.6 + 0.4) * 0.6 + 0.4);
     let f7 = f2 * (f2 * f2 * 0.6 + 0.4);
-    let c = clamp(vec3<f32>(f3 + f2, f3 + f6, f1 + f7) * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));
+    var c = clamp(vec3<f32>(f3 + f2, f3 + f6, f1 + f7) * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));
+    // Night Vision (screen.z is its brightness, 0 without the effect): scale toward the brightest channel at 1.
+    if (g.screen.z > 0.0) {
+        let scale = min(1.0 / c.r, min(1.0 / c.g, 1.0 / c.b));
+        c = c * (1.0 - g.screen.z) + c * scale * g.screen.z;
+    }
     let inv = vec3<f32>(1.0) - c;
     let m = c * (1.0 - g.eye.w) + (vec3<f32>(1.0) - inv * inv * inv * inv) * g.eye.w;
     return clamp(m * 0.96 + 0.03, vec3<f32>(0.0), vec3<f32>(1.0));

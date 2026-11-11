@@ -85,6 +85,8 @@ pub struct InputState {
     f3_down: bool,
     sprinting: bool,
     sprint_timer: u8,
+    /// Blindness: the sprint latch cannot start (`EntityPlayerSP.onLivingUpdate`); a running sprint goes on.
+    pub blind: bool,
     /// Sneak as the mod host's `EntityPlayerSP` left it this tick; `None` without a host.
     host_sneak: Option<bool>,
     was_full_forward: bool,
@@ -120,6 +122,7 @@ impl InputState {
             f3_down: false,
             sprinting: false,
             sprint_timer: 0,
+            blind: false,
             host_sneak: None,
             was_full_forward: false,
             was_sneaking: false,
@@ -445,7 +448,7 @@ impl InputState {
         let full = forward > 0.0 && !sneak;
         let sprint_key = self.is_held(Bind::Sprint);
         self.sprint_timer = self.sprint_timer.saturating_sub(1);
-        self.update_sprint(on_ground, can_sprint && full, sprint_key);
+        self.update_sprint(on_ground, can_sprint && full && !self.blind, sprint_key);
         if self.sprinting && (!full || collided || !can_sprint) {
             self.sprinting = false;
         }

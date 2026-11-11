@@ -331,6 +331,52 @@ fn view_bob_and_gamma_change_the_frame() {
     assert_ne!(base, frame([0.0; 4], 1.0), "gamma brightens the terrain");
 }
 
+/// Night Vision lights a night scene, and Blindness closes the fog in on the camera.
+#[test]
+fn night_vision_and_blindness_change_the_frame() {
+    let frame = |env: Environment| {
+        let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
+        let mut r = Renderer::new_offscreen(320, 200, jar.as_deref());
+        r.set_environment(Environment {
+            world_time: 18000,
+            ..env
+        });
+        for cx in -1..=1 {
+            for cz in 0..=2 {
+                r.upload_chunk(&Synthetic(cx, cz));
+            }
+        }
+        let cam = Camera {
+            pos: [8.0, 68.0, -4.0],
+            pitch: 25.0,
+            ..Camera::default()
+        };
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let plain = frame(Environment::default());
+    let lit = frame(Environment {
+        night_vision: 1.0,
+        ..Environment::default()
+    });
+    let blind = frame(Environment {
+        blindness: Some(100),
+        ..Environment::default()
+    });
+    let sum = |px: &[u8]| px.iter().map(|&b| u64::from(b)).sum::<u64>();
+    assert!(
+        sum(&lit) > sum(&plain),
+        "night vision brightens the terrain"
+    );
+    assert_ne!(plain, blind, "blindness fogs the view");
+    assert!(sum(&blind) < sum(&plain), "blindness fog is black");
+    if let Some(dir) = std::env::var_os("RENDER_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, px) in [("night", &plain), ("night_vision", &lit), ("blind", &blind)] {
+            encode_png(&dir.join(format!("{name}.png")), 320, 200, px).expect("write png");
+        }
+    }
+}
+
 /// The real fire assets must show flame cutouts, animate, and disappear when extinguished.
 #[test]
 #[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]

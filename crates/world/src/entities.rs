@@ -96,6 +96,15 @@ pub mod stand {
     pub const MARKER: u8 = 16;
 }
 
+/// Baby zombie or ageable mob: age metadata is a child flag for zombies, negative for animals.
+pub fn is_baby(kind: Kind, m: &SizeMeta) -> bool {
+    match kind {
+        Kind::Mob(54 | 57) => m.age.is_some_and(|a| a != 0),
+        Kind::Mob(90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => m.age.is_some_and(|a| (a as i8) < 0),
+        _ => false,
+    }
+}
+
 /// The metadata that sets a hitbox or a sound variant: armor stand status (index 10), age of
 /// ageable mobs (12, a zombie's child flag), slime size (16), guardian flags (16) and horse
 /// type (19).
@@ -276,9 +285,8 @@ impl Entity {
                 let s = 0.51000005 * f32::from(m.slime.unwrap_or(1).max(1));
                 (s, s)
             }
-            Kind::Mob(54 | 57) => half(m.age.is_some_and(|a| a != 0)),
-            Kind::Mob(90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => {
-                half(m.age.is_some_and(|a| (a as i8) < 0))
+            Kind::Mob(54 | 57 | 90..=93 | 95 | 96 | 98 | 100 | 101 | 120) => {
+                half(is_baby(self.kind, &m))
             }
             _ => (w, h),
         }

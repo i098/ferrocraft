@@ -11,7 +11,7 @@ use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
 use render::Renderer;
 use std::collections::HashMap;
-use world::entities::{EntityEvent, Kind};
+use world::entities::{is_baby, EntityEvent, Kind};
 use world::entity_sound;
 
 /// A change to one tab list entry.
@@ -189,7 +189,8 @@ impl App {
         };
         if let Some((name, volume)) = sound {
             let jitter = s.rand_diff();
-            s.play(name, Some(at), volume, jitter * 0.2 + 1.0);
+            let baby = if is_baby(kind, &meta) { 0.5 } else { 0.0 };
+            s.play(name, Some(at), volume, jitter * 0.2 + 1.0 + baby);
         }
     }
 

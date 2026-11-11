@@ -1179,11 +1179,7 @@ impl Renderer {
         let sky_solid = self.upload_geometry(&layers.solid);
         let sky_blend = self.upload_geometry(&layers.blend);
         let sky_add = self.upload_geometry(&layers.additive);
-        // `GameSettings.shouldRenderClouds`: no clouds below 4 chunks of render distance.
-        let clouds = (self.env_tex.has_clouds
-            && env.fluid.is_none()
-            && env.clouds != 0
-            && env.render_distance_chunks >= 4)
+        let clouds = (self.env_tex.has_clouds && env.fluid.is_none())
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
 
@@ -1327,12 +1323,12 @@ impl Renderer {
             }
             if let Some(m) = &clouds {
                 pass.set_bind_group(0, &self.env_group, &[]);
-                if env.clouds == 2 {
-                    pass.set_pipeline(&self.cloud_depth_pipe);
+                // Fancy clouds draw twice: depth only, then color.
+                let pipes = [&self.cloud_depth_pipe, &self.cloud_pipe];
+                for pipe in &pipes[usize::from(env.clouds != 2)..] {
+                    pass.set_pipeline(pipe);
                     draw_mesh(&mut pass, m);
                 }
-                pass.set_pipeline(&self.cloud_pipe);
-                draw_mesh(&mut pass, m);
             }
             if let (Some(m), Some(group)) = (&rain, &self.rain_group) {
                 pass.set_bind_group(0, group, &[]);

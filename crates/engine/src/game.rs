@@ -708,6 +708,21 @@ mod tests {
     };
 
     #[test]
+    fn lightning_event_flashes_the_sky_until_the_bolt_expires() {
+        let mut g = Game::new();
+        assert_eq!(g.bolts.flash(0.0), 0.0);
+        g.apply(NetEvent::Lightning { pos: [1.0, 64.0, 1.0] });
+        g.tick(IDLE);
+        assert!(g.bolts.flash(0.0) > 0.0);
+        // A bolt strikes at most 3 times, each followed by a delay under 10 ticks.
+        for _ in 0..100 {
+            g.tick(IDLE);
+        }
+        assert!(g.bolts.is_empty());
+        assert_eq!(g.bolts.flash(0.0), 0.0);
+    }
+
+    #[test]
     fn a_new_held_stack_or_slot_ends_the_item_use() {
         let mut g = Game::new();
         g.apply(NetEvent::HeldItem(0));

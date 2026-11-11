@@ -216,4 +216,30 @@ mod tests {
             assert_eq!(col, [7 << 4, 3 << 4, 3 << 4, 2 << 4, 0]);
         }
     }
+
+    fn global_entity(kind: i8) -> cb::Packet {
+        cb::Packet::from(cb::SpawnGlobalEntity {
+            entity_id: ferrocraft_protocol::codec::VarInt(7),
+            kind,
+            x: 64,
+            y: -32,
+            z: 16,
+        })
+    }
+
+    /// `handleSpawnGlobalEntity`: type 1 is lightning at fixed-point (1/32 block) coordinates.
+    #[test]
+    fn global_entity_type_one_is_lightning_at_block_position() {
+        let p = cb::Packet::decode(&global_entity(1).encode()).unwrap();
+        assert_eq!(
+            game_events(p, 0).unwrap(),
+            vec![NetEvent::Lightning { pos: [2.0, -1.0, 0.5] }]
+        );
+    }
+
+    #[test]
+    fn other_global_entity_types_give_no_event() {
+        let p = cb::Packet::decode(&global_entity(2).encode()).unwrap();
+        assert!(game_events(p, 0).unwrap().is_empty());
+    }
 }

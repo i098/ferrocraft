@@ -608,8 +608,8 @@ impl Game {
     }
 
     /// World-space outline box of the targeted block, grown by 0.002 like vanilla.
-    pub fn selection(&self, eye: [f64; 3]) -> Option<[f64; 6]> {
-        let hit = self.target(eye)?;
+    pub fn selection(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<[f64; 6]> {
+        let (hit, _) = self.ray_dist(eye, yaw, pitch)?;
         let at = |p: [i32; 3]| self.store.get_block(p[0], p[1], p[2]);
         let b = dig::selection_box(&at, hit.pos)?;
         let o = hit.pos.map(f64::from);
@@ -632,8 +632,13 @@ impl Game {
     /// [`Game::target`] plus the distance from `eye` to the hit point.
     pub fn target_dist(&self, eye: [f64; 3]) -> Option<(Hit, f64)> {
         let p = self.player.as_ref()?;
+        self.ray_dist(eye, p.yaw, self.pitch)
+    }
+
+    /// [`Game::target_dist`] along the look `yaw`, `pitch`.
+    pub fn ray_dist(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<(Hit, f64)> {
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
-        dig::raycast_dist(&at, eye, p.yaw, self.pitch, dig::reach(self.creative))
+        dig::raycast_dist(&at, eye, yaw, pitch, dig::reach(self.creative))
     }
 
     /// A selectable block lies between `from` and `to`.

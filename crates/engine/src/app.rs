@@ -391,6 +391,23 @@ impl App {
         Some([lerp(qx, px), lerp(qy, py) + height, lerp(qz, pz)])
     }
 
+    /// `getMouseOver` casts from `renderViewEntity`; `isDrawBlockOutline` needs a player.
+    /// Returns the eye, yaw, pitch, viewer id and its vehicle.
+    fn view_ray(&self, frac: f64) -> Option<([f64; 3], f32, f32, i32, Option<i32>)> {
+        let Some(e) = self.game.camera.and_then(|id| self.game.entities.get(id)) else {
+            let p = self.game.player.as_ref()?;
+            let (id, vehicle) = (self.game.entity_id, self.game.vehicle);
+            return Some((self.eye(frac)?, p.yaw, self.game.pitch, id, vehicle));
+        };
+        if e.kind != Kind::Player {
+            return None;
+        }
+        let [x, y, z] = e.lerp_pos(frac);
+        let (yaw, pitch) = e.lerp_look(frac as f32);
+        let eye = [x, y + f64::from(e.eye_height()), z];
+        Some((eye, yaw, pitch, e.id, e.vehicle))
+    }
+
     /// `Minecraft.isReducedDebug`: the player's game rule flag or the option.
     fn reduced_debug(&self) -> bool {
         self.game.reduced_debug || self.ui.settings.reduced_debug_info
@@ -599,12 +616,11 @@ impl App {
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
-        // `getMouseOver` casts from `renderViewEntity`; the player's own ray matches only its own view.
-        let player_view = self.game.camera.is_none();
-        let pointed = self
-            .entity_target()
-            .map(|(id, _)| id)
-            .filter(|_| player_view);
+        let ray = self.view_ray(frac);
+        let pointed = ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
+            self.entity_pick(eye, yaw, pitch, id, vehicle)
+                .map(|(id, _)| id)
+        });
         let skins = &mut self.skins;
         let mut renderer = self.renderer.as_mut();
         let ridden: std::collections::HashSet<i32> = self
@@ -703,10 +719,7 @@ impl App {
                 && self.game.burning(),
         );
         r.set_entities(&draws);
-        r.set_selection(
-            eye.filter(|_| player_view)
-                .and_then(|e| self.game.selection(e)),
-        );
+        r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles

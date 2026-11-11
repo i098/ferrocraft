@@ -480,17 +480,25 @@ impl App {
     pub(super) fn entity_target(&self) -> Option<(i32, f64)> {
         let p = self.game.player.as_ref()?;
         let eye = self.game.eye(self.input.sneaking())?;
-        let dir = look_vector(p.yaw, self.game.pitch);
+        let (id, vehicle) = (self.game.entity_id, self.game.vehicle);
+        self.entity_pick(eye, p.yaw, self.game.pitch, id, vehicle)
+    }
+
+    /// [`App::entity_target`] for a viewer at `eye` looking along `yaw`, `pitch`, which skips
+    /// the viewer `skip` and its vehicle.
+    pub(super) fn entity_pick(
+        &self,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        skip: i32,
+        vehicle: Option<i32>,
+    ) -> Option<(i32, f64)> {
         let reach = if self.game.creative { 6.0 } else { 3.0 };
-        let block = self.game.target_dist(eye).map(|(_, d)| d);
-        self.game.entities.pick(
-            eye,
-            dir,
-            reach,
-            self.game.entity_id,
-            self.game.vehicle,
-            block,
-        )
+        let block = self.game.ray_dist(eye, yaw, pitch).map(|(_, d)| d);
+        self.game
+            .entities
+            .pick(eye, look_vector(yaw, pitch), reach, skip, vehicle, block)
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.

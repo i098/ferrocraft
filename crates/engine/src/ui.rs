@@ -46,6 +46,11 @@ impl Ui {
         self.settings.force_unicode || self.texts.unicode
     }
 
+    /// `LanguageManager.isCurrentLanguageBidirectional`: `FontRenderer.bidiFlag`.
+    pub fn bidirectional(&self) -> bool {
+        self.texts.bidirectional(&self.settings.lang)
+    }
+
     /// Runs `f` with a `Ctx`; returns the effects the screens pushed.
     fn run<R>(
         &mut self,

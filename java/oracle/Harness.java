@@ -34,6 +34,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
+ *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -43,6 +44,26 @@ public class Harness {
     static final Map<Long, Block> EXTRA = new HashMap<>();
     static Block floor;
     static World world;
+
+    /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
+    static String bidiReorder(String hexText) throws Exception {
+        byte[] raw = new byte[hexText.length() / 2];
+        for (int i = 0; i < raw.length; i++) {
+            raw[i] = (byte) Integer.parseInt(hexText.substring(2 * i, 2 * i + 2), 16);
+        }
+        String text = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+        String out = text;
+        if (com.ibm.icu.text.Bidi.requiresBidi(text.toCharArray(), 0, text.length())) {
+            com.ibm.icu.text.Bidi bidi = new com.ibm.icu.text.Bidi(new com.ibm.icu.text.ArabicShaping(8).shape(text), 127);
+            bidi.setReorderingMode(0);
+            out = bidi.writeReordered(2);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : out.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
 
     static long key(int x, int z) {
         return ((long) x << 32) ^ (z & 0xffffffffL);
@@ -192,6 +213,9 @@ public class Harness {
                         + (b.getMaterial().isToolNotRequired() ? 1 : 0));
                     break;
                 }
+                case "bidi":
+                    System.out.println(bidiReorder(t.length > 1 ? t[1] : ""));
+                    break;
                 default:
                     throw new IllegalArgumentException(line);
             }

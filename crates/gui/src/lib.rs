@@ -1,6 +1,7 @@
 //! Vanilla 1.8.9 GUI: the drawing toolkit every screen uses and the in-game HUD.
 //! Everything draws into a [`toolkit::Gui`], whose quads the renderer draws over the world.
 
+pub mod bidi;
 pub mod bossbar;
 pub mod canvas;
 pub mod chat;

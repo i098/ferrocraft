@@ -51,6 +51,8 @@ pub trait Canvas: Metrics {
     fn quad_add(&mut self, tex: &str, pts: [[f32; 2]; 4], uv: [[f32; 2]; 4], argb: u32);
     /// `FontRenderer.drawString`; `argb` alpha 0 means opaque, like vanilla.
     fn text(&mut self, s: &str, x: f32, y: f32, argb: u32, shadow: bool);
+    /// `FontRenderer.setBidiFlag`.
+    fn set_bidi(&mut self, on: bool);
     /// Register a texture from PNG bytes under `name` (server icons: `servers/<ip>/icon`).
     fn texture(&mut self, name: &str, png: &[u8]);
     /// `GlStateManager.pushMatrix` + translate, uniform scale, then rotate about Z (degrees).
@@ -145,6 +147,13 @@ pub struct Texts {
 }
 
 impl Texts {
+    /// `LanguageManager.isCurrentLanguageBidirectional` for the language `code`.
+    pub fn bidirectional(&self, code: &str) -> bool {
+        self.languages
+            .iter()
+            .any(|l| l.code == code && l.bidirectional)
+    }
+
     /// `lang` is `.lang` text (`key=value` lines; a later line wins), `splashes` is `texts/splashes.txt`.
     pub fn parse(lang: &str, splashes: &str) -> Texts {
         let lang: HashMap<String, String> = lang

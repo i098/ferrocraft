@@ -156,7 +156,11 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     ps.break_block([7, 66, 12], 1 << 4);
     ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
     ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
-    r.set_particles(ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0));
+    r.set_particles(
+        ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
+            r.light_at(p)
+        }),
+    );
     let particles = frame(
         &mut r,
         0.0,

@@ -779,7 +779,7 @@ impl Renderer {
     }
 
     /// `Entity.getBrightnessForRender`: `[sky, block]` light (`0..=1`) in the block at `p`, 0 when its chunk is not loaded.
-    fn light_at(&self, p: [f64; 3]) -> [f32; 2] {
+    pub fn light_at(&self, p: [f64; 3]) -> [f32; 2] {
         let [x, y, z] = p.map(|v| v.floor() as i32);
         self.meshes
             .get(&(x >> 4, z >> 4))

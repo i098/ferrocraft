@@ -3,7 +3,7 @@
 //! draw as a tinted box of their hitbox size.
 //!
 //! Not ported yet: sheep wool, villagers, enchant glint, armor textures (armor is a tinted shell),
-//! held item models (a held item is a tinted bar), name tags (see [`nametags`]).
+//! held item models (a held item is a tinted bar). Name tags are laid out by [`nametags`].
 
 mod skin;
 

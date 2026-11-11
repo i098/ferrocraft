@@ -485,9 +485,11 @@ impl App {
             partial: frac as f32,
             rain,
             thunder,
+            flash: self.game.bolts.flash(frac as f32),
             render_distance_chunks: self.ui.settings.render_distance as u32,
             gamma: self.ui.settings.gamma,
         });
+        r.set_lightning(self.game.bolts.shapes());
         let hand_item = self.equip.2.or(held);
         r.set_hand(
             (!self.hide_hud && self.perspective == 0 && self.game.player.is_some()).then(|| Hand {

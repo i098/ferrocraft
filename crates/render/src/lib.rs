@@ -9,6 +9,9 @@ mod crack;
 mod entity;
 mod gpu;
 mod hand;
+mod jrandom;
+mod lightning;
+pub use lightning::Bolts;
 mod light;
 mod mesh;
 mod mesher;
@@ -24,6 +27,7 @@ pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use entity::{nametags, Class, EntityDraw};
 pub use gpu::Renderer;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
+pub use weather::{rain_particles, stops_rain};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips
 /// or blends (plants, doors, panes, water) is not.

@@ -72,6 +72,10 @@ pub enum NetEvent {
         reason: u8,
         value: f32,
     },
+    /// Spawn Global Entity (0x2C) of type 1: a lightning bolt at the world position.
+    Lightning {
+        pos: [f64; 3],
+    },
     /// A chat message (positions 0 and 1) as styled runs.
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.

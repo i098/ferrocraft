@@ -106,6 +106,10 @@ fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> 
             reason: g.reason,
             value: g.value,
         }],
+        // `NetHandlerPlayClient.handleSpawnGlobalEntity`: only type 1 (lightning) exists; positions are in 1/32 blocks.
+        cb::Packet::SpawnGlobalEntity(s) if s.kind == 1 => vec![NetEvent::Lightning {
+            pos: [s.x, s.y, s.z].map(|v| f64::from(v) / 32.0),
+        }],
         cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
         cb::Packet::BlockChange(b) => vec![block_change(
             b.location.x,

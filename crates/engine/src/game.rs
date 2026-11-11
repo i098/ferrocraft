@@ -112,6 +112,8 @@ pub struct Game {
     pub pitch: f32,
     pub disconnected: Option<String>,
     pub weather: Weather,
+    /// Lightning bolts of Spawn Global Entity and the flash they cause.
+    pub bolts: render::Bolts,
     pub swing: Swing,
     /// Time of day from Time Update; the packet sends a negative value while the cycle is frozen.
     pub world_time: i64,
@@ -172,6 +174,7 @@ impl Game {
             pitch: 0.0,
             disconnected: None,
             weather: Weather::default(),
+            bolts: render::Bolts::default(),
             swing: Swing::default(),
             world_time: 6000,
             daylight_cycle: true,
@@ -332,6 +335,7 @@ impl Game {
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
                 self.digger = Digger::default();
                 self.cracks.clear();
+                self.bolts.clear();
                 self.store.clear();
                 return Some(Effect::Clear);
             }
@@ -398,6 +402,12 @@ impl Game {
                 self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
+            NetEvent::Lightning { pos } => {
+                let entropy = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos() as i64);
+                self.bolts.spawn(pos, entropy);
+            }
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
         }
@@ -485,6 +495,7 @@ impl Game {
             self.world_time += 1;
         }
         self.weather.tick();
+        self.bolts.tick();
         self.swing.tick();
         for b in &mut self.bob {
             *b = (*b - 1).max(0);

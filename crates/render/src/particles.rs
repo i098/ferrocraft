@@ -1200,9 +1200,50 @@ fn material_solid(state: u16) -> bool {
         crate::blocks::Kind::Opaque | crate::blocks::Kind::Cutout => true,
         crate::blocks::Kind::Shape => !matches!(
             state >> 4,
-            6 | 27 | 28 | 30 | 31 | 32 | 37 | 38 | 39 | 40 | 50 | 51 | 55 | 59 | 65 | 66 | 69 | 75
-                | 76 | 77 | 78 | 83 | 90 | 104 | 105 | 106 | 111 | 115 | 119 | 127 | 131 | 132
-                | 93 | 94 | 140 | 141 | 142 | 143 | 144 | 149 | 150 | 157 | 171 | 175 | 198
+            6 | 27
+                | 28
+                | 30
+                | 31
+                | 32
+                | 37
+                | 38
+                | 39
+                | 40
+                | 50
+                | 51
+                | 55
+                | 59
+                | 65
+                | 66
+                | 69
+                | 75
+                | 76
+                | 77
+                | 78
+                | 83
+                | 90
+                | 104
+                | 105
+                | 106
+                | 111
+                | 115
+                | 119
+                | 127
+                | 131
+                | 132
+                | 93
+                | 94
+                | 140
+                | 141
+                | 142
+                | 143
+                | 144
+                | 149
+                | 150
+                | 157
+                | 171
+                | 175
+                | 198
         ),
         _ => false,
     }
@@ -1461,7 +1502,11 @@ mod tests {
         let mut ps = Particles::new();
         ps.world_effect(2004, [0, 64, 0], 0);
         assert_eq!(ps.len(), 40);
-        let smoke = ps.list.iter().filter(|p| p.behavior == Behavior::Smoke).count();
+        let smoke = ps
+            .list
+            .iter()
+            .filter(|p| p.behavior == Behavior::Smoke)
+            .count();
         let flames = ps
             .list
             .iter()
@@ -1511,7 +1556,13 @@ mod tests {
         for p in &ps.list {
             assert!((2.0..=3.0).contains(&p.pos[0]) && (3.0..=4.0).contains(&p.pos[2]));
             assert!((5.0..=5.5).contains(&p.pos[1]), "y {}", p.pos[1]);
-            assert!(matches!(p.sprite, Sprite::Sheet { base: 82, anim: false }));
+            assert!(matches!(
+                p.sprite,
+                Sprite::Sheet {
+                    base: 82,
+                    anim: false
+                }
+            ));
         }
     }
 

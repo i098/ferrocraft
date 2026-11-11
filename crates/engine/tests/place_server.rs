@@ -26,7 +26,7 @@ impl Bot {
         while Instant::now() < end {
             for e in self.s.poll() {
                 match e {
-                    NetEvent::Chunk(c) => self.store.insert(c),
+                    NetEvent::Chunk(c) => self.store.insert(*c),
                     NetEvent::BlockChange { x, y, z, state } => {
                         self.store.set_block(x, y, z, state);
                         self.changes.push(([x, y, z], state));

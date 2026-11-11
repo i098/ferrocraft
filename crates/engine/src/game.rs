@@ -396,7 +396,7 @@ impl Game {
             }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
-                self.store.insert(c);
+                self.store.insert(*c);
                 return Some(Effect::Upload(at.0, at.1));
             }
             NetEvent::UnloadChunk(x, z) => {
@@ -915,7 +915,7 @@ mod tests {
         g.tick(IDLE);
         assert_eq!(g.player.as_ref().unwrap().pos[1], 66.0);
         assert_eq!(
-            g.apply(NetEvent::Chunk(floor_chunk())),
+            g.apply(NetEvent::Chunk(Box::new(floor_chunk()))),
             Some(Effect::Upload(0, 0))
         );
         for _ in 0..40 {
@@ -956,7 +956,7 @@ mod tests {
         ];
         assert!(solid.iter().zip(&want).all(|(a, b)| a == b));
         let mut g = Game::new();
-        g.apply(NetEvent::Chunk(floor_chunk()));
+        g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
         assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
         assert!(g.store.is_empty());
     }

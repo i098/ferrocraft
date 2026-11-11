@@ -44,7 +44,7 @@ pub enum NetEvent {
         /// `reducedDebugInfo` game rule: F3 hides coordinates.
         reduced_debug_info: bool,
     },
-    Chunk(Chunk),
+    Chunk(Box<Chunk>),
     UnloadChunk(i32, i32),
     BlockChange {
         x: i32,

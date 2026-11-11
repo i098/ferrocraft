@@ -19,7 +19,7 @@ mod weather;
 pub use hand::{Hand, HeldKind};
 pub use sky::Environment;
 
-pub use assets::{encode_png, AssetSource, Font};
+pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use entity::{nametags, Class, EntityDraw};
 pub use gpu::Renderer;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

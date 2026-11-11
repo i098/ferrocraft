@@ -194,6 +194,11 @@ fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
             .map(|(u, a)| EntityEvent::PlayerName {
                 uuid: u.0,
                 name: a.name.clone(),
+                textures: a
+                    .properties
+                    .iter()
+                    .find(|p| p.name == "textures")
+                    .map(|p| p.value.clone()),
             })
             .collect(),
         PlayerListAction::Remove(v) => v

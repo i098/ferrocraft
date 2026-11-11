@@ -18,3 +18,6 @@ input-audio = { path = "../input-audio" }
 gui = { path = "../gui" }
 ferrocraft-modhost = { path = "../modhost" }
 winit = "0.30"
+
+[dev-dependencies]
+ferrocraft-protocol = { path = "../protocol" }

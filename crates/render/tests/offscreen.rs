@@ -171,6 +171,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         held: 276,
         armor: [0; 4],
         name: None,
+        skin: None,
     }]);
     let third = frame(&mut r, 0.0, None);
     r.set_entities(&[]);

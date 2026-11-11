@@ -145,32 +145,42 @@ pub fn rain_particles(
         }
         let state = block(x, y - 1, z);
         let (dx, dz) = (rng.next_double(), rng.next_double());
-        if cached(state).kind == Kind::Lava {
-            out.push((
-                ParticleKind::Smoke,
-                [
-                    f64::from(x) + dx,
-                    f64::from(y as f32 + 0.1),
-                    f64::from(z) + dz,
-                ],
-            ));
-        } else if state >> 4 != 0 {
-            let max_y = crate::shapes::boxes(state, &|_, _, _| 0)
-                .iter()
-                .map(|b| b.max[1])
-                .fold(0.0f32, f32::max);
-            let max_y = if max_y > 0.0 { max_y } else { 1.0 };
-            out.push((
-                ParticleKind::Droplet,
-                [
-                    f64::from(x) + dx,
-                    f64::from((y - 1) as f32 + 0.1) + f64::from(max_y),
-                    f64::from(z) + dz,
-                ],
-            ));
-        }
+        out.extend(splash(state, x, y, z, dx, dz));
     }
     out
+}
+
+/// The particle one rain drop makes on the block `state` below column height `y`, if any.
+fn splash(
+    state: u16,
+    x: i32,
+    y: i32,
+    z: i32,
+    dx: f64,
+    dz: f64,
+) -> Option<(ParticleKind, [f64; 3])> {
+    if cached(state).kind == Kind::Lava {
+        let pos = [
+            f64::from(x) + dx,
+            f64::from(y as f32 + 0.1),
+            f64::from(z) + dz,
+        ];
+        return Some((ParticleKind::Smoke, pos));
+    }
+    if state >> 4 == 0 {
+        return None;
+    }
+    let max_y = crate::shapes::boxes(state, &|_, _, _| 0)
+        .iter()
+        .map(|b| b.max[1])
+        .fold(0.0f32, f32::max);
+    let max_y = if max_y > 0.0 { max_y } else { 1.0 };
+    let pos = [
+        f64::from(x) + dx,
+        f64::from((y - 1) as f32 + 0.1) + f64::from(max_y),
+        f64::from(z) + dz,
+    ];
+    Some((ParticleKind::Droplet, pos))
 }
 
 #[cfg(test)]

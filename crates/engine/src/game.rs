@@ -203,6 +203,14 @@ impl Game {
         }
     }
 
+    /// Spawn a lightning bolt; the seed only shapes the bolt, so any entropy will do.
+    fn strike(&mut self, pos: [f64; 3]) {
+        let entropy = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as i64);
+        self.bolts.spawn(pos, entropy);
+    }
+
     pub fn apply(&mut self, ev: NetEvent) -> Option<Effect> {
         let ev = match self.apply_player(ev) {
             Ok(e) => return e,
@@ -356,6 +364,7 @@ impl Game {
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
             NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
+            NetEvent::Lightning { pos } => self.strike(pos),
             ev => self.apply_state(ev),
         }
         None
@@ -402,12 +411,6 @@ impl Game {
                 self.world_time = time_of_day.wrapping_abs();
             }
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
-            NetEvent::Lightning { pos } => {
-                let entropy = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_nanos() as i64);
-                self.bolts.spawn(pos, entropy);
-            }
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
         }
@@ -711,7 +714,9 @@ mod tests {
     fn lightning_event_flashes_the_sky_until_the_bolt_expires() {
         let mut g = Game::new();
         assert_eq!(g.bolts.flash(0.0), 0.0);
-        g.apply(NetEvent::Lightning { pos: [1.0, 64.0, 1.0] });
+        g.apply(NetEvent::Lightning {
+            pos: [1.0, 64.0, 1.0],
+        });
         g.tick(IDLE);
         assert!(g.bolts.flash(0.0) > 0.0);
         // A bolt strikes at most 3 times, each followed by a delay under 10 ticks.

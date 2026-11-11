@@ -233,7 +233,9 @@ mod tests {
         let p = cb::Packet::decode(&global_entity(1).encode()).unwrap();
         assert_eq!(
             game_events(p, 0).unwrap(),
-            vec![NetEvent::Lightning { pos: [2.0, -1.0, 0.5] }]
+            vec![NetEvent::Lightning {
+                pos: [2.0, -1.0, 0.5]
+            }]
         );
     }
 

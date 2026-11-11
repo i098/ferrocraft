@@ -86,7 +86,7 @@ pub fn build(bolts: &[([f64; 3], i64)], eye: [f64; 3]) -> MeshData {
     out
 }
 
-fn bolt(out: &mut MeshData, [x, y, z]: [f64; 3], seed: i64) {
+fn offsets(seed: i64) -> ([f64; 8], [f64; 8], f64, f64) {
     let (mut xs, mut zs) = ([0.0f64; 8], [0.0f64; 8]);
     let (mut sx, mut sz) = (0.0, 0.0);
     let mut rng = JavaRandom::new(seed);
@@ -96,6 +96,41 @@ fn bolt(out: &mut MeshData, [x, y, z]: [f64; 3], seed: i64) {
         sx += f64::from(rng.next_int(11) - 5);
         sz += f64::from(rng.next_int(11) - 5);
     }
+    (xs, zs, sx, sz)
+}
+
+/// The 5-corner ring of one segment: lower vertex at `k`, upper at `k + 1`.
+fn strip_vertices(
+    [x, y, z]: [f64; 3],
+    k: i32,
+    [lower, upper]: [f64; 2],
+    [dx, dz]: [f64; 2],
+    [prev_x, prev_z]: [f64; 2],
+) -> Vec<Vertex> {
+    (0..5)
+        .flat_map(|corner| {
+            let at = |w: f64| {
+                let (mut cx, mut cz) = (x + 0.5 - w, z + 0.5 - w);
+                if corner == 1 || corner == 2 {
+                    cx += w * 2.0;
+                }
+                if corner == 2 || corner == 3 {
+                    cz += w * 2.0;
+                }
+                (cx, cz)
+            };
+            let (lx, lz) = at(lower);
+            let (ux, uz) = at(upper);
+            [
+                vertex([lx + dx, y + f64::from(k * 16), lz + dz]),
+                vertex([ux + prev_x, y + f64::from((k + 1) * 16), uz + prev_z]),
+            ]
+        })
+        .collect()
+}
+
+fn bolt(out: &mut MeshData, pos: [f64; 3], seed: i64) {
+    let (xs, zs, sx, sz) = offsets(seed);
     for pass in 0..4 {
         let mut rng = JavaRandom::new(seed);
         for j in 0..3 {
@@ -114,26 +149,7 @@ fn bolt(out: &mut MeshData, [x, y, z]: [f64; 3], seed: i64) {
                     upper *= f64::from(k) * 0.1 + 1.0;
                     lower *= f64::from(k - 1) * 0.1 + 1.0;
                 }
-                let strip: Vec<Vertex> = (0..5)
-                    .flat_map(|corner| {
-                        let at = |w: f64| {
-                            let (mut cx, mut cz) = (x + 0.5 - w, z + 0.5 - w);
-                            if corner == 1 || corner == 2 {
-                                cx += w * 2.0;
-                            }
-                            if corner == 2 || corner == 3 {
-                                cz += w * 2.0;
-                            }
-                            (cx, cz)
-                        };
-                        let (lx, lz) = at(lower);
-                        let (ux, uz) = at(upper);
-                        [
-                            vertex([lx + dx, y + f64::from(k * 16), lz + dz]),
-                            vertex([ux + prev_x, y + f64::from((k + 1) * 16), uz + prev_z]),
-                        ]
-                    })
-                    .collect();
+                let strip = strip_vertices(pos, k, [lower, upper], [dx, dz], [prev_x, prev_z]);
                 strip_to_triangles(out, &strip);
             }
         }

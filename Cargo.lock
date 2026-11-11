@@ -675,6 +675,7 @@ version = "0.1.0"
 dependencies = [
  "ferrocraft-modhost",
  "ferrocraft-net-client",
+ "ferrocraft-protocol",
  "gui",
  "input-audio",
  "render",

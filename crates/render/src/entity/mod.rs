@@ -719,6 +719,7 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
         &tf,
         min,
         size,
+        part.size,
         part.uv,
         part.mirror,
         v_off,
@@ -843,13 +844,15 @@ fn skin_dims() -> [f32; 2] {
     [Skins::width() as f32, Skins::height() as f32]
 }
 
-/// `ModelBox`: six quads with the unfolded-cuboid texture layout at `uv` (texels, plus `v_off`).
+/// `ModelBox`: six quads with the unfolded-cuboid texture layout of a `layout`-sized box at `uv`
+/// (texels, plus `v_off`); `size` may be larger (inflate).
 #[allow(clippy::too_many_arguments)]
 fn add_box(
     out: &mut MeshData,
     tf: &dyn Fn(V3) -> V3,
     min: V3,
     size: V3,
+    layout: V3,
     (u0, v0): (f32, f32),
     mirror: bool,
     v_off: f32,
@@ -858,7 +861,8 @@ fn add_box(
 ) {
     let [x1, y1, z1] = min;
     let [x2, y2, z2] = [min[0] + size[0], min[1] + size[1], min[2] + size[2]];
-    let [w, h, d] = size;
+    // `ModelBox` lays the texture out by the box size, not by the inflated geometry.
+    let [w, h, d] = layout;
     let v0 = v0 + v_off;
     let uv = |u: f32, v: f32| [u / tex[0], v / tex[1]];
     // (corners in model space, texel corners, outward model-space normal, shade)
@@ -1096,6 +1100,39 @@ mod tests {
             view: [0.0; 2],
             line: None,
         }
+    }
+
+    #[test]
+    fn inflating_a_box_keeps_its_texture_layout() {
+        let uvs = |grow: f32| {
+            let mut out = MeshData::default();
+            let (min, size) = (
+                [-4.0 - grow, -grow, -2.0 - grow],
+                [8.0 + 2.0 * grow, 12.0 + 2.0 * grow, 4.0 + 2.0 * grow],
+            );
+            add_box(
+                &mut out,
+                &|p| p,
+                min,
+                size,
+                [8.0, 12.0, 4.0],
+                (16.0, 16.0),
+                false,
+                0.0,
+                [1.0; 3],
+                [64.0, 64.0],
+            );
+            out.vertices.iter().map(|v| v.uv).collect::<Vec<_>>()
+        };
+        assert_eq!(uvs(1.0), uvs(0.0));
+        // The back face of the body unfolds at u 32..40, v 20..32.
+        let back = uvs(1.0);
+        assert!(back
+            .iter()
+            .any(|uv| uv[0] == 40.0 / 64.0 && uv[1] == 32.0 / 64.0));
+        assert!(back
+            .iter()
+            .all(|uv| uv[0] >= 16.0 / 64.0 && uv[0] <= 40.0 / 64.0));
     }
 
     #[test]

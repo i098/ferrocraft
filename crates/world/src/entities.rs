@@ -107,7 +107,7 @@ pub fn is_baby(kind: Kind, m: &SizeMeta) -> bool {
 
 /// The metadata that sets a hitbox or a sound variant: armor stand status (index 10), age of
 /// ageable mobs (12, a zombie's child flag), slime size (16), guardian flags (16) and horse
-/// type (19).
+/// type (19), plus the name-tag byte (3, `getAlwaysRenderNameTag`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SizeMeta {
     pub stand: Option<u8>,
@@ -115,6 +115,7 @@ pub struct SizeMeta {
     pub slime: Option<u8>,
     pub guardian: Option<i32>,
     pub horse: Option<u8>,
+    pub always_name: Option<u8>,
 }
 
 impl SizeMeta {
@@ -124,6 +125,7 @@ impl SizeMeta {
         self.slime = new.slime.or(self.slime);
         self.guardian = new.guardian.or(self.guardian);
         self.horse = new.horse.or(self.horse);
+        self.always_name = new.always_name.or(self.always_name);
     }
 }
 
@@ -268,6 +270,33 @@ impl Entity {
         self.flags & flag::INVISIBLE != 0
     }
 
+    /// `Entity.canBeCollidedWith` for what the crosshair can pick: players, mobs, armor stands without a marker.
+    pub fn pickable(&self) -> bool {
+        match self.kind {
+            Kind::Player | Kind::Mob(_) => true,
+            Kind::Object(78) => self.size() != (0.0, 0.0),
+            _ => false,
+        }
+    }
+
+    pub fn burning(&self) -> bool {
+        self.flags & flag::BURNING != 0
+    }
+
+    /// `Entity.getAlwaysRenderNameTag`: metadata byte 3 is 1.
+    pub fn always_name(&self) -> bool {
+        self.meta.always_name == Some(1)
+    }
+
+    /// `Entity.getEyeHeight`: players 1.62 (1.54 sneaking), armor stands 0.9 of the height, else 0.85.
+    pub fn eye_height(&self) -> f32 {
+        match self.kind {
+            Kind::Player => 1.62 - if self.sneaking() { 0.08 } else { 0.0 },
+            Kind::Object(78) => self.size().1 * 0.9,
+            _ => self.size().1 * 0.85,
+        }
+    }
+
     /// Axis-aligned hitbox `(min, max)` at the current position.
     pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
         bounds_at(self.pos, self.size())
@@ -352,8 +381,13 @@ impl Entity {
         if let Some(f) = flags {
             self.flags = f;
         }
-        if let (Kind::Mob(_), Some(n)) = (self.kind, name) {
-            self.name = Some(n).filter(|n| !n.is_empty());
+        // Players keep their player-list name; index 2 only fills in when the list has none.
+        match (self.kind, name) {
+            (Kind::Mob(_) | Kind::Object(78), Some(n)) => {
+                self.name = Some(n).filter(|n| !n.is_empty());
+            }
+            (Kind::Player, Some(n)) if self.name.is_none() && !n.is_empty() => self.name = Some(n),
+            _ => {}
         }
         if stack.is_some() {
             self.stack = stack;

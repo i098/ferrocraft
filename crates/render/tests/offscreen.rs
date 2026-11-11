@@ -173,6 +173,10 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         armor: [0; 4],
         name: None,
         skin: None,
+        burning: false,
+        eye_height: 1.62,
+        always_name: false,
+        pointed: false,
     }]);
     let third = frame(&mut r, 0.0, None);
     r.set_entities(&[]);

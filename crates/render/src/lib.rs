@@ -21,8 +21,8 @@ pub use hand::{Hand, HeldKind, UseAction, Using};
 pub use sky::Environment;
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
-pub use entity::{nametags, Class, EntityDraw};
-pub use gpu::Renderer;
+pub use entity::{nametags, Class, EntityDraw, NameTag};
+pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips

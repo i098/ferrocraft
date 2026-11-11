@@ -1011,6 +1011,21 @@ impl Renderer {
         }
     }
 
+    /// Draws each precipitation mesh that has a texture.
+    fn draw_precipitation<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        layers: [(&'a Option<GpuMesh>, &'a Option<wgpu::BindGroup>); 2],
+    ) {
+        for (mesh, group) in layers {
+            if let (Some(m), Some(group)) = (mesh, group) {
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.water_pipe);
+                draw_mesh(pass, m);
+            }
+        }
+    }
+
     /// Rain and snow meshes for this frame.
     fn rain_mesh(&self, env: &Environment, cam: &Camera) -> (Option<GpuMesh>, Option<GpuMesh>) {
         let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
@@ -1354,13 +1369,10 @@ impl Renderer {
                     draw_mesh(&mut pass, m);
                 }
             }
-            for (mesh, group) in [(&rain, &self.rain_group), (&snow, &self.snow_group)] {
-                if let (Some(m), Some(group)) = (mesh, group) {
-                    pass.set_bind_group(0, group, &[]);
-                    pass.set_pipeline(&self.water_pipe);
-                    draw_mesh(&mut pass, m);
-                }
-            }
+            self.draw_precipitation(
+                &mut pass,
+                [(&rain, &self.rain_group), (&snow, &self.snow_group)],
+            );
         }
         self.draw_hand_and_gui(
             &mut enc,

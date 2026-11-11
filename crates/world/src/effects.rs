@@ -171,7 +171,9 @@ const NAMES: [&str; 23] = [
 
 /// English `potion.*` name of an effect id; `None` for ids the client does not know.
 pub fn name(id: i8) -> Option<&'static str> {
-    NAMES.get(usize::try_from(id).ok()?.checked_sub(1)?).copied()
+    NAMES
+        .get(usize::try_from(id).ok()?.checked_sub(1)?)
+        .copied()
 }
 
 /// `setIconIndex(column, row)` of ids 1 to 22, indexed by `Potion.id - 1`; `None` for the instant effects.

@@ -391,7 +391,14 @@ impl Particles {
         } else {
             144
         };
-        let mut p = self.base(pos, start, Sprite::Sheet { base: tile, anim: true });
+        let mut p = self.base(
+            pos,
+            start,
+            Sprite::Sheet {
+                base: tile,
+                anim: true,
+            },
+        );
         p.vel[1] *= f64::from(0.2_f32);
         if motion[0] == 0.0 && motion[2] == 0.0 {
             p.vel[0] *= f64::from(0.1_f32);

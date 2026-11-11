@@ -107,7 +107,11 @@ fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
             );
         }
         let suffix = [" II", " III", " IV"].get((e.amplifier as usize).wrapping_sub(1));
-        let name = format!("{}{}", effects::name(e.id).unwrap_or(""), suffix.unwrap_or(&""));
+        let name = format!(
+            "{}{}",
+            effects::name(e.id).unwrap_or(""),
+            suffix.unwrap_or(&"")
+        );
         c.text(&name, (x + 28) as f32, (y + 6) as f32, 0xFFFF_FFFF, true);
         c.text(
             &effects::duration_string(e),

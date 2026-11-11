@@ -289,9 +289,8 @@ mod tests {
     /// Vanilla 1.8.9 writes byte 1 when the effect shows particles (a plain `/effect` sends 1).
     #[test]
     fn entity_effect_wire_byte_one_shows_particles() {
-        let decode = |flag: u8| {
-            events(&cb::Packet::decode(&[0x1D, 5, 1, 1, 0x90, 0x03, flag]).unwrap())
-        };
+        let decode =
+            |flag: u8| events(&cb::Packet::decode(&[0x1D, 5, 1, 1, 0x90, 0x03, flag]).unwrap());
         let particles = |ev: &[NetEvent]| match ev {
             [NetEvent::EntityEffect { effect, .. }] => effect.particles,
             other => panic!("{other:?}"),

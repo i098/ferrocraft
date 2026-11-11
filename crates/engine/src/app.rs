@@ -109,7 +109,7 @@ pub struct App {
     /// When the last frame was shown, for the `maxFps` limit.
     last_frame: Instant,
     /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
-    equip: (f32, f32, Option<(i16, i16)>),
+    equip: (f32, f32, Option<(i16, i16, bool)>),
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
     cursor: (f64, f64),
@@ -592,7 +592,7 @@ impl App {
             .inv
             .held_stack()
             .as_ref()
-            .map(|s| (s.id, s.damage));
+            .map(|s| (s.id, s.damage, world::inventory::glint(s)));
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);
         let using = self.using(frac as f32);
@@ -621,10 +621,11 @@ impl App {
         let hand_item = self.equip.2.or(held);
         r.set_hand(
             (!self.hide_hud && self.perspective == 0 && self.game.player.is_some()).then(|| Hand {
-                held: hand_item.map(|(id, damage)| HeldKind::Item { id, damage }),
+                held: hand_item.map(|(id, damage, _)| HeldKind::Item { id, damage }),
                 swing,
                 lowered,
                 using,
+                glint: hand_item.is_some_and(|h| h.2),
             }),
         );
         r.set_on_fire(self.perspective == 0 && self.game.player.is_some() && self.game.burning());

@@ -584,10 +584,23 @@ fn rotate(p: V3, rot: V3) -> V3 {
     [x, y, z]
 }
 
-/// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
-/// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
 /// Texture of the enchantment glint, `RenderItem.renderEffect` and `LayerArmorBase.renderGlint`.
 pub const GLINT_TEXTURE: &str = "textures/misc/enchanted_item_glint.png";
+
+/// Texture coordinates of the glint at a model-space point (`age` in ticks), for the third-person
+/// layer and the first-person hand alike: scaled, turned 30 degrees, then scrolled.
+pub fn glint_uv(p: [f32; 3], age: f32) -> [f32; 2] {
+    let shift = (age * 0.05 % 3.0) / 3.0 * 8.0 * 0.02;
+    let (s, c) = 30f32.to_radians().sin_cos();
+    let (x, y) = (p[0] + p[2], p[1]);
+    [
+        (x * c - y * s) / 3.0 * 4.0 + shift,
+        (x * s + y * c) / 3.0 * 4.0 + shift * 1.5,
+    ]
+}
+
+/// Glint tint, 0.5 * 0.76, 0.25 * 0.76, 0.8 * 0.76 as `renderGlint` sets it.
+pub const GLINT_COLOR: [f32; 4] = [0.38, 0.19, 0.608, 1.0];
 
 /// The glint layer: the glowing armor pieces and held items again, with texture coordinates that
 /// scroll over the surface. Drawn additively at the same depth as the model.
@@ -613,24 +626,22 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
                 emit_part(&mut out, &xf, &held_bar(arm), 0.0, [1.0; 3], 0.0);
             }
         }
-        // 0.5 * 0.76, 0.25 * 0.76, 0.8 * 0.76 as `renderGlint` sets it.
-        let color = [0.38, 0.19, 0.608, 1.0];
-        let shift = (d.age * 0.05 % 3.0) / 3.0 * 8.0 * 0.02;
-        let (s, c) = 30f32.to_radians().sin_cos();
         for v in &mut out.vertices[start..] {
-            // Scaled by 1/3 texture units per world unit, turned 30 degrees, then scrolled.
-            let (x, y) = (v.pos[0] + v.pos[2], v.pos[1]);
-            v.uv = [
-                (x * c - y * s) / 3.0 * 4.0 + shift,
-                (x * s + y * c) / 3.0 * 4.0 + shift * 1.5,
+            let rel = [
+                v.pos[0] - xf.pos[0] as f32,
+                v.pos[1] - xf.pos[1] as f32,
+                v.pos[2] - xf.pos[2] as f32,
             ];
-            v.color = color;
+            v.uv = glint_uv(rel, d.age);
+            v.color = GLINT_COLOR;
             v.light = [1.0; 2];
         }
     }
     out
 }
 
+/// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
+/// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
 pub fn build(
     draws: &[EntityDraw],
     skins: &Skins,

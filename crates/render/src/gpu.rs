@@ -129,6 +129,7 @@ pub struct Renderer {
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
+    hand_glint_group: Option<wgpu::BindGroup>,
     held: Option<(HeldKind, Held)>,
     /// Camera-relative particle quads for the next frame.
     particles: Quads,
@@ -363,6 +364,7 @@ impl Renderer {
             hand_skin,
             rain_group,
             hand: None,
+            hand_glint_group: None,
             held: None,
             particles: Quads::default(),
             gui_pipes,
@@ -502,6 +504,15 @@ impl Renderer {
             &self.sampler,
             &view,
         );
+        if tex == entity::GLINT_TEXTURE {
+            self.hand_glint_group = Some(bind_group(
+                &self.device,
+                &self.layout_bg,
+                &self.hand_globals,
+                &self.sampler,
+                &view,
+            ));
+        }
         self.textures.insert(tex.to_owned(), group);
     }
 
@@ -943,8 +954,26 @@ impl Renderer {
         cam: &Camera,
         world: &Globals,
         sun_brightness: f32,
-    ) -> Option<(GpuMesh, HandTex)> {
+    ) -> Option<(GpuMesh, HandTex, Option<GpuMesh>)> {
         let (mut draw, tex) = self.hand_draw()?;
+        let glint = self.hand.is_some_and(|h| h.glint && h.held.is_some());
+        if glint {
+            self.load_texture(entity::GLINT_TEXTURE);
+        }
+        let age = self.environment.ticks as f32 + self.environment.partial;
+        let glint_vertices: Vec<Vertex> = if glint {
+            draw.vertices
+                .iter()
+                .map(|v| Vertex {
+                    uv: entity::glint_uv(v.pos, age),
+                    color: entity::GLINT_COLOR,
+                    light: [1.0; 2],
+                    ..*v
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let eye = cam.pos.map(|p| p.floor() as i32);
         let light = self
             .meshes
@@ -973,11 +1002,19 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
+        let glint = if glint {
+            self.upload_geometry(&SkyGeometry {
+                vertices: glint_vertices,
+                indices: draw.indices.clone(),
+            })
+        } else {
+            None
+        };
         let geometry = SkyGeometry {
             vertices: draw.vertices,
             indices: draw.indices,
         };
-        Some((self.upload_geometry(&geometry)?, tex))
+        Some((self.upload_geometry(&geometry)?, tex, glint))
     }
 
     fn upload_geometry(&self, g: &SkyGeometry) -> Option<GpuMesh> {
@@ -1264,7 +1301,7 @@ impl Renderer {
         &self,
         enc: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        hand: Option<&(GpuMesh, HandTex)>,
+        hand: Option<&(GpuMesh, HandTex, Option<GpuMesh>)>,
         fire: &FireFrame,
         gui_buf: Option<&wgpu::Buffer>,
         overlay: &[Quad],
@@ -1291,10 +1328,15 @@ impl Renderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        if let Some((m, tex)) = hand {
+        if let Some((m, tex, glint)) = hand {
             pass.set_bind_group(0, self.hand_group(*tex), &[]);
             pass.set_pipeline(&self.hand_pipe);
             draw_mesh(&mut pass, m);
+            if let (Some(g), Some(group)) = (glint, &self.hand_glint_group) {
+                pass.set_bind_group(0, group, &[]);
+                pass.set_pipeline(&self.bolt_pipe);
+                draw_mesh(&mut pass, g);
+            }
         }
         self.draw_fire_overlay(&mut pass, fire);
         if let Some(buf) = gui_buf {

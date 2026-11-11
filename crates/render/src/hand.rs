@@ -30,6 +30,8 @@ pub struct Hand {
     pub lowered: f32,
     /// A timed use in progress (`getItemUseTimer() > 0`).
     pub using: Option<Using>,
+    /// `ItemStack.hasEffect` of the held item: draws the enchantment glint over it.
+    pub glint: bool,
 }
 
 /// `EnumAction` of the item being used, as far as the first-person pose differs.
@@ -482,6 +484,7 @@ mod tests {
                 swing: 0.0,
                 lowered: 0.0,
                 using: None,
+                glint: false,
             },
             64,
         );
@@ -530,6 +533,7 @@ mod tests {
                     action: UseAction::Consume,
                     timer,
                 }),
+                glint: false,
             })
         };
         let rest = item_transform(0.0, 0.0);

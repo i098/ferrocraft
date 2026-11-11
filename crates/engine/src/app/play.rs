@@ -423,7 +423,7 @@ impl App {
             .inv
             .held_stack()
             .as_ref()
-            .map(|s| (s.id, s.damage));
+            .map(|s| (s.id, s.damage, world::inventory::glint(s)));
         let (cur, _, shown) = self.equip;
         let same = shown.map(|s| s.0) == held.map(|h| h.0);
         let target = if same { 1.0 } else { 0.0 };

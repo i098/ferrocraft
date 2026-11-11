@@ -104,6 +104,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         swing: 0.0,
         lowered: 0.0,
         using: None,
+        glint: false,
     };
     let clear = frame(&mut r, 0.0, None);
     let rainy = frame(&mut r, 1.0, None);
@@ -137,6 +138,19 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     assert_ne!(armed, holding, "a held block must differ from the arm");
     assert_ne!(holding, sword, "a flat sword must differ from a held block");
     assert_ne!(sword, torch, "a flat torch must differ from the sword");
+    let enchanted = frame(
+        &mut r,
+        0.0,
+        Some(Hand {
+            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            glint: true,
+            ..bare
+        }),
+    );
+    assert_ne!(
+        sword, enchanted,
+        "an enchanted sword must glint in the hand"
+    );
 
     let mut ps = Particles::new();
     ps.break_block([7, 66, 12], 1 << 4);

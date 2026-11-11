@@ -142,61 +142,67 @@ impl Speed {
     }
 }
 
+/// English `potion.*` names indexed by `Potion.id - 1`.
+const NAMES: [&str; 23] = [
+    "Speed",
+    "Slowness",
+    "Haste",
+    "Mining Fatigue",
+    "Strength",
+    "Instant Health",
+    "Instant Damage",
+    "Jump Boost",
+    "Nausea",
+    "Regeneration",
+    "Resistance",
+    "Fire Resistance",
+    "Water Breathing",
+    "Invisibility",
+    "Blindness",
+    "Night Vision",
+    "Hunger",
+    "Weakness",
+    "Poison",
+    "Wither",
+    "Health Boost",
+    "Absorption",
+    "Saturation",
+];
+
 /// English `potion.*` name of an effect id; `None` for ids the client does not know.
 pub fn name(id: i8) -> Option<&'static str> {
-    Some(match id {
-        1 => "Speed",
-        2 => "Slowness",
-        3 => "Haste",
-        4 => "Mining Fatigue",
-        5 => "Strength",
-        6 => "Instant Health",
-        7 => "Instant Damage",
-        8 => "Jump Boost",
-        9 => "Nausea",
-        10 => "Regeneration",
-        11 => "Resistance",
-        12 => "Fire Resistance",
-        13 => "Water Breathing",
-        14 => "Invisibility",
-        15 => "Blindness",
-        16 => "Night Vision",
-        17 => "Hunger",
-        18 => "Weakness",
-        19 => "Poison",
-        20 => "Wither",
-        21 => "Health Boost",
-        22 => "Absorption",
-        23 => "Saturation",
-        _ => return None,
-    })
+    NAMES.get(usize::try_from(id).ok()?.checked_sub(1)?).copied()
 }
 
-/// `Potion.getStatusIconIndex` (`setIconIndex(column, row)` is `column + row * 8`); `None` for
-/// the instant effects, which have no icon.
+/// `setIconIndex(column, row)` of ids 1 to 22, indexed by `Potion.id - 1`; `None` for the instant effects.
+const ICONS: [Option<(i32, i32)>; 22] = [
+    Some((0, 0)),
+    Some((1, 0)),
+    Some((2, 0)),
+    Some((3, 0)),
+    Some((4, 0)),
+    None,
+    None,
+    Some((2, 1)),
+    Some((3, 1)),
+    Some((7, 0)),
+    Some((6, 1)),
+    Some((7, 1)),
+    Some((0, 2)),
+    Some((0, 1)),
+    Some((5, 1)),
+    Some((4, 1)),
+    Some((1, 1)),
+    Some((5, 0)),
+    Some((6, 0)),
+    Some((1, 2)),
+    Some((2, 2)),
+    Some((2, 2)),
+];
+
+/// `Potion.getStatusIconIndex` (`column + row * 8`); `None` for the instant effects, which have no icon.
 pub fn icon(id: i8) -> Option<i32> {
-    let (col, row) = match id {
-        1 => (0, 0),
-        2 => (1, 0),
-        3 => (2, 0),
-        4 => (3, 0),
-        5 => (4, 0),
-        8 => (2, 1),
-        9 => (3, 1),
-        10 => (7, 0),
-        11 => (6, 1),
-        12 => (7, 1),
-        13 => (0, 2),
-        14 => (0, 1),
-        15 => (5, 1),
-        16 => (4, 1),
-        17 => (1, 1),
-        18 => (5, 0),
-        19 => (6, 0),
-        20 => (1, 2),
-        21 | 22 => (2, 2),
-        _ => return None,
-    };
+    let (col, row) = (*ICONS.get(usize::try_from(id).ok()?.checked_sub(1)?)?)?;
     Some(col + row * 8)
 }
 

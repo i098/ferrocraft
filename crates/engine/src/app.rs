@@ -965,3 +965,27 @@ fn screenshot_stamp() -> String {
         rem % 60
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn regeneration_bounce_wraps_on_max_health_even_at_zero_health() {
+        let mut game = Game::new();
+        game.effects.add(world::effects::Effect {
+            id: Fx::REGENERATION,
+            amplifier: 0,
+            duration: 100,
+            permanent: false,
+            ambient: false,
+            particles: true,
+        });
+        // Vanilla: updateCounter % ceil(maxHealth + 5) = % 25, independent of current health.
+        for health in [1.0, 0.0, -5.0, -20.0] {
+            game.health = health;
+            assert_eq!(status_of(&game, 24).regen_tick, 24);
+            assert_eq!(status_of(&game, 25).regen_tick, 0);
+        }
+    }
+}

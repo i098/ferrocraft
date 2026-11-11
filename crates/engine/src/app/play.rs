@@ -235,6 +235,11 @@ impl App {
                 e.invisible(),
             );
         }
+        self.local_potion_particles();
+    }
+
+    fn local_potion_particles(&mut self) {
+        let g = &self.game;
         if let Some(p) = &g.player {
             let invisible = g.effects.has(world::effects::id::INVISIBILITY);
             self.particles.potion_swirl(

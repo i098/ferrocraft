@@ -59,7 +59,7 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
                 duration: p.duration.0,
                 permanent: p.duration.0 == world::effects::PERMANENT_TICKS,
                 ambient: false,
-                particles: !p.hide_particles,
+                particles: p.show_particles,
             },
         },
         P::RemoveEntityEffect(p) => NetEvent::RemoveEntityEffect {
@@ -284,6 +284,20 @@ mod tests {
     /// Encodes then decodes, so each test goes through the wire format.
     fn wire(p: impl Into<cb::Packet>) -> Vec<NetEvent> {
         events(&cb::Packet::decode(&p.into().encode()).unwrap())
+    }
+
+    /// Vanilla 1.8.9 writes byte 1 when the effect shows particles (a plain `/effect` sends 1).
+    #[test]
+    fn entity_effect_wire_byte_one_shows_particles() {
+        let decode = |flag: u8| {
+            events(&cb::Packet::decode(&[0x1D, 5, 1, 1, 0x90, 0x03, flag]).unwrap())
+        };
+        let particles = |ev: &[NetEvent]| match ev {
+            [NetEvent::EntityEffect { effect, .. }] => effect.particles,
+            other => panic!("{other:?}"),
+        };
+        assert!(particles(&decode(1)));
+        assert!(!particles(&decode(0)));
     }
 
     #[test]

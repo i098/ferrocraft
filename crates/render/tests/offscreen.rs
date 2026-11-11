@@ -371,27 +371,35 @@ fn curse_and_item_particles_draw() {
         (w / 4..3 * w / 4).contains(&cx) && (h / 4..3 * h / 4).contains(&cy),
         "mid curse centre ({cx}, {cy}) must be near the screen centre"
     );
-    assert!(x1 - x0 > w / 8 && y1 - y0 > h / 8, "mid curse is a large model");
+    assert!(
+        x1 - x0 > w / 8 && y1 - y0 > h / 8,
+        "mid curse is a large model"
+    );
     // `renderParticle` tilts the model by 60 - 150 * progress - pitch: it swings in from above.
-    assert!((ey0 + ey1) / 2 < cy, "the early curse sits above the mid curse");
+    assert!(
+        (ey0 + ey1) / 2 < cy,
+        "the early curse sits above the mid curse"
+    );
 
     if jar.is_none() {
-        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping the item, footprint and barrier particles");
+        eprintln!(
+            "FERROCRAFT_CLIENT_JAR not set; skipping the item, footprint and barrier particles"
+        );
         return;
     }
     let mut shots = Vec::new();
     for (id, pos, vel, speed, count, args) in [
         (28, [8.5, 64.01, 11.0], [0.0; 3], 0.0, 0, vec![]),
         (35, [8.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
-        (31, [9.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
-        (33, [10.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (31, [8.0, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
+        (33, [6.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
         (36, [7.5, 66.0, 11.0], [0.1, 0.1, 0.0], 1.0, 8, vec![276]),
     ] {
         let mut one = Particles::new();
         one.spawn_packet(id, pos, vel, speed, count, &args);
         let px = frame(&one, 0.0);
-        let (x0, y0, x1, y1) = changed_box(&clear, &px, w)
-            .unwrap_or_else(|| panic!("particle {id} must draw"));
+        let (x0, y0, x1, y1) =
+            changed_box(&clear, &px, w).unwrap_or_else(|| panic!("particle {id} must draw"));
         let (ex, ey) = project(&cam, pos.map(f64::from), w as f64, h as f64);
         let (cx, cy) = (((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64);
         assert!(
@@ -403,10 +411,14 @@ fn curse_and_item_particles_draw() {
 
     if let Some(dir) = std::env::var_os("RENDER_DIR") {
         let dir = std::path::Path::new(&dir);
-        for (name, px) in [("curse_clear", &clear), ("curse_early", &early), ("curse_mid", &mid)]
-            .into_iter()
-            .map(|(n, p)| (n.to_string(), p))
-            .chain(shots.iter().map(|(n, p)| (n.clone(), p)))
+        for (name, px) in [
+            ("curse_clear", &clear),
+            ("curse_early", &early),
+            ("curse_mid", &mid),
+        ]
+        .into_iter()
+        .map(|(n, p)| (n.to_string(), p))
+        .chain(shots.iter().map(|(n, p)| (n.clone(), p)))
         {
             encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
         }

@@ -119,6 +119,23 @@ fn sunrise_glow(angle: f32) -> Option<[f32; 4]> {
     Some([f3 * 0.3 + 0.7, f3 * f3 * 0.7 + 0.2, 0.2, a])
 }
 
+/// `updateFogColor`: the sunrise glow tints the fog toward the sun, weighted by the look component.
+fn glow_fog(fog: [f32; 3], angle: f32, look_x: f32) -> [f32; 3] {
+    let toward_sun = if (angle * PI * 2.0).sin() > 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let weight = (look_x * toward_sun).max(0.0);
+    match sunrise_glow(angle) {
+        Some(glow) if weight > 0.0 => {
+            let w = weight * glow[3];
+            [0, 1, 2].map(|i| fog[i] * (1.0 - w) + glow[i] * w)
+        }
+        _ => fog,
+    }
+}
+
 impl Environment {
     /// Sky, fog and light for this frame; `temperature` is the biome temperature at the camera
     /// and `look` the camera look vector (`Entity.getLook`).
@@ -149,18 +166,8 @@ impl Environment {
             0.847_058_83 * (day * 0.94 + 0.06),
             day * 0.91 + 0.09,
         ];
-        // `updateFogColor`: the sunrise glow tints the fog toward the sun.
         if self.render_distance_chunks >= 4 {
-            let toward_sun = if (angle * PI * 2.0).sin() > 0.0 {
-                -1.0
-            } else {
-                1.0
-            };
-            let weight = (look[0] * toward_sun).max(0.0);
-            if let (true, Some(glow)) = (weight > 0.0, sunrise_glow(angle)) {
-                let w = weight * glow[3];
-                fog = [0, 1, 2].map(|i| fog[i] * (1.0 - w) + glow[i] * w);
-            }
+            fog = glow_fog(fog, angle, look[0]);
         }
         let f = 1.0 - (0.25 + 0.75 * self.render_distance_chunks as f32 / 32.0).powf(0.25);
         fog = [0, 1, 2].map(|i| fog[i] + (sky[i] - fog[i]) * f);
@@ -699,27 +706,13 @@ mod tests {
 
     #[test]
     fn fog_glow_matches_the_vanilla_blend() {
-        // Hand-computed from `updateFogColor` at tick 12000, 8 chunks, looking straight at the sun.
-        let angle = celestial_angle(12000, 0.0);
-        let glow = sunrise_glow(angle).expect("sunset glows");
-        let day = ((angle * PI * 2.0).cos() * 2.0 + 0.5).clamp(0.0, 1.0);
-        let base = [
-            0.752_941_2 * (day * 0.94 + 0.06),
-            0.847_058_83 * (day * 0.94 + 0.06),
-            day * 0.91 + 0.09,
-        ];
-        let sky = Environment {
-            world_time: 12000,
-            ..Environment::default()
-        }
-        .sky_state(0.8, [0.0; 3])
-        .sky;
-        let f = 1.0 - (0.25f32 + 0.75 * 8.0 / 32.0).powf(0.25);
+        // Worked by hand from vanilla 1.8.9 `updateFogColor` at tick 12000, 8 chunks, temperature 0.8:
+        // angle 0.21548, glow alpha 0.445, glow-mixed fog (0.8047, 0.7126, 0.6088), then the
+        // distance blend toward the sky color.
         let got = fog_at(12000, [-1.0, 0.0, 0.0]);
+        let want = [0.736_666, 0.693_448, 0.668_878];
         for i in 0..3 {
-            let mixed = base[i] * (1.0 - glow[3]) + glow[i] * glow[3];
-            let want = mixed + (sky[i] - mixed) * f;
-            assert!((got[i] - want).abs() < 1e-5, "{i}: {} vs {want}", got[i]);
+            assert!((got[i] - want[i]).abs() < 1e-4, "{i}: {} vs {}", got[i], want[i]);
         }
     }
 

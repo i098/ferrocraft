@@ -6,10 +6,12 @@
 //! bar). Name tags are laid out by [`nametags`].
 
 pub(crate) mod fire;
+mod projectile;
 mod skin;
 
 use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
+pub use projectile::Thrower;
 pub use skin::{Skin, Skins};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
@@ -65,6 +67,10 @@ pub struct EntityDraw {
     pub child: bool,
     /// Action of the timed item use in progress (`getItemUseTimer() > 0`), players only.
     pub using: Option<UseAction>,
+    /// Camera yaw and pitch in degrees, for sprites that face the viewer.
+    pub view: [f32; 2],
+    /// Fishing bobber: world point where the line leaves the rod and the vertical eye offset.
+    pub line: Option<([f64; 3], f32)>,
 }
 
 /// A box of a model, in vanilla model pixels (y down).
@@ -722,6 +728,11 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
 }
 
 fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
+    if let Class::Object(id) = d.class {
+        if projectile::handles(id) {
+            return projectile::build(out, id, d, skins);
+        }
+    }
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
     let generic = m.skin == Skin::White
@@ -817,6 +828,13 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
         Skin::Armor(_) => [0.7; 3],
+        Skin::Arrow
+        | Skin::Snowball
+        | Skin::Egg
+        | Skin::EnderPearl
+        | Skin::FireCharge
+        | Skin::Bobber
+        | Skin::SplashPotion => [0.8, 0.8, 0.85],
         Skin::White | Skin::Player(_) => [1.0; 3],
     }
 }
@@ -1047,7 +1065,7 @@ pub fn nametags(
 mod tests {
     use super::*;
 
-    fn steve() -> EntityDraw {
+    pub(crate) fn steve() -> EntityDraw {
         EntityDraw {
             class: Class::Player { slim: false },
             pos: [10.0, 64.0, 10.0],
@@ -1075,6 +1093,8 @@ mod tests {
             ridden: false,
             child: false,
             using: None,
+            view: [0.0; 2],
+            line: None,
         }
     }
 

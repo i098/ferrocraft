@@ -27,7 +27,7 @@ use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
     AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand, HeldKind,
-    Particles, Renderer, UseAction, Using,
+    Particles, Renderer, Thrower, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -448,6 +448,40 @@ impl App {
     }
 
     /// The local player as a model, for F5 views.
+    /// The player who cast a fishing rod, as `FishingBobberRenderer` reads it.
+    fn thrower(&self, id: i32, frac: f64) -> Option<Thrower> {
+        let f = frac as f32;
+        if id == self.game.entity_id {
+            let p = self.game.player.as_ref()?;
+            let lerp = |a: f64, b: f64| a + (b - a) * frac;
+            return Some(Thrower {
+                pos: [
+                    lerp(self.game.prev_pos[0], p.pos[0]),
+                    lerp(self.game.prev_pos[1], p.pos[1]),
+                    lerp(self.game.prev_pos[2], p.pos[2]),
+                ],
+                yaw: p.yaw,
+                pitch: self.game.pitch,
+                body_yaw: p.yaw,
+                eye_height: eye_height(self.input.sneaking()) as f32,
+                sneaking: self.input.sneaking(),
+                swing: self.game.swing.progress(f),
+                first_person: self.perspective == 0,
+            });
+        }
+        let e = self.game.entities.get(id)?;
+        Some(Thrower {
+            pos: e.lerp_pos(frac),
+            yaw: e.yaw,
+            pitch: e.pitch,
+            body_yaw: e.yaw,
+            eye_height: e.eye_height(),
+            sneaking: e.sneaking(),
+            swing: e.swing_progress(f),
+            first_person: false,
+        })
+    }
+
     fn self_draw(&self, frac: f64) -> Option<EntityDraw> {
         let p = self.game.player.as_ref()?;
         let f = frac as f32;
@@ -489,6 +523,8 @@ impl App {
             ridden: false,
             child: false,
             using: self.using(f).map(|u| u.action),
+            view: [0.0; 2],
+            line: None,
         })
     }
 
@@ -531,6 +567,12 @@ impl App {
                 )
             })
             .collect();
+        for (e, d) in self.game.entities.iter().zip(&mut draws) {
+            d.view = [cam.yaw, cam.pitch];
+            if e.kind == Kind::Object(90) {
+                d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());
+            }
+        }
         draws.extend(self_model);
         let (quads, textures, effects) = self.overlay(frac, eye, &cam, &draws);
         self.run_effects(effects);
@@ -936,6 +978,8 @@ fn entity_draw(
         ridden,
         child: e.is_child(),
         using: remote_using(e),
+        view: [0.0; 2],
+        line: None,
     }
 }
 

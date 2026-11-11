@@ -7,7 +7,7 @@ pub const SLOT: u32 = 64;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The last
 /// twelve are the armor layers (see [`Skin::armor`]).
-const SKINS: [&str; 20] = [
+const SKINS: [&str; 27] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -16,6 +16,13 @@ const SKINS: [&str; 20] = [
     "entity/creeper/creeper.png",
     "entity/pig/pig.png",
     "entity/cow/cow.png",
+    "entity/arrow.png",
+    "items/snowball.png",
+    "items/egg.png",
+    "items/ender_pearl.png",
+    "items/fireball.png",
+    "particle/particles.png",
+    "items/potion_bottle_splash.png",
     "models/armor/leather_layer_1.png",
     "models/armor/leather_layer_2.png",
     "models/armor/chainmail_layer_1.png",
@@ -29,7 +36,14 @@ const SKINS: [&str; 20] = [
     "models/armor/leather_layer_1_overlay.png",
     "models/armor/leather_layer_2_overlay.png",
 ];
-const ARMOR_FIRST: u8 = 8;
+/// Index of the first armor layer in `SKINS`.
+const ARMOR_FIRST: u8 = 15;
+
+/// Slots from this index on hold sprites and projectile textures, not player-layout skins.
+const FIRST_SPRITE: usize = 8;
+/// The fishing bobber is the 8x8 cell at (8, 16) of `particles.png` (`FishingBobberRenderer`).
+const BOBBER_SLOT: usize = 13;
+const BOBBER_CELL: (usize, usize, usize) = (8, 16, 8);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Skin {
@@ -41,6 +55,16 @@ pub enum Skin {
     Creeper,
     Pig,
     Cow,
+    /// `textures/entity/arrow.png` (32x32).
+    Arrow,
+    Snowball,
+    Egg,
+    EnderPearl,
+    /// `items/fireball.png`, the fire charge icon.
+    FireCharge,
+    /// The bobber cell of `particles.png`, cropped to 8x8.
+    Bobber,
+    SplashPotion,
     /// An armor texture, by index into the armor part of the slot table.
     Armor(u8),
     /// Plain white: shapes take their color from the vertex tint.
@@ -180,10 +204,28 @@ impl Skins {
             let Some(img) = source.read(&path).and_then(|b| decode_png(&b)) else {
                 continue;
             };
-            s.blit(i as u32, &img);
+            if i == BOBBER_SLOT {
+                s.blit_plain(i as u32, &crop(&img, BOBBER_CELL));
+            } else if i >= FIRST_SPRITE && i < ARMOR_FIRST as usize {
+                s.blit_plain(i as u32, &img);
+            } else {
+                s.blit(i as u32, &img);
+            }
             s.loaded[i] = true;
         }
         s
+    }
+
+    /// Copies a sprite into the top-left corner of its slot, with no skin-layout fixes.
+    fn blit_plain(&mut self, slot: u32, img: &Image) {
+        let base = (slot * SLOT) as usize;
+        let w = SLOT as usize;
+        self.rgba[base * w * 4..(base + w) * w * 4].fill(0);
+        for y in 0..img.height.min(w) {
+            let n = img.width.min(w);
+            let dst = ((base + y) * w) * 4;
+            self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
+        }
     }
 
     /// Copies a skin into its slot. A legacy 64x32 skin also fills the left arm and leg regions
@@ -241,20 +283,47 @@ impl Skins {
     }
 }
 
+/// The `size` x `size` square at (`x`, `y`) of `img`; missing rows and columns stay transparent.
+fn crop(img: &Image, (x, y, size): (usize, usize, usize)) -> Image {
+    let mut rgba = vec![0; size * size * 4];
+    for row in 0..size.min(img.height.saturating_sub(y)) {
+        let n = size.min(img.width.saturating_sub(x));
+        let from = ((y + row) * img.width + x) * 4;
+        rgba[row * size * 4..][..n * 4].copy_from_slice(&img.rgba[from..from + n * 4]);
+    }
+    Image {
+        width: size,
+        height: size,
+        rgba,
+    }
+}
+
+/// Skins in `SKINS` order, before the armor layers.
+const FIXED: [Skin; ARMOR_FIRST as usize] = [
+    Skin::Steve,
+    Skin::Alex,
+    Skin::Zombie,
+    Skin::Skeleton,
+    Skin::PigZombie,
+    Skin::Creeper,
+    Skin::Pig,
+    Skin::Cow,
+    Skin::Arrow,
+    Skin::Snowball,
+    Skin::Egg,
+    Skin::EnderPearl,
+    Skin::FireCharge,
+    Skin::Bobber,
+    Skin::SplashPotion,
+];
+
 fn slot(skin: Skin) -> Option<u32> {
-    Some(match skin {
-        Skin::Steve => 0,
-        Skin::Alex => 1,
-        Skin::Zombie => 2,
-        Skin::Skeleton => 3,
-        Skin::PigZombie => 4,
-        Skin::Creeper => 5,
-        Skin::Pig => 6,
-        Skin::Cow => 7,
-        Skin::Armor(i) => u32::from(ARMOR_FIRST + i),
-        Skin::Player(i) => SLOTS + u32::from(i),
-        Skin::White => return None,
-    })
+    match skin {
+        Skin::Player(i) => Some(SLOTS + u32::from(i)),
+        Skin::White => None,
+        Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
+        fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
+    }
 }
 
 #[cfg(test)]

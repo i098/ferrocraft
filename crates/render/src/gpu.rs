@@ -993,17 +993,24 @@ impl Renderer {
         })
     }
 
+    fn draw_fire_world<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, fire: &'a FireFrame) {
+        pass.set_pipeline(&self.fire_pipe);
+        for (i, mesh) in fire.meshes.iter().enumerate() {
+            if let Some(mesh) = mesh {
+                pass.set_bind_group(0, &self.textures[entity::fire::TEXTURES[i]], &[]);
+                draw_mesh(pass, mesh);
+            }
+        }
+    }
+
+    fn draw_fire_overlay<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, fire: &'a FireFrame) {
+        if let (Some(buf), Some(quads)) = (&fire.buf, &fire.overlay) {
+            self.draw_gui(pass, buf, quads);
+        }
+    }
+
     /// Fire meshes, first-person overlay quads and their vertex buffer for this frame.
-    fn prepare_fire(
-        &mut self,
-        cam: &Camera,
-        w: u32,
-        h: u32,
-    ) -> (
-        [Option<GpuMesh>; 2],
-        Option<[Quad; 2]>,
-        Option<wgpu::Buffer>,
-    ) {
+    fn prepare_fire(&mut self, cam: &Camera, w: u32, h: u32) -> FireFrame {
         if (self.on_fire || !self.fires.is_empty()) && self.fire_frames[0] == 0 {
             self.load_fire_textures();
         }
@@ -1032,7 +1039,11 @@ impl Renderer {
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
-        (fires, overlay, buf)
+        FireFrame {
+            meshes: fires,
+            overlay,
+            buf,
+        }
     }
 
     /// Reads each fire texture's frame count (`height / width`) and uploads it.
@@ -1052,7 +1063,7 @@ impl Renderer {
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
         let env = self.environment;
-        let (fires, fire_overlay, fire_buf) = self.prepare_fire(cam, w, h);
+        let fire = self.prepare_fire(cam, w, h);
         let sky = env.sky_state();
         let globals = Globals {
             view_proj: view_proj(cam, w as f32 / h as f32),
@@ -1168,13 +1179,7 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
-            pass.set_pipeline(&self.fire_pipe);
-            for (i, fire) in fires.iter().enumerate() {
-                if let Some(fire) = fire {
-                    pass.set_bind_group(0, &self.textures[entity::fire::TEXTURES[i]], &[]);
-                    draw_mesh(&mut pass, fire);
-                }
-            }
+            self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.
             pass.set_pipeline(&self.crack_pipe);
             for (tex, m) in &crack_meshes {
@@ -1252,9 +1257,7 @@ impl Renderer {
                 pass.set_pipeline(&self.hand_pipe);
                 draw_mesh(&mut pass, m);
             }
-            if let (Some(buf), Some(quads)) = (&fire_buf, &fire_overlay) {
-                self.draw_gui(&mut pass, buf, quads);
-            }
+            self.draw_fire_overlay(&mut pass, &fire);
             if let Some(buf) = &gui_buf {
                 self.draw_gui(&mut pass, buf, overlay);
             }
@@ -1940,6 +1943,13 @@ fn mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
         }
     }
     o
+}
+
+/// Per-frame fire geometry: world billboards, first-person quads and their vertex buffer.
+struct FireFrame {
+    meshes: [Option<GpuMesh>; 2],
+    overlay: Option<[Quad; 2]>,
+    buf: Option<wgpu::Buffer>,
 }
 
 #[cfg(test)]

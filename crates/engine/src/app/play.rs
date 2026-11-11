@@ -476,16 +476,9 @@ impl App {
         }
     }
 
-    /// The entity under the crosshair (`EntityRenderer.getMouseOver`): a nearer block hides it.
-    pub(super) fn entity_target(&self) -> Option<(i32, f64)> {
-        let p = self.game.player.as_ref()?;
-        let eye = self.game.eye(self.input.sneaking())?;
-        let (id, vehicle) = (self.game.entity_id, self.game.vehicle);
-        self.entity_pick(eye, p.yaw, self.game.pitch, id, vehicle)
-    }
-
-    /// [`App::entity_target`] for a viewer at `eye` looking along `yaw`, `pitch`, which skips
-    /// the viewer `skip` and its vehicle.
+    /// The entity under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`
+    /// (`EntityRenderer.getMouseOver`), which skips the viewer `skip` and its vehicle: a nearer
+    /// block hides it.
     pub(super) fn entity_pick(
         &self,
         eye: [f64; 3],
@@ -511,8 +504,16 @@ impl App {
             held: self.input.attack_held(),
             presses,
         };
-        let entity = self.entity_target().map(|(id, _)| id);
-        let (actions, effects) = self.game.dig_tick(attack, entity, self.input.sneaking());
+        let ray = self.view_ray(1.0);
+        let entity = ray
+            .and_then(|(eye, yaw, pitch, skip, vehicle)| {
+                self.entity_pick(eye, yaw, pitch, skip, vehicle)
+            })
+            .map(|(id, _)| id);
+        let block = ray
+            .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
+            .map(|(h, _)| h);
+        let (actions, effects) = self.game.dig_tick(attack, entity, block);
         for action in actions {
             let sent = match action {
                 DigAction::Dig { status, pos, face } => {
@@ -554,10 +555,10 @@ impl App {
     }
 
     fn hit_shard(&mut self) {
-        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
             return;
         };
-        if let Some(h) = self.game.target(eye) {
+        if let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) {
             let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
             let state = at(h.pos);
             if state != 0 {
@@ -658,13 +659,13 @@ impl App {
         }
         self.use_delay = USE_DELAY;
         let sneaking = self.input.sneaking();
-        let (Some(p), Some(eye)) = (&self.game.player, self.game.eye(sneaking)) else {
+        let Some((eye, yaw, pitch, skip, vehicle)) = self.view_ray(1.0) else {
             return;
         };
-        let dir = look_vector(p.yaw, self.game.pitch);
+        let dir = look_vector(yaw, pitch);
         let held = self.game.inv.held_stack().clone();
         let gamemode = self.game.gamemode;
-        if let Some((id, dist)) = self.entity_target() {
+        if let Some((id, dist)) = self.entity_pick(eye, yaw, pitch, skip, vehicle) {
             let Some(e) = self.game.entities.get(id) else {
                 return;
             };
@@ -677,7 +678,7 @@ impl App {
             }
             let r = self.session_send(|s| s.interact_entity(id));
             self.send_result(r);
-        } else if let Some((h, dist)) = self.game.target_dist(eye) {
+        } else if let Some((h, dist)) = self.game.ray_dist(eye, yaw, pitch) {
             if self.use_block(h, dist, eye, dir, sneaking, &held) {
                 return;
             }
@@ -779,10 +780,10 @@ impl App {
     /// `Minecraft.middleClickMouse`: select the targeted block's item on the hotbar; creative
     /// puts it there when missing.
     fn pick_block(&mut self) {
-        let Some(eye) = self.game.eye(self.input.sneaking()) else {
+        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
             return;
         };
-        let Some(h) = self.game.target(eye) else {
+        let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) else {
             return;
         };
         let state = self.game.store.get_block(h.pos[0], h.pos[1], h.pos[2]);

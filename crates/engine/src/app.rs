@@ -391,17 +391,14 @@ impl App {
         Some([lerp(qx, px), lerp(qy, py) + height, lerp(qz, pz)])
     }
 
-    /// `getMouseOver` casts from `renderViewEntity`; `isDrawBlockOutline` needs a player.
-    /// Returns the eye, yaw, pitch, viewer id and its vehicle.
-    fn view_ray(&self, frac: f64) -> Option<([f64; 3], f32, f32, i32, Option<i32>)> {
+    /// `renderViewEntity`'s eyes and look, which `getMouseOver` casts from: the camera entity,
+    /// else the local player. Returns the eye, yaw, pitch, viewer id and its vehicle.
+    pub(super) fn view_ray(&self, frac: f64) -> Option<([f64; 3], f32, f32, i32, Option<i32>)> {
         let Some(e) = self.game.camera.and_then(|id| self.game.entities.get(id)) else {
             let p = self.game.player.as_ref()?;
             let (id, vehicle) = (self.game.entity_id, self.game.vehicle);
             return Some((self.eye(frac)?, p.yaw, self.game.pitch, id, vehicle));
         };
-        if e.kind != Kind::Player {
-            return None;
-        }
         let [x, y, z] = e.lerp_pos(frac);
         let (yaw, pitch) = e.lerp_look(frac as f32);
         let eye = [x, y + f64::from(e.eye_height()), z];
@@ -464,7 +461,8 @@ impl App {
     fn view_camera(&self, frac: f64) -> Camera {
         let fov = self.ui.settings.fov
             * (self.fov_mod.1 + (self.fov_mod.0 - self.fov_mod.1) * frac as f32);
-        let (Some(p), Some(eye)) = (&self.game.player, self.eye(frac)) else {
+        let ray = self.view_ray(frac).filter(|_| self.game.player.is_some());
+        let Some((eye, yaw, pitch, ..)) = ray else {
             return Camera {
                 pos: [0.0; 3],
                 yaw: 0.0,
@@ -472,16 +470,6 @@ impl App {
                 fov_deg: fov,
                 ..Camera::default()
             };
-        };
-        // `renderViewEntity`: a spectated entity lends its eyes and look.
-        let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
-        let (eye, yaw, pitch) = match spectated {
-            Some(e) => {
-                let [x, y, z] = e.lerp_pos(frac);
-                let (yaw, pitch) = e.lerp_look(frac as f32);
-                ([x, y + f64::from(e.eye_height()), z], yaw, pitch)
-            }
-            None => (eye, p.yaw, self.game.pitch),
         };
         if self.perspective == 0 {
             return Camera {
@@ -612,11 +600,16 @@ impl App {
         let until = self.next_tick.saturating_duration_since(Instant::now());
         let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
         let cam = self.camera(frac);
-        let eye = self.eye(frac);
         let self_model = (self.perspective != 0)
             .then(|| self.self_draw(frac))
             .flatten();
-        let ray = self.view_ray(frac);
+        // `isDrawBlockOutline`: only a player view draws the outline and the highlight.
+        let player_view = self
+            .game
+            .camera
+            .and_then(|id| self.game.entities.get(id))
+            .is_none_or(|e| e.kind == Kind::Player);
+        let ray = self.view_ray(frac).filter(|_| player_view);
         let pointed = ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
             self.entity_pick(eye, yaw, pitch, id, vehicle)
                 .map(|(id, _)| id)
@@ -664,7 +657,7 @@ impl App {
                 draws.remove(i);
             }
         }
-        let (quads, textures, effects) = self.overlay(frac, eye, &cam, &draws);
+        let (quads, textures, effects) = self.overlay(frac, &cam, &draws);
         self.run_effects(effects);
         let held = self
             .game
@@ -754,7 +747,8 @@ impl App {
     }
 
     /// The F3 left column, `None` without a player.
-    fn debug_lines(&self, eye: Option<[f64; 3]>) -> Option<Vec<String>> {
+    fn debug_lines(&self, frac: f64) -> Option<Vec<String>> {
+        let ray = self.view_ray(frac);
         self.game.player.as_ref().map(|p| {
             gui::debug::left_lines(&gui::debug::DebugInfo {
                 fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
@@ -766,7 +760,9 @@ impl App {
                 pos: p.pos,
                 yaw: p.yaw,
                 pitch: self.game.pitch,
-                looking_at: eye.and_then(|e| self.game.target(e)).map(|h| h.pos),
+                looking_at: ray
+                    .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
+                    .map(|(h, _)| h.pos),
                 reduced: self.reduced_debug(),
                 ..Default::default()
             })
@@ -775,13 +771,7 @@ impl App {
 
     /// The HUD, the open container and the menu screens as quads, plus the textures they
     /// registered and the effects they raised.
-    fn overlay(
-        &mut self,
-        frac: f64,
-        eye: Option<[f64; 3]>,
-        cam: &Camera,
-        draws: &[EntityDraw],
-    ) -> Overlay {
+    fn overlay(&mut self, frac: f64, cam: &Camera, draws: &[EntityDraw]) -> Overlay {
         let Some(r) = &self.renderer else {
             return (Vec::new(), Vec::new(), Vec::new());
         };
@@ -806,7 +796,7 @@ impl App {
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
         if show_hud {
             draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
-            let debug = self.debug_lines(eye);
+            let debug = self.debug_lines(frac);
             let status = status_of(&self.game, self.hud.update_counter);
             self.hud.selected_slot = i32::from(self.game.inv.held);
             let inv = &self.game.inv;

@@ -624,18 +624,8 @@ impl Game {
         ])
     }
 
-    /// The block under the crosshair for a camera at `eye`, within the game mode's reach.
-    pub fn target(&self, eye: [f64; 3]) -> Option<Hit> {
-        self.target_dist(eye).map(|(hit, _)| hit)
-    }
-
-    /// [`Game::target`] plus the distance from `eye` to the hit point.
-    pub fn target_dist(&self, eye: [f64; 3]) -> Option<(Hit, f64)> {
-        let p = self.player.as_ref()?;
-        self.ray_dist(eye, p.yaw, self.pitch)
-    }
-
-    /// [`Game::target_dist`] along the look `yaw`, `pitch`.
+    /// The block under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`, within
+    /// the game mode's reach, plus the distance to the hit point.
     pub fn ray_dist(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<(Hit, f64)> {
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
         dig::raycast_dist(&at, eye, yaw, pitch, dig::reach(self.creative))
@@ -652,12 +642,6 @@ impl Game {
         let pitch = (-d[1] / len).asin().to_degrees() as f32;
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
         dig::raycast_dist(&at, from, yaw, pitch, len).is_some()
-    }
-
-    /// `Entity.getPositionEyes(1)` of the local player.
-    pub fn eye(&self, sneaking: bool) -> Option<[f64; 3]> {
-        let p = self.player.as_ref()?;
-        Some([p.pos[0], p.pos[1] + eye_height(sneaking), p.pos[2]])
     }
 
     /// The local player's bounding box `[x0, y0, z0, x1, y1, z1]`, which blocks a placement.
@@ -735,16 +719,16 @@ impl Game {
 
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
     /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
-    /// the block and a click attacks it, as in vanilla's `objectMouseOver`. Only survival and
-    /// creative can dig.
+    /// the block `block` and a click attacks it, as in vanilla's `objectMouseOver`. Only
+    /// survival and creative can dig.
     pub fn dig_tick(
         &mut self,
         attack: Attack,
         entity: Option<i32>,
-        sneaking: bool,
+        block: Option<Hit>,
     ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
-        let (Some(p), Some(eye)) = (&self.player, self.eye(sneaking)) else {
+        let Some(p) = &self.player else {
             return (actions, Vec::new());
         };
         let frame = Frame {
@@ -754,11 +738,7 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
-            target: if entity.is_some() {
-                None
-            } else {
-                self.target(eye)
-            },
+            target: block.filter(|_| entity.is_none()),
             entity,
         };
         let mut local = Local {

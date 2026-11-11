@@ -171,8 +171,9 @@ struct GuiVertex {
 }
 
 impl Renderer {
-    /// Window renderer. `assets` is the 1.8.9 client jar or an extracted assets directory; `None` draws flat colors and no text.
-    pub fn new(window: Arc<winit::window::Window>, assets: Option<&Path>) -> Renderer {
+    /// Window renderer. `assets` is the 1.8.9 client jar or an extracted assets directory, with
+    /// any resource packs over it; `None` draws flat colors and no text.
+    pub fn new(window: Arc<winit::window::Window>, assets: Option<AssetSource>) -> Renderer {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).expect("create surface");
@@ -207,6 +208,11 @@ impl Renderer {
 
     /// Headless renderer that draws into an RGBA texture (tests, screenshots).
     pub fn new_offscreen(width: u32, height: u32, assets: Option<&Path>) -> Renderer {
+        Self::new_offscreen_from(width, height, assets.and_then(AssetSource::open))
+    }
+
+    /// [`Renderer::new_offscreen`] over an opened source, such as resource packs over the jar.
+    pub fn new_offscreen_from(width: u32, height: u32, source: Option<AssetSource>) -> Renderer {
         let instance = wgpu::Instance::default();
         let (_, device, queue) = pollster::block_on(request_device(&instance, None));
         let texture = offscreen_texture(&device, width, height);
@@ -219,7 +225,7 @@ impl Renderer {
                 height,
             },
             OFFSCREEN,
-            assets,
+            source,
         )
     }
 
@@ -228,16 +234,15 @@ impl Renderer {
         queue: wgpu::Queue,
         target: Target,
         format: wgpu::TextureFormat,
-        assets: Option<&Path>,
+        mut source: Option<AssetSource>,
     ) -> Renderer {
-        let mut source = assets.and_then(AssetSource::open);
         let atlas = Arc::new(source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets));
         let font = source.as_mut().and_then(Font::load);
         let env_tex = EnvTexture::load(source.as_mut());
         let entity_skins = source.as_mut().map_or_else(Skins::flat, Skins::from_assets);
         if font.is_none() {
             eprintln!(
-                "ferrocraft-render: no textures/font/ascii.png in {assets:?}; text is not drawn"
+                "ferrocraft-render: no textures/font/ascii.png in the assets; text is not drawn"
             );
         }
 

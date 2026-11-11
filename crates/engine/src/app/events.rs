@@ -57,15 +57,7 @@ impl App {
                     s.play_ui(name);
                 }
             }
-            UiEffect::Connect { host, port } => {
-                self.game = Game::new();
-                let addr = if host.contains(':') {
-                    format!("[{host}]:{port}")
-                } else {
-                    format!("{host}:{port}")
-                };
-                self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
-            }
+            UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
             UiEffect::Respawn => {
@@ -75,7 +67,7 @@ impl App {
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
-            UiEffect::OpenUrl(url) => open_url(url),
+            UiEffect::OpenUrl(url) => open_url(&url),
             // `activateNextShader` returns at once without `OpenGlHelper.shadersSupported`; Ferrocraft
             // has no post-process shaders yet (#121), so only the sound plays.
             UiEffect::SuperSecret => {
@@ -83,7 +75,32 @@ impl App {
                     s.play_super_secret();
                 }
             }
+            UiEffect::ResourcesChanged => self.refresh_resources(),
         }
+    }
+
+    fn connect(&mut self, host: &str, port: u16) {
+        self.game = Game::new();
+        let addr = if host.contains(':') {
+            format!("[{host}]:{port}")
+        } else {
+            format!("{host}:{port}")
+        };
+        self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
+    }
+
+    /// `Minecraft.refreshResources` after a resource pack change: a new renderer over the new
+    /// packs, then the chunks, texts and screens again.
+    // shortcut: sounds and mod-registered textures still come from before the change; reload them when packs need it.
+    fn refresh_resources(&mut self) {
+        let Some(w) = self.window.clone() else { return };
+        // Drop the old renderer first: a window holds one surface at a time.
+        self.renderer = None;
+        self.renderer = Some(Renderer::new(w, self.asset_source()));
+        self.load_assets();
+        self.apply_settings();
+        self.reload_chunks();
+        self.resize_screens();
     }
 
     /// `refreshResources`, then the font flag and a rescale, which relabels the screen.

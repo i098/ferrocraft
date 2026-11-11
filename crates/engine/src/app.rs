@@ -186,7 +186,7 @@ impl App {
     /// Loads language texts, item icons and sounds once the window and its assets exist.
     fn load_assets(&mut self) {
         self.load_texts();
-        let Some(mut src) = self.args.assets_dir.as_deref().and_then(AssetSource::open) else {
+        let Some(mut src) = self.asset_source() else {
             return;
         };
         self.icons = Some(Icons::new(|name| {
@@ -198,35 +198,49 @@ impl App {
     /// splashes and the `pack.mcmeta` language list. Only `en_US` is in the client jar; the other
     /// languages and `pack.mcmeta` come from the launcher's asset index.
     fn load_texts(&mut self) {
-        let mut src = self.args.assets_dir.as_deref().and_then(AssetSource::open);
-        let index = [
-            Some(self.args.game_dir.as_path()),
-            self.args.game_dir.parent(),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(|d| AssetIndex::load(d, "1.8.9").ok());
+        let mut src = self.asset_source();
+        let index = self.asset_index();
         let file = |name: &str| {
             index
                 .as_ref()?
                 .path(name)
                 .and_then(|p| std::fs::read(p).ok())
         };
-        let mut text = |name: &str| {
-            src.as_mut()
-                .and_then(|s| s.read(&format!("assets/minecraft/{name}")))
-                .or_else(|| file(&format!("minecraft/{name}")))
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default()
-        };
-        let mut lang = text("lang/en_US.lang");
+        let mut lang = merged_lang(&file, src.as_mut(), "en_US");
         if self.ui.settings.lang != "en_US" {
             lang.push('\n');
-            lang += &text(&format!("lang/{}.lang", self.ui.settings.lang));
+            lang += &merged_lang(&file, src.as_mut(), &self.ui.settings.lang);
         }
-        let mut texts = Texts::parse(&lang, &text("texts/splashes.txt"));
-        texts.languages = file("pack.mcmeta").map_or_else(Vec::new, |b| languages(&b));
+        let splashes = src
+            .as_mut()
+            .and_then(|s| s.read("assets/minecraft/texts/splashes.txt"))
+            .or_else(|| file("minecraft/texts/splashes.txt"))
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
+        let mut texts = Texts::parse(&lang, &splashes);
+        let meta = file("pack.mcmeta");
+        texts.languages = meta.as_deref().map_or_else(Vec::new, languages);
+        // `DefaultResourcePack`: `pack.png` from the jar, the description from the asset index.
+        let desc = meta.map_or_else(String::new, |b| gui::screens::default_description(&b));
+        let jar = self.args.assets_dir.as_deref().and_then(AssetSource::open);
+        texts.default_pack = (jar.and_then(|mut j| j.read("pack.png")), desc);
         self.ui.texts = texts;
+    }
+
+    fn asset_index(&self) -> Option<AssetIndex> {
+        [
+            Some(self.args.game_dir.as_path()),
+            self.args.game_dir.parent(),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
+    }
+
+    /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
+    pub(super) fn asset_source(&self) -> Option<AssetSource> {
+        let packs = gui::screens::selected_paths(&self.args.game_dir, &self.ui.settings);
+        AssetSource::layered(&packs, self.args.assets_dir.as_deref()?)
     }
 
     fn load_sound(&mut self) {
@@ -803,6 +817,23 @@ impl App {
     }
 }
 
+/// One language's `.lang` text: the asset index copy, then every pack's copy over it
+/// (`getAllResources`).
+fn merged_lang(
+    file: &dyn Fn(&str) -> Option<Vec<u8>>,
+    src: Option<&mut AssetSource>,
+    code: &str,
+) -> String {
+    let base = file(&format!("minecraft/lang/{code}.lang"));
+    let packs = src.map(|s| s.read_all(&format!("assets/minecraft/lang/{code}.lang")));
+    let parts: Vec<_> = base
+        .into_iter()
+        .chain(packs.into_iter().flatten())
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .collect();
+    parts.join("\n")
+}
+
 /// `Render.renderLivingLabel`: a 25% black plate and the name at vanilla's world scale. Vanilla draws the text twice,
 /// faint without the depth test and solid with it; the overlay has no depth buffer, so a block on the line of
 /// sight to the tag stands in for the depth test.
@@ -875,10 +906,7 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes().with_title("Minecraft 1.8.9");
         let window = Arc::new(el.create_window(attrs).expect("create window"));
-        self.renderer = Some(Renderer::new(
-            window.clone(),
-            self.args.assets_dir.as_deref(),
-        ));
+        self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
         if let Some(cfg) = ferrocraft_modhost::Config::from_env() {

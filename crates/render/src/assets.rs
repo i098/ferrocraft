@@ -11,6 +11,8 @@ const COLUMNS: usize = 16;
 pub enum AssetSource {
     Jar(zip::ZipArchive<std::fs::File>),
     Dir(PathBuf),
+    /// `FallbackResourceManager`: the selected resource packs, top first, over the client jar.
+    Layers(Vec<AssetSource>),
 }
 
 impl AssetSource {
@@ -20,6 +22,18 @@ impl AssetSource {
         }
         let file = std::fs::File::open(path).ok()?;
         zip::ZipArchive::new(file).ok().map(AssetSource::Jar)
+    }
+
+    /// `packs` (top first, each a zip or a folder) over `base`; a pack that cannot be opened is
+    /// skipped, as vanilla skips it.
+    pub fn layered(packs: &[PathBuf], base: &Path) -> Option<AssetSource> {
+        let base = Self::open(base)?;
+        if packs.is_empty() {
+            return Some(base);
+        }
+        let mut layers: Vec<AssetSource> = packs.iter().filter_map(|p| Self::open(p)).collect();
+        layers.push(base);
+        Some(AssetSource::Layers(layers))
     }
 
     /// `name` is a jar path such as `assets/minecraft/textures/font/ascii.png`.
@@ -36,6 +50,19 @@ impl AssetSource {
                     .or_else(|_| std::fs::read(dir.join(stripped)))
                     .ok()
             }
+            AssetSource::Layers(layers) => layers.iter_mut().find_map(|l| l.read(name)),
+        }
+    }
+
+    /// `getAllResources`: every layer's copy of `name`, bottom first.
+    pub fn read_all(&mut self, name: &str) -> Vec<Vec<u8>> {
+        match self {
+            AssetSource::Layers(layers) => layers
+                .iter_mut()
+                .rev()
+                .flat_map(|l| l.read_all(name))
+                .collect(),
+            single => single.read(name).into_iter().collect(),
         }
     }
 }
@@ -256,5 +283,38 @@ impl Font {
             unicode,
             force_unicode: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_all_returns_every_layer_bottom_first() {
+        let root = std::env::temp_dir().join(format!("assets_read_all_{}", std::process::id()));
+        let (top, bottom, empty) = (root.join("top"), root.join("bottom"), root.join("empty"));
+        for (dir, text) in [
+            (&top, Some("top")),
+            (&bottom, Some("bottom")),
+            (&empty, None),
+        ] {
+            std::fs::create_dir_all(dir.join("assets/minecraft/lang")).unwrap();
+            if let Some(text) = text {
+                std::fs::write(dir.join("assets/minecraft/lang/en_US.lang"), text).unwrap();
+            }
+        }
+        let mut src = AssetSource::Layers(vec![
+            AssetSource::Dir(top),
+            AssetSource::Dir(empty),
+            AssetSource::Dir(bottom),
+        ]);
+        let name = "assets/minecraft/lang/en_US.lang";
+        assert_eq!(
+            src.read_all(name),
+            vec![b"bottom".to_vec(), b"top".to_vec()]
+        );
+        assert_eq!(src.read(name), Some(b"top".to_vec()));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

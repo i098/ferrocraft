@@ -206,19 +206,7 @@ impl Environment {
             fog = fog.map(|c| c * (1.0 - self.thunder * 0.5));
         }
 
-        // `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog.
-        let (mut fog, mut fog_density) = match self.fluid {
-            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
-            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
-            None => (fog, None),
-        };
-        let far = (self.render_distance_chunks * 16) as f32;
-        let (mut fog_start, mut fog_end) = (far * 0.75, far);
-        if let Some(ticks) = self.blindness {
-            // Blindness replaces the liquid fog with a short linear one.
-            (fog, fog_start, fog_end) = blind_fog(fog, far, ticks, self.view_y);
-            fog_density = None;
-        }
+        let (fog, fog_start, fog_end, fog_density) = self.final_fog(fog);
         // The sky dome sits in that fog.
         if fog_density.is_some() || self.blindness.is_some() {
             sky = fog;
@@ -261,6 +249,24 @@ impl Environment {
             fog_start,
             fog_end,
             fog_density,
+        }
+    }
+
+    /// `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog;
+    /// Blindness replaces both with a short linear fog. Returns color, start, end and density.
+    fn final_fog(&self, fog: [f32; 3]) -> ([f32; 3], f32, f32, Option<f32>) {
+        let (fog, density) = match self.fluid {
+            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
+            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
+            None => (fog, None),
+        };
+        let far = (self.render_distance_chunks * 16) as f32;
+        match self.blindness {
+            Some(ticks) => {
+                let (fog, start, end) = blind_fog(fog, far, ticks, self.view_y);
+                (fog, start, end, None)
+            }
+            None => (fog, far * 0.75, far, density),
         }
     }
 

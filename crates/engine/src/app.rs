@@ -704,15 +704,13 @@ impl App {
         }
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
-            cs.draw(
-                &mut c,
-                &self.game.inv,
+            let view = gui::inventory::InventoryView {
+                inv: &self.game.inv,
                 icons,
-                mx,
-                my,
-                self.ui.settings.advanced_item_tooltips,
-                &self.game.effects,
-            );
+                advanced_tooltips: self.ui.settings.advanced_item_tooltips,
+                effects: &self.game.effects,
+            };
+            cs.draw(&mut c, &view, mx, my);
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
         let mut textures = std::mem::take(&mut c.pending_textures);

@@ -86,6 +86,15 @@ pub struct ContainerScreen {
     effects_shown: bool,
 }
 
+/// What `GuiContainer.drawScreen` reads besides the cursor position.
+#[derive(Clone, Copy)]
+pub struct InventoryView<'a> {
+    pub inv: &'a Inventory,
+    pub icons: &'a Icons,
+    pub advanced_tooltips: bool,
+    pub effects: &'a Effects,
+}
+
 /// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
 fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
     const TEXTURE: &str = "textures/gui/container/inventory.png";
@@ -561,16 +570,13 @@ impl ContainerScreen {
     }
 
     /// `GuiContainer.drawScreen`.
-    pub fn draw(
-        &mut self,
-        c: &mut dyn Canvas,
-        inv: &Inventory,
-        icons: &Icons,
-        mx: i32,
-        my: i32,
-        advanced_tooltips: bool,
-        effects: &Effects,
-    ) {
+    pub fn draw(&mut self, c: &mut dyn Canvas, view: &InventoryView, mx: i32, my: i32) {
+        let InventoryView {
+            inv,
+            icons,
+            advanced_tooltips,
+            effects,
+        } = *view;
         // `checkStatusEffects`: only the player's own inventory and the creative screen list effects.
         self.effects_shown = !effects.is_empty() && inv.open.is_none();
         let (l, t) = self.origin();

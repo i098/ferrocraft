@@ -7,7 +7,9 @@ use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
 use crate::mesher::{Done, Job, Mesher, SharedBlocks};
 use crate::particles::Quads;
-use crate::sky::{build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, ENV_H, ENV_W};
+use crate::sky::{
+    build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
+};
 use crate::weather::{build_rain, precipitation_height};
 use crate::{Camera, ChunkBlocks, Quad};
 use std::collections::{HashMap, HashSet};
@@ -1065,23 +1067,7 @@ impl Renderer {
         let env = self.environment;
         let fire = self.prepare_fire(cam, w, h);
         let sky = env.sky_state();
-        let globals = Globals {
-            view_proj: view_proj(cam, w as f32 / h as f32),
-            eye: [
-                cam.pos[0] as f32,
-                cam.pos[1] as f32,
-                cam.pos[2] as f32,
-                env.gamma,
-            ],
-            fog_color: [sky.fog[0], sky.fog[1], sky.fog[2], 1.0],
-            // Torch flicker is a slow random walk around 0 in vanilla, so the factor stays near 1.5.
-            fog: match sky.fog_density {
-                // A negative start tells `fs_world` to use `exp(-density * d)`.
-                Some(d) => [-d, d, sky.sun_brightness, 1.5],
-                None => [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
-            },
-            screen: [w as f32, h as f32, 0.0, 0.0],
-        };
+        let globals = Self::globals(cam, &env, &sky, (w, h));
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -1263,6 +1249,70 @@ impl Renderer {
             }
         }
         self.queue.submit([enc.finish()]);
+    }
+
+    fn globals(cam: &Camera, env: &Environment, sky: &SkyState, (w, h): (u32, u32)) -> Globals {
+        Globals {
+            view_proj: view_proj(cam, w as f32 / h as f32),
+            eye: [
+                cam.pos[0] as f32,
+                cam.pos[1] as f32,
+                cam.pos[2] as f32,
+                env.gamma,
+            ],
+            fog_color: [sky.fog[0], sky.fog[1], sky.fog[2], 1.0],
+            // Torch flicker is a slow random walk around 0 in vanilla, so the factor stays near 1.5.
+            fog: match sky.fog_density {
+                // A negative start tells `fs_world` to use `exp(-density * d)`.
+                Some(d) => [-d, d, sky.sun_brightness, 1.5],
+                None => [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
+            },
+            screen: [w as f32, h as f32, 0.0, 0.0],
+        }
+    }
+
+    fn draw_hand_and_gui(
+        &self,
+        enc: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        hand: Option<&(GpuMesh, HandTex)>,
+        fire: Option<(&wgpu::Buffer, &[Quad])>,
+        gui_buf: Option<&wgpu::Buffer>,
+        overlay: &[Quad],
+    ) {
+        // Vanilla draws the hand on a cleared depth buffer, then the GUI.
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        if let Some((m, tex)) = hand {
+            pass.set_bind_group(0, self.hand_group(*tex), &[]);
+            pass.set_pipeline(&self.hand_pipe);
+            draw_mesh(&mut pass, m);
+        }
+        if let Some((buf, quads)) = fire {
+            self.draw_gui(&mut pass, buf, quads);
+        }
+        if let Some(buf) = gui_buf {
+            self.draw_gui(&mut pass, buf, overlay);
+        }
     }
 
     fn draw_gui<'a>(

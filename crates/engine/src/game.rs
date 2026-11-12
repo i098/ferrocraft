@@ -1186,7 +1186,10 @@ mod tests {
             max_players: 20,
             reduced_debug_info: false,
         });
-        assert_eq!((g.death_message.as_deref(), g.killer_id, g.score), (None, -1, 0));
+        assert_eq!(
+            (g.death_message.as_deref(), g.killer_id, g.score),
+            (None, -1, 0)
+        );
     }
 
     #[test]

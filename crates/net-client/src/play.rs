@@ -92,14 +92,6 @@ fn handle(
     })
 }
 
-/// The client brand: the mod host passes its stand-in's `getClientModName()` in the environment.
-fn client_brand() -> String {
-    std::env::var("FERROCRAFT_CLIENT_BRAND")
-        .ok()
-        .filter(|b| !b.is_empty())
-        .unwrap_or_else(|| "vanilla".into())
-}
-
 /// `NetHandlerPlayClient.handleJoinGame`: `MC|Brand` with the brand as a length-prefixed string.
 fn brand_message(brand: &str) -> sb::PluginMessage {
     let mut data = Vec::new();
@@ -111,7 +103,7 @@ fn brand_message(brand: &str) -> sb::PluginMessage {
 }
 
 fn send_brand(writer: &Mutex<Writer>) -> io::Result<()> {
-    send(writer, sb::Packet::from(brand_message(&client_brand())))
+    send(writer, sb::Packet::from(brand_message("vanilla")))
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {

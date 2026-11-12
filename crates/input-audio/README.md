@@ -8,7 +8,7 @@ Keyboard, mouse and chat input per vanilla 1.8.9.
   `player_list_held()`), mouse look (`take_look_delta()`) and discrete `Action`s
   (`take_actions()`): hotbar 1-9, wheel, E, Q / Ctrl+Q, Esc, F1, F2, F3 and F3 combos, F4, F5, F11,
   left/middle/right click.
-- Sprint is Ctrl held or a double tap of forward (350 ms), cancelled by sneak or releasing forward.
+- Sprint is Ctrl held or a double tap of forward (350 ms), cancelled by sneak, item use (bow, food, sword block) or releasing forward.
 - `KeyBindings` holds the vanilla defaults and reads `key_key.*` lines of `options.txt`
   (LWJGL codes).
 - `apply_cursor_grab` locks the cursor (Locked, then Confined). The engine must call

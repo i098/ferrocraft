@@ -22,8 +22,9 @@ trap 'rm -rf "$game"' EXIT
 cd "$game"
 boot() {
     # FML refuses a Minecraft jar whose classes are not signed, and the generated jar is a patched copy: ignore that.
-    # OneConfig's bootstrap fetches its loader, and Cloudflare drops this JDK's TLS 1.3 offer: pin TLS 1.2.
-    "$J/java" -Dferro.test="$1" -Dfml.ignoreInvalidMinecraftCertificates=true -Djdk.tls.client.protocols=TLSv1.2 -cp "$cp" net.minecraft.launchwrapper.Launch \
+    # The mod boot needs network on a cold cache: OneConfig's bootstrap downloads its loader, and Cloudflare drops
+    # this JDK's TLS 1.3 offer, so TLS 1.2 is pinned.
+    "$J/java" -Dferro.test="$1" -Dferro.mods=oneconfig,evergreenhud,polyfrostkeystrokes,polysprint,vanillahud -Dfml.ignoreInvalidMinecraftCertificates=true -Djdk.tls.client.protocols=TLSv1.2 -cp "$cp" net.minecraft.launchwrapper.Launch \
         --tweakClass net.minecraftforge.fml.common.launcher.FMLTweaker \
         --tweakClass net.ferrocraft.tweak.HostTweaker \
         --gameDir "$game" --assetsDir "$L/minecraft-1.8.9.jar" --version 1.8.9 --accessToken x

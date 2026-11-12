@@ -27,6 +27,11 @@ public final class ModBootTest {
                 if (!state.equalsIgnoreCase("AVAILABLE")) throw new AssertionError(id + " is " + state + ", not AVAILABLE");
                 if (!id.equals("mcp") && !id.equals("FML") && !id.equals("Forge")) mods.add(id);
             }
+            for (String want : System.getProperty("ferro.mods", "").split(",")) {
+                if (!want.isEmpty() && mods.stream().noneMatch(want::equalsIgnoreCase)) {
+                    throw new AssertionError("expected mod " + want + " is not loaded, loaded: " + mods);
+                }
+            }
             if (mods.isEmpty()) throw new AssertionError("no mod from GAMEDIR/mods was loaded");
             System.out.println("ModBootTest passed: " + mods);
             code = 0;

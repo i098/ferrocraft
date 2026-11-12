@@ -51,6 +51,14 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             food: p.food.0,
             saturation: p.saturation,
         },
+        P::CombatEvent(p) => NetEvent::Combat(p.event.clone()),
+        P::EntityMetadata(p) => NetEvent::PlayerScore {
+            entity_id: p.entity_id.0,
+            score: match p.metadata.0.iter().find(|e| e.index == 18)?.value {
+                ferrocraft_protocol::codec::MetaValue::Int(s) => s,
+                _ => return None,
+            },
+        },
         P::EntityEffect(p) => NetEvent::EntityEffect {
             entity_id: p.entity_id.0,
             effect: world::effects::Effect {
@@ -284,6 +292,20 @@ mod tests {
     /// Encodes then decodes, so each test goes through the wire format.
     fn wire(p: impl Into<cb::Packet>) -> Vec<NetEvent> {
         events(&cb::Packet::decode(&p.into().encode()).unwrap())
+    }
+
+    #[test]
+    fn combat_event_and_player_score_map() {
+        use ferrocraft_protocol::play::{clientbound, CombatEventKind};
+        let event = CombatEventKind::EntityDead {
+            player_id: VarInt(3),
+            entity_id: 9,
+            message: "{\"text\":\"x was slain by y\"}".into(),
+        };
+        let got = wire(clientbound::CombatEvent {
+            event: event.clone(),
+        });
+        assert_eq!(got, vec![NetEvent::Combat(event)]);
     }
 
     /// Vanilla 1.8.9 writes byte 1 when the effect shows particles (a plain `/effect` sends 1).

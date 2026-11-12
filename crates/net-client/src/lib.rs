@@ -25,6 +25,7 @@ use std::time::Duration;
 pub use auth::Auth;
 pub use chat::{formatted_text, plain_text, styled, Styled};
 pub use events::{PlayerInfo, PlayerListEvent};
+pub use ferrocraft_protocol::play::CombatEventKind;
 use screens::DEFAULT_PORT;
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
@@ -87,6 +88,13 @@ pub enum NetEvent {
     Camera(i32),
     /// Spawn, move, metadata or destroy of a remote entity.
     Entity(world::entities::EntityEvent),
+    /// S42 CombatEvent. Kind `EntityDead` carries the death message of the receiving player.
+    Combat(CombatEventKind),
+    /// Metadata index 18 of a player: `EntityPlayer.getScore`.
+    PlayerScore {
+        entity_id: i32,
+        score: i32,
+    },
     /// S06 UpdateHealth.
     Health {
         health: f32,

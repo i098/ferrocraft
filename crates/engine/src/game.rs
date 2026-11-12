@@ -2,7 +2,7 @@
 
 use crate::swing::Swing;
 use crate::weather::Weather;
-use ferrocraft_net_client::{NetEvent, Styled};
+use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled};
 use std::collections::HashMap;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
@@ -131,6 +131,12 @@ pub struct Game {
     /// Blocks the player broke locally since the app last drained this.
     pub broken: Vec<([i32; 3], u16)>,
     pub xp_total: i32,
+    /// `EntityPlayer.getScore` (metadata 18) for the death screen.
+    pub score: i32,
+    /// `S42` kind 2 message for the local player, formatted; shown by the death screen.
+    pub death_message: Option<String>,
+    /// Entity id of the killer from the same packet; -1 when none.
+    pub killer_id: i32,
     pub hardcore: bool,
     pub difficulty: u8,
     pub health: f32,
@@ -198,6 +204,9 @@ impl Game {
             inv: Inventory::default(),
             broken: Vec::new(),
             xp_total: 0,
+            score: 0,
+            death_message: None,
+            killer_id: -1,
             hardcore: false,
             difficulty: 1,
             health: 20.0,
@@ -281,6 +290,18 @@ impl Game {
                 self.health_seen = true;
                 (self.health, self.food, self.saturation) = (health, food, saturation);
                 return Ok((was_alive && health <= 0.0).then_some(Effect::Died));
+            }
+            NetEvent::PlayerScore { entity_id, score } if entity_id == self.entity_id => {
+                self.score = score;
+            }
+            NetEvent::Combat(CombatEventKind::EntityDead {
+                player_id,
+                entity_id,
+                message,
+            }) if player_id.0 == self.entity_id => {
+                self.death_message = Some(formatted_text(&styled(&message)));
+                self.killer_id = entity_id;
+                return Ok(Some(Effect::Died));
             }
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
@@ -390,6 +411,7 @@ impl Game {
                 self.vehicle = None;
                 self.camera = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
+                (self.death_message, self.killer_id) = (None, -1);
                 self.effects.clear();
                 self.speed = world::effects::Speed::default();
                 self.potion_color = 0;
@@ -1112,6 +1134,35 @@ mod tests {
         assert!(g.fly_toggle(false));
         assert_eq!(g.abilities, 6);
         assert!(!g.fly_toggle(false));
+    }
+
+    #[test]
+    fn combat_death_keeps_message_killer_and_score_until_respawn() {
+        use ferrocraft_protocol::codec::VarInt;
+        let mut g = Game::new();
+        g.entity_id = 7;
+        g.apply(NetEvent::PlayerScore {
+            entity_id: 7,
+            score: 42,
+        });
+        let dead = |player| {
+            NetEvent::Combat(CombatEventKind::EntityDead {
+                player_id: VarInt(player),
+                entity_id: 9,
+                message: "{\"text\":\"Steve was slain by Bob\"}".into(),
+            })
+        };
+        assert_eq!(g.apply(dead(8)), None, "another player's death is ignored");
+        assert_eq!(g.apply(dead(7)), Some(Effect::Died));
+        assert_eq!(g.score, 42);
+        assert_eq!(g.killer_id, 9);
+        assert!(g
+            .death_message
+            .as_deref()
+            .unwrap()
+            .contains("Steve was slain by Bob"));
+        g.apply(NetEvent::Respawn);
+        assert_eq!(g.death_message, None);
     }
 
     #[test]

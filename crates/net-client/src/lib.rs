@@ -44,7 +44,7 @@ pub enum NetEvent {
         /// `reducedDebugInfo` game rule: F3 hides coordinates.
         reduced_debug_info: bool,
     },
-    /// S3F custom payload: the channel and its raw bytes (`MC|BOpen` opens the held book).
+    /// S3F custom payload: the channel and its raw bytes; the engine does not act on it yet.
     PluginMessage {
         channel: String,
         data: Vec<u8>,

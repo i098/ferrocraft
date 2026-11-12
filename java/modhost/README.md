@@ -29,11 +29,15 @@ Set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_G
 
 ## Test
 
-After `build.sh`, run `java/modhost/test.sh` with the same `FERRO_JAVA_HOME` and `FERRO_LIB`; the folder also holds the Minecraft 1.8.9 jar and the other Java 8 libraries. It boots FML with the host tweakers and runs `test/` classes in place of the host entry point. `PlayerTest` runs the stand-in player through a double-tap of jump with `allowFlying`, which must toggle flight without a packet send or an exception.
+After `build.sh`, run `java/modhost/test.sh` with the same `FERRO_JAVA_HOME` and `FERRO_LIB`; the folder also holds the Minecraft 1.8.9 jar and the other Java 8 libraries, and needs `lzma-0.0.1.jar` and `trove4j-3.0.3.jar` there too. It boots FML with the host tweakers and runs `test/` classes in place of the host entry point. `PlayerTest` runs the stand-in player through a double-tap of jump with `allowFlying`, which must toggle flight without a packet send or an exception.
+
+Set `FERRO_MODS` to a folder of mod jars to add the mod boot test, `ModBootTest`: the same FML boot, with FML loading those jars out of `GAMEDIR/mods`. It requires the mods `oneconfig`, `evergreenhud`, `polyfrostkeystrokes`, `polysprint` and `vanillahud` (set in `test.sh` as `ferro.mods`) to be loaded and in state `AVAILABLE`, which FML sets after the mod's init and complete events ran. It needs network on a cold cache, because the OneConfig bootstrap downloads its loader. It prints the jar the Minecraft classes load from. `java/modhost-accept/run.sh <cache>` downloads the acceptance mods into `<cache>/mods`.
+
+Set `FERRO_PREPARE_OUT` to the folder `java/modhost-prepare/run.sh` wrote, and both boots run on `ferro-mc-1.8.9.jar` and `ferro-forge.jar` instead of the player's client and Forge jars. The generated Minecraft jar is unsigned, so the test passes `-Dfml.ignoreInvalidMinecraftCertificates=true`.
 
 ## Limits
 
-- The Minecraft classes are the vanilla 1.8.9 classes from the player's jar, patched at load time. The generated stand-in jar from `ferro-prepare` is not built yet.
+- The Minecraft classes are the vanilla 1.8.9 classes from the player's jar, patched at load time. `java/modhost-prepare` makes the same patched jar once, so FML then patches nothing; the stand-in bodies are not written yet.
 - The stand-in player, world and options are mirrors of Rust state. Only what the HUD mods read is filled in.
 - Mods that draw with GL calls other than rectangles, gradients, text, images, SVG files and clip rectangles are not forwarded yet.
 - Mod screens are drawn only where the mod HUD is drawn (in a world); the window and sound handler parts of `displayGuiScreen` are skipped.

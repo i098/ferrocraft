@@ -596,13 +596,21 @@ fn burning_entity_and_first_person_fire() {
 fn hurt_entity_flashes_red() {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
     let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
     let cam = Camera {
-        pos: [0.0, 65.0, -4.0],
+        pos: [8.5, 67.6, -2.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        fov_deg: 70.0,
         ..Camera::default()
     };
     let mut entity = EntityDraw {
         class: Class::Player { slim: false },
-        pos: [0.0, 64.0, 0.0],
+        pos: [8.5, 66.0, 2.0],
         yaw: 180.0,
         head_yaw: 180.0,
         pitch: 0.0,
@@ -632,6 +640,8 @@ fn hurt_entity_flashes_red() {
         view: [0.0; 2],
         line: None,
     };
+    // Chunk light is known after the first frame, so the entity is lit only from the second.
+    r.render_to_rgba(&cam, &[]);
     r.set_entities(&[entity.clone()]);
     let before = r.render_to_rgba(&cam, &[]).2;
     entity.hurt = true;

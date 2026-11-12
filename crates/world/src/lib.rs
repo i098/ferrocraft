@@ -759,6 +759,17 @@ mod tests {
     }
 
     #[test]
+    fn sprint_then_block_walk() {
+        let sprint = input(1.0, 0.0, false, true);
+        let block = Input {
+            forward: 1.0,
+            using_item: true,
+            ..IDLE
+        };
+        Scenario::new(vec![(3, IDLE), (12, sprint), (20, block)]).check("sprint then block");
+    }
+
+    #[test]
     fn sneak_stops_at_a_block_edge() {
         let sneak = Input {
             forward: 1.0,

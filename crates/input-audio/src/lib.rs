@@ -441,12 +441,18 @@ impl InputState {
 
     /// Call once per game tick: `EntityPlayerSP.onLivingUpdate` sprint latch.
     /// `can_sprint` is `foodLevel > 6 || allowFlying`.
-    pub fn movement(&mut self, on_ground: bool, collided: bool, can_sprint: bool) -> world::Input {
+    pub fn movement(
+        &mut self,
+        on_ground: bool,
+        collided: bool,
+        can_sprint: bool,
+        using_item: bool,
+    ) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
         let forward = axis(self.is_held(Bind::Forward), self.is_held(Bind::Back));
         self.host_sneak = None;
         let sneak = self.sneaking();
-        let full = forward > 0.0 && !sneak;
+        let full = forward > 0.0 && !sneak && !using_item;
         let sprint_key = self.is_held(Bind::Sprint);
         self.sprint_timer = self.sprint_timer.saturating_sub(1);
         self.update_sprint(on_ground, can_sprint && full && !self.blind, sprint_key);
@@ -562,7 +568,7 @@ mod tests {
     fn walk(s: &mut InputState, ticks: usize) -> bool {
         let mut sprint = false;
         for _ in 0..ticks {
-            sprint = s.movement(true, false, true).sprint;
+            sprint = s.movement(true, false, true, false).sprint;
         }
         sprint
     }
@@ -614,16 +620,16 @@ mod tests {
         let mut s = InputState::default();
         start(&mut s);
         assert!(walk(&mut s, 3));
-        assert!(!s.movement(true, true, true).sprint);
+        assert!(!s.movement(true, true, true, false).sprint);
 
         let mut s = InputState::default();
         start(&mut s);
-        assert!(!s.movement(true, false, false).sprint);
+        assert!(!s.movement(true, false, false, false).sprint);
 
         let mut s = InputState::default();
         start(&mut s);
         press(&mut s, KeyCode::ShiftLeft);
-        assert!(!s.movement(true, false, true).sprint);
+        assert!(!s.movement(true, false, true, false).sprint);
         release(&mut s, KeyCode::ShiftLeft);
         assert!(!walk(&mut s, 2));
 
@@ -640,18 +646,18 @@ mod tests {
         press(&mut s, KeyCode::KeyA);
         press(&mut s, KeyCode::Space);
         press(&mut s, KeyCode::ControlLeft);
-        let i = s.movement(true, false, true);
+        let i = s.movement(true, false, true, false);
         assert_eq!(
             (i.forward, i.strafe, i.jump, i.sprint),
             (1.0, 1.0, true, true)
         );
         press(&mut s, KeyCode::KeyS);
         press(&mut s, KeyCode::KeyD);
-        let i = s.movement(true, false, true);
+        let i = s.movement(true, false, true, false);
         assert_eq!((i.forward, i.strafe), (0.0, 0.0));
         s.on_key(KeyCode::KeyW, false, None);
         s.on_key(KeyCode::Space, false, None);
-        let i = s.movement(true, false, true);
+        let i = s.movement(true, false, true, false);
         assert_eq!((i.forward, i.jump), (-1.0, false));
         press(&mut s, KeyCode::ShiftLeft);
         assert!(s.sneaking());
@@ -664,7 +670,7 @@ mod tests {
         press(&mut s, KeyCode::KeyT);
         assert_eq!(s.chat_input(), Some(""));
         assert!(!s.wants_cursor_grab());
-        assert_eq!(s.movement(true, false, true).forward, 0.0);
+        assert_eq!(s.movement(true, false, true, false).forward, 0.0);
         typ(&mut s, KeyCode::KeyH, "h");
         typ(&mut s, KeyCode::KeyI, "i");
         typ(&mut s, KeyCode::KeyT, "t");
@@ -729,7 +735,7 @@ mod tests {
     #[test]
     fn double_tap_forward_latches_sprint() {
         let mut s = InputState::default();
-        let tick = |s: &mut InputState| s.movement(true, false, true).sprint;
+        let tick = |s: &mut InputState| s.movement(true, false, true, false).sprint;
         press(&mut s, KeyCode::KeyW);
         assert!(!tick(&mut s));
         s.on_key(KeyCode::KeyW, false, None);
@@ -745,7 +751,7 @@ mod tests {
         assert!(tick(&mut s));
         s.on_key(KeyCode::ControlLeft, false, None);
         assert!(tick(&mut s));
-        assert!(!s.movement(true, true, true).sprint);
+        assert!(!s.movement(true, true, true, false).sprint);
         s.on_key(KeyCode::KeyW, false, None);
         for _ in 0..10 {
             tick(&mut s);
@@ -758,6 +764,17 @@ mod tests {
         }
         press(&mut s, KeyCode::KeyW);
         assert!(!tick(&mut s));
+    }
+
+    #[test]
+    fn using_an_item_stops_and_blocks_sprint() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(s.movement(true, false, true, false).sprint);
+        assert!(!s.movement(true, false, true, true).sprint);
+        assert!(!s.movement(true, false, true, true).sprint);
+        assert!(s.movement(true, false, true, false).sprint);
     }
 
     #[test]
@@ -804,7 +821,7 @@ mod tests {
         let mut s = InputState::default();
         press(&mut s, KeyCode::KeyW);
         s.set_focused(false);
-        assert_eq!(s.movement(true, false, true).forward, 0.0);
+        assert_eq!(s.movement(true, false, true, false).forward, 0.0);
         assert_eq!(s.take_actions(), vec![Action::Pause]);
         s.set_focused(true);
         assert!(!s.wants_cursor_grab());

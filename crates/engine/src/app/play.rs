@@ -183,8 +183,12 @@ impl App {
                     .player
                     .as_ref()
                     .map_or_else(world::Input::default, |p| {
-                        s.input
-                            .movement(p.on_ground, p.collided_horizontally, s.game.food > 6)
+                        s.input.movement(
+                            p.on_ground,
+                            p.collided_horizontally,
+                            s.game.food > 6,
+                            s.use_ticks > 0,
+                        )
                     })
             };
             match host {

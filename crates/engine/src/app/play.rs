@@ -198,6 +198,12 @@ impl App {
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();
         self.game.tick(input);
+        let rd = self.ui.settings.render_distance as i32;
+        for e in self.game.unload_far(rd) {
+            if let (Effect::Remove(x, z), Some(r)) = (e, &mut self.renderer) {
+                r.remove_chunk(x, z);
+            }
+        }
         self.fall_sounds();
         abilities |= self.game.fly_land();
         if abilities {

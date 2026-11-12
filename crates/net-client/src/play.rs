@@ -2,6 +2,7 @@
 
 use crate::link::{Reader, Writer};
 use crate::{chat, entity, events, send, NetEvent};
+use ferrocraft_protocol::codec::Wire;
 use ferrocraft_protocol::play::{clientbound as cb, serverbound as sb};
 use std::io;
 use std::sync::mpsc::Sender;
@@ -72,6 +73,7 @@ fn handle(
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
+            send_brand(writer)?;
             vec![NetEvent::JoinGame {
                 entity_id: j.entity_id,
                 gamemode: j.gamemode & 7,
@@ -81,9 +83,27 @@ fn handle(
                 reduced_debug_info: j.reduced_debug_info,
             }]
         }
+        cb::Packet::PluginMessage(m) => vec![NetEvent::PluginMessage {
+            channel: m.channel,
+            data: m.data.0,
+        }],
         cb::Packet::Disconnect(d) => vec![NetEvent::Disconnect(chat::plain_text(&d.reason))],
         other => game_events(other, *dimension)?,
     })
+}
+
+/// `NetHandlerPlayClient.handleJoinGame`: `MC|Brand` with the brand as a length-prefixed string.
+fn brand_message(brand: &str) -> sb::PluginMessage {
+    let mut data = Vec::new();
+    brand.to_string().write(&mut data);
+    sb::PluginMessage {
+        channel: "MC|Brand".into(),
+        data: ferrocraft_protocol::codec::Rest(data),
+    }
+}
+
+fn send_brand(writer: &Mutex<Writer>) -> io::Result<()> {
+    send(writer, sb::Packet::from(brand_message("vanilla")))
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
@@ -216,6 +236,57 @@ mod tests {
             // bedrock, dirt, dirt, grass, air
             assert_eq!(col, [7 << 4, 3 << 4, 3 << 4, 2 << 4, 0]);
         }
+    }
+
+    /// The server reads `MC|Brand` = `vanilla` right after it sent `JoinGame`.
+    #[test]
+    fn join_game_makes_the_client_send_vanilla_brand() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let mut reader = Reader::new(client.try_clone().unwrap());
+        let writer = Mutex::new(Writer::new(client));
+        let join = cb::Packet::from(cb::JoinGame {
+            entity_id: 1,
+            gamemode: 0,
+            dimension: 0,
+            difficulty: 1,
+            max_players: 20,
+            level_type: "default".into(),
+            reduced_debug_info: false,
+        });
+        let join = cb::Packet::decode(&join.encode()).unwrap();
+        let events = handle(join, &mut reader, &writer, &mut 0).unwrap();
+        assert!(matches!(events[0], NetEvent::JoinGame { .. }));
+        let mut server_reader = Reader::new(server);
+        let sb::Packet::PluginMessage(m) = server_reader.recv::<sb::Packet>().unwrap() else {
+            panic!("not a plugin message");
+        };
+        assert_eq!(m.channel, "MC|Brand");
+        assert_eq!(m.data.0, [&[7u8][..], b"vanilla"].concat());
+    }
+
+    #[test]
+    fn plugin_message_becomes_event() {
+        let p = cb::Packet::from(cb::PluginMessage {
+            channel: "MC|BOpen".into(),
+            data: ferrocraft_protocol::codec::Rest(vec![]),
+        });
+        let p = cb::Packet::decode(&p.encode()).unwrap();
+        let (a, b) = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let c = std::net::TcpStream::connect(l.local_addr().unwrap()).unwrap();
+            (c, l.accept().unwrap().0)
+        };
+        let mut r = Reader::new(a.try_clone().unwrap());
+        let w = Mutex::new(Writer::new(b));
+        assert_eq!(
+            handle(p, &mut r, &w, &mut 0).unwrap(),
+            vec![NetEvent::PluginMessage {
+                channel: "MC|BOpen".into(),
+                data: vec![]
+            }]
+        );
     }
 
     fn global_entity(kind: i8) -> cb::Packet {

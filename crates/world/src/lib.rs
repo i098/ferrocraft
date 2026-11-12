@@ -54,8 +54,10 @@ pub struct Input {
     pub strafe: f32,
     pub jump: bool,
     pub sprint: bool,
-    /// The sneak key: flying down.
+    /// The sneak key: flying down; walking at 0.3 speed and held at block edges.
     pub sneak: bool,
+    /// `isUsingItem()` while not riding: blocking, eating, drawing a bow. Walks at 0.2 speed.
+    pub using_item: bool,
     /// `PlayerAbilities.flySpeed` while `isFlying`, else `None`.
     pub fly_speed: Option<f32>,
 }
@@ -135,6 +137,8 @@ pub struct Player {
     pub yaw: f32,
     pub on_ground: bool,
     pub sprinting: bool,
+    /// `isSneaking()`, set from the input each tick.
+    pub sneaking: bool,
     pub collided_horizontally: bool,
     pub collided_vertically: bool,
     /// `generic.movementSpeed` value for this tick, sprint modifier included; `None` before the
@@ -166,6 +170,7 @@ impl Player {
             yaw,
             on_ground: false,
             sprinting: false,
+            sneaking: false,
             collided_horizontally: false,
             collided_vertically: false,
             speed_attr: None,
@@ -194,6 +199,7 @@ impl Player {
     /// One game tick: `PlayerEntity.mobTick` for a player that is on land and not flying.
     pub fn tick(&mut self, world: &dyn World, input: Input) {
         self.sprinting = input.sprint;
+        self.sneaking = input.sneak;
         // `EntityPlayerSP.onLivingUpdate`: the vertical flight keys, before `mobTick`.
         if let Some(fly) = input.fly_speed {
             if input.sneak {
@@ -219,12 +225,17 @@ impl Player {
         } else {
             self.jump_ticks = 0;
         }
-        self.move_with_heading(
-            world,
-            input.strafe * 0.98,
-            input.forward * 0.98,
-            input.fly_speed,
-        );
+        // `MovementInputFromOptions` (0.3 while sneaking), then `onLivingUpdate` (0.2 while using an item).
+        let (mut strafe, mut forward) = (input.strafe, input.forward);
+        if input.sneak {
+            strafe *= 0.3_f32;
+            forward *= 0.3_f32;
+        }
+        if input.using_item {
+            strafe *= 0.2_f32;
+            forward *= 0.2_f32;
+        }
+        self.move_with_heading(world, strafe * 0.98, forward * 0.98, input.fly_speed);
 
         self.jump_movement_factor = FLYING_SPEED;
         if self.sprinting {
@@ -382,8 +393,11 @@ impl Player {
     }
 
     /// `Entity.moveEntity`.
-    fn move_entity(&mut self, world: &dyn World, motion: [f64; 3]) {
+    fn move_entity(&mut self, world: &dyn World, mut motion: [f64; 3]) {
         let original = self.bb;
+        if self.on_ground && self.sneaking {
+            motion = self.edge_guard(world, motion);
+        }
         let mut d = motion;
         let boxes = Self::colliding_boxes(world, &original.add_coord(d));
         let mut bb = original;
@@ -406,6 +420,39 @@ impl Player {
         ];
         self.bb = bb;
         self.set_collisions(motion, d);
+    }
+
+    /// The sneak part of `Entity.moveEntity`: step back by 0.05 until a block is under the new spot.
+    fn edge_guard(&self, world: &dyn World, mut m: [f64; 3]) -> [f64; 3] {
+        const STEP: f64 = 0.05;
+        let empty = |x: f64, z: f64| {
+            let b = self.bb.offset(0, x);
+            let b = b.offset(1, -1.0).offset(2, z);
+            // `getCollidingBoundingBoxes` keeps only boxes that overlap `b`; `colliding_boxes` also lists touching ones.
+            !Self::colliding_boxes(world, &b)
+                .iter()
+                .any(|o| (0..3).all(|a| b.max[a] > o.min[a] && b.min[a] < o.max[a]))
+        };
+        let back = |v: f64| {
+            if (-STEP..STEP).contains(&v) {
+                0.0
+            } else if v > 0.0 {
+                v - STEP
+            } else {
+                v + STEP
+            }
+        };
+        while m[0] != 0.0 && empty(m[0], 0.0) {
+            m[0] = back(m[0]);
+        }
+        while m[2] != 0.0 && empty(0.0, m[2]) {
+            m[2] = back(m[2]);
+        }
+        while m[0] != 0.0 && m[2] != 0.0 && empty(m[0], m[2]) {
+            m[0] = back(m[0]);
+            m[2] = back(m[2]);
+        }
+        m
     }
 
     /// Collision flags and stopped velocity after moving `d` of the wanted `motion`.
@@ -497,13 +544,14 @@ mod tests {
             for (n, i) in &self.steps {
                 writeln!(
                     s,
-                    "tick {n} {:?} {:?} {} {} {:?} {}",
+                    "tick {n} {:?} {:?} {} {} {:?} {} {}",
                     i.forward,
                     i.strafe,
                     i.jump as u8,
                     i.sprint as u8,
                     i.fly_speed.unwrap_or(0.0),
-                    i.sneak as u8
+                    i.sneak as u8,
+                    i.using_item as u8
                 )
                 .unwrap();
             }
@@ -564,6 +612,7 @@ mod tests {
             jump,
             sprint,
             sneak: false,
+            using_item: false,
             fly_speed: None,
         }
     }
@@ -574,6 +623,7 @@ mod tests {
         jump: false,
         sprint: false,
         sneak: false,
+        using_item: false,
         fly_speed: None,
     };
 
@@ -626,6 +676,7 @@ mod tests {
             jump,
             sprint,
             sneak,
+            using_item: false,
             fly_speed: Some(0.05),
         };
         let mut s = Scenario::new(vec![
@@ -684,6 +735,45 @@ mod tests {
         let mut s = Scenario::new(vec![(3, IDLE), (30, input(0.0, 0.0, true, false))]);
         s.blocks = vec![((0, 66, 0), Block::Stone)];
         s.check("ceiling");
+    }
+
+    #[test]
+    fn sneak_walk() {
+        let sneak = Input {
+            forward: 1.0,
+            sneak: true,
+            ..IDLE
+        };
+        Scenario::new(vec![(3, IDLE), (40, sneak), (20, IDLE)]).check("sneak walk");
+    }
+
+    #[test]
+    fn sword_block_walk() {
+        let block = Input {
+            forward: 1.0,
+            strafe: 1.0,
+            using_item: true,
+            ..IDLE
+        };
+        Scenario::new(vec![(3, IDLE), (40, block), (20, IDLE)]).check("block walk");
+    }
+
+    #[test]
+    fn sneak_stops_at_a_block_edge() {
+        let sneak = Input {
+            forward: 1.0,
+            sneak: true,
+            ..IDLE
+        };
+        let mut s = Scenario::new(vec![(3, IDLE), (120, sneak), (20, IDLE)]);
+        s.blocks = (-3..=3)
+            .flat_map(|x| {
+                (-3..=3).map(move |z| ((x, 63, z), if z >= 3 { Block::Air } else { Block::Stone }))
+            })
+            .collect();
+        s.check("sneak edge");
+        let last = s.simulate().pop().unwrap();
+        assert!(last.on_ground, "sneaking player fell off the ledge");
     }
 
     #[test]

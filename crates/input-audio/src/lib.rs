@@ -461,6 +461,7 @@ impl InputState {
             jump: self.is_held(Bind::Jump),
             sprint: self.sprinting,
             sneak,
+            using_item: false,
             fly_speed: None,
         }
     }
@@ -479,6 +480,7 @@ impl InputState {
             jump: self.is_held(Bind::Jump),
             sprint,
             sneak,
+            using_item: false,
             fly_speed: None,
         }
     }

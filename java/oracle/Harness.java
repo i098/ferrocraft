@@ -30,7 +30,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   floor <block>                 every block with y <= 63 becomes <block>
  *   block <x> <y> <z> <block>     extra block; must come before "start"
  *   start <x> <y> <z> <yaw>           spawn the player and build the world
- *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak>
+ *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak> <using item>
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
@@ -175,6 +175,17 @@ public class Harness {
                     boolean sprint = t[5].equals("1");
                     float fly = Float.parseFloat(t[6]);
                     boolean sneak = t[7].equals("1");
+                    boolean using = t[8].equals("1");
+                    // MovementInputFromOptions (sneak 0.3), then EntityPlayerSP.onLivingUpdate (using item 0.2)
+                    if (sneak) {
+                        fwd *= 0.3f;
+                        strafe *= 0.3f;
+                    }
+                    if (using) {
+                        fwd *= 0.2f;
+                        strafe *= 0.2f;
+                    }
+                    player.setSneaking(sneak);
                     player.abilities.flying = fly > 0f;
                     if (fly > 0f) {
                         player.abilities.setFlySpeed(fly);

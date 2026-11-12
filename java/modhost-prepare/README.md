@@ -1,0 +1,24 @@
+# java/modhost-prepare
+
+Owner: fc-modhost-pvp
+
+Step 1 of `ferro-prepare` (see `docs/mod-host.md`): it makes the two jars the mod host boots on, from files the player already has. Nothing Mojang or Forge made is committed.
+
+```sh
+FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with forge.jar, lw.jar, guava, asm-all, lzma, log4j> \
+  java/modhost-prepare/run.sh <client-1.8.9.jar> <out-dir>
+```
+
+It writes to `out-dir`:
+
+- `ferro-mc-1.8.9.jar` - the player's client jar with Forge's binpatches applied, so FML patches nothing at boot. Notch names stay. `META-INF/` is dropped, because the Mojang signature of every patched class would fail.
+- `ferro-forge.jar` - the Forge universal jar without `binpatches.pack.lzma`, so FML logs "The binary patch set is missing" and skips its patch step.
+
+The patch step is Forge's own `ClassPatchManager`, called with `Side.CLIENT`, the same code FML runs at boot. The output is the next input of the stand-in jar work: the class shapes are already the patched ones, so only the bodies change later.
+
+`java/modhost/test.sh` with `FERRO_PREPARE_OUT=<out-dir>` boots the mods on these two jars. The Minecraft classes then load from `ferro-mc-1.8.9.jar`, which `ModBootTest` prints.
+
+## Limits
+
+- The bodies are the real vanilla ones. The stand-in bodies (T0 to T3) are not written yet.
+- `hook-index.json` is not written yet.

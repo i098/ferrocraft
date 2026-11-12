@@ -30,7 +30,7 @@ boot() {
         --gameDir "$game" --assetsDir "$L/minecraft-1.8.9.jar" --version 1.8.9 --accessToken x
 }
 boot PlayerTest
-# Optional: FERRO_MODS is a folder with the public mod jars (OneConfig bootstrap, EvergreenHUD, Keystrokes, PolySprint).
+# Optional: FERRO_MODS is a folder with the public mod jars (OneConfig bootstrap, EvergreenHUD, Keystrokes, PolySprint, VanillaHUD).
 if [ -n "${FERRO_MODS:-}" ]; then
     mkdir -p "$game/mods" && cp "$FERRO_MODS"/*.jar "$game/mods/"
     boot ModBootTest

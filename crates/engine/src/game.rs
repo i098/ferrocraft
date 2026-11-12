@@ -606,30 +606,6 @@ impl Game {
         }
     }
 
-    /// `ChunkProviderClient` unloading: drop every chunk more than `render_distance + 1` chunks
-    /// (Chebyshev) from the player. The player's own chunk is at distance 0, so it stays.
-    pub fn unload_far(&mut self, render_distance: i32) -> Vec<Effect> {
-        let Some(p) = &self.player else {
-            return Vec::new();
-        };
-        let (cx, cz) = (
-            (p.pos[0].floor() as i32) >> 4,
-            (p.pos[2].floor() as i32) >> 4,
-        );
-        let keep = render_distance + 1;
-        let far: Vec<_> = self
-            .store
-            .positions()
-            .filter(|&(x, z)| (x - cx).abs().max((z - cz).abs()) > keep)
-            .collect();
-        far.into_iter()
-            .map(|(x, z)| {
-                self.store.remove(x, z);
-                Effect::Remove(x, z)
-            })
-            .collect()
-    }
-
     fn set_gamemode(&mut self, mode: u8) {
         self.gamemode = mode;
         self.creative = mode == CREATIVE;
@@ -806,32 +782,6 @@ mod tests {
         sneak: false,
         fly_speed: None,
     };
-
-    #[test]
-    fn walking_keeps_only_the_render_window_loaded() {
-        let mut g = Game::new();
-        g.player = Some(Player::new([8.0, 64.0, 8.0], 0.0));
-        for x in -4..=4 {
-            for z in -4..=4 {
-                g.store.insert(Chunk::new(x, z));
-            }
-        }
-        // Distance 0 keeps the 3x3 around the player chunk, distance 1 the 5x5.
-        assert_eq!(g.unload_far(0).len(), 81 - 9);
-        assert_eq!(g.store.len(), 9);
-        // Walk 10 chunks east, loading a 3x3 window each step: the count stays at the window.
-        for step in 1..=10 {
-            g.player.as_mut().unwrap().pos[0] = f64::from(step * 16) + 8.0;
-            for x in step - 1..=step + 1 {
-                for z in -1..=1 {
-                    g.store.insert(Chunk::new(x, z));
-                }
-            }
-            g.unload_far(0);
-            assert_eq!(g.store.len(), 9);
-        }
-        assert!(g.store.get(10, 0).is_some() && g.store.get(8, 0).is_none());
-    }
 
     #[test]
     fn lightning_event_flashes_the_sky_until_the_bolt_expires() {

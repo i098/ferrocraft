@@ -67,7 +67,14 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     if (t.a < 0.1) {
         discard;
     }
-    var rgb = t.rgb * i.color.rgb * lightmap(i.light.x, i.light.y);
+    // Entities flashing red carry +2 on the block light (`entity::HURT_FLAG`).
+    let hurt = i.light.y > 1.5;
+    let block = select(i.light.y, i.light.y - 2.0, hurt);
+    var rgb = t.rgb * i.color.rgb * lightmap(i.light.x, block);
+    if (hurt) {
+        // `setBrightness`: GL_INTERPOLATE of the red constant over the lit texture by 0.3.
+        rgb = mix(rgb, vec3<f32>(1.0, 0.0, 0.0), 0.3);
+    }
     let d = length(i.world - g.eye.xyz);
     var fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     if (g.fog.x < 0.0) {

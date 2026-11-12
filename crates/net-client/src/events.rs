@@ -36,11 +36,28 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
     if let cb::Packet::PlayerListItem(p) = packet {
         return player_list(&p.action);
     }
-    window_event(packet)
+    combat_event(packet)
+        .or_else(|| window_event(packet))
         .or_else(|| score_event(packet))
         .or_else(|| world_event(packet))
         .into_iter()
         .collect()
+}
+
+/// S42 CombatEvent and the player score in entity metadata.
+fn combat_event(packet: &cb::Packet) -> Option<NetEvent> {
+    use cb::Packet as P;
+    Some(match packet {
+        P::CombatEvent(p) => NetEvent::Combat(p.event.clone()),
+        P::EntityMetadata(p) => NetEvent::PlayerScore {
+            entity_id: p.entity_id.0,
+            score: match p.metadata.0.iter().find(|e| e.index == 18)?.value {
+                ferrocraft_protocol::codec::MetaValue::Int(s) => s,
+                _ => return None,
+            },
+        },
+        _ => return None,
+    })
 }
 
 fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
@@ -284,6 +301,20 @@ mod tests {
     /// Encodes then decodes, so each test goes through the wire format.
     fn wire(p: impl Into<cb::Packet>) -> Vec<NetEvent> {
         events(&cb::Packet::decode(&p.into().encode()).unwrap())
+    }
+
+    #[test]
+    fn combat_event_and_player_score_map() {
+        use ferrocraft_protocol::play::{clientbound, CombatEventKind};
+        let event = CombatEventKind::EntityDead {
+            player_id: VarInt(3),
+            entity_id: 9,
+            message: "{\"text\":\"x was slain by y\"}".into(),
+        };
+        let got = wire(clientbound::CombatEvent {
+            event: event.clone(),
+        });
+        assert_eq!(got, vec![NetEvent::Combat(event)]);
     }
 
     /// Vanilla 1.8.9 writes byte 1 when the effect shows particles (a plain `/effect` sends 1).

@@ -497,9 +497,10 @@ impl App {
                 self.container = None;
                 self.game.inv.close_window();
                 let m = metrics!(self);
-                let q = self
-                    .ui
-                    .open(&m, boxed(Death::new(None, self.game.xp_total)));
+                let q = self.ui.open(
+                    &m,
+                    boxed(Death::new(self.game.death_message.clone(), self.game.score)),
+                );
                 self.run_effects(q);
             }
         }

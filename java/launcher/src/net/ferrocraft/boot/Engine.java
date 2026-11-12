@@ -23,7 +23,12 @@ public final class Engine {
             cmd.add(clientJar);
         }
         System.out.println("ferrocraft-boot: starting " + engine);
-        return new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
+        // Without a mod host the engine sends the vanilla brand; a host sets this property.
+        if (System.getProperty("ferrocraft.modhost") != null) {
+            pb.environment().put("FERROCRAFT_CLIENT_BRAND", net.minecraft.client.ClientBrandRetriever.getClientModName());
+        }
+        return pb.start().waitFor();
     }
 
     /** The classpath jar that holds the vanilla font: the engine reads textures and text from it, wherever the launcher keeps it. */

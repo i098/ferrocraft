@@ -814,6 +814,7 @@ mod tests {
         jump: false,
         sprint: false,
         sneak: false,
+        using_item: false,
         fly_speed: None,
     };
 

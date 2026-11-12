@@ -183,8 +183,12 @@ impl App {
                     .player
                     .as_ref()
                     .map_or_else(world::Input::default, |p| {
-                        s.input
-                            .movement(p.on_ground, p.collided_horizontally, s.game.food > 6)
+                        s.input.movement(
+                            p.on_ground,
+                            p.collided_horizontally,
+                            s.game.food > 6,
+                            s.use_ticks > 0,
+                        )
                     })
             };
             match host {
@@ -194,6 +198,10 @@ impl App {
         } else {
             self.input.set_host_sneak(host.map(|h| h.sneaking));
             world::Input::default()
+        };
+        let input = world::Input {
+            using_item: self.use_ticks > 0,
+            ..input
         };
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();

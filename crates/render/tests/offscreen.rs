@@ -590,6 +590,69 @@ fn burning_entity_and_first_person_fire() {
     }
 }
 
+/// A hurt entity mixes 30% red over its lit texture (`RenderLivingBase.setBrightness`).
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn hurt_entity_flashes_red() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, -4.0],
+        ..Camera::default()
+    };
+    let mut entity = EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [0.0, 64.0, 0.0],
+        yaw: 180.0,
+        head_yaw: 180.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        size: (0.6, 1.8),
+        held: 0,
+        armor: [0; 4],
+        armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
+        name: None,
+        skin: None,
+        burning: false,
+        eye_height: 1.62,
+        always_name: false,
+        pointed: false,
+        ridden: false,
+        child: false,
+        using: None,
+        view: [0.0; 2],
+        line: None,
+    };
+    r.set_entities(&[entity.clone()]);
+    let before = r.render_to_rgba(&cam, &[]).2;
+    entity.hurt = true;
+    r.set_entities(&[entity]);
+    let after = r.render_to_rgba(&cam, &[]).2;
+    let red_sum = |img: &[u8]| {
+        img.chunks(4)
+            .map(|p| i64::from(p[0]) - i64::from(p[1]))
+            .sum::<i64>()
+    };
+    assert!(
+        red_sum(&after) > red_sum(&before),
+        "hurt entity turns redder"
+    );
+    if let Some(dir) = std::env::var_os("FIGHT_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("before.png"), 400, 300, &before).unwrap();
+        encode_png(&dir.join("after.png"), 400, 300, &after).unwrap();
+    }
+}
+
 /// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
 fn leather_assets(overlay: bool) -> std::path::PathBuf {
     let dir =

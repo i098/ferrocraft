@@ -690,11 +690,24 @@ pub fn build(
         } else {
             light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
         };
+        let level = [
+            level[0],
+            level[1] + if hurt_flash(d) { HURT_FLAG } else { 0.0 },
+        ];
         for v in &mut out.vertices[start..] {
             v.light = level;
         }
     }
     out
+}
+
+/// Added to the block light of every vertex of a flashing entity; `fs_world` strips it and mixes
+/// in `HURT_RED` (`RenderLivingBase.setBrightness`: `(1, 0, 0, 0.3)` interpolated over the lit texture).
+pub const HURT_FLAG: f32 = 2.0;
+
+/// `RenderLivingBase.setBrightness` runs for `hurtTime > 0 || deathTime > 0`.
+fn hurt_flash(d: &EntityDraw) -> bool {
+    d.hurt || d.death_time > 0.0
 }
 
 /// Model-space to world-space transform of one entity: yaw, death tilt, sneak drop and bob.
@@ -790,9 +803,6 @@ fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
     } else {
         (Skin::White, fallback_tint(m.skin))
     };
-    if d.hurt || d.death_time > 0.0 {
-        return (skin, [tint[0], tint[1] * 0.45, tint[2] * 0.45]);
-    }
     (skin, tint)
 }
 

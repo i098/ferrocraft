@@ -442,7 +442,11 @@ impl Entity {
 
     fn set_status(&mut self, status: i8) {
         match status {
-            2 => self.hurt_time = 10,
+            // `handleStatusUpdate(2)`: the hit also kicks the limb swing to 1.5.
+            2 => {
+                self.limb_swing_amount = 1.5;
+                self.hurt_time = 10;
+            }
             3 if self.death_time == 0 => {
                 self.hurt_time = 10;
                 self.death_time = 1;
@@ -1067,6 +1071,9 @@ mod tests {
             .filter(|f| matches!(f, Fx::Hit { magic: false, .. }))
             .count();
         assert_eq!(hits, 3);
+        es.apply(EntityEvent::Status { id: 3, status: 2 });
+        let e = es.get(3).unwrap();
+        assert_eq!((e.hurt_time, e.limb_swing_amount), (10, 1.5));
         es.apply(EntityEvent::Status { id: 3, status: 3 });
         for _ in 0..DEATH_TICKS {
             es.tick();

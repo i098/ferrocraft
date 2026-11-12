@@ -563,7 +563,7 @@ impl App {
             swing: self.game.swing.progress(f),
             age: self.game.ticks as f32 + f,
             sneaking: self.input.sneaking(),
-            hurt: false,
+            hurt: self.game.hurt_timer > 0 || self.game.health <= 0.0,
             death_time: 0.0,
             invisible: self.game.effects.has(Fx::INVISIBILITY),
             burning: self.game.burning(),

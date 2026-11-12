@@ -286,6 +286,7 @@ impl Game {
             } => {
                 self.entity_id = entity_id;
                 self.health_seen = false;
+                (self.death_message, self.killer_id, self.score) = (None, -1, 0);
                 self.vehicle = None;
                 self.camera = None;
                 self.hardcore = hardcore;
@@ -422,7 +423,7 @@ impl Game {
                 self.vehicle = None;
                 self.camera = None;
                 (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
-                (self.death_message, self.killer_id) = (None, -1);
+                (self.death_message, self.killer_id, self.score) = (None, -1, 0);
                 self.effects.clear();
                 self.speed = world::effects::Speed::default();
                 self.potion_color = 0;
@@ -1174,6 +1175,18 @@ mod tests {
             .contains("Steve was slain by Bob"));
         g.apply(NetEvent::Respawn);
         assert_eq!(g.death_message, None);
+        assert_eq!(g.score, 0);
+        assert_eq!(g.killer_id, -1);
+        g.apply(dead(7));
+        g.apply(NetEvent::JoinGame {
+            entity_id: 7,
+            gamemode: 0,
+            hardcore: false,
+            difficulty: 1,
+            max_players: 20,
+            reduced_debug_info: false,
+        });
+        assert_eq!((g.death_message.as_deref(), g.killer_id, g.score), (None, -1, 0));
     }
 
     #[test]

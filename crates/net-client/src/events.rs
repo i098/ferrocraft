@@ -36,11 +36,28 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
     if let cb::Packet::PlayerListItem(p) = packet {
         return player_list(&p.action);
     }
-    window_event(packet)
+    combat_event(packet)
+        .or_else(|| window_event(packet))
         .or_else(|| score_event(packet))
         .or_else(|| world_event(packet))
         .into_iter()
         .collect()
+}
+
+/// S42 CombatEvent and the player score in entity metadata.
+fn combat_event(packet: &cb::Packet) -> Option<NetEvent> {
+    use cb::Packet as P;
+    Some(match packet {
+        P::CombatEvent(p) => NetEvent::Combat(p.event.clone()),
+        P::EntityMetadata(p) => NetEvent::PlayerScore {
+            entity_id: p.entity_id.0,
+            score: match p.metadata.0.iter().find(|e| e.index == 18)?.value {
+                ferrocraft_protocol::codec::MetaValue::Int(s) => s,
+                _ => return None,
+            },
+        },
+        _ => return None,
+    })
 }
 
 fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
@@ -50,14 +67,6 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             health: p.health,
             food: p.food.0,
             saturation: p.saturation,
-        },
-        P::CombatEvent(p) => NetEvent::Combat(p.event.clone()),
-        P::EntityMetadata(p) => NetEvent::PlayerScore {
-            entity_id: p.entity_id.0,
-            score: match p.metadata.0.iter().find(|e| e.index == 18)?.value {
-                ferrocraft_protocol::codec::MetaValue::Int(s) => s,
-                _ => return None,
-            },
         },
         P::EntityEffect(p) => NetEvent::EntityEffect {
             entity_id: p.entity_id.0,

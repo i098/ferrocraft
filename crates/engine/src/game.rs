@@ -252,6 +252,26 @@ impl Game {
         self.apply_world(ev)
     }
 
+    /// Score metadata and the S42 death message of the local player.
+    fn apply_death_info(&mut self, ev: NetEvent) -> Option<Effect> {
+        match ev {
+            NetEvent::PlayerScore { entity_id, score } if entity_id == self.entity_id => {
+                self.score = score;
+            }
+            NetEvent::Combat(CombatEventKind::EntityDead {
+                player_id,
+                entity_id,
+                message,
+            }) if player_id.0 == self.entity_id => {
+                self.death_message = Some(formatted_text(&styled(&message)));
+                self.killer_id = entity_id;
+                return Some(Effect::Died);
+            }
+            _ => {}
+        }
+        None
+    }
+
     /// Join, vitals, game mode and abilities. `Err` hands back an event it does not own.
     #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn apply_player(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
@@ -291,17 +311,8 @@ impl Game {
                 (self.health, self.food, self.saturation) = (health, food, saturation);
                 return Ok((was_alive && health <= 0.0).then_some(Effect::Died));
             }
-            NetEvent::PlayerScore { entity_id, score } if entity_id == self.entity_id => {
-                self.score = score;
-            }
-            NetEvent::Combat(CombatEventKind::EntityDead {
-                player_id,
-                entity_id,
-                message,
-            }) if player_id.0 == self.entity_id => {
-                self.death_message = Some(formatted_text(&styled(&message)));
-                self.killer_id = entity_id;
-                return Ok(Some(Effect::Died));
+            ev @ (NetEvent::PlayerScore { .. } | NetEvent::Combat(_)) => {
+                return Ok(self.apply_death_info(ev));
             }
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);

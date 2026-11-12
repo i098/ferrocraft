@@ -221,8 +221,15 @@ impl Renderer {
 
     /// [`Renderer::new_offscreen`] over an opened source, such as resource packs over the jar.
     pub fn new_offscreen_from(width: u32, height: u32, source: Option<AssetSource>) -> Renderer {
-        let instance = wgpu::Instance::default();
-        let (_, device, queue) = pollster::block_on(request_device(&instance, None));
+        // One process-wide instance, never dropped, and serialized device creation: parallel
+        // tests that each create and destroy a Vulkan instance crash lavapipe (issue #129).
+        static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+        static CREATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let instance = INSTANCE.get_or_init(wgpu::Instance::default);
+        let (_, device, queue) = {
+            let _guard = CREATE.lock().unwrap_or_else(|e| e.into_inner());
+            pollster::block_on(request_device(instance, None))
+        };
         let texture = offscreen_texture(&device, width, height);
         Self::build(
             device,

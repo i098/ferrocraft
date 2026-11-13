@@ -491,7 +491,9 @@ impl App {
     fn held_and_line(&self, e: &Entity, d: &mut EntityDraw, frac: f64) {
         if e.kind == Kind::Player {
             let cast = self.casting(e.id);
-            d.held_damage = world::inventory::items::held_variant(d.held, d.held_damage, 0, cast);
+            let drawn = e.use_ticks.map_or(0, |t| t as i32);
+            d.held_damage =
+                world::inventory::items::held_variant(d.held, d.held_damage, drawn, cast);
         }
         if e.kind == Kind::Object(90) {
             d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());

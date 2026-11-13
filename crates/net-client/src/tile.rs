@@ -8,7 +8,12 @@ use ferrocraft_protocol::play::clientbound as cb;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TileEvent {
     /// Chest lid: `event` 1 carries the number of viewers in `value`.
-    Action { pos: [i32; 3], event: u8, value: u8 },
+    Action {
+        pos: [i32; 3],
+        block: u16,
+        event: u8,
+        value: u8,
+    },
     /// The four lines of a sign as formatted text (§ codes).
     Sign { pos: [i32; 3], lines: [String; 4] },
     /// `SkullType`, `Rot` and the owner's UUID.
@@ -31,6 +36,7 @@ pub(crate) fn event(packet: &cb::Packet) -> Option<NetEvent> {
     let tile = match packet {
         cb::Packet::BlockAction(b) => TileEvent::Action {
             pos: [b.location.x, b.location.y, b.location.z],
+            block: u16::try_from(b.block_type.0).unwrap_or(0),
             event: b.byte1,
             value: b.byte2,
         },
@@ -165,6 +171,7 @@ mod tests {
             got,
             Some(TileEvent::Action {
                 pos: [-3, 64, 12],
+                block: 54,
                 event: 1,
                 value: 2
             })

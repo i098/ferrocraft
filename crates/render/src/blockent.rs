@@ -120,21 +120,35 @@ impl BlockEntities {
         self.banners.remove(&pos);
     }
 
-    /// Replaces everything known about chunk (`cx`, `cz`) with its tile blocks; `at` reads a
-    /// chunk-local block.
+    /// Rebuilds the tile blocks of chunk (`cx`, `cz`); `at` reads a chunk-local block. Data of a
+    /// position stays while that position holds a tile block of the same kind.
     pub fn load_chunk(&mut self, cx: i32, cz: i32, at: impl Fn(usize, usize, usize) -> u16) {
-        self.remove_chunk(cx, cz);
+        let inside = |p: &[i32; 3]| p[0].div_euclid(16) == cx && p[2].div_euclid(16) == cz;
+        let old = std::mem::take(&mut self.blocks);
+        let mut fresh = HashMap::new();
         for y in 0..256 {
             for z in 0..16 {
                 for x in 0..16 {
                     let state = at(x, y, z);
                     if is_tile(state >> 4) {
-                        let pos = [cx * 16 + x as i32, y as i32, cz * 16 + z as i32];
-                        self.blocks.insert(pos, state);
+                        fresh.insert([cx * 16 + x as i32, y as i32, cz * 16 + z as i32], state);
                     }
                 }
             }
         }
+        let keep = |p: &[i32; 3]| {
+            !inside(p)
+                || fresh
+                    .get(p)
+                    .is_some_and(|s| old.get(p).is_none_or(|o| o >> 4 == s >> 4))
+        };
+        self.lids.retain(|p, _| keep(p));
+        self.signs.retain(|p, _| keep(p));
+        self.skulls.retain(|p, _| keep(p));
+        self.banners.retain(|p, _| keep(p));
+        self.blocks = old;
+        self.blocks.retain(|p, _| !inside(p));
+        self.blocks.extend(fresh);
     }
 
     pub fn remove_chunk(&mut self, cx: i32, cz: i32) {
@@ -151,12 +165,8 @@ impl BlockEntities {
     }
 
     /// `S24 BlockAction` for a chest: event 1 carries the number of viewers.
-    pub fn block_action(&mut self, pos: [i32; 3], event: u8, value: u8) {
-        let chest = self
-            .blocks
-            .get(&pos)
-            .is_some_and(|s| matches!(s >> 4, CHEST | ENDER_CHEST | TRAPPED_CHEST));
-        if chest && event == 1 {
+    pub fn block_action(&mut self, pos: [i32; 3], block: u16, event: u8, value: u8) {
+        if matches!(block, CHEST | ENDER_CHEST | TRAPPED_CHEST) && event == 1 {
             self.lids.entry(pos).or_default().viewers = value;
         }
     }
@@ -923,12 +933,12 @@ mod tests {
         let mut be = BlockEntities::default();
         let pos = [3, 64, 3];
         be.set_state(pos, CHEST << 4 | 2);
-        be.block_action(pos, 1, 1);
+        be.block_action(pos, CHEST, 1, 1);
         tick_n(&mut be, 4);
         assert!((be.lids[&pos].now - 0.4).abs() < 1e-6);
         tick_n(&mut be, 20);
         assert_eq!(be.lids[&pos].now, 1.0);
-        be.block_action(pos, 1, 0);
+        be.block_action(pos, CHEST, 1, 0);
         tick_n(&mut be, 3);
         assert!((be.lids[&pos].now - 0.7).abs() < 1e-6);
         tick_n(&mut be, 20);
@@ -938,11 +948,36 @@ mod tests {
     #[test]
     fn block_action_ignores_other_blocks_and_events() {
         let mut be = BlockEntities::default();
-        be.set_state([0, 0, 0], 1 << 4);
-        be.block_action([0, 0, 0], 1, 1);
-        be.set_state([1, 0, 0], CHEST << 4);
-        be.block_action([1, 0, 0], 2, 1);
+        be.block_action([0, 0, 0], 1, 1, 1);
+        be.block_action([1, 0, 0], CHEST, 2, 1);
         assert!(be.lids.is_empty());
+    }
+
+    #[test]
+    fn chunk_reload_keeps_data_of_unchanged_tiles_only() {
+        let tile = |kind: u16| {
+            move |x: usize, y: usize, z: usize| {
+                if (x, y, z) == (1, 5, 2) {
+                    kind << 4
+                } else {
+                    0
+                }
+            }
+        };
+        let pos = [17, 5, 2];
+        let lines = || ["a".to_string(), String::new(), String::new(), String::new()];
+        let mut be = BlockEntities::default();
+        be.set_sign(pos, lines());
+        be.load_chunk(1, 0, tile(SIGN_STANDING));
+        assert_eq!(be.signs.get(&pos), Some(&lines()));
+        be.load_chunk(1, 0, tile(SIGN_STANDING));
+        assert_eq!(be.signs.get(&pos), Some(&lines()));
+        be.set_state(pos, BANNER_STANDING << 4);
+        be.set_banner(pos, Banner::default());
+        be.load_chunk(1, 0, tile(BANNER_STANDING));
+        assert!(be.signs.is_empty() && !be.banners.is_empty());
+        be.load_chunk(1, 0, |_, _, _| 0);
+        assert!(be.banners.is_empty() && be.blocks.is_empty());
     }
 
     #[test]

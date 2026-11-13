@@ -5,8 +5,8 @@ use crate::blockent::{banner_image, Banner, Skull, View, WornHead};
 
 impl Renderer {
     /// `S24 BlockAction` (`event` 1 and `value` = viewers) opens or closes the lid of a chest.
-    pub fn block_action(&mut self, pos: [i32; 3], event: u8, value: u8) {
-        self.block_entities.block_action(pos, event, value);
+    pub fn block_action(&mut self, pos: [i32; 3], block: u16, event: u8, value: u8) {
+        self.block_entities.block_action(pos, block, event, value);
     }
 
     /// The four lines of a sign (`S33 UpdateSign`, `S35 UpdateBlockEntity` action 9) as plain

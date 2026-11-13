@@ -59,7 +59,7 @@ export DISPLAY=$DISP
 for _ in $(seq 60); do grep -q 'Done (' "$OUT/server.log" 2>/dev/null && break; sleep 1; done
 grep -q 'Done (' "$OUT/server.log" || { echo "local server did not start" >&2; exit 1; }
 
-others=$(ls "$L"/*.jar | grep -v 'forge.jar\|minecraft-1' | tr '\n' ':')
+others=; for j in "$L"/*.jar; do case $j in *forge.jar*|*minecraft-1*) ;; *) others+=$j:;; esac; done
 export FERROCRAFT_MODHOST_JAVA=$J/java FERROCRAFT_MODHOST_GAMEDIR=$OUT/run
 export FERROCRAFT_MODHOST_CP="$root/java/modhost/cls:$others$L/forge.jar:$L/minecraft-1.8.9.jar"
 # The mods write their OneConfig folder into the working directory.

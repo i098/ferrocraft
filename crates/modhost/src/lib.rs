@@ -1,6 +1,7 @@
 //! Rust side of the mod host. See the README of this crate.
 
 pub mod keys;
+pub mod provision;
 pub mod wire;
 
 use std::collections::HashMap;

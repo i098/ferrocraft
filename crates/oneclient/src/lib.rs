@@ -95,7 +95,11 @@ impl Http for Modrinth {
             .header("User-Agent", UA)
             .call()
             .map_err(http_err)?;
-        r.body_mut().read_to_vec().map_err(http_err)
+        r.body_mut()
+            .with_config()
+            .limit(256 * 1024 * 1024)
+            .read_to_vec()
+            .map_err(http_err)
     }
 }
 

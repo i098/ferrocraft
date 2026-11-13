@@ -129,6 +129,11 @@ pub enum NetEvent {
     },
     /// S09: the selected hotbar slot, 0 to 8.
     HeldItem(u8),
+    /// S3F: a custom payload; the engine acts on `MC|BOpen` only.
+    PluginMessage {
+        channel: String,
+        data: Vec<u8>,
+    },
     /// S2F: window -1 and slot -1 is the cursor stack.
     SetSlot {
         window: i8,

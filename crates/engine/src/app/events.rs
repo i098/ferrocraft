@@ -1,8 +1,9 @@
 //! Server events and menu effects: what the network and the screens ask the client to do.
 
 use super::{boxed, App, View};
-use crate::game::Effect;
 use crate::game::Game;
+use crate::game::{eye_height, Effect};
+use crate::game_state::Reaction;
 use crate::link::Link;
 use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent, TileEvent};
 use gui::inventory::ContainerScreen;
@@ -412,6 +413,44 @@ impl App {
         }
     }
 
+    /// `handleChangeGameState` reasons 0, 5 and 6: the bed message, the demo help and the arrow hit ding.
+    fn game_state(&mut self, reason: u8, value: f32) {
+        let Some(feet) = self.game.player.as_ref().map(|p| p.pos) else {
+            return;
+        };
+        let eye = [
+            feet[0],
+            feet[1] + eye_height(self.input.sneaking()),
+            feet[2],
+        ];
+        match crate::game_state::react(reason, value, eye) {
+            Some(Reaction::Sound {
+                name,
+                pos,
+                volume,
+                pitch,
+            }) => {
+                if let Some(s) = &mut self.sound {
+                    s.play(name, Some(pos), volume, pitch);
+                }
+            }
+            Some(Reaction::Message { key, keys }) => {
+                let texts = &self.ui.texts;
+                let names: Vec<String> = keys
+                    .iter()
+                    .filter_map(|d| self.ui.settings.keys.iter().find(|k| k.desc == *d))
+                    .map(|k| gui::screens::key_name(k.code, texts))
+                    .collect();
+                let text = texts.fmt(key, &names.iter().map(String::as_str).collect::<Vec<_>>());
+                self.chat_line(vec![ferrocraft_net_client::Styled {
+                    text,
+                    ..Default::default()
+                }]);
+            }
+            None => {}
+        }
+    }
+
     /// Sounds, particles and explosions; `Err` hands back an event it does not own.
     #[allow(clippy::result_large_err)] // `Err` hands the unmatched event back
     fn world_event(&mut self, ev: NetEvent, dirty: &mut Dirty) -> Result<(), NetEvent> {
@@ -439,6 +478,10 @@ impl App {
                 .spawn_packet(id, pos, offset, speed, count, &data),
             NetEvent::Effect { id, pos, data, .. } => self.world_effect(id, pos, data),
             NetEvent::GameState { reason: 10, .. } => self.guardian_curse(),
+            NetEvent::GameState {
+                reason: reason @ (0 | 5 | 6),
+                value,
+            } => self.game_state(reason, value),
             NetEvent::Explosion {
                 pos,
                 radius,

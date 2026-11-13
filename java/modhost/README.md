@@ -21,7 +21,7 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 ## Build
 
 ```sh
-FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.0.3.jar forge.jar guava-17.0.jar> java/modhost/build.sh
+FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.2.jar forge.jar guava-17.0.jar> java/modhost/build.sh
 ```
 
 The class path of the JVM is `java/modhost/cls`, then the libraries, then the Forge jar and the Minecraft 1.8.9 jar.
@@ -31,7 +31,7 @@ Set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_G
 
 After `build.sh`, run `java/modhost/test.sh` with the same `FERRO_JAVA_HOME` and `FERRO_LIB`; the folder also holds the Minecraft 1.8.9 jar and the other Java 8 libraries, and needs `lzma-0.0.1.jar` and `trove4j-3.0.3.jar` there too. It boots FML with the host tweakers and runs `test/` classes in place of the host entry point. `PlayerTest` runs the stand-in player through a double-tap of jump with `allowFlying`, which must toggle flight without a packet send or an exception.
 
-Set `FERRO_MODS` to a folder of mod jars to add the mod boot test, `ModBootTest`: the same FML boot, with FML loading those jars out of `GAMEDIR/mods`. It requires the 22 twins (the `oneconfig` loader plus 21 mods), Keystrokes and `mixinbooter` (the mod ids in `test.sh` as `ferro.mods`) to be loaded and in state `AVAILABLE`, which FML sets after the mod's init and complete events ran. It needs network on a cold cache, because the OneConfig bootstrap downloads its loader. It prints the jar the Minecraft classes load from. `java/modhost-accept/run.sh <cache>` downloads the acceptance mods into `<cache>/mods`. A cache from an earlier run holds the old EvergreenHUD, PolySprint and VanillaHUD jar names: clear it before `FERRO_MODS` points at it, or FML sees each of those mods twice. The mod boot needs `FERRO_LIB` to hold asm-all 5.2 (not Forge's 5.0.3) and maven-artifact 3.3.9, which MixinBooter uses; `chatblock` requires MixinBooter.
+Set `FERRO_MODS` to a folder of mod jars to add the mod boot test, `ModBootTest`: the same FML boot, with FML loading those jars out of `GAMEDIR/mods`. It requires the 22 twins (the `oneconfig` loader plus 21 mods), Keystrokes and `mixinbooter` (the mod ids in `test.sh` as `ferro.mods`) to be loaded and in state `AVAILABLE`, which FML sets after the mod's init and complete events ran. It needs network on a cold cache, because the OneConfig bootstrap downloads its loader. It prints the jar the Minecraft classes load from. `java/modhost-accept/run.sh <cache>` downloads the acceptance mods into `<cache>/mods`. A cache from an earlier run holds the old EvergreenHUD, PolySprint and VanillaHUD jar names: clear it before `FERRO_MODS` points at it, or FML sees each of those mods twice. The mod boot needs `FERRO_LIB` to hold asm-all 5.2 (not Forge's 5.0.3) and maven-artifact 3.3.9, which MixinBooter uses. `FERRO_LIB` must hold only that one ASM jar, because `test.sh` puts every jar of the folder on the class path; `chatblock` requires MixinBooter.
 
 Set `FERRO_PREPARE_OUT` to the folder `java/modhost-prepare/run.sh` wrote, and both boots run on `ferro-mc-1.8.9.jar` and `ferro-forge.jar` instead of the player's client and Forge jars. The generated Minecraft jar is unsigned, so the test passes `-Dfml.ignoreInvalidMinecraftCertificates=true`.
 

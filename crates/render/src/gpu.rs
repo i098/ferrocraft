@@ -110,6 +110,8 @@ pub struct Renderer {
     tile_meshes: Vec<(Tex, GpuMesh)>,
     head_meshes: Vec<(Tex, GpuMesh)>,
     glint_mesh: Option<GpuMesh>,
+    /// The additive white flash of primed TNT.
+    flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
     item_models: entity::item::Models,
     /// Wood models of item frames, read the first time one is drawn.
@@ -390,6 +392,7 @@ impl Renderer {
             tile_meshes: Vec::new(),
             head_meshes: Vec::new(),
             glint_mesh: None,
+            flash_mesh: None,
             item_models: HashMap::new(),
             frames: None,
             maps: HashMap::new(),
@@ -863,6 +866,7 @@ impl Renderer {
                 self.item_meshes.push((tex, m));
             }
         }
+        self.flash_mesh = self.upload_mesh(items.flash, [0.0; 3]);
         items.glint
     }
 
@@ -1566,6 +1570,13 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
                 pass.set_pipeline(&self.opaque_pipe);
+            }
+            if let Some(m) = &self.flash_mesh {
+                pass.set_bind_group(0, &self.env_group, &[]);
+                pass.set_pipeline(&self.bolt_pipe);
+                draw_mesh(&mut pass, m);
+                pass.set_pipeline(&self.opaque_pipe);
+                pass.set_bind_group(0, &self.world_group, &[]);
             }
             self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.

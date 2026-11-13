@@ -135,7 +135,6 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     let before = r.render_to_rgba(&cam, &[]).2;
     r.set_entities(&draws);
     let after = r.render_to_rgba(&cam, &[]).2;
-    assert_ne!(before, after, "the model is not the old box");
 
     // Vanilla: a small stand is half the size (scale 0.5) and both stand centred on their x.
     let bounds = |r: &mut Renderer, d: EntityDraw| {
@@ -155,6 +154,51 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     let (sc, sh) = bounds(&mut r, stand(class, 0.0, arms(1, [None; 6])));
     assert!((0.4..0.6).contains(&(sh / nh)), "small/normal height {sh}/{nh}");
     assert!(nc.abs() < 6.0 && sc.abs() < 6.0, "centre offsets {nc} {sc}");
+    // Vanilla: a stand is 1.975 blocks tall; at ~3 blocks distance and 70 degree fov on a 360 px
+    // frame that is well over a fifth of the frame and well under the whole frame.
+    assert!((72.0..360.0).contains(&nh), "normal stand height {nh}");
+
+    // Arms (flag 4) add geometry at both shoulders, left and right of the body centre.
+    let side_diff = |r: &mut Renderer, a: EntityDraw, b: EntityDraw| {
+        r.set_entities(&[a]);
+        let ia = r.render_to_rgba(&cam, &[]).2;
+        r.set_entities(&[b]);
+        let ib = r.render_to_rgba(&cam, &[]).2;
+        let (mut l, mut rt) = (0usize, 0usize);
+        for (i, (p, q)) in ia.chunks(4).zip(ib.chunks(4)).enumerate() {
+            if p != q {
+                if i % 640 < 320 {
+                    l += 1
+                } else {
+                    rt += 1
+                }
+            }
+        }
+        (l, rt)
+    };
+    let (l, rt) = side_diff(
+        &mut r,
+        stand(class, 0.0, StandLook::default()),
+        stand(class, 0.0, arms(4, [None; 6])),
+    );
+    assert!(l > 20 && rt > 20, "arms on both sides, got {l} left {rt} right");
+    // Posing only the right arm (index 3) must change pixels on one side of the body only.
+    let (l, rt) = side_diff(
+        &mut r,
+        stand(class, 0.0, arms(4, [None; 6])),
+        stand(class, 0.0, arms(4, [None, None, None, Some([-80.0, 0.0, 10.0]), None, None])),
+    );
+    // The stand faces the camera (yaw 180), so its right arm is on the screen's left half.
+    assert!(l > 0 && rt == 0, "right arm pose: {l} left {rt} right");
+    // Pinhole projection at z = 6, fov 70, height 360: x = 3 sits 3/6 * 180/tan 35 = 128.6 px
+    // from the centre (world +x is screen left). Plain stand at x = -3 and armored ghost at x = 3.
+    let (pc, _) = bounds(&mut r, stand(class, -3.0, StandLook::default()));
+    assert!((pc - 128.6).abs() < 10.0, "plain stand column {pc}");
+    let mut g = stand(class, 3.0, StandLook::default());
+    g.invisible = true;
+    g.armor = [313, 312, 311, 310];
+    let (gc, _) = bounds(&mut r, g);
+    assert!((gc + 128.6).abs() < 12.0, "armor column {gc}");
     if let Some(dir) = std::env::var_os("STAND_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("before.png"), 640, 360, &before).unwrap();
@@ -167,9 +211,5 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     r.set_entities(&[bare]);
     assert_eq!(empty, r.render_to_rgba(&cam, &[]).2, "invisible body");
     r.set_entities(&[draws[3].clone()]);
-    assert_ne!(
-        empty,
-        r.render_to_rgba(&cam, &[]).2,
-        "armor of an invisible stand"
-    );
+    assert!(gc.abs() > 100.0, "armor of an invisible stand drew at {gc}");
 }

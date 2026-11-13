@@ -1128,3 +1128,74 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
     }
     assert_ne!(tints[3], tints[4], "red sand must differ from sand");
 }
+
+/// Lava (x < 8) and water (x >= 8) pools under open sky.
+struct Pools;
+
+impl ChunkBlocks for Pools {
+    fn chunk_x(&self) -> i32 {
+        0
+    }
+    fn chunk_z(&self) -> i32 {
+        0
+    }
+    fn block(&self, x: usize, y: usize, _z: usize) -> u16 {
+        match y {
+            0..=60 => 1 << 4,
+            61 if x < 8 => 11 << 4,
+            61 => 9 << 4,
+            _ => 0,
+        }
+    }
+}
+
+/// `TextureMap.updateAnimations` runs each client tick: lava and water leave frame 0 as `Environment.ticks` advances.
+#[test]
+fn lava_and_water_animate_with_client_ticks() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    r.upload_chunk(&Pools);
+    let cam = Camera {
+        pos: [8.0, 66.0, 4.0],
+        yaw: 0.0,
+        pitch: 90.0,
+        ..Camera::default()
+    };
+    let frame = |r: &mut Renderer, ticks: u64| {
+        r.set_environment(Environment {
+            ticks,
+            ..Environment::default()
+        });
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let first = frame(&mut r, 0);
+    let same = frame(&mut r, 0);
+    // water_still and lava_still: frametime 2, so two ticks reach the second frame.
+    let later = frame(&mut r, 2);
+    assert_eq!(first, same, "no tick, no change");
+    let (w, half) = (400usize, 200usize);
+    let side = |img: &[u8], right: bool| -> Vec<u8> {
+        (0..300)
+            .flat_map(|y| {
+                let x0 = if right { half } else { 0 };
+                img[(y * w + x0) * 4..][..half * 4].to_vec()
+            })
+            .collect()
+    };
+    assert_ne!(
+        side(&first, false),
+        side(&later, false),
+        "left half (water, +x) moved"
+    );
+    assert_ne!(
+        side(&first, true),
+        side(&later, true),
+        "right half (lava, -x) moved"
+    );
+    if let Ok(dir) = std::env::var("ANIM_PNG_DIR") {
+        for (name, img) in [("before", &first), ("after", &later)] {
+            let path = std::path::Path::new(&dir).join(format!("{name}.png"));
+            encode_png(&path, 400, 300, img).expect("write png");
+        }
+    }
+}

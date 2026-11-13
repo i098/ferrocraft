@@ -1,5 +1,6 @@
 //! Asset loading from the 1.8.9 client jar (or an extracted copy): block atlas and the ascii font.
 
+use crate::animation::Animation;
 use crate::blocks::texture_names;
 use std::collections::HashMap;
 use std::io::Read;
@@ -123,6 +124,8 @@ pub struct Atlas {
     pub tile: u32,
     pub rgba: Vec<u8>,
     cells: HashMap<&'static str, u32>,
+    /// Animated cells (`.png.mcmeta`), stepped by [`crate::animation::Animator`].
+    pub(crate) animations: Vec<Animation>,
 }
 
 impl Atlas {
@@ -135,6 +138,7 @@ impl Atlas {
             tile: TILE as u32,
             rgba: vec![255; TILE * TILE * 4],
             cells: HashMap::new(),
+            animations: Vec::new(),
         }
     }
 
@@ -165,6 +169,7 @@ impl Atlas {
         let (w, h) = (COLUMNS * tile, rows * tile);
         let mut rgba = vec![0u8; w * h * 4];
         let mut cells = HashMap::new();
+        let mut animations = Vec::new();
         let white = Image {
             width: 1,
             height: 1,
@@ -177,6 +182,10 @@ impl Atlas {
                 blit(&mut rgba, w, tile, cell, &missing_tile());
             } else {
                 blit(&mut rgba, w, tile, cell, image);
+                let meta = source.read(&format!(
+                    "assets/minecraft/textures/blocks/{name}.png.mcmeta"
+                ));
+                animations.extend(meta.and_then(|m| Animation::new(cell as u32, image, tile, &m)));
             }
             cells.insert(*name, cell as u32);
         }
@@ -190,6 +199,7 @@ impl Atlas {
             tile: tile as u32,
             rgba,
             cells,
+            animations,
         }
     }
     /// Atlas coordinates for texture `name` at tile-local `(u, v)` in `0..=1`.
@@ -231,17 +241,25 @@ fn atlas_tile(sides: impl Iterator<Item = usize>, rows: usize) -> usize {
     tile.min(1 << fit.ilog2())
 }
 
-/// Copy the top-left square of `image` into grid `cell`, nearest-sampled to `tile` px (animated strips keep frame 0).
-fn blit(atlas: &mut [u8], atlas_width: usize, tile: usize, cell: usize, image: &Image) {
+/// Nearest-sample the top-left square of `image` to `tile` px (animated strips keep frame 0).
+pub(crate) fn resample(image: &Image, tile: usize) -> Vec<u8> {
     let side = image.width.min(image.height).max(1);
-    let (ox, oy) = ((cell % COLUMNS) * tile, (cell / COLUMNS) * tile);
+    let mut out = Vec::with_capacity(tile * tile * 4);
     for y in 0..tile {
         for x in 0..tile {
-            let (sx, sy) = (x * side / tile, y * side / tile);
-            let src = (sy * image.width + sx) * 4;
-            let dst = ((oy + y) * atlas_width + ox + x) * 4;
-            atlas[dst..dst + 4].copy_from_slice(&image.rgba[src..src + 4]);
+            let src = ((y * side / tile) * image.width + x * side / tile) * 4;
+            out.extend_from_slice(&image.rgba[src..src + 4]);
         }
+    }
+    out
+}
+
+/// Copy the resampled `image` into grid `cell`.
+fn blit(atlas: &mut [u8], atlas_width: usize, tile: usize, cell: usize, image: &Image) {
+    let (ox, oy) = ((cell % COLUMNS) * tile, (cell / COLUMNS) * tile);
+    for (y, row) in resample(image, tile).chunks_exact(tile * 4).enumerate() {
+        let dst = ((oy + y) * atlas_width + ox) * 4;
+        atlas[dst..dst + tile * 4].copy_from_slice(row);
     }
 }
 
@@ -344,6 +362,7 @@ mod tests {
             tile: tile as u32,
             rgba: Vec::new(),
             cells: HashMap::from([("a", 17)]),
+            animations: Vec::new(),
         };
         assert_eq!(atlas.uv("a", [0.0, 0.0]), [1.0 / 16.0, 0.5]);
         assert_eq!(atlas.uv("a", [1.0, 1.0]), [2.0 / 16.0, 1.0]);

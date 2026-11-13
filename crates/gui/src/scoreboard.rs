@@ -3,21 +3,64 @@
 use crate::toolkit::{Gui, FONT_HEIGHT};
 use std::collections::HashMap;
 
-/// Display slot 0: the tab list. 1: the sidebar.
+/// Display slot 0: the tab list. 1: the sidebar. 2: below the name. 3 to 18: the sidebar of one team color.
 pub const SLOT_LIST: u8 = 0;
 pub const SLOT_SIDEBAR: u8 = 1;
+pub const SLOT_BELOW_NAME: u8 = 2;
+const SLOT_TEAM_COLOR: u8 = 3;
+
+/// `Team.Visibility`: who sees the name tags of a team's members.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Visibility {
+    #[default]
+    Always,
+    Never,
+    HideForOtherTeams,
+    HideForOwnTeam,
+}
+
+impl Visibility {
+    /// `Visibility.byKey`; vanilla crashes on an unknown key, this shows the tag.
+    fn by_key(key: &str) -> Self {
+        match key {
+            "never" => Self::Never,
+            "hideForOtherTeams" => Self::HideForOtherTeams,
+            "hideForOwnTeam" => Self::HideForOwnTeam,
+            _ => Self::Always,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Team {
     pub prefix: String,
     pub suffix: String,
+    pub visibility: Visibility,
+    /// `Formatting.getId` of the team color; `None` is reset (-1).
+    pub color: Option<u8>,
     pub members: Vec<String>,
+}
+
+/// The fields of an S3E in modes 0 and 2.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TeamInfo {
+    pub prefix: String,
+    pub suffix: String,
+    /// `nameTagVisibility` key.
+    pub visibility: String,
+    pub color: i8,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Objective {
+    display: String,
+    /// The `hearts` render type.
+    hearts: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scoreboard {
-    /// Objective name to display name.
-    objectives: HashMap<String, String>,
+    objectives: HashMap<String, Objective>,
     /// Objective name to player name to points.
     scores: HashMap<String, HashMap<String, i32>>,
     /// Display slot to objective name.
@@ -27,13 +70,15 @@ pub struct Scoreboard {
 
 impl Scoreboard {
     /// S3B: mode 0 creates, 1 removes, 2 renames the objective.
-    pub fn set_objective(&mut self, name: &str, display: &str, mode: u8) {
+    pub fn set_objective(&mut self, name: &str, display: &str, mode: u8, hearts: bool) {
         if mode == 1 {
             self.objectives.remove(name);
             self.scores.remove(name);
             self.display.retain(|_, o| o != name);
         } else {
-            self.objectives.insert(name.into(), display.into());
+            let display = display.into();
+            self.objectives
+                .insert(name.into(), Objective { display, hearts });
         }
     }
 
@@ -63,14 +108,7 @@ impl Scoreboard {
     }
 
     /// S3E: mode 0 create, 1 remove, 2 update prefix/suffix, 3 add members, 4 remove members.
-    pub fn set_team(
-        &mut self,
-        name: &str,
-        mode: u8,
-        prefix: &str,
-        suffix: &str,
-        members: &[String],
-    ) {
+    pub fn set_team(&mut self, name: &str, mode: u8, info: &TeamInfo, members: &[String]) {
         if mode == 1 {
             self.teams.remove(name);
             return;
@@ -83,8 +121,10 @@ impl Scoreboard {
         }
         let t = self.teams.entry(name.into()).or_default();
         if mode == 0 || mode == 2 {
-            t.prefix = prefix.into();
-            t.suffix = suffix.into();
+            t.prefix = info.prefix.clone();
+            t.suffix = info.suffix.clone();
+            t.visibility = Visibility::by_key(&info.visibility);
+            t.color = u8::try_from(info.color).ok();
         }
         match mode {
             0 | 3 => t.members.extend(members.iter().cloned()),
@@ -107,6 +147,32 @@ impl Scoreboard {
             Some((_, t)) => format!("{}{player}{}", t.prefix, t.suffix),
             None => player.into(),
         }
+    }
+
+    /// `RendererLivingEntity.canRenderName` for a player on a team: `Some` when the team decides whether
+    /// `player`'s tag shows to `me`, `None` when the player has no team.
+    pub fn name_tag_shown(&self, player: &str, me: &str) -> Option<bool> {
+        let (team, t) = self.team_of(player)?;
+        let mine = self.team_of(me).map(|(n, _)| n);
+        let same = |m: &str| m == team;
+        Some(match t.visibility {
+            Visibility::Always => true,
+            Visibility::Never => false,
+            Visibility::HideForOtherTeams => mine.is_none_or(same),
+            Visibility::HideForOwnTeam => mine.is_none_or(|m| !same(m)),
+        })
+    }
+
+    /// `RenderPlayer.renderNameTag`: the line below a player's tag, `"<score> <objective>"`.
+    pub fn below_name(&self, player: &str) -> Option<String> {
+        let o = self.objective_in(SLOT_BELOW_NAME)?;
+        let score = self.score(o, player).unwrap_or(0);
+        Some(format!("{score} {}", self.objectives[o].display))
+    }
+
+    /// Whether an objective uses the `hearts` render type.
+    pub fn is_hearts(&self, objective: &str) -> bool {
+        self.objectives.get(objective).is_some_and(|o| o.hearts)
     }
 
     /// The objective in a display slot.
@@ -134,13 +200,16 @@ impl Scoreboard {
         v
     }
 
-    /// `renderScoreboard` for the sidebar objective (slot 1).
-    pub fn draw_sidebar(&self, gui: &mut Gui) {
-        // shortcut: the team-color sidebar slots 3..=18 are ignored; add when the engine tracks team colors.
-        let Some(obj) = self.objective_in(SLOT_SIDEBAR) else {
+    /// `renderScoreboard`: the objective of the local player's team color (slots 3 to 18), else slot 1.
+    pub fn draw_sidebar(&self, gui: &mut Gui, me: &str) {
+        let colored = self
+            .team_of(me)
+            .and_then(|(_, t)| t.color)
+            .and_then(|c| self.objective_in(SLOT_TEAM_COLOR + c));
+        let Some(obj) = colored.or_else(|| self.objective_in(SLOT_SIDEBAR)) else {
             return;
         };
-        let title = &self.objectives[obj];
+        let title = &self.objectives[obj].display;
         let all = self.sorted(obj);
         let list: Vec<_> = all.iter().filter(|(n, _)| !n.starts_with('#')).collect();
         // Vanilla skips by the unfiltered count.
@@ -185,17 +254,66 @@ mod tests {
     #[test]
     fn scores_sort_and_teams_format() {
         let mut s = Scoreboard::default();
-        s.set_objective("o", "Obj", 0);
+        s.set_objective("o", "Obj", 0, false);
         s.set_display(SLOT_SIDEBAR, "o");
         s.set_score("b", "o", 1, false);
         s.set_score("a", "o", 1, false);
         s.set_score("c", "o", 0, false);
         assert_eq!(s.sorted("o"), [("c", 0), ("b", 1), ("a", 1)]);
-        s.set_team("t", 0, "[", "]", &["a".into()]);
+        let info = TeamInfo {
+            prefix: "[".into(),
+            suffix: "]".into(),
+            ..TeamInfo::default()
+        };
+        s.set_team("t", 0, &info, &["a".into()]);
         assert_eq!(s.format_name("a"), "[a]");
-        s.set_team("t", 4, "", "", &["a".into()]);
+        s.set_team("t", 4, &TeamInfo::default(), &["a".into()]);
         assert_eq!(s.format_name("a"), "a");
-        s.set_objective("o", "", 1);
+        s.set_objective("o", "", 1, false);
         assert_eq!(s.objective_in(SLOT_SIDEBAR), None);
+    }
+
+    /// `canRenderName`: the four `Team.Visibility` modes for a viewer on the same team, on another team and on none.
+    #[test]
+    fn name_tag_visibility_modes() {
+        let mut s = Scoreboard::default();
+        let team = |s: &mut Scoreboard, n: &str, vis: &str, who: &str| {
+            let info = TeamInfo {
+                visibility: vis.into(),
+                ..TeamInfo::default()
+            };
+            s.set_team(n, 0, &info, &[who.into()]);
+        };
+        team(&mut s, "red", "always", "r1");
+        team(&mut s, "blue", "never", "b1");
+        team(&mut s, "green", "hideForOtherTeams", "g1");
+        team(&mut s, "gold", "hideForOwnTeam", "y1");
+        s.set_team("green", 3, &TeamInfo::default(), &["g2".into()]);
+        s.set_team("gold", 3, &TeamInfo::default(), &["y2".into()]);
+        // Viewers: "g2" is on green, "y2" on gold, "nobody" has no team.
+        let shown = |p, me| s.name_tag_shown(p, me);
+        assert_eq!(shown("r1", "g2"), Some(true));
+        assert_eq!(shown("b1", "b1x"), Some(false));
+        assert_eq!(shown("g1", "g2"), Some(true));
+        assert_eq!(shown("g1", "y2"), Some(false));
+        assert_eq!(shown("g1", "nobody"), Some(true));
+        assert_eq!(shown("y1", "y2"), Some(false));
+        assert_eq!(shown("y1", "g2"), Some(true));
+        assert_eq!(shown("y1", "nobody"), Some(true));
+        assert_eq!(shown("loner", "g2"), None);
+    }
+
+    #[test]
+    fn below_name_line_and_hearts() {
+        let mut s = Scoreboard::default();
+        assert_eq!(s.below_name("a"), None);
+        s.set_objective("hp", "\u{a7}cHP", 0, true);
+        s.set_display(SLOT_BELOW_NAME, "hp");
+        assert_eq!(s.below_name("a").as_deref(), Some("0 \u{a7}cHP"));
+        s.set_score("a", "hp", 17, false);
+        assert_eq!(s.below_name("a").as_deref(), Some("17 \u{a7}cHP"));
+        assert!(s.is_hearts("hp"));
+        s.set_objective("hp", "HP", 2, false);
+        assert!(!s.is_hearts("hp"));
     }
 }

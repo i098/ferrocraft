@@ -24,6 +24,8 @@ pub struct PlayerInfo {
     pub ping: i32,
     /// Formatted text (§ codes) of the custom tab list name.
     pub display: Option<String>,
+    /// The `textures` profile property: base64 JSON with the skin URL.
+    pub textures: Option<String>,
 }
 
 /// `IChatComponent.getFormattedText()` of a chat JSON string.
@@ -282,6 +284,11 @@ fn player_list(action: &PlayerListAction) -> Vec<NetEvent> {
                     gamemode: a.gamemode.0 as u8,
                     ping: a.ping.0,
                     display: a.display_name.0.as_deref().map(formatted),
+                    textures: a
+                        .properties
+                        .iter()
+                        .find(|p| p.name == "textures")
+                        .map(|p| p.value.clone()),
                 })
                 .collect(),
         ))],
@@ -369,6 +376,7 @@ mod tests {
                     gamemode: 1,
                     ping: 42,
                     display: Some("§cBoss§r".into()),
+                    textures: None,
                 }])
             }]
         );

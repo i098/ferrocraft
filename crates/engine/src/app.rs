@@ -743,6 +743,7 @@ impl App {
                 draws.remove(i);
             }
         }
+        self.tab_heads();
         let (quads, textures, effects) = self.overlay(frac, &cam, &draws);
         self.run_effects(effects);
         let held = self
@@ -935,6 +936,35 @@ impl App {
                 ..Default::default()
             })
         })
+    }
+
+    /// `renderPlayerlist` head inputs: uploads the skins that finished downloading and tells each
+    /// entry which skin, hat and flip to draw. Only an online connection draws heads.
+    fn tab_heads(&mut self) {
+        if !self.hud.tablist.encrypted || !self.input.player_list_held() {
+            return;
+        }
+        let Some(r) = self.renderer.as_mut() else {
+            return;
+        };
+        for e in &mut self.hud.tablist.entries {
+            if let Some(img) = self.skins.tab_head(e.uuid, e.textures.as_deref()) {
+                r.register_image(&crate::skins::tab_texture(e.uuid), &img);
+            }
+            let tex = crate::skins::tab_texture(e.uuid);
+            let parts = self
+                .game
+                .entities
+                .iter()
+                .find(|p| p.kind == Kind::Player && p.uuid == Some(e.uuid))
+                .map(|p| p.meta.stand.unwrap_or(0x7F));
+            e.head = gui::tablist::Head {
+                skin: self.skins.has_tab(e.uuid).then_some(tex),
+                hat: parts.is_some_and(|p| p & 0x40 != 0),
+                upside_down: parts.is_some_and(|p| p & 1 != 0)
+                    && matches!(e.name.as_str(), "Dinnerbone" | "Grumm"),
+            };
+        }
     }
 
     /// The HUD, the open container and the menu screens as quads, plus the textures they

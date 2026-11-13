@@ -357,6 +357,7 @@ impl App {
                 ..
             } => {
                 self.hud = gui::Hud::default();
+                self.hud.tablist.encrypted = self.link.session().is_some_and(|s| s.encrypted);
                 self.container = None;
                 self.ui.difficulty = Some(*difficulty);
                 self.ui.hardcore = *hardcore;
@@ -710,6 +711,7 @@ impl App {
                         ping: p.ping,
                         gamemode: p.gamemode,
                         display: p.display,
+                        textures: p.textures,
                         ..TabEntry::default()
                     });
                 }

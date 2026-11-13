@@ -6,8 +6,8 @@ use crate::toolkit::{Gui, FONT_HEIGHT, ICONS};
 const SPECTATOR: u8 = 3;
 /// `l` of `renderPlayerlist` for the `hearts` type.
 const HEARTS_WIDTH: i32 = 90;
-// shortcut: every head is Steve's; draw the player's skin when the renderer loads skins.
 const STEVE: &str = "textures/entity/steve.png";
+const ALEX: &str = "textures/entity/alex.png";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TabEntry {
@@ -18,6 +18,21 @@ pub struct TabEntry {
     /// Display name with `§` codes; replaces the team-formatted name.
     pub display: Option<String>,
     pub hearts: HeartState,
+    /// The `textures` profile property, base64 JSON with the skin URL.
+    pub textures: Option<String>,
+    /// How the head draws; the engine sets it from the loaded skin and the player entity.
+    pub head: Head,
+}
+
+/// `getSkinTexture` and the entity checks of `renderPlayerlist`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Head {
+    /// Name of the downloaded skin texture; `None` draws `DefaultPlayerSkin`.
+    pub skin: Option<String>,
+    /// The player entity is loaded and shows its hat layer.
+    pub hat: bool,
+    /// The player entity is loaded, shows its cape layer and is called Dinnerbone or Grumm.
+    pub upside_down: bool,
 }
 
 /// The health fields of `PlayerInfo` that animate the heart row.
@@ -128,7 +143,7 @@ impl TabList {
             gui.fill(j2, k2, j2 + i1, k2 + 8, 553_648_127);
             gui.set_color(0xFFFF_FFFF);
             if flag {
-                draw_head(gui, j2, k2);
+                draw_head(gui, j2, k2, e);
                 j2 += 9;
             }
             let opened = self.opened;
@@ -311,11 +326,40 @@ fn draw_hearts_text(gui: &mut Gui, score: i32, (x1, x2, y): (i32, i32, i32)) {
     gui.text(&s, x as f32, y as f32, 0xFF00_0000 | color);
 }
 
-/// The head and its hat layer; every head is Steve's.
-fn draw_head(gui: &mut Gui, x: i32, y: i32) {
+/// `DefaultPlayerSkin.getDefaultSkin`: Alex for an odd `UUID.hashCode`, else Steve.
+fn default_skin(uuid: u128) -> &'static str {
+    let hash = uuid as u32 ^ (uuid >> 32) as u32 ^ (uuid >> 64) as u32 ^ (uuid >> 96) as u32;
+    if hash & 1 == 1 {
+        ALEX
+    } else {
+        STEVE
+    }
+}
+
+/// The face at (8, 8) and the hat layer at (40, 8) of a 64x64 skin; `upside_down` reads the rows
+/// from 16 up to 8 as `drawScaledCustomSizeModalRect` does with a height of -8.
+fn head_uvs(upside_down: bool) -> [[f32; 4]; 2] {
+    let (top, bottom) = if upside_down {
+        (16.0, 8.0)
+    } else {
+        (8.0, 16.0)
+    };
+    let uv = |u: f32| [u / 64.0, top / 64.0, (u + 8.0) / 64.0, bottom / 64.0];
+    [uv(8.0), uv(40.0)]
+}
+
+/// The face, and the hat layer when the player entity shows it.
+fn draw_head(gui: &mut Gui, x: i32, y: i32, e: &TabEntry) {
     let (x, y) = (x as f32, y as f32);
-    for uv in [[0.125, 0.125, 0.25, 0.25], [0.625, 0.125, 0.75, 0.25]] {
-        gui.blit_tinted(STEVE, x, y, 8.0, 8.0, uv, 0xFFFF_FFFF);
+    let tex = e
+        .head
+        .skin
+        .clone()
+        .unwrap_or_else(|| default_skin(e.uuid).to_owned());
+    let [face, hat] = head_uvs(e.head.upside_down);
+    gui.blit_tinted(tex.clone(), x, y, 8.0, 8.0, face, 0xFFFF_FFFF);
+    if e.head.hat {
+        gui.blit_tinted(tex, x, y, 8.0, 8.0, hat, 0xFFFF_FFFF);
     }
 }
 
@@ -376,6 +420,42 @@ fn draw_ping(gui: &mut Gui, w: i32, x: i32, y: i32, ping: i32) {
 mod tests {
     use super::*;
     use crate::toolkit::GuiScale;
+
+    /// The face is the 8x8 at (8, 8), the hat the 8x8 at (40, 8); Dinnerbone reads them upside down.
+    #[test]
+    fn head_reads_face_and_hat_rectangles() {
+        assert_eq!(
+            head_uvs(false),
+            [[0.125, 0.125, 0.25, 0.25], [0.625, 0.125, 0.75, 0.25]]
+        );
+        assert_eq!(head_uvs(true)[0], [0.125, 0.25, 0.25, 0.125]);
+    }
+
+    /// No skin: Alex for an odd `UUID.hashCode`; a skin and a hidden hat draw one quad of that skin.
+    #[test]
+    fn head_picks_default_skin_and_hat() {
+        let draw = |e: &TabEntry| {
+            let mut gui = Gui::new(GuiScale::new(854, 480, 0, false), None, 0);
+            draw_head(&mut gui, 0, 0, e);
+            gui.into_quads()
+        };
+        let mut e = TabEntry {
+            uuid: 1,
+            ..TabEntry::default()
+        };
+        let quads = draw(&e);
+        assert_eq!((quads.len(), &*quads[0].tex), (1, ALEX));
+        e.uuid = 2;
+        assert_eq!(&*draw(&e)[0].tex, STEVE);
+        e.head = Head {
+            skin: Some("skin/x".into()),
+            hat: true,
+            upside_down: false,
+        };
+        let quads = draw(&e);
+        assert_eq!(quads.len(), 2);
+        assert!(quads.iter().all(|q| &*q.tex == "skin/x"));
+    }
 
     /// One quad per drawn 9 px icon: 10 containers, 7 full hearts and a half heart for a score of 15.
     #[test]

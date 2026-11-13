@@ -179,35 +179,21 @@ fn sign_line_json(line: &str) -> String {
 mod tests {
     use super::sign_line_json;
 
-    /// The bytes of `Text.Serializer.toJson(new LiteralText(line))` in the 1.8.9 jar.
+    /// The bytes the 1.8.9 client writes for each line: `IChatComponent.Serializer.componentToJson(new
+    /// ChatComponentText(line))`, recorded from the oracle harness.
     #[test]
     fn sign_lines_match_the_vanilla_serializer() {
-        let corpus = [
-            "",
-            "hello",
-            "a\"b\\c",
-            "§cred",
-            "é€😀",
-            "<>&='",
-            "a\tb\nc\u{1}\u{1f}",
-            "\u{2028}\u{2029}",
-        ];
-        let script: String = corpus
-            .iter()
-            .map(|s| {
-                format!(
-                    "signjson {}\n",
-                    s.bytes().map(|b| format!("{b:02x}")).collect::<String>()
-                )
-            })
-            .collect();
-        let lines = oracle::Oracle::get().run(&script).unwrap();
-        assert_eq!(lines.len(), corpus.len());
-        for (s, hex) in corpus.iter().zip(lines) {
-            let want: Vec<u8> = (0..hex.len() / 2)
-                .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
-                .collect();
-            assert_eq!(sign_line_json(s).as_bytes(), &want[..], "line {s:?}");
+        for (line, json) in [
+            ("", "\"\""),
+            ("hello", "\"hello\""),
+            ("a\"b\\c", "\"a\\\"b\\\\c\""),
+            ("\u{a7}cred", "\"\u{a7}cred\""),
+            ("\u{e9}\u{20ac}\u{1f600}", "\"\u{e9}\u{20ac}\u{1f600}\""),
+            ("<>&='", "\"\\u003c\\u003e\\u0026\\u003d\\u0027\""),
+            ("a\tb\nc\u{1}\u{1f}", "\"a\\tb\\nc\\u0001\\u001f\""),
+            ("\u{2028}\u{2029}", "\"\\u2028\\u2029\""),
+        ] {
+            assert_eq!(sign_line_json(line), json, "line {line:?}");
         }
     }
 }

@@ -4,6 +4,7 @@
 //! one [`Screens`], feeds it input as [`Event`]s with LWJGL key codes, and acts on the
 //! [`Effect`]s the screens push into [`Ctx::effects`].
 
+mod book;
 mod connecting;
 mod death;
 mod disconnect;
@@ -16,6 +17,7 @@ mod pause;
 mod snooper;
 mod title;
 
+pub use book::Book;
 pub use connecting::{Connecting, DownloadingTerrain};
 pub use death::Death;
 pub use disconnect::Disconnected;

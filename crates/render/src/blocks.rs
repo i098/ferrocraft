@@ -1129,6 +1129,62 @@ pub fn cached(state: u16) -> &'static Look {
     &TABLE[state as usize & 4095]
 }
 
+/// `Material.isSolid`: full cubes, and shaped blocks except the plant, circuit, snow-layer, carpet,
+/// web, fire and portal materials.
+pub fn material_solid(state: u16) -> bool {
+    match cached(state).kind {
+        Kind::Opaque | Kind::Cutout => true,
+        Kind::Shape => !matches!(
+            state >> 4,
+            6 | 27
+                | 28
+                | 30
+                | 31
+                | 32
+                | 37
+                | 38
+                | 39
+                | 40
+                | 50
+                | 51
+                | 55
+                | 59
+                | 65
+                | 66
+                | 69
+                | 75
+                | 76
+                | 77
+                | 78
+                | 83
+                | 90
+                | 104
+                | 105
+                | 106
+                | 111
+                | 115
+                | 119
+                | 127
+                | 131
+                | 132
+                | 93
+                | 94
+                | 140
+                | 141
+                | 142
+                | 143
+                | 144
+                | 149
+                | 150
+                | 157
+                | 171
+                | 175
+                | 198
+        ),
+        _ => false,
+    }
+}
+
 /// Texture and tint of the upper half of a double plant whose lower half has `variant` metadata.
 pub fn double_plant_top(variant: u16) -> (&'static str, Tint) {
     match variant & 7 {

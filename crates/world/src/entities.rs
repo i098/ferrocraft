@@ -132,6 +132,8 @@ pub struct SizeMeta {
     pub horse_flags: Option<i32>,
     pub always_name: Option<u8>,
     pub skeleton: Option<u8>,
+    /// Arrows: metadata index 16, bit 1 is `getIsCritical`.
+    pub arrow: Option<u8>,
     /// Item frames: metadata index 9, the rotation of the displayed item in eighths of a turn.
     pub rotation: Option<u8>,
 }
@@ -146,6 +148,7 @@ impl SizeMeta {
         self.horse_flags = new.horse_flags.or(self.horse_flags);
         self.always_name = new.always_name.or(self.always_name);
         self.skeleton = new.skeleton.or(self.skeleton);
+        self.arrow = new.arrow.or(self.arrow);
         self.rotation = new.rotation.or(self.rotation);
     }
 }
@@ -347,6 +350,11 @@ impl Entity {
             Kind::Object(t) => matches!(t, 1 | 10..=12),
             Kind::ExperienceOrb | Kind::Painting => false,
         }
+    }
+
+    /// `EntityArrow.getIsCritical`.
+    pub fn critical_arrow(&self) -> bool {
+        self.kind == Kind::Object(60) && self.meta.arrow.unwrap_or(0) & 1 != 0
     }
 
     pub fn is_dead(&self) -> bool {
@@ -738,6 +746,8 @@ pub enum Fx {
     },
     /// `EntityLivingBase.onDeathUpdate` at tick 20: the 20-particle puff.
     Death { pos: [f64; 3], size: (f32, f32) },
+    /// A snowball (61), egg (62) or ender pearl (65) left the world: `onImpact` made its particles there.
+    Impact { object: i8, pos: [f64; 3] },
 }
 
 impl Entities {
@@ -858,7 +868,14 @@ impl Entities {
             }),
             E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
             E::Destroy(ids) => ids.iter().for_each(|id| {
-                self.map.remove(id);
+                if let Some(Entity {
+                    kind: Kind::Object(object @ (61 | 62 | 65)),
+                    pos,
+                    ..
+                }) = self.map.remove(id)
+                {
+                    self.fx.push(Fx::Impact { object, pos });
+                }
             }),
             E::Clear => self.map.clear(),
             other => self.apply_state(other),
@@ -1289,6 +1306,30 @@ mod tests {
         es.tick();
         assert!(es.get(3).unwrap().is_dead());
         assert!(es.get(3).unwrap().blocks_placement());
+    }
+
+    #[test]
+    fn a_destroyed_pearl_leaves_an_impact_and_a_boat_does_not() {
+        let mut es = Entities::default();
+        for (id, kind) in [(7, 65), (8, 1)] {
+            es.apply(EntityEvent::SpawnObject {
+                id,
+                kind,
+                pos: [32, 64, 96],
+                yaw: 0,
+                pitch: 0,
+                vel: [0; 3],
+                data: 0,
+            });
+        }
+        es.apply(EntityEvent::Destroy(vec![7, 8]));
+        assert_eq!(
+            es.take_fx(),
+            vec![Fx::Impact {
+                object: 65,
+                pos: [1.0, 2.0, 3.0]
+            }]
+        );
     }
 
     #[test]

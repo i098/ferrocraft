@@ -233,6 +233,7 @@ impl App {
         self.rain_particles();
         self.potion_particles();
         self.entity_fx();
+        self.projectile_fx();
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
@@ -254,6 +255,9 @@ impl App {
                     self.particles.hit_burst(magic, pos, size)
                 }
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
+                world::entities::Fx::Impact { object, pos } => {
+                    self.particles.thrown_impact(object, pos)
+                }
             }
         }
         let g = &self.game;
@@ -273,6 +277,39 @@ impl App {
         }
         for (pos, vel, width, state) in dust {
             self.particles.sprint_dust(pos, vel, width, state);
+        }
+    }
+
+    /// Tick particles of arrows, thrown entities, fireballs and primed TNT (`onUpdate` of each class).
+    fn projectile_fx(&mut self) {
+        let g = &self.game;
+        let block = |x, y, z| g.store.get_block(x, y, z);
+        for e in g.entities.iter().filter(|e| !e.is_dead()) {
+            let vel = [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]);
+            let moving = vel != [0.0; 3];
+            let Kind::Object(object) = e.kind else {
+                continue;
+            };
+            let wet = || world::motion_sound::in_water(e.pos, f64::from(e.size().1), block);
+            let (bubbles, smoke) = match object {
+                // A stuck arrow does not move and runs neither branch.
+                60 if moving => {
+                    if e.critical_arrow() {
+                        self.particles.arrow_crit(e.prev_pos, vel);
+                    }
+                    (wet(), false)
+                }
+                61 | 62 | 65 | 73 | 75 => (wet(), false),
+                63 | 64 | 66 => (wet(), true),
+                50 => (false, true),
+                _ => continue,
+            };
+            if bubbles {
+                self.particles.bubble_trail(e.pos, vel);
+            }
+            if smoke {
+                self.particles.smoke_puff(e.pos);
+            }
         }
     }
 

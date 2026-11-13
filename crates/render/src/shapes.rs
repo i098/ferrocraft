@@ -235,7 +235,7 @@ fn decor(state: u16, out: &mut Vec<Bx>) {
             }
         }
         _ => {
-            // Dragon egg: nine stacked boxes.
+            // Dragon egg: eight stacked boxes.
             for (min, max) in [
                 ([6.0, 15.0, 6.0], [10.0, 16.0, 10.0]),
                 ([5.0, 14.0, 5.0], [11.0, 15.0, 11.0]),

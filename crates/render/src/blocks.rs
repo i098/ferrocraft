@@ -999,11 +999,6 @@ fn look_19(id: u16, meta: u16) -> Look {
         127 => shape(0x8b5a2b, ["cocoa_stage_2"; 6]),
         131 => shape(0xb08850, ["trip_wire_source"; 6]),
         132 => shape(0xe0e0e0, ["trip_wire"; 6]),
-        117 => shape(0xb0a080, ["brewing_stand"; 6]),
-        118 => shape(0x3c3c3c, ["cauldron_side"; 6]),
-        122 => shape(0x0c0910, ["dragon_egg"; 6]),
-        145 => shape(0x404040, ["anvil_base"; 6]),
-        154 => shape(0x4a4a4a, ["hopper_outside"; 6]),
         147 => shape(0xf8d73e, ["gold_block"; 6]),
         148 => shape(0xdcdcdc, ["iron_block"; 6]),
         149 | 150 => shape(
@@ -1014,11 +1009,23 @@ fn look_19(id: u16, meta: u16) -> Look {
                 "comparator_off"
             }; 6],
         ),
+        _ => look_decor(id),
+    }
+}
+
+/// Hopper, cauldron, anvil, brewing stand and dragon egg, whose models `shapes.rs` builds from several textures.
+fn look_decor(id: u16) -> Look {
+    match id {
+        117 => shape(0xb0a080, ["brewing_stand"; 6]),
+        118 => shape(0x3c3c3c, ["cauldron_side"; 6]),
+        122 => shape(0x0c0910, ["dragon_egg"; 6]),
+        145 => shape(0x404040, ["anvil_base"; 6]),
+        154 => shape(0x4a4a4a, ["hopper_outside"; 6]),
         _ => mk(Kind::Skip, 0, ["stone"; 6]),
     }
 }
 
-/// Textures that only `shapes.rs` boxes use, so no `look` lists them.
+/// Textures the `shapes.rs` boxes need besides the ones each `look` names; `names` dedups the overlap.
 const SHAPE_TEXTURES: [&str; 28] = [
     "hopper_outside",
     "hopper_top",

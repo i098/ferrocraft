@@ -6,6 +6,7 @@ pub mod bossbar;
 pub mod canvas;
 pub mod chat;
 pub mod debug;
+pub mod hover;
 pub mod hud;
 pub mod inventory;
 pub mod scoreboard;

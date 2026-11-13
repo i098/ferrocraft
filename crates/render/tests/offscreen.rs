@@ -1267,6 +1267,8 @@ fn portal_animates_with_client_ticks() {
     let (t0, t1, t40) = (frame(0), frame(1), frame(40));
     assert!(t0 != t1 || t0 != t40, "portal stayed on frame 0");
     assert_ne!(t0, t40, "portal differs after 40 ticks");
+}
+
 /// Share of red in the pixels that differ from `base`.
 fn red_share(base: &[u8], frame: &[u8]) -> f64 {
     let (mut red, mut all) = (0.0, 0.0);

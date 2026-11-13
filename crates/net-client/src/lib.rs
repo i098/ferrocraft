@@ -86,6 +86,12 @@ pub enum NetEvent {
     Lightning {
         pos: [f64; 3],
     },
+    /// Maps (0x34): colour bytes of the `columns` by `rows` area at `(x, z)` of map `id`.
+    Map {
+        id: i32,
+        area: [usize; 4],
+        data: Vec<u8>,
+    },
     /// A chat message (positions 0 and 1) as styled runs.
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.

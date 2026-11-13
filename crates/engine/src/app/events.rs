@@ -88,6 +88,9 @@ impl App {
 
     fn connect(&mut self, host: &str, port: u16) {
         self.game = Game::new();
+        if let Some(r) = &mut self.renderer {
+            r.clear_maps();
+        }
         let addr = if host.contains(':') {
             format!("[{host}]:{port}")
         } else {
@@ -113,8 +116,12 @@ impl App {
     fn refresh_resources(&mut self) {
         let Some(w) = self.window.clone() else { return };
         // Drop the old renderer first: a window holds one surface at a time.
+        let maps = self.renderer.as_mut().map(|r| r.take_maps());
         self.renderer = None;
         self.renderer = Some(Renderer::new(w, self.asset_source()));
+        if let (Some(r), Some(maps)) = (&mut self.renderer, maps) {
+            r.restore_maps(maps);
+        }
         self.load_assets();
         self.apply_settings();
         self.reload_chunks();
@@ -247,6 +254,12 @@ impl App {
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
         self.note_session_state(&ev);
         self.entity_sound(&ev);
+        if let NetEvent::Map { id, area, data } = &ev {
+            if let Some(r) = &mut self.renderer {
+                r.map_update(*id, *area, data);
+            }
+            return;
+        }
         let ev = match self.world_event(ev, dirty) {
             Ok(()) => return,
             Err(ev) => ev,

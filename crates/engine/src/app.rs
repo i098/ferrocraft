@@ -601,6 +601,10 @@ impl App {
                 .held_stack()
                 .as_ref()
                 .is_some_and(world::inventory::glint),
+            held_damage: self.game.inv.held_stack().as_ref().map_or(0, |s| s.damage),
+            stack: None,
+            hover_start: 0.0,
+            hang: Default::default(),
             name: None,
             skin: None,
             eye_height: eye_height(self.input.sneaking()) as f32,
@@ -1141,6 +1145,7 @@ fn entity_draw(
         Kind::Mob(id) => Class::Mob(id),
         Kind::Object(id) => Class::Object(id),
         Kind::ExperienceOrb => Class::Orb,
+        Kind::Painting => Class::Painting,
     };
     let p = partial as f32;
     EntityDraw {
@@ -1168,6 +1173,19 @@ fn entity_draw(
         armor_dye: [1, 2, 3, 4].map(|s| e.equipment[s].and_then(|i| i.dye)),
         armor_glint: [1, 2, 3, 4].map(|s| e.equipment[s].is_some_and(|i| i.glint)),
         held_glint: e.equipment[0].is_some_and(|i| i.glint),
+        held_damage: e.equipment[0].map_or(0, |i| i.damage),
+        stack: e.stack.map(|i| render::item::Stack {
+            id: i.id,
+            damage: i.damage,
+            count: i.count,
+            glint: i.glint,
+        }),
+        hover_start: (e.id as f32 * 0.618) % std::f32::consts::TAU,
+        hang: render::hanging::Hang {
+            facing: e.facing,
+            title: e.title.clone(),
+            rotation: e.meta.rotation.unwrap_or(0),
+        },
         name: e.name.clone(),
         skin,
         burning: e.burning(),

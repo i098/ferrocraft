@@ -150,6 +150,8 @@ pub struct Renderer {
     hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
+    /// Atlas at level 0 only for dropped and held items: vanilla draws them with `setBlurMipmap(false, false)`.
+    item_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
     hand_skin: Option<(wgpu::BindGroup, u32)>,
     rain_group: Option<wgpu::BindGroup>,
@@ -371,8 +373,9 @@ impl Renderer {
                 &img.rgba,
             )
         };
-        let hand_atlas_group =
-            bind_group(&device, &layout_bg, &hand_globals, &sampler, &atlas_view);
+        let flat_view = level_zero_view(&atlas_tex);
+        let item_group = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
+        let hand_atlas_group = bind_group(&device, &layout_bg, &hand_globals, &sampler, &flat_view);
         let hand_skin = skin_img.map(|img| {
             let view = view_of(&img);
             (
@@ -437,6 +440,7 @@ impl Renderer {
             selection: None,
             hand_globals,
             hand_atlas_group,
+            item_group,
             hand_skin,
             rain_group,
             snow_group,
@@ -860,9 +864,7 @@ impl Renderer {
     /// Held and dropped items, each mesh with the texture it samples; leaves the world group bound.
     fn draw_items<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         for (tex, m) in &self.item_meshes {
-            let group = tex
-                .as_ref()
-                .map_or(&self.world_group, |t| &self.textures[t]);
+            let group = tex.as_ref().map_or(&self.item_group, |t| &self.textures[t]);
             pass.set_bind_group(0, group, &[]);
             draw_mesh(pass, m);
         }
@@ -1143,10 +1145,12 @@ impl Renderer {
         }
         self.atlas_tex = create_atlas_texture(&self.device, &self.queue, &self.atlas, levels);
         let view = self.atlas_tex.create_view(&Default::default());
+        let flat = level_zero_view(&self.atlas_tex);
         let group =
-            |globals| bind_group(&self.device, &self.layout_bg, globals, &self.sampler, &view);
-        self.world_group = group(&self.globals);
-        self.hand_atlas_group = group(&self.hand_globals);
+            |globals, view| bind_group(&self.device, &self.layout_bg, globals, &self.sampler, view);
+        self.world_group = group(&self.globals, &view);
+        self.item_group = group(&self.globals, &flat);
+        self.hand_atlas_group = group(&self.hand_globals, &flat);
     }
 
     /// `PostChain.close`, then `GameRenderer.loadShader` when `name` (a jar path such as
@@ -2495,6 +2499,15 @@ fn create_texture(
         wgpu::util::TextureDataOrder::LayerMajor,
         rgba,
     )
+}
+
+/// A view of the atlas that exposes level 0 only, for items (`setBlurMipmap(false, false)`).
+fn level_zero_view(tex: &wgpu::Texture) -> wgpu::TextureView {
+    tex.create_view(&wgpu::TextureViewDescriptor {
+        base_mip_level: 0,
+        mip_level_count: Some(1),
+        ..Default::default()
+    })
 }
 
 /// The block atlas with levels 0 to `levels` of its mip chain.

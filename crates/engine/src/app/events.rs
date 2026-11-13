@@ -138,6 +138,7 @@ impl App {
         let maps = self.renderer.as_mut().map(|r| r.take_maps());
         self.renderer = None;
         self.renderer = Some(Renderer::new(w, self.asset_source()));
+        self.skins.clear_tab();
         if let (Some(r), Some(maps)) = (&mut self.renderer, maps) {
             r.restore_maps(maps);
         }
@@ -357,6 +358,7 @@ impl App {
                 ..
             } => {
                 self.hud = gui::Hud::default();
+                self.hud.tablist.encrypted = self.link.session().is_some_and(|s| s.encrypted);
                 self.container = None;
                 self.ui.difficulty = Some(*difficulty);
                 self.ui.hardcore = *hardcore;
@@ -710,6 +712,7 @@ impl App {
                         ping: p.ping,
                         gamemode: p.gamemode,
                         display: p.display,
+                        textures: p.textures,
                         ..TabEntry::default()
                     });
                 }

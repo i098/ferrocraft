@@ -34,6 +34,15 @@ fn grid(slots: &mut Vec<(i32, i32)>, x: i32, y: i32, cols: i32, rows: i32) {
     }
 }
 
+/// `ContainerHorseInventory`: saddle, armor, then 3 rows of the chest's columns on a donkey or mule.
+fn horse_slots(slots: &mut Vec<(i32, i32)>, n: u8) {
+    slots.extend([(8, 18), (8, 36)]);
+    if n > 2 {
+        grid(slots, 80, 18, i32::from(n - 2) / 3, 3);
+    }
+    player_part(slots, 8, 84, 142);
+}
+
 pub fn layout(kind: Kind) -> Layout {
     let mut slots = Vec::new();
     let (texture, height) = match kind {
@@ -91,6 +100,10 @@ pub fn layout(kind: Kind) -> Layout {
             slots.push((136, 110));
             player_part(&mut slots, 36, 137, 195);
             ("textures/gui/container/beacon.png", 219)
+        }
+        Kind::Horse(n) => {
+            horse_slots(&mut slots, n);
+            ("textures/gui/container/horse.png", 166)
         }
         Kind::Merchant => {
             slots.extend([(36, 53), (62, 53), (120, 53)]);

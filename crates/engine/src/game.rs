@@ -8,6 +8,7 @@ use world::border::WorldBorder;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
+use world::horse::{self, HorseJump};
 use world::inventory::{merchant, Inventory};
 use world::{Input, Player, World};
 
@@ -83,6 +84,25 @@ pub fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
+/// `Entity.updateRidden`: add the vehicle's yaw and pitch change to the pending `delta`, wrap it to
+/// +-180 and hand half of it, at most 10 degrees, to the rider this tick.
+fn rider_turn(delta: &mut [f64; 2], vehicle: [f32; 2]) -> [f32; 2] {
+    let mut step = [0.0f32; 2];
+    for i in 0..2 {
+        delta[i] += f64::from(vehicle[i]);
+        while delta[i] >= 180.0 {
+            delta[i] -= 360.0;
+        }
+        while delta[i] < -180.0 {
+            delta[i] += 360.0;
+        }
+        let d = (delta[i] * 0.5).clamp(-10.0, 10.0);
+        delta[i] -= d;
+        step[i] = d as f32;
+    }
+    step
+}
+
 /// Local block removals of the dig state machine, remembering which chunks changed.
 struct Local<'a> {
     store: &'a mut ChunkStore,
@@ -110,6 +130,11 @@ pub struct Game {
     pub entity_id: i32,
     pub entity_flags: u8,
     pub vehicle: Option<i32>,
+    /// `Entity.entityRiderYawDelta` and `entityRiderPitchDelta`: the vehicle's turn the rider has not followed yet.
+    rider_turn: [f64; 2],
+    pub horse_jump: HorseJump,
+    /// `EntityAction` 5 boost waiting to be sent: the horse jump key was released this tick.
+    pub horse_boost: Option<i32>,
     /// `World.getWorldBorder`, set by `S44`.
     pub border: WorldBorder,
     /// `Entity.isOutsideBorder` of the local player.
@@ -200,6 +225,9 @@ impl Game {
             entity_id: -1,
             entity_flags: 0,
             vehicle: None,
+            rider_turn: [0.0; 2],
+            horse_jump: HorseJump::default(),
+            horse_boost: None,
             border: WorldBorder::default(),
             border_outside: false,
             camera: None,
@@ -409,11 +437,8 @@ impl Game {
                 kind,
                 title,
                 slots,
-            } => Some(if self.inv.open_window(id, &kind, title, slots) {
-                Effect::OpenWindow
-            } else {
-                Effect::RejectWindow(id)
-            }),
+                horse,
+            } => Some(self.open_window(id, &kind, title, slots, horse)),
             NetEvent::SignEditorOpen { pos } => Some(Effect::EditSign(pos)),
             NetEvent::PluginMessage { channel, data } if channel == "MC|TrList" => {
                 self.set_trades(&data);
@@ -510,6 +535,7 @@ impl Game {
         if let EntityEvent::Attach { id, vehicle } = &e {
             if *id == self.entity_id {
                 self.vehicle = (*vehicle >= 0).then_some(*vehicle);
+                self.rider_turn = [0.0; 2];
             }
         }
         self.entities.apply(e)
@@ -663,6 +689,8 @@ impl Game {
             self.cracks.retain(|_, c| now - c.2 <= 400);
         }
         self.effects.tick();
+        let riding = self.riding_saddled_horse();
+        self.horse_boost = self.horse_jump.tick(riding, input.jump);
         let Some(p) = &mut self.player else { return };
         self.prev_pos = p.pos;
         let (cx, cz) = (
@@ -675,6 +703,13 @@ impl Game {
             p.pos = [v.pos[0], v.pos[1] + off, v.pos[2]];
             p.vel = [0.0; 3];
             p.on_ground = false;
+            // `Entity.updateRidden`: the view turns with the vehicle.
+            let turn = rider_turn(
+                &mut self.rider_turn,
+                [v.yaw - v.prev_yaw, v.pitch - v.prev_pitch],
+            );
+            p.yaw += turn[0];
+            self.pitch += turn[1];
         } else if self.store.get(cx, cz).is_some() {
             let flying = self.abilities & 2 != 0;
             let input = world::Input {
@@ -704,6 +739,42 @@ impl Game {
                 p.vel[2] += push[2];
             }
         }
+    }
+
+    fn open_window(
+        &mut self,
+        id: u8,
+        kind: &str,
+        title: String,
+        slots: u8,
+        horse: Option<i32>,
+    ) -> Effect {
+        if !self.inv.open_window(id, kind, title, slots) {
+            return Effect::RejectWindow(id);
+        }
+        if let Some(w) = &mut self.inv.open {
+            // `canWearArmor`: only a plain horse (type 0) wears armor.
+            w.horse_armor = horse
+                .and_then(|h| self.entities.get(h))
+                .is_some_and(|e| e.meta.horse == Some(0));
+        }
+        Effect::OpenWindow
+    }
+
+    /// `ClientPlayerInteractionManager.hasRidingInventory`: the vehicle is a horse, saddled or not.
+    pub fn riding_horse(&self) -> bool {
+        self.vehicle
+            .and_then(|id| self.entities.get(id))
+            .is_some_and(|v| v.kind == world::entities::Kind::Mob(100))
+    }
+
+    /// `LocalClientPlayerEntity.isRidingRideableMob`: the vehicle is a horse with a saddle.
+    pub fn riding_saddled_horse(&self) -> bool {
+        self.riding_horse()
+            && self
+                .vehicle
+                .and_then(|id| self.entities.get(id))
+                .is_some_and(|v| v.meta.horse_flags.is_some_and(horse::is_saddled))
     }
 
     fn set_gamemode(&mut self, mode: u8) {
@@ -861,6 +932,17 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rider_follows_half_the_vehicle_turn_up_to_ten_degrees() {
+        let mut d = [0.0; 2];
+        assert_eq!(super::rider_turn(&mut d, [8.0, 0.0]), [4.0, 0.0]);
+        assert_eq!(super::rider_turn(&mut d, [0.0, 0.0]), [2.0, 0.0]);
+        let mut d = [0.0; 2];
+        assert_eq!(super::rider_turn(&mut d, [90.0, -90.0]), [10.0, -10.0]);
+        // 350 degrees is a turn of -10 once wrapped
+        let mut d = [0.0; 2];
+        assert_eq!(super::rider_turn(&mut d, [350.0, 0.0]), [-5.0, 0.0]);
+    }
     use super::*;
     use world::chunk::Chunk;
 

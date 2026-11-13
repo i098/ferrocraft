@@ -1089,6 +1089,7 @@ fn status_of(game: &Game, update_counter: i32) -> Status {
         } else {
             -1
         },
+        horse_jump: game.riding_saddled_horse().then_some(game.horse_jump.power),
         ..Status::default()
     }
 }

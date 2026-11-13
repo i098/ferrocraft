@@ -112,6 +112,7 @@ fn container_event(packet: &cb::Packet) -> Option<NetEvent> {
             kind: p.window_type.clone(),
             title: chat::plain_text(&p.title),
             slots: p.slots,
+            horse: p.horse_entity_id,
         },
         P::CloseWindow(_) => NetEvent::CloseWindow,
         P::SignEditorOpen(p) => NetEvent::SignEditorOpen {

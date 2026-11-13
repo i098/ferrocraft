@@ -128,6 +128,8 @@ pub struct SizeMeta {
     pub slime: Option<u8>,
     pub guardian: Option<i32>,
     pub horse: Option<u8>,
+    /// Horse flags (index 16, an int): tame, saddled, chested.
+    pub horse_flags: Option<i32>,
     pub always_name: Option<u8>,
     pub skeleton: Option<u8>,
     /// Item frames: metadata index 9, the rotation of the displayed item in eighths of a turn.
@@ -141,6 +143,7 @@ impl SizeMeta {
         self.slime = new.slime.or(self.slime);
         self.guardian = new.guardian.or(self.guardian);
         self.horse = new.horse.or(self.horse);
+        self.horse_flags = new.horse_flags.or(self.horse_flags);
         self.always_name = new.always_name.or(self.always_name);
         self.skeleton = new.skeleton.or(self.skeleton);
         self.rotation = new.rotation.or(self.rotation);

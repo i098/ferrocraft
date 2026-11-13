@@ -303,12 +303,21 @@ impl App {
                 61 | 62 | 65 | 73 | 75 => {
                     // `EntityThrowable.onUpdate`: the client traces blocks along the motion and runs `onImpact`.
                     let next = [0, 1, 2].map(|i| e.pos[i] + vel[i]);
-                    if moving
-                        && matches!(object, 61 | 62 | 65)
-                        && (g.line_blocked(e.pos, next)
-                            || g.entities.hit_along(e.pos, next, e.age < 5, body).is_some())
-                    {
-                        particles.thrown_impact(object, e.pos);
+                    if moving && matches!(object, 61 | 62 | 65) {
+                        let len = vel.iter().map(|v| v * v).sum::<f64>().sqrt();
+                        let hit = [
+                            g.block_dist(e.pos, next),
+                            g.entities.hit_along(e.pos, next, e.age < 5, body),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .min_by(f64::total_cmp);
+                        if let Some(t) = hit {
+                            particles.thrown_impact(
+                                object,
+                                [0, 1, 2].map(|i| e.pos[i] + vel[i] / len * t),
+                            );
+                        }
                     }
                     (wet(), false)
                 }
@@ -1259,6 +1268,9 @@ mod tests {
         let (g, mut ps) = pearl_flying_toward_x(true);
         App::projectile_fx(&g, &mut ps);
         assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 1.0).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
         let (g, mut ps) = pearl_flying_toward_x(false);
         App::projectile_fx(&g, &mut ps);
         assert_eq!(ps.len(), 0);
@@ -1278,6 +1290,9 @@ mod tests {
         });
         App::projectile_fx(&g, &mut ps);
         assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 0.95).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
     }
 
     #[test]
@@ -1286,6 +1301,9 @@ mod tests {
         g.player = Some(world::Player::new([1.5, 64.0, 0.5], 0.0));
         App::projectile_fx(&g, &mut ps);
         assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 0.9).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
     }
 
     #[test]

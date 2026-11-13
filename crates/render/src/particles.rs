@@ -221,6 +221,10 @@ impl Particles {
         self.list.len()
     }
 
+    pub fn positions(&self) -> impl Iterator<Item = [f64; 3]> + '_ {
+        self.list.iter().map(|p| p.pos)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.list.is_empty()
     }

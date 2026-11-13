@@ -1515,7 +1515,9 @@ mod tests {
         let mut d = steve();
         d.skin = Some(1);
         let count = |skins: &Skins, d: &EntityDraw| {
-            build(std::slice::from_ref(d), skins, |_| [1.0, 1.0]).vertices.len()
+            build(std::slice::from_ref(d), skins, |_| [1.0, 1.0])
+                .vertices
+                .len()
         };
         d.look.skin_parts = 0x00;
         let bare = count(&skins, &d);

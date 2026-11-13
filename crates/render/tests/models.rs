@@ -86,7 +86,11 @@ fn ported_mobs_render() {
     ];
     for (i, &(id, size)) in mobs.iter().enumerate() {
         r.set_entities(&[draw(Class::Mob(id), -1.0 + i as f64 * 0.01, size)]);
-        assert_ne!(empty, r.render_to_rgba(&cam, &[]).2, "mob {id} draws nothing");
+        assert_ne!(
+            empty,
+            r.render_to_rgba(&cam, &[]).2,
+            "mob {id} draws nothing"
+        );
     }
     let mut draws: Vec<EntityDraw> = mobs
         .iter()
@@ -108,5 +112,54 @@ fn ported_mobs_render() {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("mobs.png"), 960, 360, &image).unwrap();
         encode_png(&dir.join("player.png"), 960, 360, &steve).unwrap();
+    }
+}
+
+/// Downloaded skins and capes go through `write_texture`; filling every slot (LRU wrap included)
+/// must not trip wgpu validation, and a coloured skin must change the picture.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn downloaded_skins_and_capes_upload_and_draw() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(480, 360, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=1 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let solid = |w: usize, h: usize, c: [u8; 4]| render::Image {
+        width: w,
+        height: h,
+        rgba: c.iter().copied().cycle().take(w * h * 4).collect(),
+    };
+    let mut player = draw(Class::Player { slim: false }, 0.0, (0.6, 1.8));
+    player.look = Look {
+        cape: Some(CapeSway::default()),
+        ..Look::default()
+    };
+    player.skin = Some(1);
+    r.set_entities(&[player.clone()]);
+    let before = r.render_to_rgba(&cam, &[]).2;
+    for k in 1..=200u128 {
+        r.set_player_skin(k, &solid(64, 64, [255, 0, 255, 255]));
+        r.set_player_cape(k, &solid(64, 32, [0, 255, 0, 255]));
+    }
+    player.skin = Some(200);
+    r.set_entities(&[player]);
+    let after = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(before, after);
+    if let Some(dir) = std::env::var_os("MODELS_PROOF_DIR") {
+        encode_png(
+            &std::path::PathBuf::from(dir).join("skin_cape.png"),
+            480,
+            360,
+            &after,
+        )
+        .unwrap();
     }
 }

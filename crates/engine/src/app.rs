@@ -29,7 +29,7 @@ use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
     AssetSource, Camera, CapeSway, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand,
-    HeldKind, Look, Particles, Renderer, TeamTag, Thrower, UseAction, Using,
+    HeldKind, Look, Particles, Renderer, StandLook, TeamTag, Thrower, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1217,6 +1217,19 @@ fn remote_using(e: &Entity) -> Option<UseAction> {
     (e.flags & flag::USING_ITEM != 0).then(|| use_action(e.equipment[0].map_or(0, |i| i.id)))
 }
 
+/// Flags, pose and helmet of an armor stand; any other entity keeps the defaults.
+fn stand_look(e: &Entity) -> StandLook {
+    if e.kind != Kind::Object(78) {
+        return StandLook::default();
+    }
+    StandLook {
+        flags: e.meta.stand.unwrap_or(0),
+        head_damage: e.equipment[4].map_or(0, |i| i.damage),
+        ..StandLook::default()
+    }
+    .with_pose(e.meta.pose)
+}
+
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
@@ -1301,6 +1314,7 @@ fn entity_draw(
                 _ => 0,
             },
             cape: Some(CapeSway::default()),
+            stand: stand_look(e),
             ..Look::default()
         },
     }

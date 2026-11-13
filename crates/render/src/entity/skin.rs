@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 45] = [
+const SKINS: [&str; 46] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -58,6 +58,7 @@ const SKINS: [&str; 45] = [
     "entity/enderman/enderman.png",
     "entity/spider_eyes.png",
     "entity/enderman/enderman_eyes.png",
+    "entity/armorstand/wood.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -108,6 +109,8 @@ pub enum Skin {
     Enderman,
     SpiderEyes,
     EndermanEyes,
+    /// `textures/entity/armorstand/wood.png` (64x64).
+    ArmorStand,
     /// A downloaded cape in dynamic slot `n`.
     Cape(u8),
     /// An armor texture, by index into the armor part of the slot table.
@@ -440,6 +443,7 @@ fn mob_slot(skin: Skin) -> Option<u32> {
         Skin::Enderman => 42,
         Skin::SpiderEyes => 43,
         Skin::EndermanEyes => 44,
+        Skin::ArmorStand => 45,
         _ => return None,
     })
 }

@@ -6,6 +6,7 @@
 //! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
+mod armorstand;
 mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
@@ -24,6 +25,7 @@ const PLAYER_LEFT_PANTS: usize = 11;
 
 use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
+pub use armorstand::StandLook;
 pub use projectile::Thrower;
 pub use skin::{Skin, Skins, SLOT};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
@@ -129,6 +131,8 @@ pub struct Look {
     pub screaming: bool,
     /// Players with a cape: how it sways.
     pub cape: Option<CapeSway>,
+    /// Armor stands: flags, pose and worn block; see [`StandLook`].
+    pub stand: StandLook,
 }
 
 impl Default for Look {
@@ -139,6 +143,7 @@ impl Default for Look {
             carried: 0,
             screaming: false,
             cape: None,
+            stand: StandLook::default(),
         }
     }
 }
@@ -185,6 +190,10 @@ struct Part {
     inflate: f32,
     /// `ModelRenderer.mirror`: the box samples the opposite-hand texture layout, flipped.
     mirror: bool,
+    /// Model-wide `scale` of `ModelBiped.render` for a child: the part, moved by `shift`, is scaled
+    /// about the model origin.
+    scale: f32,
+    shift: [f32; 3],
 }
 
 impl Part {
@@ -197,7 +206,15 @@ impl Part {
             rot: [0.0; 3],
             inflate: 0.0,
             mirror: false,
+            scale: 1.0,
+            shift: [0.0; 3],
         }
+    }
+    /// `scalef(scale)` after `translatef(shift)`, as `ModelBiped.render` does for a child.
+    fn placed(mut self, scale: f32, shift: [f32; 3]) -> Part {
+        self.scale = scale;
+        self.shift = shift;
+        self
     }
     fn rot(mut self, rot: [f32; 3]) -> Part {
         self.rot = rot;
@@ -630,7 +647,17 @@ fn model(d: &EntityDraw) -> Model {
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
         Class::Mob(id) => mobs::build(d, id).unwrap_or_else(|| generic(d)),
+        Class::Object(78) => armorstand::model(d),
         _ => generic(d),
+    }
+}
+
+/// The model whose boxes the armor layers grow: the body itself, except on a stand, whose armor
+/// has its own `ArmorStandArmorModel`.
+fn armor_model(d: &EntityDraw) -> Model {
+    match d.class {
+        Class::Object(78) => armorstand::armor_model(d),
+        _ => model(d),
     }
 }
 
@@ -739,8 +766,11 @@ pub const ITEM_GLINT_COLOR: [f32; 4] = [0.502, 0.251, 0.8, 1.0];
 pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
     let mut out = MeshData::default();
     for d in draws {
-        let m = model(d);
-        let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
+        let m = armor_model(d);
+        let holds = matches!(
+            d.class,
+            Class::Player { .. } | Class::Mob(54 | 57 | 51) | Class::Object(78)
+        );
         if !holds {
             continue;
         }
@@ -853,7 +883,12 @@ impl Xf {
             pos: d.pos,
             st,
             ct,
-            sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
+            // Only `RenderPlayer` lowers the model; a stand sneaks through its own model offset.
+            sneak_drop: if d.sneaking && d.class != Class::Object(78) {
+                0.125
+            } else {
+                0.0
+            },
             fall,
             // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
             scale: match d.class {
@@ -920,11 +955,7 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
     let size = part.size.map(|s| s + 2.0 * grow);
     let tf = |p: V3| -> V3 {
         let r = rotate(p, part.rot);
-        xf.world([
-            r[0] + part.pivot[0],
-            r[1] + part.pivot[1],
-            r[2] + part.pivot[2],
-        ])
+        xf.world([0, 1, 2].map(|i| (r[i] + part.pivot[i] + part.shift[i]) * part.scale))
     };
     add_box(
         out,
@@ -1041,6 +1072,9 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
 
 /// The body model, its armor and layers; returns where the full-bright layers start.
 fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
+    if d.class == Class::Object(78) {
+        return armorstand::draw(out, d, skins);
+    }
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
     let generic = m.skin == Skin::White
@@ -1174,6 +1208,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
         Skin::Armor(_) | Skin::GuardianElder => [0.7; 3],
+        Skin::ArmorStand => [0.65, 0.5, 0.35],
         Skin::Arrow
         | Skin::Snowball
         | Skin::Egg

@@ -72,6 +72,10 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
     };
     SizeMeta {
         stand: byte(10),
+        pose: [11, 12, 13, 14, 15, 16].map(|index| match find(meta, index) {
+            Some(MetaValue::Rotation(x, y, z)) => Some([*x, *y, *z]),
+            _ => None,
+        }),
         age: byte(12),
         slime: byte(16),
         guardian: match find(meta, 16) {

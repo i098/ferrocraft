@@ -106,6 +106,8 @@ pub mod flag {
 /// `EntityArmorStand` status byte (metadata index 10).
 pub mod stand {
     pub const SMALL: u8 = 1;
+    pub const ARMS: u8 = 4;
+    pub const NO_BASE_PLATE: u8 = 8;
     pub const MARKER: u8 = 16;
 }
 
@@ -121,9 +123,12 @@ pub fn is_baby(kind: Kind, m: &SizeMeta) -> bool {
 /// The metadata that sets a hitbox or a sound variant: armor stand status (index 10), age of
 /// ageable mobs (12, a zombie's child flag), slime size (16), guardian flags (16) and horse
 /// type (19), plus the name-tag byte (3, `getAlwaysRenderNameTag`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SizeMeta {
     pub stand: Option<u8>,
+    /// `EntityArmorStand` poses in degrees (metadata 11 to 16): head, body, left arm, right arm,
+    /// left leg, right leg. `None` keeps the vanilla default of that part.
+    pub pose: [Option<[f32; 3]>; 6],
     pub age: Option<u8>,
     pub slime: Option<u8>,
     pub guardian: Option<i32>,
@@ -141,6 +146,9 @@ pub struct SizeMeta {
 impl SizeMeta {
     fn merge(&mut self, new: SizeMeta) {
         self.stand = new.stand.or(self.stand);
+        for (old, new) in self.pose.iter_mut().zip(new.pose) {
+            *old = new.or(*old);
+        }
         self.age = new.age.or(self.age);
         self.slime = new.slime.or(self.slime);
         self.guardian = new.guardian.or(self.guardian);

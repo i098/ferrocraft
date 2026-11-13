@@ -241,6 +241,32 @@ fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
 }
 
 impl Session {
+    /// C05 `PlayerLook`: `EntityPlayerSP.onUpdate` sends it instead of a position while riding.
+    pub fn send_look(&mut self, yaw: f32, pitch: f32, on_ground: bool) -> io::Result<()> {
+        let p = sb::PlayerLook {
+            yaw,
+            pitch,
+            on_ground,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C0C `SteerVehicle` (`PacketInput`): flag 1 is jump, flag 2 is the dismount (sneak).
+    pub fn send_steer(
+        &mut self,
+        sideways: f32,
+        forward: f32,
+        jump: bool,
+        dismount: bool,
+    ) -> io::Result<()> {
+        let p = sb::SteerVehicle {
+            sideways,
+            forward,
+            flags: u8::from(jump) | u8::from(dismount) << 1,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
     /// Left click on an entity: `UseEntity` attack. The caller sends the arm swing first.
     pub fn attack_entity(&mut self, target: i32) -> io::Result<()> {
         send(

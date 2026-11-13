@@ -6,6 +6,8 @@ use std::borrow::Cow;
 mod assets;
 mod biome;
 mod blocks;
+mod border;
+pub use border::Border;
 mod crack;
 mod entity;
 mod gpu;

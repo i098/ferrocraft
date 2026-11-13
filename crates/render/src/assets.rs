@@ -113,11 +113,12 @@ pub fn encode_png(path: &Path, width: u32, height: u32, rgba: &[u8]) -> std::io:
     writer.write_image_data(rgba).map_err(std::io::Error::other)
 }
 
-/// Block texture atlas: 16x16 tiles in a grid; tile 0 is solid white (flat colors use it).
+/// Block texture atlas: square tiles in a grid, `tile` px wide (the largest block texture, rounded up to a power of two, at least 16); tile 0 is solid white (flat colors use it).
 pub struct Atlas {
     pub textured: bool,
     pub width: u32,
     pub height: u32,
+    pub tile: u32,
     pub rgba: Vec<u8>,
     cells: HashMap<&'static str, u32>,
 }
@@ -129,6 +130,7 @@ impl Atlas {
             textured: false,
             width: TILE as u32,
             height: TILE as u32,
+            tile: TILE as u32,
             rgba: vec![255; TILE * TILE * 4],
             cells: HashMap::new(),
         }
@@ -136,23 +138,8 @@ impl Atlas {
 
     pub fn from_assets(source: &mut AssetSource) -> Atlas {
         let names = texture_names();
-        let rows = (names.len() + 1).div_ceil(COLUMNS);
-        let (w, h) = (COLUMNS * TILE, rows * TILE);
-        let mut rgba = vec![0u8; w * h * 4];
-        let mut cells = HashMap::new();
-        blit(
-            &mut rgba,
-            w,
-            0,
-            &Image {
-                width: 1,
-                height: 1,
-                rgba: vec![255; 4],
-            },
-        );
-        let mut loaded = 0;
-        for (i, name) in names.iter().enumerate() {
-            let cell = i + 1;
+        let mut images: Vec<Image> = Vec::with_capacity(names.len());
+        for name in &names {
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
             let mut image = source.read(&path).and_then(|b| decode_png(&b));
             if *name == "grass_side" {
@@ -164,8 +151,31 @@ impl Atlas {
                     bake_overlay(base, &over, crate::blocks::rgb(crate::blocks::GRASS_COLOR));
                 }
             }
-            loaded += usize::from(image.is_some());
-            blit(&mut rgba, w, cell, &image.unwrap_or_else(missing_tile));
+            images.push(image.unwrap_or_else(|| Image {
+                width: 0,
+                height: 0,
+                rgba: Vec::new(),
+            }));
+        }
+        let loaded = images.iter().filter(|i| i.width > 0).count();
+        let tile = atlas_tile(images.iter().map(|i| i.width.min(i.height)));
+        let rows = (names.len() + 1).div_ceil(COLUMNS);
+        let (w, h) = (COLUMNS * tile, rows * tile);
+        let mut rgba = vec![0u8; w * h * 4];
+        let mut cells = HashMap::new();
+        let white = Image {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        blit(&mut rgba, w, tile, 0, &white);
+        for (i, (name, image)) in names.iter().zip(&images).enumerate() {
+            let cell = i + 1;
+            if image.width == 0 {
+                blit(&mut rgba, w, tile, cell, &missing_tile());
+            } else {
+                blit(&mut rgba, w, tile, cell, image);
+            }
             cells.insert(*name, cell as u32);
         }
         if loaded == 0 {
@@ -175,11 +185,11 @@ impl Atlas {
             textured: true,
             width: w as u32,
             height: h as u32,
+            tile: tile as u32,
             rgba,
             cells,
         }
     }
-
     /// Atlas coordinates for texture `name` at tile-local `(u, v)` in `0..=1`.
     pub fn uv(&self, name: &str, [u, v]: [f32; 2]) -> [f32; 2] {
         let cell = self.cells.get(name).copied().unwrap_or(0) as usize;
@@ -188,8 +198,8 @@ impl Atlas {
         }
         let (cx, cy) = ((cell % COLUMNS) as f32, (cell / COLUMNS) as f32);
         [
-            (cx + u) * TILE as f32 / self.width as f32,
-            (cy + v) * TILE as f32 / self.height as f32,
+            (cx + u) * self.tile as f32 / self.width as f32,
+            (cy + v) * self.tile as f32 / self.height as f32,
         ]
     }
 }
@@ -211,13 +221,18 @@ pub(crate) fn missing_tile() -> Image {
     }
 }
 
-/// Copy the top-left square of `image` into grid `cell`, nearest-sampled to 16x16 (animated strips keep frame 0).
-fn blit(atlas: &mut [u8], atlas_width: usize, cell: usize, image: &Image) {
+/// Tile edge for the block atlas: the largest sprite side, rounded up to a power of two, at least 16.
+fn atlas_tile(sides: impl Iterator<Item = usize>) -> usize {
+    sides.max().unwrap_or(0).max(TILE).next_power_of_two()
+}
+
+/// Copy the top-left square of `image` into grid `cell`, nearest-sampled to `tile` px (animated strips keep frame 0).
+fn blit(atlas: &mut [u8], atlas_width: usize, tile: usize, cell: usize, image: &Image) {
     let side = image.width.min(image.height).max(1);
-    let (ox, oy) = ((cell % COLUMNS) * TILE, (cell / COLUMNS) * TILE);
-    for y in 0..TILE {
-        for x in 0..TILE {
-            let (sx, sy) = (x * side / TILE, y * side / TILE);
+    let (ox, oy) = ((cell % COLUMNS) * tile, (cell / COLUMNS) * tile);
+    for y in 0..tile {
+        for x in 0..tile {
+            let (sx, sy) = (x * side / tile, y * side / tile);
             let src = (sy * image.width + sx) * 4;
             let dst = ((oy + y) * atlas_width + ox + x) * 4;
             atlas[dst..dst + 4].copy_from_slice(&image.rgba[src..src + 4]);
@@ -289,6 +304,42 @@ impl Font {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn solid(side: usize, px: [u8; 4]) -> Image {
+        Image {
+            width: side,
+            height: side,
+            rgba: px.repeat(side * side),
+        }
+    }
+
+    #[test]
+    fn tile_follows_largest_sprite_and_uvs_stay_in_cell() {
+        assert_eq!(atlas_tile([16, 16].into_iter()), 16);
+        assert_eq!(atlas_tile([16, 32, 0].into_iter()), 32);
+        assert_eq!(atlas_tile([48].into_iter()), 64);
+        let tile = 32;
+        let mut rgba = vec![0u8; 16 * tile * 2 * tile * 4];
+        blit(&mut rgba, 16 * tile, tile, 1, &solid(16, [1, 2, 3, 255]));
+        blit(&mut rgba, 16 * tile, tile, 2, &solid(32, [9, 9, 9, 255]));
+        let px = |cell: usize, x: usize, y: usize| {
+            let i = (y * 16 * tile + cell * tile + x) * 4;
+            rgba[i]
+        };
+        // a 16x sprite scales by 2 and fills its whole 32 px cell; a 32x sprite copies 1:1
+        assert_eq!((px(1, 0, 0), px(1, 31, 31)), (1, 1));
+        assert_eq!((px(2, 0, 0), px(2, 31, 31)), (9, 9));
+        let atlas = Atlas {
+            textured: true,
+            width: (16 * tile) as u32,
+            height: (2 * tile) as u32,
+            tile: tile as u32,
+            rgba: Vec::new(),
+            cells: HashMap::from([("a", 17)]),
+        };
+        assert_eq!(atlas.uv("a", [0.0, 0.0]), [1.0 / 16.0, 0.5]);
+        assert_eq!(atlas.uv("a", [1.0, 1.0]), [2.0 / 16.0, 1.0]);
+    }
 
     #[test]
     fn read_all_returns_every_layer_bottom_first() {

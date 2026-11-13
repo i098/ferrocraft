@@ -804,7 +804,7 @@ impl Renderer {
             },
             wgpu::Extent3d {
                 width: Skins::width(),
-                height: Skins::width(),
+                height: entity::SLOT,
                 depth_or_array_layers: 1,
             },
         );
@@ -828,7 +828,7 @@ impl Renderer {
             },
             wgpu::Extent3d {
                 width: Skins::width(),
-                height: Skins::width(),
+                height: entity::SLOT,
                 depth_or_array_layers: 1,
             },
         );

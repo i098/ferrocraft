@@ -22,7 +22,7 @@ const PLAYER_LEFT_PANTS: usize = 11;
 use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
 pub use projectile::Thrower;
-pub use skin::{Skin, Skins};
+pub use skin::{Skin, Skins, SLOT};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
 /// What to draw; mob and object ids are the 1.8.9 network type ids.
@@ -849,11 +849,14 @@ impl Xf {
             },
             sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
             fall,
-            // `RenderPlayer.preRenderCallback` scales the player model by 15/16.
-            scale: if matches!(d.class, Class::Player { .. }) {
-                0.9375
-            } else {
-                1.0
+            // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
+            scale: match d.class {
+                Class::Player { .. } => 0.9375,
+                Class::Mob(mobs::CAVE_SPIDER) => 0.7,
+                // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
+                Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
+                Class::Mob(mobs::VILLAGER) => 0.9375,
+                _ => 1.0,
             },
             generic,
         }
@@ -1448,6 +1451,82 @@ mod tests {
         assert!(back
             .iter()
             .all(|uv| uv[0] >= 16.0 / 64.0 && uv[0] <= 40.0 / 64.0));
+    }
+
+    fn mesh(d: &EntityDraw) -> MeshData {
+        build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
+    }
+
+    fn extent(m: &MeshData, axis: usize) -> f32 {
+        let (lo, hi) = m.vertices.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v.pos[axis]), hi.max(v.pos[axis]))
+        });
+        hi - lo
+    }
+
+    #[test]
+    fn every_ported_mob_draws_at_its_vanilla_height() {
+        // Heights in blocks from the 1.8.9 Model* boxes: (24 - top) / 16 times the render scale.
+        let mobs = [
+            (120u8, 34.0 / 16.0 * 0.9375),
+            (60, 0.5),
+            (93, 0.9375),
+            (91, 1.41),
+        ];
+        let mut bad = Vec::new();
+        for (id, expected) in mobs {
+            let mut d = steve();
+            d.class = Class::Mob(id);
+            let m = mesh(&d);
+            let h = extent(&m, 1);
+            if m.vertices.is_empty() || (h - expected).abs() > 0.05 {
+                bad.push((id, h, expected));
+            }
+        }
+        for id in [99u8, 52, 59, 58] {
+            let mut d = steve();
+            d.class = Class::Mob(id);
+            if mesh(&d).vertices.is_empty() {
+                bad.push((id, 0.0, 0.0));
+            }
+        }
+        assert!(bad.is_empty(), "(id, got, expected): {bad:?}");
+    }
+
+    #[test]
+    fn cave_spider_is_seven_tenths_of_a_spider() {
+        let mut d = steve();
+        d.class = Class::Mob(mobs::SPIDER);
+        let spider = extent(&mesh(&d), 0);
+        d.class = Class::Mob(mobs::CAVE_SPIDER);
+        let cave = extent(&mesh(&d), 0);
+        assert!((cave / spider - 0.7).abs() < 0.01, "{cave} / {spider}");
+    }
+
+    #[test]
+    fn player_skin_layers_and_cape_add_geometry() {
+        let img = |w, h| crate::assets::Image {
+            width: w,
+            height: h,
+            rgba: vec![255; w * h * 4],
+        };
+        let mut skins = Skins::flat();
+        skins.set_player(1, &img(64, 64));
+        let mut d = steve();
+        d.skin = Some(1);
+        let count = |skins: &Skins, d: &EntityDraw| {
+            build(std::slice::from_ref(d), skins, |_| [1.0, 1.0]).vertices.len()
+        };
+        d.look.skin_parts = 0x00;
+        let bare = count(&skins, &d);
+        d.look.skin_parts = 0x7F;
+        // Hat, jacket, two sleeves and two pants legs: six extra boxes of 24 vertices.
+        let layered = count(&skins, &d);
+        assert_eq!(layered, bare + 6 * 24);
+        d.look.cape = Some(CapeSway::default());
+        assert_eq!(count(&skins, &d), layered);
+        skins.set_cape(1, &img(64, 32));
+        assert_eq!(count(&skins, &d), layered + 24);
     }
 
     #[test]

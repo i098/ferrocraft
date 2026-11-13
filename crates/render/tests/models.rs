@@ -84,6 +84,10 @@ fn ported_mobs_render() {
         (59, (0.7, 0.5)),
         (58, (0.6, 2.9)),
     ];
+    for (i, &(id, size)) in mobs.iter().enumerate() {
+        r.set_entities(&[draw(Class::Mob(id), -1.0 + i as f64 * 0.01, size)]);
+        assert_ne!(empty, r.render_to_rgba(&cam, &[]).2, "mob {id} draws nothing");
+    }
     let mut draws: Vec<EntityDraw> = mobs
         .iter()
         .enumerate()
@@ -91,7 +95,6 @@ fn ported_mobs_render() {
         .collect();
     r.set_entities(&draws);
     let image = r.render_to_rgba(&cam, &[]).2;
-    assert_ne!(empty, image);
     let mut player = draw(Class::Player { slim: false }, 0.0, (0.6, 1.8));
     player.look = Look {
         cape: Some(CapeSway::default()),

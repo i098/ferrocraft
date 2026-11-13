@@ -123,7 +123,9 @@ fn geometry(
 /// The stacks `build` needs models for.
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let held = (holds(d) && d.held != 0).then_some((d.held, d.held_damage));
-    held.into_iter().chain(dropped(d).map(|s| (s.id, s.damage)))
+    held.into_iter()
+        .chain(dropped(d).map(|s| (s.id, s.damage)))
+        .chain(super::block::wanted(d))
 }
 
 fn holds(d: &EntityDraw) -> bool {
@@ -141,6 +143,8 @@ pub struct Items {
     pub sprites: BTreeMap<String, MeshData>,
     /// Two passes per glowing piece, over the glint texture; same positions as the pieces.
     pub glint: MeshData,
+    /// The white flash of primed TNT, drawn additively over the white texel.
+    pub flash: MeshData,
 }
 
 /// `p` through `m`, a column-major affine matrix.
@@ -193,6 +197,22 @@ impl Items {
             });
         }
         target.indices.extend([0, 1, 2, 0, 2, 3].map(|i| i + base));
+    }
+
+    /// A white copy of `model` with `alpha`, placed with `to_world`.
+    pub(super) fn flash(&mut self, model: &ItemModel, to_world: &dyn Fn(V3) -> V3, alpha: f32) {
+        let base = self.flash.vertices.len() as u32;
+        self.flash
+            .vertices
+            .extend(model.mesh.vertices.iter().map(|v| Vertex {
+                pos: to_world(v.pos),
+                uv: crate::sky::white_uv(),
+                color: [1.0, 1.0, 1.0, alpha],
+                light: [1.0; 2],
+            }));
+        self.flash
+            .indices
+            .extend(model.mesh.indices.iter().map(|i| i + base));
     }
 
     /// Places `model` with `to_world` (model units to world coordinates) and `normal_to_world`.
@@ -266,6 +286,7 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
             }
         }
     }
+    super::block::build(&mut out, draws, models, &light);
     out
 }
 

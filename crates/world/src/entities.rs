@@ -132,6 +132,8 @@ pub struct SizeMeta {
     pub horse_flags: Option<i32>,
     pub always_name: Option<u8>,
     pub skeleton: Option<u8>,
+    /// Arrows: metadata index 16, bit 1 is `getIsCritical`.
+    pub arrow: Option<u8>,
     /// Item frames: metadata index 9, the rotation of the displayed item in eighths of a turn.
     pub rotation: Option<u8>,
 }
@@ -146,6 +148,7 @@ impl SizeMeta {
         self.horse_flags = new.horse_flags.or(self.horse_flags);
         self.always_name = new.always_name.or(self.always_name);
         self.skeleton = new.skeleton.or(self.skeleton);
+        self.arrow = new.arrow.or(self.arrow);
         self.rotation = new.rotation.or(self.rotation);
     }
 }
@@ -347,6 +350,11 @@ impl Entity {
             Kind::Object(t) => matches!(t, 1 | 10..=12),
             Kind::ExperienceOrb | Kind::Painting => false,
         }
+    }
+
+    /// `EntityArrow.getIsCritical`.
+    pub fn critical_arrow(&self) -> bool {
+        self.kind == Kind::Object(60) && self.meta.arrow.unwrap_or(0) & 1 != 0
     }
 
     pub fn is_dead(&self) -> bool {
@@ -949,6 +957,16 @@ impl Entities {
                 if kind == 90 {
                     e.owner = data;
                 }
+                if kind == 70 {
+                    // `Block.deserialize`: id in the low 12 bits, metadata in the next 4.
+                    e.stack = Some(ItemRef {
+                        id: (data & 4095) as i16,
+                        damage: (data >> 12 & 15) as i16,
+                        count: 1,
+                        dye: None,
+                        glint: false,
+                    });
+                }
                 (id, e)
             }
             _ => return,
@@ -1073,13 +1091,7 @@ impl Entities {
         self.map
             .values()
             .filter(|e| e.id != skip)
-            .filter(|e| {
-                !matches!(
-                    e.kind,
-                    Kind::ExperienceOrb
-                        | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
-                )
-            })
+            .filter(|e| collidable(e))
             .filter_map(|e| {
                 let border = if e.kind == Kind::Object(63) { 1.0 } else { 0.1 };
                 let (mut lo, mut hi) = e.bounds();
@@ -1093,6 +1105,42 @@ impl Entities {
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
             .map(|(_, d, id)| (id, d))
     }
+
+    /// `EntityThrowable.onUpdate` entity scan along the step `from`..`to`: the distance to the
+    /// first collidable entity whose box, grown by 0.3, the step crosses. While the throwable
+    /// is `young` (under 5 ticks in the air) an entity it starts inside is skipped: the client does not know the thrower, so this stands in for the thrower exemption. `player` is the local player's box, which is not in the map.
+    pub fn hit_along(
+        &self,
+        from: [f64; 3],
+        to: [f64; 3],
+        young: bool,
+        player: Option<([f64; 3], [f64; 3])>,
+    ) -> Option<f64> {
+        let d = [0, 1, 2].map(|i| to[i] - from[i]);
+        let len = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if len < 1e-9 {
+            return None;
+        }
+        let dir = d.map(|v| v / len);
+        self.map
+            .values()
+            .filter(|e| collidable(e) && !e.is_dead())
+            .map(Entity::bounds)
+            .chain(player)
+            .filter_map(|(lo, hi)| {
+                let ray = ray_box(from, dir, lo.map(|v| v - 0.3), hi.map(|v| v + 0.3))?;
+                (ray <= len && !(young && ray == 0.0)).then_some(ray)
+            })
+            .min_by(f64::total_cmp)
+    }
+}
+
+fn collidable(e: &Entity) -> bool {
+    !matches!(
+        e.kind,
+        Kind::ExperienceOrb
+            | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
+    )
 }
 
 fn velocity(v: [i16; 3]) -> [f64; 3] {
@@ -1289,6 +1337,23 @@ mod tests {
         es.tick();
         assert!(es.get(3).unwrap().is_dead());
         assert!(es.get(3).unwrap().blocks_placement());
+    }
+
+    #[test]
+    fn destroying_a_thrown_entity_makes_no_particles() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnObject {
+            id: 7,
+            kind: 65,
+            pos: [32, 64, 96],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        es.apply(EntityEvent::Destroy(vec![7]));
+        assert!(es.take_fx().is_empty());
+        assert!(es.get(7).is_none());
     }
 
     #[test]

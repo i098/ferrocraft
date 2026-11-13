@@ -811,15 +811,20 @@ impl Game {
 
     /// A selectable block lies between `from` and `to`.
     pub fn line_blocked(&self, from: [f64; 3], to: [f64; 3]) -> bool {
+        self.block_dist(from, to).is_some()
+    }
+
+    /// Distance from `from` to the first selectable block on the way to `to`.
+    pub fn block_dist(&self, from: [f64; 3], to: [f64; 3]) -> Option<f64> {
         let d = [0, 1, 2].map(|i| to[i] - from[i]);
         let len = d.iter().map(|v| v * v).sum::<f64>().sqrt();
         if len < 1e-6 {
-            return false;
+            return None;
         }
         let yaw = (-d[0]).atan2(d[2]).to_degrees() as f32;
         let pitch = (-d[1] / len).asin().to_degrees() as f32;
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
-        dig::raycast_dist(&at, from, yaw, pitch, len).is_some()
+        dig::raycast_dist(&at, from, yaw, pitch, len).map(|(_, t)| t)
     }
 
     /// The local player's bounding box `[x0, y0, z0, x1, y1, z1]`, which blocks a placement.

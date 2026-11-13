@@ -166,11 +166,14 @@ impl App {
         if self.container.is_some() {
             let key = self.container_key(code);
             let mods = self.mods();
-            let reqs =
-                self.container
-                    .as_mut()
-                    .expect("checked")
-                    .key(&mut self.game.inv, key, typed, mods);
+            let m = metrics!(self);
+            let reqs = self.container.as_mut().expect("checked").key(
+                &mut self.game.inv,
+                key,
+                typed,
+                mods,
+                &m,
+            );
             self.send_requests(reqs);
             return;
         }
@@ -206,7 +209,7 @@ impl App {
         }
     }
 
-    fn send_requests(&mut self, reqs: Vec<Request>) {
+    pub(super) fn send_requests(&mut self, reqs: Vec<Request>) {
         for r in reqs {
             match r {
                 Request::Click(c) => {
@@ -216,6 +219,18 @@ impl App {
                 Request::Creative { slot, item } => {
                     if let Some(s) = self.link.session() {
                         let res = s.creative_slot(slot, &item);
+                        self.send_result(res);
+                    }
+                }
+                Request::Enchant { window_id, button } => {
+                    if let Some(s) = self.link.session() {
+                        let res = s.enchant_item(window_id, button);
+                        self.send_result(res);
+                    }
+                }
+                Request::Plugin { channel, data } => {
+                    if let Some(s) = self.link.session() {
+                        let res = s.plugin_message(channel, data);
                         self.send_result(res);
                     }
                 }

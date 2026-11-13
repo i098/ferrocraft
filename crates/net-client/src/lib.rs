@@ -149,6 +149,10 @@ pub enum NetEvent {
     },
     /// S2E.
     CloseWindow,
+    /// S36: open the sign editor at this block.
+    SignEditorOpen {
+        pos: [i32; 3],
+    },
     /// S31.
     WindowProperty {
         window: u8,

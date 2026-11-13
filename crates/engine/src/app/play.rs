@@ -161,9 +161,14 @@ impl App {
         let m = metrics!(self);
         let q = self.ui.tick(&m);
         self.run_effects(q);
-        if let Some(c) = &mut self.container {
-            c.tick();
+        let m = metrics!(self);
+        let reqs = self.container.as_mut().map(|c| {
+            let reqs = c.tick(&self.game.inv, &m);
             c.sync_game_mode(&self.game.inv);
+            reqs
+        });
+        if let Some(reqs) = reqs {
+            self.send_requests(reqs);
         }
         let playing = self.game.player.is_some() && !self.ui.is_open() && self.container.is_none();
         if playing {

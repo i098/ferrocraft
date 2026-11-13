@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
-use world::inventory::Inventory;
+use world::inventory::{merchant, Inventory};
 use world::{Block, Input, Player, World};
 
 /// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
@@ -48,6 +48,8 @@ pub enum Effect {
         window: u8,
         action: i16,
     },
+    /// S36: the server asks the player to edit the sign at this block.
+    EditSign([i32; 3]),
     /// Health fell to zero or below: the death screen.
     Died,
 }
@@ -317,6 +319,7 @@ impl Game {
             }
             NetEvent::Experience { bar, level, total } => {
                 (self.xp_bar, self.xp_level, self.xp_total) = (bar, level, total);
+                self.inv.xp_level = level;
             }
             NetEvent::Abilities {
                 flags,
@@ -393,6 +396,16 @@ impl Game {
             } else {
                 Effect::RejectWindow(id)
             }),
+            NetEvent::SignEditorOpen { pos } => Some(Effect::EditSign(pos)),
+            NetEvent::PluginMessage { channel, data } if channel == "MC|TrList" => {
+                // `NetHandlerPlayClient.handleCustomPayload`: only for the open window
+                if let Ok((id, recipes)) = merchant::parse_list(&data) {
+                    if u8::try_from(id) == Ok(self.inv.window_id()) {
+                        self.inv.set_recipes(self.inv.window_id(), recipes);
+                    }
+                }
+                None
+            }
             NetEvent::CloseWindow => {
                 self.inv.close_window();
                 Some(Effect::CloseWindow)

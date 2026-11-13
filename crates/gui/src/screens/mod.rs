@@ -12,6 +12,7 @@ mod multiplayer;
 mod options;
 mod packs;
 mod pause;
+mod sign;
 mod snooper;
 mod title;
 
@@ -23,6 +24,7 @@ pub use multiplayer::Multiplayer;
 pub use options::{KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
 pub use packs::{default_description, selected_paths};
 pub use pause::Pause;
+pub use sign::EditSign;
 pub use title::Title;
 
 use std::collections::HashMap;
@@ -131,6 +133,8 @@ pub enum Effect {
     ResourcesChanged,
     /// Open a web page or a folder in the system browser.
     OpenUrl(String),
+    /// `GuiEditSign.onGuiClosed`: send `C12UpdateSign` for the block at `pos`.
+    SignText { pos: [i32; 3], lines: [String; 4] },
 }
 
 /// Localized text, `I18n`/`LanguageMap`/`LanguageManager`, and the title splashes.
@@ -797,6 +801,10 @@ pub struct TextField {
     pub h: i32,
     pub text: String,
     pub max_len: usize,
+    /// `enableBackgroundDrawing`: the grey frame and black box, and 4 units of padding.
+    pub background: bool,
+    /// `setTextColor`, as RGB.
+    pub color: u32,
     pub focused: bool,
     ticks: u32,
     /// Char indices: cursor, selection end, first visible char.
@@ -814,6 +822,8 @@ impl TextField {
             h,
             text: String::new(),
             max_len: 32,
+            background: true,
+            color: 0xe0e0e0,
             focused: false,
             ticks: 0,
             cursor: 0,
@@ -855,8 +865,16 @@ impl TextField {
         self.focused = f;
     }
 
+    fn pad(&self) -> i32 {
+        if self.background {
+            4
+        } else {
+            0
+        }
+    }
+
     fn inner_width(&self) -> i32 {
-        self.w - 8
+        self.w - 2 * self.pad()
     }
 
     fn selected(&self) -> &str {
@@ -1045,7 +1063,7 @@ impl TextField {
         let inside = x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h;
         self.set_focused(inside);
         if inside && button == 0 {
-            let rel = x - self.x - 4;
+            let rel = x - self.x - self.pad();
             let shown = trim(
                 m,
                 self.slice(self.scroll, self.len()),
@@ -1059,15 +1077,17 @@ impl TextField {
 
     /// `drawTextBox`.
     pub fn draw(&self, c: &mut dyn Canvas) {
-        c.fill(
-            self.x - 1,
-            self.y - 1,
-            self.x + self.w + 1,
-            self.y + self.h + 1,
-            0xffa0a0a0,
-        );
-        c.fill(self.x, self.y, self.x + self.w, self.y + self.h, 0xff000000);
-        let color = 0xe0e0e0;
+        if self.background {
+            c.fill(
+                self.x - 1,
+                self.y - 1,
+                self.x + self.w + 1,
+                self.y + self.h + 1,
+                0xffa0a0a0,
+            );
+            c.fill(self.x, self.y, self.x + self.w, self.y + self.h, 0xff000000);
+        }
+        let color = self.color;
         let len = self.len();
         let shown = trim(c, self.slice(self.scroll, len), self.inner_width(), false);
         let shown_len = shown.chars().count();
@@ -1075,7 +1095,11 @@ impl TextField {
         let sel = (self.sel as isize - self.scroll as isize).min(shown_len as isize);
         let cursor_in = cur >= 0 && cur as usize <= shown_len;
         let blink = self.focused && (self.ticks / 6).is_multiple_of(2) && cursor_in;
-        let (x0, y0) = (self.x + 4, self.y + (self.h - 8) / 2);
+        let (x0, y0) = if self.background {
+            (self.x + 4, self.y + (self.h - 8) / 2)
+        } else {
+            (self.x, self.y)
+        };
         let byte_at = |i: usize| shown.char_indices().nth(i).map_or(shown.len(), |(b, _)| b);
         let mut x = x0;
         if !shown.is_empty() {

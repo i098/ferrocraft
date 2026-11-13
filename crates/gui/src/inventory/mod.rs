@@ -9,6 +9,7 @@ mod creative;
 pub mod icons;
 pub mod layout;
 pub(crate) mod tooltip;
+mod windows;
 
 use crate::screens::blit256 as modal;
 pub use crate::screens::{Canvas, Metrics};
@@ -27,6 +28,13 @@ pub enum Request {
     Creative { slot: i16, item: Slot },
     /// `C0D CloseWindow`; the engine closes the screen.
     Close { window_id: u8 },
+    /// `C11 EnchantItem`: press option `button` (0 to 2) of the enchanting table.
+    Enchant { window_id: u8, button: i8 },
+    /// `C17 CustomPayload`: `MC|ItemName`, `MC|Beacon` or `MC|TrSel`.
+    Plugin {
+        channel: &'static str,
+        data: Vec<u8>,
+    },
 }
 
 /// Keys a container screen reacts to, already mapped from the player's key bindings. The
@@ -84,6 +92,7 @@ pub struct ContainerScreen {
     creative: Option<Creative>,
     /// `PlayerInventoryScreen.hasStatusEffect`: the window sits right of the effect list.
     effects_shown: bool,
+    extras: windows::Extras,
 }
 
 /// What `GuiContainer.drawScreen` reads besides the cursor position.
@@ -154,6 +163,7 @@ impl ContainerScreen {
             shift_clicked: None,
             creative,
             effects_shown: false,
+            extras: windows::Extras::new(),
         }
     }
 
@@ -164,10 +174,11 @@ impl ContainerScreen {
     }
 
     /// `GuiScreen.updateScreen`, once per client tick.
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, inv: &Inventory, m: &dyn Metrics) -> Vec<Request> {
         if let Some(cr) = &mut self.creative {
             cr.tick();
         }
+        self.extras.tick(inv, m)
     }
 
     /// `GuiContainerCreative.updateScreen`: once the player leaves creative, become `GuiInventory`.
@@ -290,6 +301,9 @@ impl ContainerScreen {
             if button == 0 && cr.scrollbar_down(mx - l, my - t) {
                 return out;
             }
+        }
+        if let Some(reqs) = self.extras.click(inv, mx - l, my - t, button) {
+            return reqs;
         }
         let slot = self.slot_at(mx, my);
         self.double_click = self
@@ -525,8 +539,12 @@ impl ContainerScreen {
         key: Key,
         typed: Option<char>,
         mods: Mods,
+        m: &dyn Metrics,
     ) -> Vec<Request> {
         let mut out = Vec::new();
+        if let Some(reqs) = self.extras.key(inv, key, typed, mods, m) {
+            return reqs;
+        }
         if let Some(cr) = &mut self.creative {
             match cr.key(key, typed) {
                 creative::KeyUse::Used => return out,
@@ -589,6 +607,7 @@ impl ContainerScreen {
             Some(cr) => cr.draw_background(c, inv, icons, l, t),
             None => self.draw_background(c, inv, l, t),
         }
+        self.extras.draw_back(c, inv, l, t, mx, my);
         self.hovered = self.slot_at(mx, my);
         c.push([l as f32, t as f32], 1.0, 0.0);
         for i in 0..self.slots().len() {
@@ -600,7 +619,7 @@ impl ContainerScreen {
         }
         match &self.creative {
             Some(cr) => cr.draw_foreground(c),
-            None => self.draw_foreground(c, inv),
+            None => self.draw_foreground(c, inv, icons),
         }
         if let Some(cursor) = &inv.cursor {
             self.draw_cursor(c, inv, icons, cursor, mx - l - 8, my - t - 8);
@@ -615,6 +634,8 @@ impl ContainerScreen {
             }
         }
         if inv.cursor.is_none() {
+            self.extras
+                .hover(c, inv, l, t, mx, my, self.width, self.height);
             self.draw_tooltip(c, inv, mx, my, advanced_tooltips);
         }
     }
@@ -746,7 +767,10 @@ impl ContainerScreen {
             }
             Kind::Furnace => {
                 modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
-                let p = inv.open.as_ref().map_or([0; 4], |w| w.props);
+                let p = inv
+                    .open
+                    .as_ref()
+                    .map_or([0; 4], |w| [w.props[0], w.props[1], w.props[2], w.props[3]]);
                 let p = p.map(i32::from);
                 if p[0] > 0 {
                     // TileEntityFurnace.isBurning; getBurnLeftScaled(13)
@@ -777,26 +801,35 @@ impl ContainerScreen {
     }
 
     /// `drawGuiContainerForegroundLayer` of each survival screen.
-    fn draw_foreground(&self, c: &mut dyn Canvas, inv: &Inventory) {
+    fn draw_foreground(&self, c: &mut dyn Canvas, inv: &Inventory, icons: &Icons) {
         let title = inv.open.as_ref().map_or("", |w| w.title.as_str());
         let h = self.layout.height;
         let inventory =
             |c: &mut dyn Canvas| c.text("Inventory", 8.0, (h - 96 + 2) as f32, LABEL, false);
+        let centered = |c: &mut dyn Canvas| {
+            let x = self.layout.width / 2 - c.width(title) / 2;
+            c.text(title, x as f32, 6.0, LABEL, false);
+        };
         match inv.kind() {
             Kind::Player => c.text("Crafting", 86.0, 16.0, LABEL, false),
             Kind::Crafting => {
                 c.text("Crafting", 28.0, 6.0, LABEL, false);
                 inventory(c);
             }
-            Kind::Furnace | Kind::Dispenser => {
-                let x = self.layout.width / 2 - c.width(title) / 2;
-                c.text(title, x as f32, 6.0, LABEL, false);
+            Kind::Furnace | Kind::Dispenser | Kind::Brewing | Kind::Merchant => {
+                centered(c);
                 inventory(c);
             }
             Kind::Chest(_) | Kind::Hopper => {
                 c.text(title, 8.0, 6.0, LABEL, false);
                 inventory(c);
             }
+            Kind::Enchanting => {
+                c.text(title, 12.0, 5.0, LABEL, false);
+                inventory(c);
+            }
+            Kind::Anvil | Kind::Beacon => {}
         }
+        self.extras.draw_fore(c, inv, icons);
     }
 }

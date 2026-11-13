@@ -6,7 +6,7 @@ use crate::game::Game;
 use crate::link::Link;
 use ferrocraft_net_client::{split_address, NetEvent, PlayerListEvent};
 use gui::inventory::ContainerScreen;
-use gui::screens::{Connecting, Death, Effect as UiEffect};
+use gui::screens::{Connecting, Death, EditSign, Effect as UiEffect};
 use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
 use render::Renderer;
@@ -63,6 +63,12 @@ impl App {
             UiEffect::Respawn => {
                 let r = self.link.session().map(|s| s.respawn());
                 self.send_result(r.unwrap_or(Ok(())));
+            }
+            UiEffect::SignText { pos, lines } => {
+                if let Some(s) = self.link.session() {
+                    let r = s.update_sign(pos, &lines);
+                    self.send_result(r);
+                }
             }
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
@@ -482,6 +488,12 @@ impl App {
                 ));
             }
             Effect::CloseWindow => self.container = None,
+            Effect::EditSign(pos) => {
+                let state = self.game.store.get_block(pos[0], pos[1], pos[2]);
+                let m = metrics!(self);
+                let q = self.ui.open(&m, boxed(EditSign::new(pos, state)));
+                self.run_effects(q);
+            }
             Effect::RejectWindow(id) => {
                 self.container = None;
                 let r = self.session_send(|s| s.close_window(id));

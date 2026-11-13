@@ -120,6 +120,36 @@ impl Session {
         send(&self.writer, sb::Packet::from(p))
     }
 
+    /// C11: press button `button` (0 to 2) of the enchanting table.
+    pub fn enchant_item(&mut self, window: u8, button: i8) -> io::Result<()> {
+        let p = sb::EnchantItem {
+            window_id: window,
+            enchantment: button,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C17: a custom payload (`MC|ItemName`, `MC|Beacon`, `MC|TrSel`).
+    pub fn plugin_message(&mut self, channel: &str, data: Vec<u8>) -> io::Result<()> {
+        let p = sb::PluginMessage {
+            channel: channel.to_string(),
+            data: ferrocraft_protocol::codec::Rest(data),
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C12: the four sign lines as plain text components (`ChatComponentText`).
+    pub fn update_sign(&mut self, pos: [i32; 3], lines: &[String; 4]) -> io::Result<()> {
+        let [x, y, z] = pos;
+        let p = sb::UpdateSign {
+            location: Position { x, y, z },
+            lines: lines
+                .clone()
+                .map(|l| serde_json::json!({ "text": l }).to_string()),
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
     /// C13: `flags` 2 is flying.
     pub fn abilities(&mut self, flags: u8, fly_speed: f32, walk_speed: f32) -> io::Result<()> {
         let p = sb::PlayerAbilities {

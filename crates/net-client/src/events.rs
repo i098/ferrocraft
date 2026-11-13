@@ -106,6 +106,9 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             slots: p.slots,
         },
         P::CloseWindow(_) => NetEvent::CloseWindow,
+        P::SignEditorOpen(p) => NetEvent::SignEditorOpen {
+            pos: [p.location.x, p.location.y, p.location.z],
+        },
         P::WindowProperty(p) => NetEvent::WindowProperty {
             window: p.window_id,
             property: p.property,

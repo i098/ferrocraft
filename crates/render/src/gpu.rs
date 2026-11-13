@@ -1166,7 +1166,7 @@ impl Renderer {
         self.register_image(name, &image);
     }
 
-    fn register_image(&mut self, name: &str, image: &Image) {
+    pub fn register_image(&mut self, name: &str, image: &Image) {
         let view = upload_texture(
             &self.device,
             &self.queue,

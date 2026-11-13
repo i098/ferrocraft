@@ -879,6 +879,24 @@ impl Renderer {
         self.insert_texture(&format!("map/{id}"), &image);
     }
 
+    /// Forgets every received map, as a new server's map ids start again.
+    pub fn clear_maps(&mut self) {
+        self.maps.clear();
+        self.textures.retain(|k, _| !k.starts_with("map/"));
+    }
+
+    /// Hands over the received map colours, for the renderer that replaces this one.
+    pub fn take_maps(&mut self) -> HashMap<i32, Vec<u8>> {
+        std::mem::take(&mut self.maps)
+    }
+
+    /// Uploads maps taken from an earlier renderer.
+    pub fn restore_maps(&mut self, maps: HashMap<i32, Vec<u8>>) {
+        for (id, colors) in maps {
+            self.map_update(id, [0, 0, 128, 128], &colors);
+        }
+    }
+
     /// Resolves the model of every held and dropped item that is new.
     fn resolve_items(&mut self, draws: &[EntityDraw]) {
         for key in draws.iter().flat_map(entity::item::wanted) {

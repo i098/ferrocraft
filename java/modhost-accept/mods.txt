@@ -1,4 +1,4 @@
-# role | file | pinned Modrinth URL (1.8.9 Forge): the 22 Forge twins of the OneClient mods, plus Keystrokes
+# role | file | pinned Modrinth URL (1.8.9 Forge): the 21 Forge twins of the OneClient mods, plus Keystrokes (22 mods) and the OneConfig bootstrap
 OneConfig bootstrap|oneconfig-bootstrap-1.0.3.jar|https://cdn.modrinth.com/data/AibBIVmj/versions/TcuRDj1R/Aoneconfigbootstrap-1.8.9-forge-1.0.3.jar
 Keystrokes|Keystrokes-1.0.0.jar|https://cdn.modrinth.com/data/G2Hmyf0G/versions/70oHEIpB/Keystrokes-1.8.9-forge-1.0.0.jar
 evergreenhud|EvergreenHUD-1.8.9-forge-2.1.7.jar|https://cdn.modrinth.com/data/1yIQcc2b/versions/YAwKwEPz/EvergreenHUD-1.8.9-forge-2.1.7.jar

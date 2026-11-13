@@ -20,7 +20,7 @@ cp="$here/cls/test:$here/cls:$others$fj:$mcj"
 game=$(mktemp -d)
 trap 'rm -rf "$game"' EXIT
 cd "$game"
-# The 22 Forge twins of the OneClient mods (mod ids, not file names), plus Keystrokes. oneconfig is the loader the
+# The 21 Forge twins of the OneClient mods (mod ids, not file names), plus Keystrokes: 22 mods. oneconfig is the loader the
 # bootstrap downloads at first boot.
 twins=oneconfig,evergreenhud,polysprint,vanillahud,polycrosshair,redaction,chatting,chatblock,polytime,polyweather,freelook,behindyouv3,betternightvision,damagetint,polyhitbox,polynametag,countdown,glintcolorizer,overflowanimations,overflowparticles,polyblur,colorsaturation,polyfrostkeystrokes
 boot() {

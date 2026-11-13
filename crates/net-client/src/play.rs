@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use world::chunk::Chunk;
 use world::entities::EntityEvent;
 
-pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>) {
+pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>, brand: &str) {
     let mut dimension = 0;
     let end = loop {
         let packet = match reader.recv_or_skip::<cb::Packet>() {
@@ -18,7 +18,7 @@ pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>)
             Ok(None) => continue,
             Err(e) => break format!("connection closed: {e}"),
         };
-        match handle(packet, &mut reader, &writer, &mut dimension) {
+        match handle(packet, &mut reader, &writer, &mut dimension, brand) {
             Ok(events) => {
                 let kicked = events.iter().any(|e| matches!(e, NetEvent::Disconnect(_)));
                 let mut open = true;
@@ -43,6 +43,7 @@ fn handle(
     reader: &mut Reader,
     writer: &Mutex<Writer>,
     dimension: &mut i32,
+    brand: &str,
 ) -> io::Result<Vec<NetEvent>> {
     Ok(match packet {
         cb::Packet::KeepAlive(k) => {
@@ -58,9 +59,12 @@ fn handle(
             vec![]
         }
         cb::Packet::Respawn(r) => {
+            let changed = *dimension != r.dimension;
             *dimension = r.dimension;
             vec![
-                NetEvent::Respawn,
+                NetEvent::Respawn {
+                    dimension_changed: changed,
+                },
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
                 NetEvent::Difficulty(r.difficulty),
@@ -73,7 +77,7 @@ fn handle(
         }
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
-            send_brand(writer)?;
+            send_brand(writer, brand)?;
             vec![NetEvent::JoinGame {
                 entity_id: j.entity_id,
                 gamemode: j.gamemode & 7,
@@ -102,8 +106,47 @@ fn brand_message(brand: &str) -> sb::PluginMessage {
     }
 }
 
-fn send_brand(writer: &Mutex<Writer>) -> io::Result<()> {
-    send(writer, sb::Packet::from(brand_message("vanilla")))
+fn send_brand(writer: &Mutex<Writer>, brand: &str) -> io::Result<()> {
+    send(writer, sb::Packet::from(brand_message(brand)))
+}
+
+/// `S44` as `NetHandlerPlayClient.handleWorldBorder` applies it; the speed is in milliseconds.
+fn border_update(a: ferrocraft_protocol::play::WorldBorderAction) -> world::border::Update {
+    use ferrocraft_protocol::play::WorldBorderAction as A;
+    use world::border::Update as U;
+    match a {
+        A::SetSize { diameter } => U::SetSize(diameter),
+        A::LerpSize {
+            old_diameter,
+            new_diameter,
+            speed,
+        } => U::LerpSize {
+            old: old_diameter,
+            new: new_diameter,
+            millis: speed.0,
+        },
+        A::SetCenter { x, z } => U::SetCenter { x, z },
+        A::Initialize {
+            x,
+            z,
+            old_diameter,
+            new_diameter,
+            speed,
+            warning_time,
+            warning_blocks,
+            ..
+        } => U::Initialize {
+            x,
+            z,
+            old: old_diameter,
+            new: new_diameter,
+            millis: speed.0,
+            warning_time: warning_time.0,
+            warning_blocks: warning_blocks.0,
+        },
+        A::SetWarningTime { seconds } => U::WarningTime(seconds.0),
+        A::SetWarningBlocks { blocks } => U::WarningBlocks(blocks.0),
+    }
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
@@ -122,6 +165,11 @@ fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> 
         cb::Packet::TimeUpdate(t) => vec![NetEvent::TimeUpdate {
             world_age: t.world_age,
             time_of_day: t.time_of_day,
+        }],
+        cb::Packet::WorldBorder(b) => vec![NetEvent::WorldBorder(border_update(b.action))],
+        cb::Packet::ResourcePackSend(p) => vec![NetEvent::ResourcePack {
+            url: p.url,
+            hash: p.hash,
         }],
         cb::Packet::ChangeGameState(g) => vec![NetEvent::GameState {
             reason: g.reason,
@@ -238,9 +286,8 @@ mod tests {
         }
     }
 
-    /// The server reads `MC|Brand` = `vanilla` right after it sent `JoinGame`.
-    #[test]
-    fn join_game_makes_the_client_send_vanilla_brand() {
+    /// The server reads `MC|Brand` right after it sent `JoinGame`.
+    fn brand_after_join(brand: &str) -> Vec<u8> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server, _) = listener.accept().unwrap();
@@ -256,14 +303,31 @@ mod tests {
             reduced_debug_info: false,
         });
         let join = cb::Packet::decode(&join.encode()).unwrap();
-        let events = handle(join, &mut reader, &writer, &mut 0).unwrap();
+        let events = handle(join, &mut reader, &writer, &mut 0, brand).unwrap();
         assert!(matches!(events[0], NetEvent::JoinGame { .. }));
         let mut server_reader = Reader::new(server);
         let sb::Packet::PluginMessage(m) = server_reader.recv::<sb::Packet>().unwrap() else {
             panic!("not a plugin message");
         };
         assert_eq!(m.channel, "MC|Brand");
-        assert_eq!(m.data.0, [&[7u8][..], b"vanilla"].concat());
+        m.data.0
+    }
+
+    #[test]
+    fn join_game_makes_the_client_send_vanilla_brand() {
+        assert_eq!(
+            brand_after_join("vanilla"),
+            [&[7u8][..], b"vanilla"].concat()
+        );
+    }
+
+    /// With the mod host active the brand is the hosted `getClientModName()`.
+    #[test]
+    fn join_game_sends_the_hosted_brand() {
+        assert_eq!(
+            brand_after_join("fml,forge"),
+            [&[9u8][..], b"fml,forge"].concat()
+        );
     }
 
     #[test]
@@ -281,7 +345,7 @@ mod tests {
         let mut r = Reader::new(a.try_clone().unwrap());
         let w = Mutex::new(Writer::new(b));
         assert_eq!(
-            handle(p, &mut r, &w, &mut 0).unwrap(),
+            handle(p, &mut r, &w, &mut 0, "vanilla").unwrap(),
             vec![NetEvent::PluginMessage {
                 channel: "MC|BOpen".into(),
                 data: vec![]

@@ -112,6 +112,8 @@ pub struct App {
     limbs: Limbs,
     /// `EntityRenderer.fovModifierHand` and its previous tick value.
     fov_mod: (f32, f32),
+    /// What the mods left of the world values at the last frame's start.
+    mod_view: ferrocraft_modhost::Overrides,
     view_bob: play::ViewBob,
     /// When the last frame was shown, for the `maxFps` limit.
     last_frame: Instant,
@@ -174,6 +176,7 @@ impl App {
             own_sounds: own_sounds::State::default(),
             limbs: Limbs::default(),
             fov_mod: (1.0, 1.0),
+            mod_view: ferrocraft_modhost::Overrides::default(),
             view_bob: play::ViewBob::default(),
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
@@ -477,9 +480,44 @@ impl App {
         })
     }
 
+    /// How far into the current tick the frame is, as vanilla's partial tick.
+    fn tick_frac(&self) -> f64 {
+        let until = self.next_tick.saturating_duration_since(Instant::now());
+        (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0)
+    }
+
+    /// Ask the mods once per drawn frame for the values they change (kept in `mod_view` for the frame to draw)
+    /// and for what their look hook leaves of this frame's mouse look, in degrees. Vanilla look without mods
+    /// or when the JVM is late.
+    fn mod_look(&mut self, dx: f32, dy: f32) -> (f32, f32) {
+        self.mod_view = ferrocraft_modhost::Overrides::default();
+        let (Some(mods), Some(p)) = (&self.mods, &self.game.player) else {
+            return (dx, dy);
+        };
+        let frac = self.tick_frac();
+        let (rain, thunder) = self.game.weather.strengths(frac as f32);
+        let state = ferrocraft_modhost::WorldState {
+            partial: frac as f32,
+            yaw: p.yaw,
+            pitch: self.game.pitch,
+            look: (dx, dy),
+            perspective: self.perspective,
+            world_time: self.game.world_time,
+            rain,
+            thunder,
+            fov: self.ui.settings.fov,
+            fov_mod: (self.fov_mod.1, self.fov_mod.0),
+            night_vision: self.game.effects.get(Fx::NIGHT_VISION).map(|e| e.duration),
+        };
+        self.mod_view = mods.overrides(state).unwrap_or_default();
+        self.mod_view.look.unwrap_or((dx, dy))
+    }
+
     fn view_camera(&self, frac: f64) -> Camera {
-        let fov = self.ui.settings.fov
-            * (self.fov_mod.1 + (self.fov_mod.0 - self.fov_mod.1) * frac as f32);
+        let fov = self.mod_view.fov.unwrap_or(
+            self.ui.settings.fov
+                * (self.fov_mod.1 + (self.fov_mod.0 - self.fov_mod.1) * frac as f32),
+        );
         let ray = self.view_ray(frac).filter(|_| self.game.player.is_some());
         let Some((eye, yaw, pitch, ..)) = ray else {
             return Camera {
@@ -490,6 +528,11 @@ impl App {
                 ..Camera::default()
             };
         };
+        let looked = self.mod_view.camera.filter(|_| self.game.camera.is_none());
+        let (yaw, pitch) = looked.map_or((yaw, pitch), |c| (c.yaw, c.pitch));
+        let max_dist = looked
+            .filter(|c| c.distance > 0.0)
+            .map_or(THIRD_PERSON_DISTANCE, |c| f64::from(c.distance));
         if self.perspective == 0 {
             return Camera {
                 pos: eye,
@@ -506,7 +549,7 @@ impl App {
         };
         let dir = look_vector(yaw, pitch);
         let mut dist = 0.0;
-        while dist < THIRD_PERSON_DISTANCE {
+        while dist < max_dist {
             let next = dist + 0.1;
             let at = [0, 1, 2].map(|i| (eye[i] - dir[i] * next).floor() as i32);
             if render::is_solid(self.game.store.get_block(at[0], at[1], at[2])) {
@@ -621,8 +664,7 @@ impl App {
     }
 
     fn draw(&mut self) {
-        let until = self.next_tick.saturating_duration_since(Instant::now());
-        let frac = (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0);
+        let frac = self.tick_frac();
         let cam = self.camera(frac);
         let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
         // `RenderPlayer.doRender`: the user player draws only as `renderViewEntity`.
@@ -699,9 +741,12 @@ impl App {
         if self.fps.2.elapsed() >= Duration::from_secs(1) {
             self.fps = (0, self.fps.0, Instant::now());
         }
-        let (rain, thunder) = self.game.weather.strengths(frac as f32);
+        let (rain, thunder) = self.mod_view.weather.unwrap_or_else(|| {
+            let (rain, thunder) = self.game.weather.strengths(frac as f32);
+            (rain, thunder * rain)
+        });
         r.set_environment(Environment {
-            world_time: self.game.world_time,
+            world_time: self.mod_view.time.unwrap_or(self.game.world_time),
             ticks: self.game.ticks,
             partial: frac as f32,
             rain,
@@ -712,8 +757,10 @@ impl App {
             fluid,
             clouds: self.ui.settings.clouds as u8,
             blindness: self.game.effects.get(Fx::BLINDNESS).map(|e| e.duration),
-            night_vision: self.game.effects.get(Fx::NIGHT_VISION).map_or(0.0, |e| {
-                world::effects::night_vision_brightness(e.duration, frac as f32)
+            night_vision: self.mod_view.night_vision.unwrap_or_else(|| {
+                self.game.effects.get(Fx::NIGHT_VISION).map_or(0.0, |e| {
+                    world::effects::night_vision_brightness(e.duration, frac as f32)
+                })
             }),
             view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
         });
@@ -1106,20 +1153,24 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.pump_network();
-        let (dx, dy) = self.input.take_look_delta();
-        let dy = if self.ui.settings.invert_mouse {
-            -dy
-        } else {
-            dy
-        };
-        self.game.look(dx, dy);
+        let due = self.pace_frame(el);
+        if due {
+            let (dx, dy) = self.input.take_look_delta();
+            let dy = if self.ui.settings.invert_mouse {
+                -dy
+            } else {
+                dy
+            };
+            let (dx, dy) = self.mod_look(dx, dy);
+            self.game.look(dx, dy);
+        }
         self.handle_actions();
         self.run_ticks();
         self.sync_cursor();
         if self.quit || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();
         }
-        if self.pace_frame(el) {
+        if due {
             if let Some(w) = &self.window {
                 w.request_redraw();
             }

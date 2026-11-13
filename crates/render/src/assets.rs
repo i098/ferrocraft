@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 const TILE: usize = 16;
 const COLUMNS: usize = 16;
+/// `wgpu::Limits::default().max_texture_dimension_2d`, the limit of the device `request_device` asks for.
+const MAX_ATLAS_SIDE: usize = 8192;
 
 pub enum AssetSource {
     Jar(zip::ZipArchive<std::fs::File>),
@@ -158,8 +160,8 @@ impl Atlas {
             }));
         }
         let loaded = images.iter().filter(|i| i.width > 0).count();
-        let tile = atlas_tile(images.iter().map(|i| i.width.min(i.height)));
         let rows = (names.len() + 1).div_ceil(COLUMNS);
+        let tile = atlas_tile(images.iter().map(|i| i.width.min(i.height)), rows);
         let (w, h) = (COLUMNS * tile, rows * tile);
         let mut rgba = vec![0u8; w * h * 4];
         let mut cells = HashMap::new();
@@ -221,9 +223,12 @@ pub(crate) fn missing_tile() -> Image {
     }
 }
 
-/// Tile edge for the block atlas: the largest sprite side, rounded up to a power of two, at least 16.
-fn atlas_tile(sides: impl Iterator<Item = usize>) -> usize {
-    sides.max().unwrap_or(0).max(TILE).next_power_of_two()
+/// Tile edge for the block atlas: the largest sprite side, rounded up to a power of two, at least 16,
+/// and small enough that the `COLUMNS` x `rows` grid fits the device texture limit (larger packs downsample).
+fn atlas_tile(sides: impl Iterator<Item = usize>, rows: usize) -> usize {
+    let fit = (MAX_ATLAS_SIDE / rows.max(COLUMNS)).max(TILE);
+    let tile = sides.max().unwrap_or(0).max(TILE).next_power_of_two();
+    tile.min(1 << fit.ilog2())
 }
 
 /// Copy the top-left square of `image` into grid `cell`, nearest-sampled to `tile` px (animated strips keep frame 0).
@@ -315,9 +320,12 @@ mod tests {
 
     #[test]
     fn tile_follows_largest_sprite_and_uvs_stay_in_cell() {
-        assert_eq!(atlas_tile([16, 16].into_iter()), 16);
-        assert_eq!(atlas_tile([16, 32, 0].into_iter()), 32);
-        assert_eq!(atlas_tile([48].into_iter()), 64);
+        assert_eq!(atlas_tile([16, 16].into_iter(), 20), 16);
+        assert_eq!(atlas_tile([16, 32, 0].into_iter(), 20), 32);
+        assert_eq!(atlas_tile([48].into_iter(), 20), 64);
+        // 317 cells = 20 rows: 256x gives 4096x5120, 512x would give 10240 high, over 8192
+        assert_eq!(atlas_tile([256].into_iter(), 20), 256);
+        assert_eq!(atlas_tile([512, 1024].into_iter(), 20), 256);
         let tile = 32;
         let mut rgba = vec![0u8; 16 * tile * 2 * tile * 4];
         blit(&mut rgba, 16 * tile, tile, 1, &solid(16, [1, 2, 3, 255]));

@@ -60,23 +60,32 @@ impl App {
             UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
-            UiEffect::Respawn => {
-                let r = self.link.session().map(|s| s.respawn());
-                self.send_result(r.unwrap_or(Ok(())));
-            }
+            UiEffect::Respawn => self.respawn(),
             UiEffect::SignText { pos, lines } => self.send_sign(pos, &lines),
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
             UiEffect::OpenUrl(url) => open_url(&url),
-            UiEffect::SuperSecret => {
-                if let Some(s) = &mut self.sound {
-                    s.play_super_secret();
-                }
-                self.next_shader();
-            }
+            UiEffect::SuperSecret => self.super_secret(),
             UiEffect::ResourcesChanged => self.refresh_resources(),
+            UiEffect::ServerPackAnswer {
+                url,
+                hash,
+                accepted,
+            } => self.answer_server_pack(&url, &hash, accepted),
         }
+    }
+
+    fn super_secret(&mut self) {
+        if let Some(s) = &mut self.sound {
+            s.play_super_secret();
+        }
+        self.next_shader();
+    }
+
+    fn respawn(&mut self) {
+        let r = self.link.session().map(|s| s.respawn());
+        self.send_result(r.unwrap_or(Ok(())));
     }
 
     fn open_sign_editor(&mut self, pos: [i32; 3]) {
@@ -109,6 +118,7 @@ impl App {
             .and_then(|m| m.client_brand())
             .unwrap_or_else(|| "vanilla".into());
         self.server.clone_from(&addr);
+        self.pack_mode = self.saved_pack_mode();
         self.link = Link::connect(
             addr,
             self.args.username.clone(),
@@ -347,11 +357,7 @@ impl App {
                 self.run_effects(q);
                 self.send_client_settings();
             }
-            NetEvent::ResourcePack { url, hash } => {
-                let dir = self.args.game_dir.clone();
-                let r = self.session_send(|s| s.accept_resource_pack(url, hash, &dir));
-                self.send_result(r);
-            }
+            NetEvent::ResourcePack { url, hash } => self.offer_server_pack(url, hash),
             NetEvent::ResourcePackReady { hash, path } => {
                 // The loader skips a pack it cannot open, as vanilla does; the server still hears about it.
                 let status = if render::AssetSource::open(path).is_some() {

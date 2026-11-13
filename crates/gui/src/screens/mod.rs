@@ -12,6 +12,7 @@ mod language;
 mod link;
 mod multiplayer;
 mod options;
+mod pack_prompt;
 mod packs;
 mod pause;
 mod sign;
@@ -26,6 +27,7 @@ pub use language::{languages, Language};
 pub use link::ConfirmLink;
 pub use multiplayer::Multiplayer;
 pub use options::{KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
+pub use pack_prompt::PackPrompt;
 pub use packs::{default_description, selected_paths};
 pub use pause::Pause;
 pub use sign::EditSign;
@@ -139,6 +141,12 @@ pub enum Effect {
     OpenUrl(String),
     /// `GuiEditSign.onGuiClosed`: send `C12UpdateSign` for the block at `pos`.
     SignText { pos: [i32; 3], lines: [String; 4] },
+    /// The answer of the server resource pack prompt: remember it for the server, then accept or decline.
+    ServerPackAnswer {
+        url: String,
+        hash: String,
+        accepted: bool,
+    },
 }
 
 /// Localized text, `I18n`/`LanguageMap`/`LanguageManager`, and the title splashes.

@@ -1,5 +1,5 @@
 //! Server resource packs (`S48`): the vanilla `NetHandlerPlayClient.handleResourcePack` and
-//! `ResourcePackRepository.downloadResourcePack`, without the prompt (the pack is always accepted).
+//! `ResourcePackRepository.downloadResourcePack`; the engine asks the player first (see `engine::app::pack`).
 
 use crate::{send, NetEvent, Session};
 use ferrocraft_protocol::codec::VarInt;

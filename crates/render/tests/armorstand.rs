@@ -152,7 +152,10 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     };
     let (nc, nh) = bounds(&mut r, stand(class, 0.0, StandLook::default()));
     let (sc, sh) = bounds(&mut r, stand(class, 0.0, arms(1, [None; 6])));
-    assert!((0.4..0.6).contains(&(sh / nh)), "small/normal height {sh}/{nh}");
+    assert!(
+        (0.4..0.6).contains(&(sh / nh)),
+        "small/normal height {sh}/{nh}"
+    );
     assert!(nc.abs() < 6.0 && sc.abs() < 6.0, "centre offsets {nc} {sc}");
     // Vanilla: a stand is 1.975 blocks tall; at ~3 blocks distance and 70 degree fov on a 360 px
     // frame that is well over a fifth of the frame and well under the whole frame.
@@ -181,12 +184,19 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
         stand(class, 0.0, StandLook::default()),
         stand(class, 0.0, arms(4, [None; 6])),
     );
-    assert!(l > 20 && rt > 20, "arms on both sides, got {l} left {rt} right");
+    assert!(
+        l > 20 && rt > 20,
+        "arms on both sides, got {l} left {rt} right"
+    );
     // Posing only the right arm (index 3) must change pixels on one side of the body only.
     let (l, rt) = side_diff(
         &mut r,
         stand(class, 0.0, arms(4, [None; 6])),
-        stand(class, 0.0, arms(4, [None, None, None, Some([-80.0, 0.0, 10.0]), None, None])),
+        stand(
+            class,
+            0.0,
+            arms(4, [None, None, None, Some([-80.0, 0.0, 10.0]), None, None]),
+        ),
     );
     // The stand faces the camera (yaw 180), so its right arm is on the screen's left half.
     assert!(l > 0 && rt == 0, "right arm pose: {l} left {rt} right");

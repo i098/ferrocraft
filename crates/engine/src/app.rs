@@ -947,17 +947,21 @@ impl App {
         let Some(r) = self.renderer.as_mut() else {
             return;
         };
+        let own_parts = self.ui.settings.model_parts;
         for e in &mut self.hud.tablist.entries {
             if let Some(img) = self.skins.tab_head(e.uuid, e.textures.as_deref()) {
                 r.register_image(&crate::skins::tab_texture(e.uuid), &img);
             }
             let tex = crate::skins::tab_texture(e.uuid);
-            let parts = self
-                .game
-                .entities
-                .iter()
-                .find(|p| p.kind == Kind::Player && p.uuid == Some(e.uuid))
-                .map(|p| p.meta.stand.unwrap_or(0x7F));
+            let parts = if e.name == self.args.username {
+                Some(own_parts)
+            } else {
+                self.game
+                    .entities
+                    .iter()
+                    .find(|p| p.kind == Kind::Player && p.uuid == Some(e.uuid))
+                    .map(|p| p.meta.stand.unwrap_or(0x7F))
+            };
             e.head = gui::tablist::Head {
                 skin: self.skins.has_tab(e.uuid).then_some(tex),
                 hat: parts.is_some_and(|p| p & 0x40 != 0),

@@ -138,6 +138,7 @@ impl App {
         let maps = self.renderer.as_mut().map(|r| r.take_maps());
         self.renderer = None;
         self.renderer = Some(Renderer::new(w, self.asset_source()));
+        self.skins.clear_tab();
         if let (Some(r), Some(maps)) = (&mut self.renderer, maps) {
             r.restore_maps(maps);
         }

@@ -134,6 +134,11 @@ impl PlayerSkins {
         Some(tab_image(img))
     }
 
+    /// Forget the uploaded GUI textures: a new renderer has none.
+    pub fn clear_tab(&mut self) {
+        self.tab_sent.clear();
+    }
+
     /// Whether the renderer has the GUI texture of the player.
     pub fn has_tab(&self, uuid: u128) -> bool {
         self.tab_sent.contains(&uuid)

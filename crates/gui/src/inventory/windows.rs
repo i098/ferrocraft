@@ -127,162 +127,22 @@ impl Extras {
         if button != 0 {
             return None;
         }
-        let inside =
-            |bx: i32, by: i32, w: i32, h: i32| x >= bx && y >= by && x < bx + w && y < by + h;
         match inv.kind() {
-            Kind::Enchanting => {
-                let i = (0..3).find(|&i| inside(60, 14 + 19 * i, 108, 19))?;
-                let sent = inv.can_enchant(i as usize).then(|| Request::Enchant {
-                    window_id: inv.window_id(),
-                    button: i as i8,
-                });
-                Some(sent.into_iter().collect())
-            }
-            Kind::Merchant => {
-                let (len, at) = (
-                    inv.open.as_ref()?.recipes.len(),
-                    inv.open.as_ref()?.recipe_index,
-                );
-                let next = if inside(147, 23, 12, 19) && at + 1 < len {
-                    at + 1
-                } else if inside(17, 23, 12, 19) && at > 0 {
-                    at - 1
-                } else {
-                    return None;
-                };
-                inv.select_recipe(next);
-                Some(vec![Request::Plugin {
-                    channel: "MC|TrSel",
-                    data: merchant::select_payload(next),
-                }])
-            }
-            Kind::Beacon => {
-                let b = beacon_buttons(inv)
-                    .into_iter()
-                    .find(|b| b.enabled && inside(b.x, b.y, 22, 22))?;
-                let w = inv.open.as_mut()?;
-                match b.act {
-                    Act::Power { id, tier } => {
-                        w.props[if tier < 3 { 1 } else { 2 }] = i16::from(id);
-                        Some(Vec::new())
-                    }
-                    Act::Confirm => {
-                        let mut data = i32::from(w.props[1]).to_be_bytes().to_vec();
-                        data.extend(i32::from(w.props[2]).to_be_bytes());
-                        Some(vec![
-                            Request::Plugin {
-                                channel: "MC|Beacon",
-                                data,
-                            },
-                            Request::Close { window_id: w.id },
-                        ])
-                    }
-                    Act::Cancel => Some(vec![Request::Close { window_id: w.id }]),
-                }
-            }
+            Kind::Enchanting => click_enchant(inv, x, y),
+            Kind::Merchant => click_merchant(inv, x, y),
+            Kind::Beacon => click_beacon(inv, x, y),
             _ => None,
         }
     }
 
     /// `drawGuiContainerBackgroundLayer` beyond the plain texture; `(l, t)` is the window's corner.
     pub fn draw_back(&self, c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) {
-        let Some(w) = inv.open.as_ref() else { return };
         match inv.kind() {
-            Kind::Anvil => {
-                let has = |i: usize| inv.slot(i).is_some();
-                modal(
-                    c,
-                    ANVIL,
-                    l + 59,
-                    t + 20,
-                    0,
-                    166 + if has(0) { 0 } else { 16 },
-                    110,
-                    16,
-                );
-                if (has(0) || has(1)) && !has(2) {
-                    modal(c, ANVIL, l + 99, t + 56, 176, 0, 28, 21);
-                }
-            }
-            Kind::Brewing => {
-                let k = i32::from(w.props[0]);
-                if k > 0 {
-                    let n = (28.0 * (1.0 - k as f32 / 400.0)) as i32;
-                    if n > 0 {
-                        modal(c, BREWING, l + 97, t + 16, 176, 0, 9, n);
-                    }
-                    let n = [29, 24, 20, 16, 11, 6, 0][(k / 2 % 7) as usize];
-                    if n > 0 {
-                        modal(c, BREWING, l + 65, t + 14 + 29 - n, 185, 29 - n, 12, n);
-                    }
-                }
-            }
+            Kind::Anvil => anvil_back(c, inv, l, t),
+            Kind::Brewing => brewing_back(c, inv, l, t),
             Kind::Enchanting => self.enchant_back(c, inv, l, t, mx, my),
-            Kind::Merchant => {
-                if w.recipes
-                    .get(w.recipe_index)
-                    .is_some_and(merchant::Recipe::disabled)
-                {
-                    modal(c, VILLAGER, l + 83, t + 21, 212, 0, 28, 21);
-                    modal(c, VILLAGER, l + 83, t + 51, 212, 0, 28, 21);
-                }
-                let (len, at) = (w.recipes.len(), w.recipe_index);
-                for (x, forward, enabled) in [(147, true, at + 1 < len), (17, false, at > 0)] {
-                    let hover = mx >= l + x && my >= t + 23 && mx < l + x + 12 && my < t + 42;
-                    let u = 176
-                        + if !enabled {
-                            23
-                        } else if hover {
-                            46
-                        } else {
-                            0
-                        };
-                    modal(
-                        c,
-                        VILLAGER,
-                        l + x,
-                        t + 23,
-                        u,
-                        if forward { 0 } else { 19 },
-                        12,
-                        19,
-                    );
-                }
-            }
-            Kind::Beacon => {
-                for b in beacon_buttons(inv) {
-                    let hover =
-                        mx >= l + b.x && my >= t + b.y && mx < l + b.x + 22 && my < t + b.y + 22;
-                    let u = if !b.enabled {
-                        44
-                    } else if b.selected {
-                        22
-                    } else if hover {
-                        66
-                    } else {
-                        0
-                    };
-                    modal(c, BEACON, l + b.x, t + b.y, u, 219, 22, 22);
-                    match b.act {
-                        Act::Power { id, .. } => {
-                            if let Some(i) = effects::icon(id) {
-                                modal(
-                                    c,
-                                    INVENTORY,
-                                    l + b.x + 2,
-                                    t + b.y + 2,
-                                    i % 8 * 18,
-                                    198 + i / 8 * 18,
-                                    18,
-                                    18,
-                                );
-                            }
-                        }
-                        Act::Confirm => modal(c, BEACON, l + b.x + 2, t + b.y + 2, 90, 219, 18, 18),
-                        Act::Cancel => modal(c, BEACON, l + b.x + 2, t + b.y + 2, 112, 219, 18, 18),
-                    }
-                }
-            }
+            Kind::Merchant => merchant_back(c, inv, l, t, mx, my),
+            Kind::Beacon => beacon_back(c, inv, l, t, mx, my),
             _ => {}
         }
     }
@@ -373,67 +233,218 @@ impl Extras {
         sw: i32,
         sh: i32,
     ) {
-        let Some(w) = inv.open.as_ref() else { return };
-        let lines: Vec<String> = match inv.kind() {
-            Kind::Enchanting => {
-                let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
-                let Some(i) = (0..3).find(|&i| {
-                    let (x, y) = (mx - l - 60, my - t - 14 - 19 * i);
-                    x >= 0 && y >= 0 && x < 108 && y < 17 && w.props[i as usize] > 0
-                }) else {
-                    return;
-                };
-                let level = i32::from(w.props[i as usize]);
-                let n = i + 1;
-                let mut lines = Vec::new();
-                let clue = items::enchantment(w.props[4 + i as usize]).and_then(|_| {
-                    tooltip::enchantment_name(w.props[4 + i as usize], w.props[7 + i as usize])
-                });
-                if let Some(name) = &clue {
-                    lines.push(format!("\u{a7}f\u{a7}o{name} . . . ?"));
-                }
-                if !inv.creative {
-                    if clue.is_some() {
-                        lines.push(String::new());
-                    }
-                    if inv.xp_level < level {
-                        lines.push(format!("\u{a7}cLevel Requirement: {level}"));
-                    } else {
-                        let color = if lapis >= n { "\u{a7}7" } else { "\u{a7}c" };
-                        lines.push(format!("{color}{n} Lapis Lazuli"));
-                        let s = if n == 1 {
-                            "1 Enchantment Level".into()
-                        } else {
-                            format!("{n} Enchantment Levels")
-                        };
-                        lines.push(format!("\u{a7}7{s}"));
-                    }
-                }
-                lines
-            }
-            Kind::Beacon => {
-                let Some(b) = beacon_buttons(inv).into_iter().find(|b| {
-                    mx >= l + b.x && my >= t + b.y && mx < l + b.x + 22 && my < t + b.y + 22
-                }) else {
-                    return;
-                };
-                vec![match b.act {
-                    Act::Power { id, tier } => {
-                        let name = effects::name(id).unwrap_or("");
-                        if tier >= 3 && id != REGENERATION {
-                            format!("{name} II")
-                        } else {
-                            name.to_string()
-                        }
-                    }
-                    Act::Confirm => "Done".into(),
-                    Act::Cancel => "Cancel".into(),
-                }]
-            }
+        let lines = match inv.kind() {
+            Kind::Enchanting => enchant_hover(inv, l, t, mx, my),
+            Kind::Beacon => beacon_hover(inv, l, t, mx, my),
             _ => return,
         };
-        tooltip::draw(c, &lines, mx, my, sw, sh);
+        if let Some(lines) = lines {
+            tooltip::draw(c, &lines, mx, my, sw, sh);
+        }
     }
+}
+
+fn inside(x: i32, y: i32, bx: i32, by: i32, w: i32, h: i32) -> bool {
+    x >= bx && y >= by && x < bx + w && y < by + h
+}
+
+fn click_enchant(inv: &Inventory, x: i32, y: i32) -> Option<Vec<Request>> {
+    let i = (0..3).find(|&i| inside(x, y, 60, 14 + 19 * i, 108, 19))?;
+    let sent = inv.can_enchant(i as usize).then(|| Request::Enchant {
+        window_id: inv.window_id(),
+        button: i as i8,
+    });
+    Some(sent.into_iter().collect())
+}
+
+fn click_merchant(inv: &mut Inventory, x: i32, y: i32) -> Option<Vec<Request>> {
+    let (len, at) = (
+        inv.open.as_ref()?.recipes.len(),
+        inv.open.as_ref()?.recipe_index,
+    );
+    let next = if inside(x, y, 147, 23, 12, 19) && at + 1 < len {
+        at + 1
+    } else if inside(x, y, 17, 23, 12, 19) && at > 0 {
+        at - 1
+    } else {
+        return None;
+    };
+    inv.select_recipe(next);
+    Some(vec![Request::Plugin {
+        channel: "MC|TrSel",
+        data: merchant::select_payload(next),
+    }])
+}
+
+fn click_beacon(inv: &mut Inventory, x: i32, y: i32) -> Option<Vec<Request>> {
+    let b = beacon_buttons(inv)
+        .into_iter()
+        .find(|b| b.enabled && inside(x, y, b.x, b.y, 22, 22))?;
+    let w = inv.open.as_mut()?;
+    match b.act {
+        Act::Power { id, tier } => {
+            w.props[if tier < 3 { 1 } else { 2 }] = i16::from(id);
+            Some(Vec::new())
+        }
+        Act::Confirm => {
+            let mut data = i32::from(w.props[1]).to_be_bytes().to_vec();
+            data.extend(i32::from(w.props[2]).to_be_bytes());
+            Some(vec![
+                Request::Plugin {
+                    channel: "MC|Beacon",
+                    data,
+                },
+                Request::Close { window_id: w.id },
+            ])
+        }
+        Act::Cancel => Some(vec![Request::Close { window_id: w.id }]),
+    }
+}
+
+fn anvil_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32) {
+    let has = |i: usize| inv.slot(i).is_some();
+    modal(
+        c,
+        ANVIL,
+        l + 59,
+        t + 20,
+        0,
+        166 + if has(0) { 0 } else { 16 },
+        110,
+        16,
+    );
+    if (has(0) || has(1)) && !has(2) {
+        modal(c, ANVIL, l + 99, t + 56, 176, 0, 28, 21);
+    }
+}
+
+fn brewing_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32) {
+    let Some(w) = inv.open.as_ref() else { return };
+    let k = i32::from(w.props[0]);
+    if k <= 0 {
+        return;
+    }
+    let n = (28.0 * (1.0 - k as f32 / 400.0)) as i32;
+    if n > 0 {
+        modal(c, BREWING, l + 97, t + 16, 176, 0, 9, n);
+    }
+    let n = [29, 24, 20, 16, 11, 6, 0][(k / 2 % 7) as usize];
+    if n > 0 {
+        modal(c, BREWING, l + 65, t + 14 + 29 - n, 185, 29 - n, 12, n);
+    }
+}
+
+fn merchant_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) {
+    let Some(w) = inv.open.as_ref() else { return };
+    if w.recipes
+        .get(w.recipe_index)
+        .is_some_and(merchant::Recipe::disabled)
+    {
+        modal(c, VILLAGER, l + 83, t + 21, 212, 0, 28, 21);
+        modal(c, VILLAGER, l + 83, t + 51, 212, 0, 28, 21);
+    }
+    let (len, at) = (w.recipes.len(), w.recipe_index);
+    for (x, forward, enabled) in [(147, true, at + 1 < len), (17, false, at > 0)] {
+        let hover = inside(mx, my, l + x, t + 23, 12, 19);
+        let u = 176
+            + if !enabled {
+                23
+            } else if hover {
+                46
+            } else {
+                0
+            };
+        modal(
+            c,
+            VILLAGER,
+            l + x,
+            t + 23,
+            u,
+            if forward { 0 } else { 19 },
+            12,
+            19,
+        );
+    }
+}
+
+fn beacon_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) {
+    for b in beacon_buttons(inv) {
+        let hover = inside(mx, my, l + b.x, t + b.y, 22, 22);
+        let u = if !b.enabled {
+            44
+        } else if b.selected {
+            22
+        } else if hover {
+            66
+        } else {
+            0
+        };
+        modal(c, BEACON, l + b.x, t + b.y, u, 219, 22, 22);
+        let (x, y) = (l + b.x + 2, t + b.y + 2);
+        match b.act {
+            Act::Power { id, .. } => {
+                if let Some(i) = effects::icon(id) {
+                    modal(c, INVENTORY, x, y, i % 8 * 18, 198 + i / 8 * 18, 18, 18);
+                }
+            }
+            Act::Confirm => modal(c, BEACON, x, y, 90, 219, 18, 18),
+            Act::Cancel => modal(c, BEACON, x, y, 112, 219, 18, 18),
+        }
+    }
+}
+
+fn enchant_hover(inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) -> Option<Vec<String>> {
+    let w = inv.open.as_ref()?;
+    let i = (0..3)
+        .find(|&i| inside(mx - l, my - t, 60, 14 + 19 * i, 108, 17) && w.props[i as usize] > 0)?;
+    let level = i32::from(w.props[i as usize]);
+    let mut lines = Vec::new();
+    let clue = items::enchantment(w.props[4 + i as usize])
+        .and_then(|_| tooltip::enchantment_name(w.props[4 + i as usize], w.props[7 + i as usize]));
+    if let Some(name) = &clue {
+        lines.push(format!("\u{a7}f\u{a7}o{name} . . . ?"));
+    }
+    if !inv.creative {
+        if clue.is_some() {
+            lines.push(String::new());
+        }
+        let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
+        enchant_cost_lines(&mut lines, inv.xp_level, level, i + 1, lapis);
+    }
+    Some(lines)
+}
+
+fn enchant_cost_lines(lines: &mut Vec<String>, xp: i32, level: i32, n: i32, lapis: i32) {
+    if xp < level {
+        lines.push(format!("\u{a7}cLevel Requirement: {level}"));
+        return;
+    }
+    let color = if lapis >= n { "\u{a7}7" } else { "\u{a7}c" };
+    lines.push(format!("{color}{n} Lapis Lazuli"));
+    let s = if n == 1 {
+        "1 Enchantment Level".into()
+    } else {
+        format!("{n} Enchantment Levels")
+    };
+    lines.push(format!("\u{a7}7{s}"));
+}
+
+fn beacon_hover(inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) -> Option<Vec<String>> {
+    let b = beacon_buttons(inv)
+        .into_iter()
+        .find(|b| inside(mx, my, l + b.x, t + b.y, 22, 22))?;
+    Some(vec![match b.act {
+        Act::Power { id, tier } => {
+            let name = effects::name(id).unwrap_or("");
+            if tier >= 3 && id != REGENERATION {
+                format!("{name} II")
+            } else {
+                name.to_string()
+            }
+        }
+        Act::Confirm => "Done".into(),
+        Act::Cancel => "Cancel".into(),
+    }])
 }
 
 /// `GuiRepair.drawGuiContainerForegroundLayer`: the title and the cost of the repair.

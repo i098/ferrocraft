@@ -64,12 +64,7 @@ impl App {
                 let r = self.link.session().map(|s| s.respawn());
                 self.send_result(r.unwrap_or(Ok(())));
             }
-            UiEffect::SignText { pos, lines } => {
-                if let Some(s) = self.link.session() {
-                    let r = s.update_sign(pos, &lines);
-                    self.send_result(r);
-                }
-            }
+            UiEffect::SignText { pos, lines } => self.send_sign(pos, &lines),
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
@@ -81,6 +76,13 @@ impl App {
                 self.next_shader();
             }
             UiEffect::ResourcesChanged => self.refresh_resources(),
+        }
+    }
+
+    fn send_sign(&mut self, pos: [i32; 3], lines: &[String; 4]) {
+        if let Some(s) = self.link.session() {
+            let r = s.update_sign(pos, lines);
+            self.send_result(r);
         }
     }
 

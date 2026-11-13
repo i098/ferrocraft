@@ -398,12 +398,7 @@ impl Game {
             }),
             NetEvent::SignEditorOpen { pos } => Some(Effect::EditSign(pos)),
             NetEvent::PluginMessage { channel, data } if channel == "MC|TrList" => {
-                // `NetHandlerPlayClient.handleCustomPayload`: only for the open window
-                if let Ok((id, recipes)) = merchant::parse_list(&data) {
-                    if u8::try_from(id) == Ok(self.inv.window_id()) {
-                        self.inv.set_recipes(self.inv.window_id(), recipes);
-                    }
-                }
+                self.set_trades(&data);
                 None
             }
             NetEvent::CloseWindow => {
@@ -426,6 +421,16 @@ impl Game {
             other => return Err(other),
         };
         Ok(effect)
+    }
+
+    /// `NetHandlerPlayClient.handleCustomPayload`: the trade list, only for the open window.
+    fn set_trades(&mut self, data: &[u8]) {
+        let Ok((id, recipes)) = merchant::parse_list(data) else {
+            return;
+        };
+        if u8::try_from(id) == Ok(self.inv.window_id()) {
+            self.inv.set_recipes(self.inv.window_id(), recipes);
+        }
     }
 
     /// Chunks, blocks, entities, time, weather, chat and disconnects.

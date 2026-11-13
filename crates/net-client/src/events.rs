@@ -90,6 +90,13 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             total: p.total.0,
         },
         P::HeldItemChange(p) => NetEvent::HeldItem(p.slot as u8),
+        _ => return container_event(packet),
+    })
+}
+
+fn container_event(packet: &cb::Packet) -> Option<NetEvent> {
+    use cb::Packet as P;
+    Some(match packet {
         P::SetSlot(p) => NetEvent::SetSlot {
             window: p.window_id,
             slot: p.slot,

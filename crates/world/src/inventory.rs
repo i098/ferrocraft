@@ -886,35 +886,13 @@ impl Inventory {
     fn transfer_merge(&mut self, kind: Kind, i: usize, s: &mut ItemStack) -> bool {
         match kind {
             Kind::Player => self.transfer_player(i, s),
-            Kind::Crafting => match i {
-                0 => self.merge(s, 10, 46, true),
-                10..=36 => self.merge(s, 37, 46, false),
-                37..=45 => self.merge(s, 10, 37, false),
-                _ => self.merge(s, 10, 46, false),
-            },
+            Kind::Crafting => self.transfer_crafting(i, s),
             Kind::Furnace => self.transfer_furnace(i, s),
-            Kind::Anvil => match i {
-                2 => self.merge(s, 3, 39, true),
-                0 | 1 => self.merge(s, 3, 39, false),
-                _ => self.merge(s, 0, 2, false),
-            },
+            Kind::Anvil => self.transfer_anvil(i, s),
             Kind::Enchanting => self.transfer_enchanting(i, s),
             Kind::Brewing => self.transfer_brewing(i, s),
-            Kind::Beacon => match i {
-                0 => self.merge(s, 1, 37, true),
-                _ if self.slot(0).is_none() && items::is_beacon_payment(s.id) && s.count == 1 => {
-                    self.merge(s, 0, 1, false)
-                }
-                1..=27 => self.merge(s, 28, 37, false),
-                28..=36 => self.merge(s, 1, 28, false),
-                _ => false,
-            },
-            Kind::Merchant => match i {
-                2 => self.merge(s, 3, 39, true),
-                0 | 1 => self.merge(s, 3, 39, false),
-                3..=29 => self.merge(s, 30, 39, false),
-                _ => self.merge(s, 3, 30, false),
-            },
+            Kind::Beacon => self.transfer_beacon(i, s),
+            Kind::Merchant => self.transfer_merchant(i, s),
             Kind::Chest(_) | Kind::Dispenser | Kind::Hopper => {
                 let n = self.slot_count();
                 let own = n - PLAYER_PART;
@@ -924,6 +902,48 @@ impl Inventory {
                     self.merge(s, 0, own, false)
                 }
             }
+        }
+    }
+
+    /// `ContainerPlayer`-style crafting table `transferStackInSlot`.
+    fn transfer_crafting(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            0 => self.merge(s, 10, 46, true),
+            10..=36 => self.merge(s, 37, 46, false),
+            37..=45 => self.merge(s, 10, 37, false),
+            _ => self.merge(s, 10, 46, false),
+        }
+    }
+
+    /// `ContainerRepair.transferStackInSlot`.
+    fn transfer_anvil(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            2 => self.merge(s, 3, 39, true),
+            0 | 1 => self.merge(s, 3, 39, false),
+            _ => self.merge(s, 0, 2, false),
+        }
+    }
+
+    /// `ContainerMerchant.transferStackInSlot`.
+    fn transfer_merchant(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            2 => self.merge(s, 3, 39, true),
+            0 | 1 => self.merge(s, 3, 39, false),
+            3..=29 => self.merge(s, 30, 39, false),
+            _ => self.merge(s, 3, 30, false),
+        }
+    }
+
+    /// `ContainerBeacon.transferStackInSlot`.
+    fn transfer_beacon(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            0 => self.merge(s, 1, 37, true),
+            _ if self.slot(0).is_none() && items::is_beacon_payment(s.id) && s.count == 1 => {
+                self.merge(s, 0, 1, false)
+            }
+            1..=27 => self.merge(s, 28, 37, false),
+            28..=36 => self.merge(s, 1, 28, false),
+            _ => false,
         }
     }
 

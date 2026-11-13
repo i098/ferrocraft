@@ -120,7 +120,7 @@ fn is_gate(id: u16) -> bool {
 }
 
 /// Full opaque cubes: `material.isOpaque() && isFullCube()`.
-pub(crate) fn opaque_cube(id: u16) -> bool {
+pub fn opaque_cube(id: u16) -> bool {
     matches!(
         id,
         1..=5 | 7 | 12 | 13 | 14..=17 | 19 | 21..=25 | 35 | 41..=43 | 45 | 47..=49 | 56..=58

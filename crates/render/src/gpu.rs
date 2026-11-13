@@ -2,6 +2,7 @@
 
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::biome::{temperature, PLAINS_TEMPERATURE};
+use crate::blockent::{BlockEntities, Tex};
 use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
@@ -104,6 +105,10 @@ pub struct Renderer {
     entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
+    /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
+    block_entities: BlockEntities,
+    tile_meshes: Vec<(Tex, GpuMesh)>,
+    head_meshes: Vec<(Tex, GpuMesh)>,
     glint_mesh: Option<GpuMesh>,
     fires: Vec<entity::fire::Fire>,
     on_fire: bool,
@@ -370,6 +375,9 @@ impl Renderer {
             entity_skins,
             entity_tex,
             entity_mesh: None,
+            block_entities: BlockEntities::default(),
+            tile_meshes: Vec::new(),
+            head_meshes: Vec::new(),
             glint_mesh: None,
             fires: Vec::new(),
             on_fire: false,
@@ -585,6 +593,8 @@ impl Renderer {
             }
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
+        self.block_entities
+            .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
         self.blocks.insert(key, Arc::new(data));
         self.biomes
             .insert(key, std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)));
@@ -593,6 +603,7 @@ impl Renderer {
 
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
+        self.block_entities.remove_chunk(x, z);
         self.biomes.remove(&(x, z));
         self.meshes.remove(&(x, z));
         self.pending.remove(&(x, z));
@@ -601,6 +612,7 @@ impl Renderer {
 
     pub fn clear_chunks(&mut self) {
         self.blocks.clear();
+        self.block_entities.clear();
         self.biomes.clear();
         self.meshes.clear();
         self.dirty.clear();
@@ -620,6 +632,7 @@ impl Renderer {
         let (lx, lz) = (x.rem_euclid(16), z.rem_euclid(16));
         // Copies only while a mesh job still reads the old data.
         Arc::make_mut(data)[index(lx as usize, y as usize, lz as usize)] = state;
+        self.block_entities.set_state([x, y, z], state);
         self.mark_around(key);
         // The edited chunk, and a neighbour when the block touches its edge, show the change this frame.
         self.urgent.insert(key);
@@ -916,6 +929,10 @@ impl Renderer {
             eprintln!("ferrocraft-render: {name} is not a PNG");
             missing_tile()
         });
+        self.register_image(name, &image);
+    }
+
+    fn register_image(&mut self, name: &str, image: &Image) {
         let view = upload_texture(
             &self.device,
             &self.queue,
@@ -1360,6 +1377,11 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            for (tex, m) in self.tile_meshes.iter().chain(&self.head_meshes) {
+                pass.set_bind_group(0, self.tile_group(tex), &[]);
+                draw_mesh(&mut pass, m);
+            }
+            pass.set_bind_group(0, &self.world_group, &[]);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);
@@ -1988,6 +2010,8 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
         .collect();
     MeshData { vertices, indices }
 }
+
+mod block_entities;
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {
     pass.set_vertex_buffer(0, m.vertices.slice(..));

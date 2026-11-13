@@ -569,12 +569,12 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
     })
 }
 
-type V3 = [f32; 3];
+pub(crate) type V3 = [f32; 3];
 /// Corners in model space, texel corners, outward normal, shade.
 type Face = ([V3; 4], [[f32; 2]; 4], V3, f32);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.
-fn rotate(p: V3, rot: V3) -> V3 {
+pub(crate) fn rotate(p: V3, rot: V3) -> V3 {
     let [mut x, mut y, mut z] = p;
     let (s, c) = rot[0].sin_cos();
     (y, z) = (y * c - z * s, y * s + z * c);
@@ -951,7 +951,7 @@ fn skin_dims() -> [f32; 2] {
 /// `ModelBox`: six quads with the unfolded-cuboid texture layout of a `layout`-sized box at `uv`
 /// (texels, plus `v_off`); `size` may be larger (inflate).
 #[allow(clippy::too_many_arguments)]
-fn add_box(
+pub(crate) fn add_box(
     out: &mut MeshData,
     tf: &dyn Fn(V3) -> V3,
     min: V3,

@@ -233,7 +233,7 @@ impl App {
         self.rain_particles();
         self.potion_particles();
         self.entity_fx();
-        self.projectile_fx();
+        Self::projectile_fx(&self.game, &mut self.particles);
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
@@ -255,9 +255,6 @@ impl App {
                     self.particles.hit_burst(magic, pos, size)
                 }
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
-                world::entities::Fx::Impact { object, pos } => {
-                    self.particles.thrown_impact(object, pos)
-                }
             }
         }
         let g = &self.game;
@@ -281,8 +278,7 @@ impl App {
     }
 
     /// Tick particles of arrows, thrown entities, fireballs and primed TNT (`onUpdate` of each class).
-    fn projectile_fx(&mut self) {
-        let g = &self.game;
+    fn projectile_fx(g: &crate::game::Game, particles: &mut render::Particles) {
         let block = |x, y, z| g.store.get_block(x, y, z);
         for e in g.entities.iter().filter(|e| !e.is_dead()) {
             let vel = [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]);
@@ -295,20 +291,27 @@ impl App {
                 // A stuck arrow does not move and runs neither branch.
                 60 if moving => {
                     if e.critical_arrow() {
-                        self.particles.arrow_crit(e.prev_pos, vel);
+                        particles.arrow_crit(e.prev_pos, vel);
                     }
                     (wet(), false)
                 }
-                61 | 62 | 65 | 73 | 75 => (wet(), false),
+                61 | 62 | 65 | 73 | 75 => {
+                    // `EntityThrowable.onUpdate`: the client traces blocks along the motion and runs `onImpact`.
+                    let next = [0, 1, 2].map(|i| e.pos[i] + vel[i]);
+                    if moving && matches!(object, 61 | 62 | 65) && g.line_blocked(e.pos, next) {
+                        particles.thrown_impact(object, e.pos);
+                    }
+                    (wet(), false)
+                }
                 63 | 64 | 66 => (wet(), true),
                 50 => (false, true),
                 _ => continue,
             };
             if bubbles {
-                self.particles.bubble_trail(e.pos, vel);
+                particles.bubble_trail(e.pos, vel);
             }
             if smoke {
-                self.particles.smoke_puff(e.pos);
+                particles.smoke_puff(e.pos);
             }
         }
     }
@@ -1209,7 +1212,48 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod tests {
-    use super::{activates, item_used_on, sprint_dust_state};
+    use super::{activates, item_used_on, sprint_dust_state, App};
+    use crate::game::Game;
+    use render::Particles;
+    use world::chunk::Chunk;
+    use world::entities::EntityEvent;
+
+    fn pearl_flying_toward_x(wall: bool) -> (Game, Particles) {
+        let mut g = Game::new();
+        let mut c = Chunk::new(0, 0);
+        if wall {
+            c.set_block(1, 64, 0, 1 << 4);
+        }
+        g.store.insert(c);
+        g.entities.apply(EntityEvent::SpawnObject {
+            id: 7,
+            kind: 65,
+            pos: [16, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        g.entities.apply(EntityEvent::Teleport {
+            id: 7,
+            pos: [48, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            on_ground: false,
+        });
+        g.entities.tick();
+        (g, Particles::new())
+    }
+
+    #[test]
+    fn a_pearl_flying_into_a_block_makes_portal_specks_and_in_open_air_none() {
+        let (g, mut ps) = pearl_flying_toward_x(true);
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
+        let (g, mut ps) = pearl_flying_toward_x(false);
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 0);
+    }
 
     #[test]
     fn sprint_dust_needs_a_solid_block_and_no_water() {

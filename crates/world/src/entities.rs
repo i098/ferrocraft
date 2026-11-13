@@ -746,8 +746,6 @@ pub enum Fx {
     },
     /// `EntityLivingBase.onDeathUpdate` at tick 20: the 20-particle puff.
     Death { pos: [f64; 3], size: (f32, f32) },
-    /// A snowball (61), egg (62) or ender pearl (65) left the world: `onImpact` made its particles there.
-    Impact { object: i8, pos: [f64; 3] },
 }
 
 impl Entities {
@@ -868,14 +866,7 @@ impl Entities {
             }),
             E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
             E::Destroy(ids) => ids.iter().for_each(|id| {
-                if let Some(Entity {
-                    kind: Kind::Object(object @ (61 | 62 | 65)),
-                    pos,
-                    ..
-                }) = self.map.remove(id)
-                {
-                    self.fx.push(Fx::Impact { object, pos });
-                }
+                self.map.remove(id);
             }),
             E::Clear => self.map.clear(),
             other => self.apply_state(other),
@@ -1309,27 +1300,20 @@ mod tests {
     }
 
     #[test]
-    fn a_destroyed_pearl_leaves_an_impact_and_a_boat_does_not() {
+    fn destroying_a_thrown_entity_makes_no_particles() {
         let mut es = Entities::default();
-        for (id, kind) in [(7, 65), (8, 1)] {
-            es.apply(EntityEvent::SpawnObject {
-                id,
-                kind,
-                pos: [32, 64, 96],
-                yaw: 0,
-                pitch: 0,
-                vel: [0; 3],
-                data: 0,
-            });
-        }
-        es.apply(EntityEvent::Destroy(vec![7, 8]));
-        assert_eq!(
-            es.take_fx(),
-            vec![Fx::Impact {
-                object: 65,
-                pos: [1.0, 2.0, 3.0]
-            }]
-        );
+        es.apply(EntityEvent::SpawnObject {
+            id: 7,
+            kind: 65,
+            pos: [32, 64, 96],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        es.apply(EntityEvent::Destroy(vec![7]));
+        assert!(es.take_fx().is_empty());
+        assert!(es.get(7).is_none());
     }
 
     #[test]

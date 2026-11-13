@@ -40,6 +40,8 @@ struct Scenario {
     steps: Vec<(u32, Input)>,
     /// Still second players at `[x, y, z]` in 1/32 blocks.
     others: Vec<[i32; 3]>,
+    /// Depth Strider level of the worn boots.
+    boots: i32,
 }
 
 impl Scenario {
@@ -51,6 +53,7 @@ impl Scenario {
             yaw: 0.0,
             steps,
             others: vec![],
+            boots: 0,
         }
     }
 
@@ -61,6 +64,7 @@ impl Scenario {
         }
         let [x, y, z] = self.start;
         writeln!(s, "start {x:?} {y:?} {z:?} {:?}", self.yaw).unwrap();
+        writeln!(s, "boots {}", self.boots).unwrap();
         for p in &self.others {
             let [x, y, z] = p.map(|v| f64::from(v) / 32.0);
             writeln!(s, "other {x:?} {y:?} {z:?}").unwrap();
@@ -88,6 +92,7 @@ impl Scenario {
             blocks: self.blocks.iter().copied().collect(),
         };
         let mut p = Player::new(self.start, self.yaw);
+        p.depth_strider = self.boots;
         let mut mobs = entities::Entities::default();
         for (i, pos) in self.others.iter().enumerate() {
             mobs.apply(entities::EntityEvent::SpawnPlayer {
@@ -472,4 +477,25 @@ fn overlapping_players_push_each_other_like_the_jar() {
     s.yaw = -90.0;
     s.others = vec![[32, 64 * 32, 16], [16, 64 * 32, 40]];
     s.check("player push");
+}
+
+/// Depth Strider 0 to 4 (4 is capped to 3): a sprint along the pool floor (halved level), a jump
+/// off it and a swim in open water, each tick bit-exact against the jar.
+#[test]
+fn depth_strider_in_water() {
+    for level in 0..=4 {
+        let mut s = Scenario::new(vec![
+            (3, IDLE),
+            (25, input(1.0, 0.3, false, true)),
+            (6, input(1.0, 0.0, true, true)),
+            (20, input(1.0, -0.5, false, false)),
+            (10, IDLE),
+        ]);
+        s.blocks = (-12..=12)
+            .flat_map(|x| (-3..=40).flat_map(move |z| (64..=66).map(move |y| ((x, y, z), WATER))))
+            .collect();
+        s.yaw = 20.0;
+        s.boots = level;
+        s.check(&format!("depth strider {level}"));
+    }
 }

@@ -228,8 +228,9 @@ fn newest_forge_file(api: &dyn Http, project: &str) -> Result<Option<File>, Erro
         .or(files.first());
     let Some(f) = f else { return Ok(None) };
     let field = |v: Option<&str>| {
-        v.map(str::to_owned)
-            .ok_or_else(|| Error::Format(format!("{project}: version file lacks url/filename/sha1")))
+        v.map(str::to_owned).ok_or_else(|| {
+            Error::Format(format!("{project}: version file lacks url/filename/sha1"))
+        })
     };
     Ok(Some(File {
         url: field(f["url"].as_str())?,

@@ -69,7 +69,9 @@ pub enum NetEvent {
         flags: u8,
     },
     /// Respawn or dimension change: every loaded chunk is gone.
-    Respawn { dimension_changed: bool },
+    Respawn {
+        dimension_changed: bool,
+    },
     /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.
     TimeUpdate {
         world_age: i64,

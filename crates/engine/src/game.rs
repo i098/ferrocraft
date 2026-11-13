@@ -445,7 +445,9 @@ impl Game {
     /// Chunks, blocks, entities, time, weather, chat and disconnects.
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::Respawn { dimension_changed } => return Some(self.respawn(dimension_changed)),
+            NetEvent::Respawn { dimension_changed } => {
+                return Some(self.respawn(dimension_changed))
+            }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
                 self.store.insert(*c);
@@ -1037,7 +1039,9 @@ mod tests {
         let mut g = Game::new();
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
         assert_eq!(
-            g.apply(NetEvent::Respawn { dimension_changed: false }),
+            g.apply(NetEvent::Respawn {
+                dimension_changed: false
+            }),
             Some(Effect::Clear)
         );
         assert!(g.store.is_empty());
@@ -1225,7 +1229,9 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Steve was slain by Bob"));
-        g.apply(NetEvent::Respawn { dimension_changed: false });
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
         assert_eq!(g.death_message, None);
         assert_eq!(g.score, 0);
         assert_eq!(g.killer_id, -1);
@@ -1266,7 +1272,9 @@ mod tests {
         g.apply(flags(7, Some(0)));
         assert_eq!(g.entity_flags, 0);
         g.apply(flags(7, Some(1)));
-        g.apply(NetEvent::Respawn { dimension_changed: false });
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
         assert_eq!(g.entity_flags, 0);
     }
 
@@ -1275,9 +1283,13 @@ mod tests {
         let mut g = Game::new();
         g.apply(NetEvent::WorldBorder(world::border::Update::SetSize(100.0)));
         assert_ne!(g.border, WorldBorder::default());
-        g.apply(NetEvent::Respawn { dimension_changed: false });
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
         assert_ne!(g.border, WorldBorder::default());
-        g.apply(NetEvent::Respawn { dimension_changed: true });
+        g.apply(NetEvent::Respawn {
+            dimension_changed: true,
+        });
         assert_eq!(g.border, WorldBorder::default());
     }
 }

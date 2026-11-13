@@ -1211,11 +1211,26 @@ mod tests {
         assert!(!falling().is_critical(false));
         assert!(!Attacker::default().is_critical(true));
         for no in [
-            Attacker { on_ground: true, ..falling() },
-            Attacker { on_ladder: true, ..falling() },
-            Attacker { in_water: true, ..falling() },
-            Attacker { blind: true, ..falling() },
-            Attacker { riding: true, ..falling() },
+            Attacker {
+                on_ground: true,
+                ..falling()
+            },
+            Attacker {
+                on_ladder: true,
+                ..falling()
+            },
+            Attacker {
+                in_water: true,
+                ..falling()
+            },
+            Attacker {
+                blind: true,
+                ..falling()
+            },
+            Attacker {
+                riding: true,
+                ..falling()
+            },
         ] {
             assert!(!no.is_critical(true), "{no:?}");
         }

@@ -62,7 +62,9 @@ fn handle(
             let changed = *dimension != r.dimension;
             *dimension = r.dimension;
             vec![
-                NetEvent::Respawn { dimension_changed: changed },
+                NetEvent::Respawn {
+                    dimension_changed: changed,
+                },
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
                 NetEvent::Difficulty(r.difficulty),

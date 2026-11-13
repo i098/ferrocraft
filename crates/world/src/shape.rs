@@ -351,7 +351,7 @@ pub(crate) fn is_solid_material(id: u16) -> bool {
 }
 
 /// `Material.blocksMovement`: as `is_solid_material`, but cobweb does not block.
-pub(crate) fn blocks_movement(id: u16) -> bool {
+pub fn blocks_movement(id: u16) -> bool {
     id != 30 && is_solid_material(id)
 }
 

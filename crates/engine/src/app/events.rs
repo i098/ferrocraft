@@ -586,7 +586,12 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
 /// Hands chest, sign, skull and banner data to the renderer.
 fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
     match tile {
-        TileEvent::Action { pos, event, value } => r.block_action(pos, event, value),
+        TileEvent::Action {
+            pos,
+            block,
+            event,
+            value,
+        } => r.block_action(pos, block, event, value),
         TileEvent::Sign { pos, lines } => r.set_sign_text(pos, lines),
         TileEvent::Skull {
             pos,

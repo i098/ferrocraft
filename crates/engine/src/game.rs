@@ -1229,6 +1229,7 @@ mod tests {
         for tile in [
             TileEvent::Action {
                 pos: [1, 64, 2],
+                block: 54,
                 event: 1,
                 value: 1,
             },

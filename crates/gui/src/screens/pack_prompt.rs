@@ -62,3 +62,69 @@ impl Screen for PackPrompt {
         release_all(&mut self.buttons);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::screens::{Metrics, Settings, Texts};
+    use std::path::PathBuf;
+
+    struct M;
+    impl Metrics for M {
+        fn width(&self, s: &str) -> i32 {
+            s.len() as i32 * 6
+        }
+    }
+
+    /// Vanilla `GuiYesNo` layout: Yes at the left, No at the right; a click answers once.
+    fn click_at(x: i32) -> (Option<Nav>, Vec<Effect>) {
+        let texts = Texts::parse("gui.yes=Yes\ngui.no=No\n", "");
+        let mut settings = Settings::new(PathBuf::from("/tmp"));
+        let mut clip = String::new();
+        let mut ctx = Ctx {
+            width: 320,
+            height: 240,
+            texts: &texts,
+            settings: &mut settings,
+            in_world: true,
+            difficulty: None,
+            hardcore: false,
+            now_ms: 0,
+            game_dir: PathBuf::from("/tmp"),
+            effects: Vec::new(),
+            clipboard: &mut clip,
+            metrics: &M,
+            shift: false,
+        };
+        let mut s = PackPrompt::new("http://h/p.zip".into(), "abc".into());
+        s.init(&mut ctx);
+        let nav = s.click(x, 240 / 6 + 96 + 5, 0, &mut ctx);
+        (nav, ctx.effects)
+    }
+
+    #[test]
+    fn yes_accepts_and_no_declines() {
+        for (x, want) in [(320 / 2 - 100, true), (320 / 2 + 60, false)] {
+            let (nav, fx) = click_at(x);
+            assert!(nav.is_some());
+            let answers: Vec<bool> = fx
+                .iter()
+                .filter_map(|e| match e {
+                    Effect::ServerPackAnswer { url, hash, accepted } => {
+                        assert_eq!((url.as_str(), hash.as_str()), ("http://h/p.zip", "abc"));
+                        Some(*accepted)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(answers, vec![want]);
+        }
+    }
+
+    #[test]
+    fn click_outside_buttons_gives_no_answer() {
+        let (nav, fx) = click_at(1);
+        assert!(nav.is_none());
+        assert!(!fx.iter().any(|e| matches!(e, Effect::ServerPackAnswer { .. })));
+    }
+}

@@ -167,6 +167,7 @@ impl App {
         self.ui.in_world = false;
         self.ui.difficulty = None;
         self.awaiting_terrain = false;
+        self.pending_pack = None;
         self.perspective = 0;
         self.sneak_sent = false;
         self.sprint_sent = false;
@@ -233,6 +234,19 @@ impl App {
         }
     }
 
+    /// The first position packet closes `GuiDownloadingTerrain`; a held pack prompt opens then.
+    fn finish_terrain_wait(&mut self) {
+        if self.awaiting_terrain && self.game.player.is_some() {
+            self.awaiting_terrain = false;
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+            if let Some((url, hash)) = self.pending_pack.take() {
+                self.offer_server_pack(&url, &hash);
+            }
+        }
+    }
+
     pub(super) fn pump_network(&mut self) {
         if let Some(e) = self.link.poll_login() {
             let m = metrics!(self);
@@ -254,12 +268,7 @@ impl App {
             }
             upload(r, &self.game, dirty);
         }
-        if self.awaiting_terrain && self.game.player.is_some() {
-            self.awaiting_terrain = false;
-            let m = metrics!(self);
-            let q = self.ui.close(&m);
-            self.run_effects(q);
-        }
+        self.finish_terrain_wait();
         if let Some(reason) = self.game.disconnected.take() {
             self.leave_world();
             let m = metrics!(self);
@@ -848,5 +857,25 @@ mod tests {
         assert!(!screen_opens(Some(386), "MC|BOpen"), "book and quill");
         assert!(!screen_opens(None, "MC|BOpen"), "empty hand");
         assert!(!screen_opens(Some(387), "MC|Brand"), "other channel");
+    }
+
+    #[test]
+    fn pack_prompt_waits_for_terrain_screen_to_close() {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.ui.in_world = true;
+        let m = metrics!(app);
+        app.ui.close(&m);
+        app.awaiting_terrain = true;
+        app.offer_server_pack("http://h/p.zip", "abc");
+        assert!(!app.ui.is_open(), "prompt must not open over the terrain screen");
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
+        app.finish_terrain_wait();
+        assert!(app.ui.is_open(), "prompt opens once the terrain screen closes");
     }
 }

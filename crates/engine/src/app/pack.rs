@@ -34,6 +34,10 @@ impl App {
             (_, Some(false)) => {
                 self.session_send(|s| s.send_pack_status(hash, PackStatus::Declined))
             }
+            (_, None) if self.awaiting_terrain => {
+                self.pending_pack = Some((url.to_owned(), hash.to_owned()));
+                Ok(())
+            }
             (_, None) => {
                 let m = metrics!(self);
                 let q = self

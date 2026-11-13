@@ -124,6 +124,8 @@ pub struct App {
     equip: (f32, f32, Option<(i16, i16, bool)>),
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
+    /// A server pack offer that arrived before that screen closed; the prompt opens once it has.
+    pending_pack: Option<(String, String)>,
     cursor: (f64, f64),
     ctrl: bool,
     shift: bool,
@@ -185,6 +187,7 @@ impl App {
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
             awaiting_terrain: false,
+            pending_pack: None,
             cursor: (0.0, 0.0),
             ctrl: false,
             shift: false,

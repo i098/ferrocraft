@@ -23,6 +23,7 @@ mod glsl;
 mod light;
 mod mesh;
 mod mesher;
+mod mip;
 mod particles;
 mod post;
 mod shapes;

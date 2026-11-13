@@ -91,6 +91,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         skeleton: byte(13),
         arrow: byte(16),
         rotation: byte(9),
+        arrows: byte(9),
     }
 }
 

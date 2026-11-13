@@ -321,6 +321,7 @@ impl App {
             height_unfocused: s.chat_height_unfocused,
         };
         let (fullscreen, vsync, unicode) = (s.fullscreen, s.vsync, self.ui.unicode());
+        let mipmap_levels = s.mipmap_levels.max(0) as u32;
         let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
         let unicode = self
             .renderer
@@ -338,6 +339,7 @@ impl App {
         }
         if let Some(r) = &mut self.renderer {
             r.set_vsync(vsync);
+            r.set_mipmap_levels(mipmap_levels);
         }
         self.send_client_settings();
     }
@@ -1399,6 +1401,8 @@ fn entity_draw(
             },
             cape: Some(CapeSway::default()),
             stand: stand_look(e),
+            id: e.id,
+            arrows: e.meta.arrows.unwrap_or(0),
             ..Look::default()
         },
     }

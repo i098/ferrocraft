@@ -700,6 +700,45 @@ fn hurt_entity_flashes_red() {
     }
 }
 
+/// `LayerArrow`: arrows stuck in a player change the frame; the proof images go to `FIGHT_PROOF_DIR`.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn stuck_arrows_draw_in_a_player() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.5, 67.0, -1.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut player = player_in_leather();
+    player.armor = [0; 4];
+    player.pos = [8.5, 66.0, 2.0];
+    player.look = render::Look {
+        id: 1234,
+        ..render::Look::default()
+    };
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(&[player.clone()]);
+    let before = r.render_to_rgba(&cam, &[]).2;
+    player.look.arrows = 12;
+    r.set_entities(&[player]);
+    let after = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(before, after, "stuck arrows change the frame");
+    if let Some(dir) = std::env::var_os("FIGHT_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("arrows-before.png"), 400, 300, &before).unwrap();
+        encode_png(&dir.join("arrows-after.png"), 400, 300, &after).unwrap();
+    }
+}
+
 /// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
 fn leather_assets(overlay: bool) -> std::path::PathBuf {
     let dir =

@@ -17,3 +17,6 @@ wgpu = { version = "24", features = ["naga-ir"] }
 winit = "0.30"
 world = { path = "../world" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+oracle = { path = "../oracle" }

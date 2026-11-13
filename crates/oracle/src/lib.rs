@@ -144,6 +144,8 @@ impl Oracle {
         }
 
         cp.insert(0, named);
+        // The harness reads class files with the ASM that the remapper jar bundles.
+        cp.push(remapper.clone());
         let classes = dir.join("classes");
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/oracle/Harness.java");
         let class = classes.join("Harness.class");

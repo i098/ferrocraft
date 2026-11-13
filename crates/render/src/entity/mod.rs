@@ -7,6 +7,7 @@
 //! are laid out by [`nametags`].
 
 mod armorstand;
+mod arrows;
 mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
@@ -135,6 +136,10 @@ pub struct Look {
     pub cape: Option<CapeSway>,
     /// Armor stands: flags, pose and worn block; see [`StandLook`].
     pub stand: StandLook,
+    /// Entity id, the seed of the stuck-arrow placement (`LayerArrow`).
+    pub id: i32,
+    /// Living entities: metadata 9, arrows stuck in the body.
+    pub arrows: u8,
 }
 
 impl Default for Look {
@@ -146,6 +151,8 @@ impl Default for Look {
             screaming: false,
             cape: None,
             stand: StandLook::default(),
+            id: 0,
+            arrows: 0,
         }
     }
 }
@@ -1120,6 +1127,7 @@ fn emit_layers(
             emit_cape(out, xf, d, sway, skins.v_offset(cape));
         }
     }
+    arrows::emit(out, xf, m, d, skins);
     if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
         emit_carried(out, xf, d.look.carried, white);
     }

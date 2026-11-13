@@ -447,12 +447,12 @@ impl Creative {
             inv.cursor = None;
             return;
         }
-        for (j, s) in inv.player.iter_mut().enumerate().take(PLAYER_SLOTS) {
+        for (j, slot) in inv.player.iter_mut().enumerate().take(PLAYER_SLOTS) {
             out.push(Request::Creative {
                 slot: j as i16,
                 item: None,
             });
-            *s = None;
+            *slot = None;
         }
     }
 
@@ -565,10 +565,10 @@ impl Creative {
             }
         }
         if button & 3 == 2 {
-            for (k, it) in inv.player.iter().enumerate().take(45).skip(36) {
+            for (k, item) in inv.player.iter().enumerate().take(45).skip(36) {
                 out.push(Request::Creative {
                     slot: k as i16,
-                    item: it.clone(),
+                    item: item.clone(),
                 });
             }
         } else if let Some(s) = slot {
@@ -809,6 +809,47 @@ mod tests {
             }]
         );
         assert_eq!(inv.cursor, Some(with_count(&stone(), 2)));
+    }
+
+    #[test]
+    fn bin_shift_click_clears_all_player_slots() {
+        let mut cr = Creative::new();
+        cr.select(INVENTORY);
+        let mut inv = Inventory::default();
+        inv.creative = true;
+        inv.player[3] = Some(stone());
+        inv.player[44] = Some(stone());
+        let mut out = Vec::new();
+        cr.click(&mut inv, Some(BIN), 0, 0, 1, &mut out);
+        assert_eq!(out.len(), 45);
+        for (j, r) in out.iter().enumerate() {
+            assert_eq!(
+                *r,
+                Request::Creative {
+                    slot: j as i16,
+                    item: None
+                }
+            );
+        }
+        assert!(inv.player.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn hotbar_middle_click_resends_slots_36_to_44() {
+        let mut cr = Creative::new();
+        cr.select(0);
+        let mut inv = Inventory::default();
+        inv.creative = true;
+        inv.player[37] = Some(stone());
+        let mut out = Vec::new();
+        cr.click(&mut inv, Some(45), 45, 2, 0, &mut out);
+        let want: Vec<Request> = (36..45)
+            .map(|k| Request::Creative {
+                slot: k,
+                item: (k == 37).then(stone),
+            })
+            .collect();
+        assert_eq!(out, want);
     }
 
     #[test]

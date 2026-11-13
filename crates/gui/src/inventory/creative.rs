@@ -812,6 +812,47 @@ mod tests {
     }
 
     #[test]
+    fn bin_shift_click_clears_all_player_slots() {
+        let mut cr = Creative::new();
+        cr.select(INVENTORY);
+        let mut inv = Inventory::default();
+        inv.creative = true;
+        inv.player[3] = Some(stone());
+        inv.player[44] = Some(stone());
+        let mut out = Vec::new();
+        cr.click(&mut inv, Some(BIN), 0, 0, 1, &mut out);
+        assert_eq!(out.len(), 45);
+        for (j, r) in out.iter().enumerate() {
+            assert_eq!(
+                *r,
+                Request::Creative {
+                    slot: j as i16,
+                    item: None
+                }
+            );
+        }
+        assert!(inv.player.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn hotbar_middle_click_resends_slots_36_to_44() {
+        let mut cr = Creative::new();
+        cr.select(0);
+        let mut inv = Inventory::default();
+        inv.creative = true;
+        inv.player[37] = Some(stone());
+        let mut out = Vec::new();
+        cr.click(&mut inv, Some(45), 45, 2, 0, &mut out);
+        let want: Vec<Request> = (36..45)
+            .map(|k| Request::Creative {
+                slot: k,
+                item: (k == 37).then(stone),
+            })
+            .collect();
+        assert_eq!(out, want);
+    }
+
+    #[test]
     fn search_filters_by_tooltip() {
         let mut cr = Creative::new();
         cr.select(SEARCH);

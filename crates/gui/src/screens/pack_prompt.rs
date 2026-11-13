@@ -110,7 +110,11 @@ mod tests {
             let answers: Vec<bool> = fx
                 .iter()
                 .filter_map(|e| match e {
-                    Effect::ServerPackAnswer { url, hash, accepted } => {
+                    Effect::ServerPackAnswer {
+                        url,
+                        hash,
+                        accepted,
+                    } => {
                         assert_eq!((url.as_str(), hash.as_str()), ("http://h/p.zip", "abc"));
                         Some(*accepted)
                     }
@@ -125,6 +129,8 @@ mod tests {
     fn click_outside_buttons_gives_no_answer() {
         let (nav, fx) = click_at(1);
         assert!(nav.is_none());
-        assert!(!fx.iter().any(|e| matches!(e, Effect::ServerPackAnswer { .. })));
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::ServerPackAnswer { .. })));
     }
 }

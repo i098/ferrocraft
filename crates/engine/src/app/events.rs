@@ -873,9 +873,15 @@ mod tests {
         app.ui.close(&m);
         app.awaiting_terrain = true;
         app.offer_server_pack("http://h/p.zip", "abc");
-        assert!(!app.ui.is_open(), "prompt must not open over the terrain screen");
+        assert!(
+            !app.ui.is_open(),
+            "prompt must not open over the terrain screen"
+        );
         app.game.player = Some(world::Player::new([0.0; 3], 0.0));
         app.finish_terrain_wait();
-        assert!(app.ui.is_open(), "prompt opens once the terrain screen closes");
+        assert!(
+            app.ui.is_open(),
+            "prompt opens once the terrain screen closes"
+        );
     }
 }

@@ -49,6 +49,14 @@ public final class Overrides {
         this.settings = R.get(mc, "field_71474_y");
         this.entity = R.get(mc, "field_175622_Z");
         R.set(world, "field_72986_A", R.alloc("net.minecraft.world.storage.WorldInfo")); // worldInfo
+        // Forge's World.getWorldTime asks the provider, which reads the world info back from its world
+        Object provider = R.alloc("net.minecraft.world.WorldProviderSurface");
+        R.set(provider, "field_76579_a", world); // worldObj
+        R.set(world, "field_73011_w", provider); // provider
+        // orientCamera asks the render global for cloud fog
+        Object globe = R.alloc("net.minecraft.client.renderer.RenderGlobal");
+        R.set(globe, "field_72777_q", mc); // mc
+        R.set(mc, "field_71438_f", globe); // renderGlobal
         R.set(renderer, "field_78490_B", 4.0f); // thirdPersonDistance
         R.set(renderer, "field_78491_C", 4.0f); // thirdPersonDistanceTemp
     }
@@ -149,8 +157,8 @@ public final class Overrides {
 
     private void weather(float rain, float thunder, float partial, Reply r) {
         try {
-            for (String f : new String[] {"field_73004_o", "field_73017_q"}) R.set(world, f, rain); // prev and now rainingStrength
-            for (String f : new String[] {"field_73018_p", "field_73016_r"}) R.set(world, f, thunder); // prev and now thunderingStrength
+            for (String f : new String[] {"field_73003_n", "field_73004_o"}) R.set(world, f, rain); // prev and now rainingStrength
+            for (String f : new String[] {"field_73018_p", "field_73017_q"}) R.set(world, f, thunder); // prev and now thunderingStrength
             r.weather[0] = (Float) R.call(world, "func_72867_j", partial); // World.getRainStrength
             r.weather[1] = (Float) R.call(world, "func_72819_i", partial); // World.getThunderStrength
             r.valid |= 2;

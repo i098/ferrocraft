@@ -14,7 +14,7 @@ import net.minecraft.launchwrapper.Launch;
  *
  * <p>Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
- * player tick request, see {@link Player}. Any other first byte ends the host.
+ * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {
@@ -26,6 +26,7 @@ public final class Host {
     private final Object fml;
     private long lastTick = System.nanoTime();
     private final Player player;
+    private final Chat chat = new Chat();
     private boolean screenOpen;
 
     private Host(Object mc) {
@@ -97,6 +98,10 @@ public final class Host {
             int tag = in.read();
             if (tag == 'P') {
                 player.tick(in, out);
+                continue;
+            }
+            if (tag == 'C') {
+                chat.line(in, out);
                 continue;
             }
             if (tag != 'F') return;

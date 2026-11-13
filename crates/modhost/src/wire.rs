@@ -15,6 +15,7 @@
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
 //! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
 //! `'C'` clip (u8 on, then four f32 corners when on).
+//! Rust to Java, also `'P'` (player tick) and `'C'` (a received chat line, see `chat.rs`).
 
 use std::io::{self, Read, Write};
 

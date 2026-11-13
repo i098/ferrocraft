@@ -1,5 +1,6 @@
 //! Rust side of the mod host. See the README of this crate.
 
+pub mod chat;
 pub mod keys;
 pub mod wire;
 
@@ -15,6 +16,7 @@ use std::time::Duration;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
+pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
 
 /// A random secret for one JVM: only the process that got it can say hello.
@@ -60,6 +62,9 @@ struct Shared {
     /// A player tick the game thread waits on, and the JVM's answer.
     player: Option<PlayerState>,
     answer: Option<PlayerInput>,
+    /// A chat line the receiving thread waits on, and the JVM's verdict.
+    chat: Option<(ChatKind, String)>,
+    chat_answer: Option<ChatVerdict>,
     /// A player tick got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
@@ -123,6 +128,8 @@ impl ModHost {
                     textures: HashMap::new(),
                     player: None,
                     answer: None,
+                    chat: None,
+                    chat_answer: None,
                     stalled: false,
                 }),
                 view: Condvar::new(),
@@ -276,6 +283,29 @@ impl ModHost {
         answer
     }
 
+    /// Post a received chat line, with `§` format codes, to the mods' `ClientChatReceivedEvent` and return what
+    /// they did with it. `Keep` while the JVM is not live or does not answer in time.
+    pub fn chat(&self, kind: ChatKind, text: &str) -> ChatVerdict {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live || s.stalled || s.chat.is_some() {
+            return ChatVerdict::Keep;
+        }
+        s.chat = Some((kind, text.to_owned()));
+        s.chat_answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.chat_answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.chat = None;
+        let answer = s.chat_answer.take();
+        s.stalled = answer.is_none() && s.phase == Phase::Live;
+        answer.unwrap_or(ChatVerdict::Keep)
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -407,7 +437,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
         let input = {
             let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live && !s.fresh && s.player.is_none() {
+            while s.phase == Phase::Live && !s.fresh && s.player.is_none() && s.chat.is_none() {
                 s = link.view.wait(s).unwrap();
             }
             if s.phase != Phase::Live {
@@ -420,6 +450,18 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                 let mut s = link.state.lock().unwrap();
                 if !s.stalled {
                     s.answer = Some(answer);
+                }
+                s.stalled = false;
+                link.answered.notify_all();
+                continue;
+            }
+            if let Some((kind, text)) = s.chat.take() {
+                drop(s);
+                chat::write_line(&mut stream, kind, &text)?;
+                let verdict = chat::read_verdict(&mut stream)?;
+                let mut s = link.state.lock().unwrap();
+                if !s.stalled {
+                    s.chat_answer = Some(verdict);
                 }
                 s.stalled = false;
                 link.answered.notify_all();
@@ -558,6 +600,8 @@ mod tests {
                 textures: HashMap::new(),
                 player: None,
                 answer: None,
+                chat: None,
+                chat_answer: None,
                 stalled: false,
             }),
             view: Condvar::new(),
@@ -658,6 +702,37 @@ mod tests {
         host.queue(key(true), false);
         assert!(link.state.lock().unwrap().input.events.is_empty());
         let _ = child.lock().unwrap().kill();
+    }
+
+    #[test]
+    fn a_chat_line_goes_to_the_jvm_and_its_verdict_comes_back() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+
+        let verdict = thread::scope(|scope| {
+            let sender = scope.spawn(|| host.chat(ChatKind::Chat, "spam"));
+            let mut request = [0; 10];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, &[b'C', 0, 0, 0, 0, 4, b's', b'p', b'a', b'm']);
+            stream.write_all(&[1]).unwrap();
+            sender.join().unwrap()
+        });
+        assert_eq!(verdict, ChatVerdict::Cancel);
+
+        host.stop();
+        worker.join().unwrap();
+        assert_eq!(host.chat(ChatKind::Chat, "x"), ChatVerdict::Keep);
     }
 
     #[test]

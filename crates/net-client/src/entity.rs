@@ -11,6 +11,7 @@ fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
         id: s.id,
         damage: s.damage,
+        count: s.count.max(0) as u8,
         dye: s.nbt.as_ref().and_then(|n| n.dye()),
         glint: world::inventory::glint(s),
     })
@@ -57,7 +58,8 @@ fn potion(id: i32, meta: &Metadata) -> Option<EntityEvent> {
 }
 
 fn stack(meta: &Metadata) -> Option<ItemRef> {
-    match find(meta, 10) {
+    // An item entity keeps its stack at index 10, an item frame at index 8.
+    match find(meta, 10).or_else(|| find(meta, 8)) {
         Some(MetaValue::Slot(s)) => item(s),
         _ => None,
     }
@@ -79,6 +81,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         horse: byte(19),
         always_name: byte(3),
         skeleton: byte(13),
+        rotation: byte(9),
     }
 }
 
@@ -134,6 +137,12 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
             pitch: p.pitch,
             vel: p.velocity.unwrap_or([0; 3]),
             data: p.data,
+        },
+        P::SpawnPainting(p) => EntityEvent::SpawnPainting {
+            id: p.entity_id.0,
+            title: p.title.clone(),
+            pos: [p.location.x, p.location.y, p.location.z],
+            facing: p.direction,
         },
         P::SpawnExperienceOrb(p) => EntityEvent::SpawnExperienceOrb {
             id: p.entity_id.0,

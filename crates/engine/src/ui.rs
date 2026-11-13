@@ -107,7 +107,7 @@ impl Ui {
     }
 
     pub fn event(&mut self, m: &dyn Metrics, ev: Event, shift: bool) -> Vec<Effect> {
-        if matches!(ev, Event::Key { ctrl: true, .. }) {
+        if matches!(ev, Event::Key { ctrl: true, .. } | Event::Click { .. }) {
             if let Some(text) = self.system.as_mut().and_then(|c| c.get_text().ok()) {
                 self.clipboard = text;
             }

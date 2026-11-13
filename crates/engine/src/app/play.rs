@@ -181,6 +181,26 @@ impl App {
             .any(|(x, y, z)| store.get_block(x, y, z) >> 4 == 90);
         if hit {
             self.hud.portal.touch();
+            self.close_portal_screen();
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: `displayGuiScreen(null)` while a non-pausing screen is open.
+    /// A container screen never pauses (`GuiContainer.doesGuiPauseGame`).
+    fn close_portal_screen(&mut self) {
+        self.close_container();
+        if self.ui.is_open() && !self.ui.pauses() {
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: the trigger sound on the tick the player enters a portal.
+    fn tick_portal(&mut self) {
+        let nausea = self.game.effects.get(world::effects::id::NAUSEA);
+        if self.hud.portal.tick(nausea.map(|e| e.duration)) {
+            self.play_portal_trigger();
         }
     }
 
@@ -203,8 +223,7 @@ impl App {
         self.chat_tick();
         self.tick_block_entities();
         self.hud.tick();
-        let nausea = self.game.effects.get(world::effects::id::NAUSEA);
-        self.hud.portal.tick(nausea.map(|e| e.duration));
+        self.tick_portal();
         if self.game.player.is_some() {
             self.hud.update_held(self.game.inv.held_stack());
         }
@@ -1283,7 +1302,7 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod tests {
-    use super::{activates, item_used_on, sprint_dust_state, App};
+    use super::{activates, item_used_on, sprint_dust_state, App, ContainerScreen};
     use crate::game::Game;
     use render::Particles;
     use world::chunk::Chunk;
@@ -1386,5 +1405,29 @@ mod tests {
         assert!(item_used_on(259, 1 << 4, 0, 1, 0) && !item_used_on(259, 1 << 4, 0, 1, 2));
         assert!(item_used_on(295, 60 << 4, 0, 1, 0) && !item_used_on(295, 2 << 4, 0, 1, 0));
         assert!(!item_used_on(325, 1 << 4, 0, 1, 0));
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: `displayGuiScreen(null)` for a non-pausing screen only.
+    #[test]
+    fn a_portal_closes_a_container_and_a_container_screen_but_not_the_pause_menu() {
+        let mut app = App::new(crate::args::Args {
+            username: "Player".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
+        let mut c = Chunk::new(0, 0);
+        c.set_block(0, 64, 0, 90 << 4);
+        app.game.store.insert(c);
+        app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
+        app.portal_touch();
+        assert!(app.container.is_none(), "a container does not pause");
+
+        app.open_pause();
+        assert!(app.ui.is_open());
+        app.portal_touch();
+        assert!(app.ui.is_open(), "the pause menu pauses, so it stays");
     }
 }

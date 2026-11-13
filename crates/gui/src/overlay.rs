@@ -8,33 +8,28 @@ pub const PUMPKIN: &str = "textures/misc/pumpkinblur.png";
 pub const PORTAL: &str = "textures/blocks/portal.png";
 const PORTAL_FRAMES: i32 = 32;
 
-/// `Entity.getPortalCooldown`.
-const PORTAL_COOLDOWN: i32 = 300;
-
-/// `timeInPortal`, `prevTimeInPortal`, `inPortal` and `timeUntilPortal` of the local player.
+/// `timeInPortal`, `prevTimeInPortal` and `inPortal` of the local player.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Portal {
     time: f32,
     prev: f32,
     in_portal: bool,
-    cooldown: i32,
 }
 
 impl Portal {
     /// `Entity.onPortalCollision` on the client, called for each nether portal block the box overlaps.
     pub fn touch(&mut self) {
-        if self.cooldown > 0 {
-            self.cooldown = PORTAL_COOLDOWN;
-        } else {
-            self.in_portal = true;
-        }
+        self.in_portal = true;
     }
 
     /// The timer part of `EntityPlayerSP.onLivingUpdate`; `nausea_ticks` is the duration left of the
-    /// Nausea effect. Call before the movement of the tick, which may `touch` again.
-    pub fn tick(&mut self, nausea_ticks: Option<i32>) {
+    /// Nausea effect. Call before the movement of the tick, which may `touch` again. Returns true
+    /// when the player has just entered the portal (`timeInPortal == 0`): the tick plays the trigger sound.
+    pub fn tick(&mut self, nausea_ticks: Option<i32>) -> bool {
         self.prev = self.time;
+        let mut entered = false;
         if self.in_portal {
+            entered = self.time == 0.0;
             self.time = (self.time + 0.0125).min(1.0);
             self.in_portal = false;
         } else if nausea_ticks.is_some_and(|d| d > 60) {
@@ -45,9 +40,7 @@ impl Portal {
             }
             self.time = self.time.max(0.0);
         }
-        if self.cooldown > 0 {
-            self.cooldown -= 1;
-        }
+        entered
     }
 
     /// `prevTimeInPortal + (timeInPortal - prevTimeInPortal) * partialTicks`.
@@ -126,14 +119,13 @@ mod tests {
     }
 
     #[test]
-    fn a_portal_touch_during_cooldown_only_restarts_the_cooldown() {
-        let mut p = Portal {
-            cooldown: 5,
-            ..Portal::default()
-        };
+    fn entering_a_portal_triggers_once_and_staying_in_it_only_advances() {
+        let mut p = Portal::default();
         p.touch();
-        p.tick(None);
-        assert_eq!((p.lerp(1.0), p.cooldown), (0.0, 299));
+        assert!(p.tick(None));
+        p.touch();
+        assert!(!p.tick(None));
+        assert_eq!(p.lerp(1.0), 0.025);
     }
 
     /// `(ticks + partial) * 20` and `1 / (5 / (t * t + 5) - t * 0.04)^2`, read from `GameRenderer.setupCamera`.

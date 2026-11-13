@@ -9,7 +9,9 @@ pub struct Ui {
     pub screens: Screens,
     pub settings: Settings,
     pub texts: Texts,
+    /// Process-local copy; the system clipboard is mirrored when one is available.
     clipboard: String,
+    system: Option<arboard::Clipboard>,
     /// Scaled screen size in GUI units, from the last [`Ui::resize`].
     pub width: i32,
     pub height: i32,
@@ -27,6 +29,7 @@ impl Ui {
             settings: Settings::load(game_dir.clone()),
             texts,
             clipboard: String::new(),
+            system: arboard::Clipboard::new().ok(),
             width: 0,
             height: 0,
             in_world: false,
@@ -73,9 +76,17 @@ impl Ui {
             metrics: m,
             shift,
         };
+        let before = ctx.clipboard.clone();
         let r = f(&mut self.screens, &mut ctx);
+        let changed = *ctx.clipboard != before;
         let (w, h, effects) = (ctx.width, ctx.height, ctx.effects);
         (self.width, self.height) = (w, h);
+        if changed {
+            if let Some(sys) = &mut self.system {
+                // A failed write keeps the process-local copy, so paste still works in-game.
+                let _ = sys.set_text(self.clipboard.clone());
+            }
+        }
         (r, effects)
     }
 
@@ -96,6 +107,11 @@ impl Ui {
     }
 
     pub fn event(&mut self, m: &dyn Metrics, ev: Event, shift: bool) -> Vec<Effect> {
+        if matches!(ev, Event::Key { ctrl: true, .. } | Event::Click { .. }) {
+            if let Some(text) = self.system.as_mut().and_then(|c| c.get_text().ok()) {
+                self.clipboard = text;
+            }
+        }
         self.run(m, shift, |s, c| s.event(ev, c)).1
     }
 

@@ -6,6 +6,7 @@ use crate::chat::{self, Chat};
 use crate::debug;
 use crate::inventory::{icons::Icons, tooltip};
 use crate::scoreboard::Scoreboard;
+use crate::screens::TextField;
 use crate::status::{self, Status, StatusState};
 use crate::tablist::TabList;
 use crate::title::TitleState;
@@ -51,7 +52,7 @@ pub struct HotbarItems<'a> {
 pub struct Frame<'a> {
     pub partial_ticks: f32,
     /// The text being typed when the chat screen is open.
-    pub chat_input: Option<&'a str>,
+    pub chat_input: Option<&'a TextField>,
     /// F3 left and right columns when the debug screen is shown.
     pub debug: Option<(&'a [String], &'a [String])>,
     /// `reducedDebugInfo`: F3 keeps the crosshair.
@@ -151,8 +152,8 @@ impl Hud {
         if f.player_list {
             self.tablist.draw(gui, &self.scoreboard);
         }
-        if let Some(text) = f.chat_input {
-            chat::draw_input(gui, text, self.update_counter);
+        if let Some(field) = f.chat_input {
+            chat::draw_input(gui, field);
         }
         gui.set_color(0xFFFF_FFFF);
     }

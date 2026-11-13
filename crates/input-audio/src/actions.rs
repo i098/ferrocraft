@@ -31,6 +31,8 @@ pub enum Action {
     HotbarScroll(i32),
     /// One wheel step while chat is open: scroll the chat window.
     ChatScroll(i32),
+    /// PageUp (+1) or PageDown (-1) in chat: `GuiNewChat.scroll` by a page less one line.
+    ChatPage(i32),
     Inventory,
     /// Q drops one item, Ctrl+Q the whole stack.
     Drop {

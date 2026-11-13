@@ -94,11 +94,14 @@ fn draws_hud_to_png() {
         pos: [8.0, 68.0, -4.0],
         ..Default::default()
     });
+    let mut chat_field = gui::screens::TextField::new(4, 468, 850, 12);
+    chat_field.background = false;
+    chat_field.text = "/say hi".into();
     let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
     hud.draw(
         &mut g,
         &Frame {
-            chat_input: Some("/say hi"),
+            chat_input: Some(&chat_field),
             debug: Some((&left, &[])),
             fancy: false,
             brightness: 1.0,

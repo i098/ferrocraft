@@ -9,5 +9,6 @@ description = "Keyboard and mouse input state for the Ferrocraft engine (vanilla
 [dependencies]
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "vorbis"] }
 serde_json = "1.0.154"
+gui = { path = "../gui" }
 winit = "0.30"
 world = { path = "../world" }

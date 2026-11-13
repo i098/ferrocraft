@@ -6,6 +6,7 @@
 //! [`Request`]s to the server.
 
 mod creative;
+pub mod dials;
 pub mod icons;
 pub mod layout;
 pub(crate) mod tooltip;

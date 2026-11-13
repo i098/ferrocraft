@@ -2,6 +2,7 @@
 
 use super::{boxed, App, View, MAX_TICKS_PER_FRAME, TICK};
 use crate::game::{Attack, Effect};
+use gui::inventory::dials::DialWorld;
 use gui::inventory::ContainerScreen;
 use gui::screens::Pause;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, DebugCombo};
@@ -158,6 +159,21 @@ impl App {
         }
     }
 
+    /// `TextureManager.tick`: the compass and clock sprites pick their frame.
+    fn tick_dials(&mut self) {
+        let Some(icons) = &mut self.icons else {
+            return;
+        };
+        icons
+            .dials
+            .tick(self.game.player.as_ref().map(|p| DialWorld {
+                spawn: [self.game.spawn[0], self.game.spawn[2]],
+                pos: [p.pos[0], p.pos[2]],
+                yaw: p.yaw,
+                time: self.game.world_time,
+            }));
+    }
+
     fn tick_once(&mut self) {
         self.chat_tick();
         self.tick_block_entities();
@@ -218,6 +234,7 @@ impl App {
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();
         self.game.tick(input);
+        self.tick_dials();
         self.fall_sounds();
         abilities |= self.game.fly_land();
         if abilities {

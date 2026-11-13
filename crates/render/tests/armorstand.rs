@@ -148,7 +148,11 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     r.set_entities(&[bare]);
     assert_eq!(empty, r.render_to_rgba(&cam, &[]).2, "invisible body");
     r.set_entities(&[draws[3].clone()]);
-    assert_ne!(empty, r.render_to_rgba(&cam, &[]).2, "armor of an invisible stand");
+    assert_ne!(
+        empty,
+        r.render_to_rgba(&cam, &[]).2,
+        "armor of an invisible stand"
+    );
 
     // The arms flag adds the arms; the small flag shrinks the picture.
     let mut no_arms = draws[1].clone();

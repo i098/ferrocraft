@@ -3,6 +3,7 @@
 
 use ferrocraft_net_client::styled;
 use gui::inventory::icons::Icons;
+use gui::scoreboard::TeamInfo;
 use gui::tablist::TabEntry;
 use gui::{debug, Frame, Gui, GuiScale, HotbarItems, Hud, Metrics, Status};
 use render::{encode_png, Camera, Renderer};
@@ -28,15 +29,19 @@ fn draws_hud_to_png() {
             name: (*n).into(),
             ping: 100 * i as i32,
             gamemode: if i == 2 { 3 } else { 0 },
-            display: None,
+            ..TabEntry::default()
         });
     }
     hud.tablist.header = "\u{a7}6Header".into();
     hud.tablist.footer = "Footer".into();
     let sb = &mut hud.scoreboard;
-    sb.set_objective("kills", "\u{a7}eKills", 0);
+    sb.set_objective("kills", "\u{a7}eKills", 0, false);
     sb.set_display(1, "kills");
-    sb.set_team("red", 0, "\u{a7}c", "", &["Steve".into()]);
+    let red = TeamInfo {
+        prefix: "\u{a7}c".into(),
+        ..TeamInfo::default()
+    };
+    sb.set_team("red", 0, &red, &["Steve".into()]);
     for (i, n) in names.iter().enumerate() {
         sb.set_score(n, "kills", i as i32 * 3, false);
     }

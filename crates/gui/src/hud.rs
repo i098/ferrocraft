@@ -8,7 +8,7 @@ use crate::inventory::{icons::Icons, tooltip};
 use crate::scoreboard::Scoreboard;
 use crate::screens::TextField;
 use crate::status::{self, Status, StatusState};
-use crate::tablist::TabList;
+use crate::tablist::{Clock, TabList};
 use crate::title::TitleState;
 use crate::toolkit::{Gui, ICONS, WIDGETS};
 use render::Blend;
@@ -70,6 +70,10 @@ pub struct Frame<'a> {
     pub hotbar: Option<HotbarItems<'a>>,
     /// The player list key is held.
     pub player_list: bool,
+    /// `Minecraft.getTime`: the clock of the tab list heart animation.
+    pub now_ms: i64,
+    /// The local player's name: it picks the team color sidebar.
+    pub local_player: &'a str,
     /// `gameSettings.heldItemTooltips`.
     pub held_item_tooltips: bool,
 }
@@ -143,14 +147,19 @@ impl Hud {
         }
         self.draw_record(gui, f.partial_ticks);
         self.title.draw(gui, f.partial_ticks);
-        self.scoreboard.draw_sidebar(gui);
+        self.scoreboard.draw_sidebar(gui, f.local_player);
         let open = f.chat_input.is_some();
         gui.push();
         gui.translate(0.0, (h - 48) as f32);
         self.chat.draw(gui, self.update_counter, open);
         gui.pop();
+        self.tablist.set_visible(f.player_list, f.now_ms);
         if f.player_list {
-            self.tablist.draw(gui, &self.scoreboard);
+            let clock = Clock {
+                now_ms: f.now_ms,
+                ticks: self.update_counter,
+            };
+            self.tablist.draw(gui, &self.scoreboard, clock);
         }
         if let Some(field) = f.chat_input {
             chat::draw_input(gui, field);

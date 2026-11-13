@@ -33,7 +33,7 @@ pub use sky::{Environment, Fluid};
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use blockent::{Banner, Skull, WornHead};
 pub use entity::{hanging, item};
-pub use entity::{nametags, CapeSway, Class, EntityDraw, Look, NameTag, Thrower};
+pub use entity::{nametags, CapeSway, Class, EntityDraw, Look, NameTag, TeamTag, Thrower};
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 pub use post::SHADERS;

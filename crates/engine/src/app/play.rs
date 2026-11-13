@@ -554,12 +554,10 @@ impl App {
 
     /// `ItemRenderer.updateEquippedItem`: the hand lowers on a change of item and rises again.
     fn equip_tick(&mut self) {
-        let held = self
-            .game
-            .inv
-            .held_stack()
-            .as_ref()
-            .map(|s| (s.id, s.damage, world::inventory::glint(s)));
+        let held = self.game.inv.held_stack().as_ref().map(|s| {
+            let dye = s.nbt.as_ref().and_then(|n| n.dye());
+            (s.id, s.damage, world::inventory::glint(s), dye)
+        });
         let (cur, _, shown) = self.equip;
         let same = shown.map(|s| s.0) == held.map(|h| h.0);
         let target = if same { 1.0 } else { 0.0 };

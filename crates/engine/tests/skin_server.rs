@@ -242,6 +242,7 @@ fn textures_property_skins_the_spawned_player() {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),

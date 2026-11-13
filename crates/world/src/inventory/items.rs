@@ -221,6 +221,23 @@ pub fn variant(id: i16, damage: i16) -> Option<&'static Variant> {
     VARIANTS.get(&(id, meta)).or_else(|| VARIANTS.get(&(id, 0)))
 }
 
+/// `Item.getColorFromItemStack(stack, layer)` as RGB, for model layer `layer`: the variant tints
+/// (potion liquid, spawn egg base and spots, the default leather brown) except that leather
+/// armor takes its `display.color` (`dye`) on layer 0 (`ItemArmor.getColor`).
+pub fn tint(id: i16, damage: i16, dye: Option<i32>, layer: usize) -> u32 {
+    if let (true, Some(color), 0) = ((298..=301).contains(&id), dye, layer) {
+        // `ArmorItem.getColorTint`: a negative color is white.
+        return if color < 0 {
+            0xFF_FFFF
+        } else {
+            color as u32 & 0xFF_FFFF
+        };
+    }
+    variant(id, damage)
+        .and_then(|v| v.tint.get(layer).copied())
+        .unwrap_or(0xFF_FFFF)
+}
+
 /// `models/item/<name>.json` of a stack (`ItemModelMesher`: damageable items use meta 0).
 ///
 /// A negative `damage` is a variant from [`held_variant`], drawn only in a hand.
@@ -301,5 +318,18 @@ mod tests {
         assert_eq!(rod(false), Some("fishing_rod"));
         assert_eq!(rod(true), Some("fishing_rod_cast"));
         assert_eq!(tabs()[0].entries[0], (1, 0, None));
+    }
+
+    /// Tints dumped from the 1.8.9 jar: leather brown, a dyed cap, the overlay layer, a
+    /// regeneration potion and a creeper egg.
+    #[test]
+    fn tint_follows_item_color() {
+        assert_eq!(tint(298, 0, None, 0), 0xA06540);
+        assert_eq!(tint(298, 0, Some(0xFF_0000), 0), 0xFF_0000);
+        assert_eq!(tint(298, 0, Some(0xFF_0000), 1), 0xFF_FFFF);
+        assert_eq!(tint(373, 16385, None, 0), 0xCD5CAB);
+        assert_eq!(tint(373, 16385, None, 1), 0xFF_FFFF);
+        assert_eq!(tint(383, 50, None, 0), 0x0D_A70B);
+        assert_eq!(tint(383, 50, None, 1), 0);
     }
 }

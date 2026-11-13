@@ -15,13 +15,15 @@ use crate::jrandom::JavaRandom;
 use crate::mesh::{MeshData, Vertex};
 use std::collections::{BTreeMap, HashMap};
 
-/// What a dropped item or a held item shows: id, damage, stack size and the enchantment glint.
+/// What a dropped item or a held item shows: id, damage, stack size, the enchantment glint and
+/// the `display.color` of leather armor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stack {
     pub id: i16,
     pub damage: i16,
     pub count: u8,
     pub glint: bool,
+    pub dye: Option<i32>,
 }
 
 /// Which texture the vertices of a model sample.
@@ -33,13 +35,21 @@ pub enum ItemTex {
     Sprite(String),
 }
 
-/// A resolved item model.
-pub struct ItemModel {
+/// One texture layer of a model: `layerN` of a flat item, or the whole block.
+struct Layer {
     tex: ItemTex,
     /// Centred on the origin and `0..1` wide, before `RenderItem.renderItem` scales it by half.
     mesh: MeshData,
     /// One normal per quad of a sprite; block meshes carry their shade in the vertex color.
     normals: Option<Vec<V3>>,
+}
+
+/// A resolved item model.
+pub struct ItemModel {
+    id: i16,
+    damage: i16,
+    /// Drawn in order; layer `i` takes tint index `i`.
+    layers: Vec<Layer>,
     /// `BakedModel.isGui3d`: blocks, not sprites.
     gui3d: bool,
     third: Mat,
@@ -70,7 +80,7 @@ pub fn resolve(
     damage: i16,
 ) -> Option<ItemModel> {
     let name = world::inventory::items::model(id, damage);
-    let (tex, mesh, normals) = geometry(read, atlas, name, id, damage)?;
+    let layers = geometry(read, atlas, name, id, damage)?;
     let mut display = |key| match name {
         Some(name) => hand::display(read, name, key),
         None => (ident(), [1.0; 3]),
@@ -79,10 +89,10 @@ pub fn resolve(
     let (ground, ground_scale) = display("ground");
     let (fixed, _) = display("fixed");
     Some(ItemModel {
-        tex,
-        mesh,
-        gui3d: normals.is_none(),
-        normals,
+        id,
+        damage,
+        gui3d: layers[0].normals.is_none(),
+        layers,
         third,
         ground,
         fixed,
@@ -90,32 +100,47 @@ pub fn resolve(
     })
 }
 
-/// Sprite or block geometry of a stack, with the texture it samples.
+/// Sprite layers or block geometry of a stack, with the texture each samples.
 fn geometry(
     read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
     atlas: &Atlas,
     name: Option<&str>,
     id: i16,
     damage: i16,
-) -> Option<(ItemTex, MeshData, Option<Vec<V3>>)> {
-    let flat = name.and_then(|name| {
-        let (texture, _) = hand::flat_model(read, name)?;
-        let image = decode_png(&read(&texture)?)?;
-        Some((texture, hand::Flat::new(&image, ident())))
+) -> Option<Vec<Layer>> {
+    let sprites = name.and_then(|name| {
+        let (textures, _) = hand::flat_model(read, name)?;
+        let layers: Vec<Layer> = textures
+            .into_iter()
+            .filter_map(|texture| {
+                let image = decode_png(&read(&texture)?)?;
+                let flat = hand::Flat::new(&image, ident());
+                let mut mesh = flat.mesh;
+                // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
+                for v in &mut mesh.vertices {
+                    v.pos = v.pos.map(|c| c - 0.5);
+                }
+                Some(Layer {
+                    tex: ItemTex::Sprite(texture),
+                    mesh,
+                    normals: Some(flat.normals),
+                })
+            })
+            .collect();
+        (!layers.is_empty()).then_some(layers)
     });
-    if let Some((texture, flat)) = flat {
-        let mut mesh = flat.mesh;
-        // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
-        for v in &mut mesh.vertices {
-            v.pos = v.pos.map(|c| c - 0.5);
-        }
-        return Some((ItemTex::Sprite(texture), mesh, Some(flat.normals)));
+    if sprites.is_some() {
+        return sprites;
     }
     if !(1..256).contains(&id) {
         return None;
     }
     let state = ((id as u16) << 4) | (damage as u16 & 15);
-    Some((ItemTex::Atlas, hand::held_mesh(state, atlas), None))
+    Some(vec![Layer {
+        tex: ItemTex::Atlas,
+        mesh: hand::held_mesh(state, atlas),
+        normals: None,
+    }])
 }
 
 /// The stacks `build` needs models for.
@@ -138,11 +163,15 @@ fn dropped(d: &EntityDraw) -> Option<Stack> {
 #[derive(Default)]
 pub struct Items {
     pub atlas: MeshData,
-    pub sprites: BTreeMap<String, MeshData>,
+    /// Sprite meshes by `(layer, texture)`: drawn layer by layer, so an overlay lands over the
+    /// coplanar layer below it as `LessEqual` depth tests need.
+    pub sprites: BTreeMap<(u8, String), MeshData>,
     /// Two passes per glowing piece, over the glint texture; same positions as the pieces.
     pub glint: MeshData,
     /// The white flash of primed TNT, drawn additively over the white texel.
     pub flash: MeshData,
+    /// `display.color` of the leather armor the next sprite pieces show.
+    dye: Option<i32>,
 }
 
 /// `p` through `m`, a column-major affine matrix.
@@ -168,10 +197,10 @@ pub(super) fn shade(n: V3) -> f32 {
 }
 
 impl Items {
-    fn mesh(&mut self, tex: &ItemTex) -> &mut MeshData {
+    fn mesh(&mut self, tex: &ItemTex, layer: usize) -> &mut MeshData {
         match tex {
             ItemTex::Atlas => &mut self.atlas,
-            ItemTex::Sprite(path) => self.sprites.entry(path.clone()).or_default(),
+            ItemTex::Sprite(path) => self.sprites.entry((layer as u8, path.clone())).or_default(),
         }
     }
 
@@ -184,7 +213,7 @@ impl Items {
         shade: f32,
         light: [f32; 2],
     ) {
-        let target = self.sprites.entry(tex.to_owned()).or_default();
+        let target = self.sprites.entry((0, tex.to_owned())).or_default();
         let base = target.vertices.len() as u32;
         for i in 0..4 {
             target.vertices.push(Vertex {
@@ -199,10 +228,11 @@ impl Items {
 
     /// A white copy of `model` with `alpha`, placed with `to_world`.
     pub(super) fn flash(&mut self, model: &ItemModel, to_world: &dyn Fn(V3) -> V3, alpha: f32) {
+        let mesh = &model.layers[0].mesh;
         let base = self.flash.vertices.len() as u32;
         self.flash
             .vertices
-            .extend(model.mesh.vertices.iter().map(|v| Vertex {
+            .extend(mesh.vertices.iter().map(|v| Vertex {
                 pos: to_world(v.pos),
                 uv: crate::sky::white_uv(),
                 color: [1.0, 1.0, 1.0, alpha],
@@ -210,10 +240,11 @@ impl Items {
             }));
         self.flash
             .indices
-            .extend(model.mesh.indices.iter().map(|i| i + base));
+            .extend(mesh.indices.iter().map(|i| i + base));
     }
 
-    /// Places `model` with `to_world` (model units to world coordinates) and `normal_to_world`.
+    /// Places each layer of `model` with `to_world` (model units to world coordinates) and
+    /// `normal_to_world`, sprite layer `i` tinted by `ItemColors` index `i`.
     pub(super) fn piece(
         &mut self,
         model: &ItemModel,
@@ -223,48 +254,55 @@ impl Items {
         direct: bool,
         glint: Option<f32>,
     ) {
-        let mut vertices = model.mesh.vertices.clone();
-        // The front quad of a sprite (the first) winds clockwise, for the hand's model space; placed
-        // straight into the world it needs the reverse order to face outward.
-        if direct && model.normals.is_some() {
-            vertices[..4].reverse();
-        }
-        for v in &mut vertices {
-            v.pos = to_world(v.pos);
-            v.light = level;
-        }
-        if let Some(normals) = &model.normals {
-            for (quad, n) in vertices.chunks_mut(4).zip(normals) {
-                let s = shade(normal_to_world(*n));
-                for v in quad {
-                    v.color = [s, s, s, 1.0];
+        for (i, layer) in model.layers.iter().enumerate() {
+            let mut vertices = layer.mesh.vertices.clone();
+            // The front quad of a sprite (the first) winds clockwise, for the hand's model space;
+            // placed straight into the world it needs the reverse order to face outward.
+            if direct && layer.normals.is_some() {
+                vertices[..4].reverse();
+            }
+            for v in &mut vertices {
+                v.pos = to_world(v.pos);
+                v.light = level;
+            }
+            if let Some(normals) = &layer.normals {
+                let rgb = world::inventory::items::tint(model.id, model.damage, self.dye, i);
+                let tint = [16, 8, 0].map(|s| ((rgb >> s) & 0xFF) as f32 / 255.0);
+                for (quad, n) in vertices.chunks_mut(4).zip(normals) {
+                    let s = shade(normal_to_world(*n));
+                    for v in quad {
+                        v.color = [s * tint[0], s * tint[1], s * tint[2], 1.0];
+                    }
                 }
             }
-        }
-        if let Some(ms) = glint {
-            let scale = match model.tex {
-                ItemTex::Atlas => 1.0,
-                ItemTex::Sprite(_) => ITEM_UV_SCALE,
-            };
-            for pass in 0..2 {
-                let base = self.glint.vertices.len() as u32;
-                self.glint.vertices.extend(vertices.iter().map(|v| Vertex {
-                    uv: glint_uv_item(v.uv.map(|c| c * scale), ms, pass),
-                    color: ITEM_GLINT_COLOR,
-                    light: [1.0; 2],
-                    ..*v
-                }));
-                self.glint
-                    .indices
-                    .extend(model.mesh.indices.iter().map(|i| i + base));
+            if let Some(ms) = glint {
+                self.add_glint(&layer.tex, &vertices, &layer.mesh.indices, ms);
             }
+            let target = self.mesh(&layer.tex, i);
+            let base = target.vertices.len() as u32;
+            target.vertices.extend(vertices);
+            target
+                .indices
+                .extend(layer.mesh.indices.iter().map(|i| i + base));
         }
-        let target = self.mesh(&model.tex);
-        let base = target.vertices.len() as u32;
-        target.vertices.extend(vertices);
-        target
-            .indices
-            .extend(model.mesh.indices.iter().map(|i| i + base));
+    }
+
+    /// The two glint passes over a placed layer.
+    fn add_glint(&mut self, tex: &ItemTex, vertices: &[Vertex], indices: &[u32], ms: f32) {
+        let scale = match tex {
+            ItemTex::Atlas => 1.0,
+            ItemTex::Sprite(_) => ITEM_UV_SCALE,
+        };
+        for pass in 0..2 {
+            let base = self.glint.vertices.len() as u32;
+            self.glint.vertices.extend(vertices.iter().map(|v| Vertex {
+                uv: glint_uv_item(v.uv.map(|c| c * scale), ms, pass),
+                color: ITEM_GLINT_COLOR,
+                light: [1.0; 2],
+                ..*v
+            }));
+            self.glint.indices.extend(indices.iter().map(|i| i + base));
+        }
     }
 }
 
@@ -275,15 +313,18 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
         let level = light_level(d, &light, false);
         if holds(d) && d.held != 0 {
             if let Some(Some(m)) = models.get(&(d.held, d.held_damage)) {
+                out.dye = d.held_dye;
                 held(&mut out, d, m, level);
             }
         }
         if let Some(stack) = dropped(d) {
             if let Some(Some(m)) = models.get(&(stack.id, stack.damage)) {
+                out.dye = stack.dye;
                 draw_drop(&mut out, d, stack, m, level);
             }
         }
     }
+    out.dye = None;
     super::block::build(&mut out, draws, models, &light);
     out
 }

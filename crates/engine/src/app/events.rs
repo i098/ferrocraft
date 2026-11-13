@@ -4,7 +4,7 @@ use super::{boxed, App, View};
 use crate::game::Effect;
 use crate::game::Game;
 use crate::link::Link;
-use ferrocraft_net_client::{split_address, NetEvent, PlayerListEvent};
+use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent};
 use gui::inventory::ContainerScreen;
 use gui::screens::{Connecting, Death, EditSign, Effect as UiEffect};
 use gui::tablist::TabEntry;
@@ -93,8 +93,18 @@ impl App {
         } else {
             format!("{host}:{port}")
         };
+        let brand = self
+            .mods
+            .as_ref()
+            .and_then(|m| m.client_brand())
+            .unwrap_or_else(|| "vanilla".into());
         self.server.clone_from(&addr);
-        self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
+        self.link = Link::connect(
+            addr,
+            self.args.username.clone(),
+            self.args.auth.clone(),
+            brand,
+        );
     }
 
     /// `Minecraft.refreshResources` after a resource pack change: a new renderer over the new
@@ -137,6 +147,10 @@ impl App {
         self.sneak_sent = false;
         self.sprint_sent = false;
         self.use_ticks = 0;
+        // `Minecraft.loadWorld(null)` drops the server pack and reloads.
+        if self.server_pack.take().is_some() {
+            self.refresh_resources();
+        }
         if let Some(r) = &mut self.renderer {
             r.clear_chunks();
             // `runTick` without a world: `stopUseShader`.
@@ -313,8 +327,30 @@ impl App {
                 self.run_effects(q);
                 self.send_client_settings();
             }
+            NetEvent::ResourcePack { url, hash } => {
+                let dir = self.args.game_dir.clone();
+                let r = self.session_send(|s| s.accept_resource_pack(url, hash, &dir));
+                self.send_result(r);
+            }
+            NetEvent::ResourcePackReady { hash, path } => {
+                // The loader skips a pack it cannot open, as vanilla does; the server still hears about it.
+                let status = if render::AssetSource::open(path).is_some() {
+                    self.server_pack = Some(path.clone());
+                    self.refresh_resources();
+                    PackStatus::Loaded
+                } else {
+                    PackStatus::Failed
+                };
+                let r = self.session_send(|s| s.send_pack_status(hash, status));
+                self.send_result(r);
+            }
             NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
+            NetEvent::TabComplete(names) => {
+                if let Some(line) = self.input.tab_response(names) {
+                    self.chat_note(&line);
+                }
+            }
             // `handleCustomPayload`: MC|BOpen opens the held written book.
             NetEvent::PluginMessage { channel, .. } if channel == "MC|BOpen" => {
                 let held = self.game.inv.held_stack().as_ref();

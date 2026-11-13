@@ -44,6 +44,8 @@ final class Chat {
             out.writeByte(1);
         } else if (after.equals(text)) {
             out.writeByte(0);
+        } else if (after.getBytes(StandardCharsets.UTF_8).length > MAX_TEXT) {
+            out.writeByte(0);
         } else {
             byte[] b = after.getBytes(StandardCharsets.UTF_8);
             out.writeByte(2);

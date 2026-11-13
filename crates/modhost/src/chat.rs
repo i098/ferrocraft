@@ -5,7 +5,7 @@
 
 use std::io::{self, Read, Write};
 
-const MAX_TEXT: usize = 1 << 16;
+pub(crate) const MAX_TEXT: usize = 1 << 16;
 
 /// The `type` byte of `ClientChatReceivedEvent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

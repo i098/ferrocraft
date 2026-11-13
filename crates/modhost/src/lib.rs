@@ -287,7 +287,7 @@ impl ModHost {
     /// they did with it. `Keep` while the JVM is not live or does not answer in time.
     pub fn chat(&self, kind: ChatKind, text: &str) -> ChatVerdict {
         let mut s = self.link.state.lock().unwrap();
-        if s.phase != Phase::Live || s.stalled || s.chat.is_some() {
+        if s.phase != Phase::Live || s.stalled || s.chat.is_some() || text.len() > chat::MAX_TEXT {
             return ChatVerdict::Keep;
         }
         s.chat = Some((kind, text.to_owned()));

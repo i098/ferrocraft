@@ -1051,3 +1051,80 @@ fn paintings_frames_and_maps_draw() {
         );
     }
 }
+
+/// Primed TNT pulses and flashes white, and a falling block draws its own state
+/// (`PrimedTntRenderer`, `FallingBlockRenderer`); `BLOCKS_PROOF_DIR` keeps the frames.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn primed_tnt_and_falling_blocks_draw_as_models() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(640, 360, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let object = |class, x: f64, age: f32, stack| EntityDraw {
+        class,
+        pos: [x, 66.0, 1.0],
+        size: (0.98, 0.98),
+        stack,
+        age,
+        ..player_in_leather()
+    };
+    let block = |id: i16, damage: i16| {
+        Some(render::item::Stack {
+            id,
+            damage,
+            count: 1,
+            glint: false,
+        })
+    };
+    // Timer 80 flashes (80 / 5 is even), timer 8 does not, timer 3 flashes while it pulses.
+    let draws = [
+        object(Class::Object(50), 4.0, 0.0, None),
+        object(Class::Object(50), 6.0, 72.0, None),
+        object(Class::Object(50), 8.0, 77.5, None),
+        object(Class::Object(70), 10.0, 3.0, block(12, 0)),
+        object(Class::Object(70), 12.0, 3.0, block(12, 1)),
+    ];
+    let cam = Camera {
+        pos: [8.0, 67.6, -3.5],
+        yaw: 0.0,
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    if let Some(dir) = std::env::var_os("BLOCKS_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("blocks.png"), 640, 360, &image).unwrap();
+    }
+    r.set_entities(&[]);
+    let baseline = r.render_to_rgba(&cam, &[]).2;
+    let mut tints = Vec::new();
+    for d in &draws {
+        let (cx, cy) = project(&cam, [d.pos[0], d.pos[1] + 0.5, d.pos[2]], 640.0, 360.0);
+        let mut colours = std::collections::HashSet::new();
+        let mut sum = [0u32; 3];
+        for y in (cy - 25.0).max(0.0) as usize..((cy + 25.0) as usize).min(360) {
+            for x in (cx - 25.0).max(0.0) as usize..((cx + 25.0) as usize).min(640) {
+                let o = (y * 640 + x) * 4;
+                if image[o..o + 3] != baseline[o..o + 3] {
+                    colours.insert([image[o], image[o + 1], image[o + 2]]);
+                    (0..3).for_each(|c| sum[c] += u32::from(image[o + c]));
+                }
+            }
+        }
+        assert!(
+            colours.len() >= 4,
+            "{:?} drew {} colours; a flat tint cannot be a model",
+            d.class,
+            colours.len()
+        );
+        tints.push(sum);
+    }
+    assert_ne!(tints[3], tints[4], "red sand must differ from sand");
+}

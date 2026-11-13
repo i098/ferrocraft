@@ -90,6 +90,15 @@ impl Renderer {
         out
     }
 
+    /// Draws the block entity and worn head meshes, then restores the world bind group.
+    pub(super) fn draw_tiles<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        for (tex, m) in self.tile_meshes.iter().chain(&self.head_meshes) {
+            pass.set_bind_group(0, self.tile_group(tex), &[]);
+            draw_mesh(pass, m);
+        }
+        pass.set_bind_group(0, &self.world_group, &[]);
+    }
+
     pub(super) fn tile_group(&self, tex: &Tex) -> &wgpu::BindGroup {
         match tex {
             Tex::Atlas => &self.entity_group,

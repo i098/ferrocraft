@@ -211,43 +211,47 @@ impl BlockEntities {
             if !in_range(&pos, view.eye) {
                 continue;
             }
-            let (id, meta) = (state >> 4, (state & 15) as i32);
             let center = [
                 f64::from(pos[0]) + 0.5,
                 f64::from(pos[1]) + 0.5,
                 f64::from(pos[2]) + 0.5,
             ];
-            let at = Mat::at([pos[0].into(), pos[1].into(), pos[2].into()]);
             let level = light(center);
             let mark = out.mark();
-            match id {
-                CHEST | TRAPPED_CHEST | ENDER_CHEST => {
-                    self.chest(&mut out, pos, id, meta, at, view.partial);
-                }
-                SIGN_STANDING | SIGN_WALL => {
-                    let lines = self.signs.get(&pos);
-                    let near = dist_sq(&pos, view.eye) < TEXT_DISTANCE_SQ;
-                    sign(
-                        &mut out,
-                        id == SIGN_STANDING,
-                        meta,
-                        at,
-                        lines.filter(|_| near),
-                        font,
-                    );
-                }
-                SKULL => {
-                    let skull = self.skulls.get(&pos).copied().unwrap_or_default();
-                    skull_block(&mut out, meta & 7, skull, at, skins);
-                }
-                _ => {
-                    let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
-                    banner_block(&mut out, id == BANNER_STANDING, meta, pos, view, banner, at);
-                }
-            }
+            self.tile(&mut out, pos, state, view, font, skins);
             out.light_since(mark, level);
         }
         out.0
+    }
+
+    /// One tile at `pos` with block state `state`, by block id.
+    fn tile(
+        &self,
+        out: &mut Batches,
+        pos: [i32; 3],
+        state: u16,
+        view: &View,
+        font: Option<&Font>,
+        skins: &Skins,
+    ) {
+        let (id, meta) = (state >> 4, (state & 15) as i32);
+        let at = Mat::at([pos[0].into(), pos[1].into(), pos[2].into()]);
+        match id {
+            CHEST | TRAPPED_CHEST | ENDER_CHEST => self.chest(out, pos, id, meta, at, view.partial),
+            SIGN_STANDING | SIGN_WALL => {
+                let near = dist_sq(&pos, view.eye) < TEXT_DISTANCE_SQ;
+                let lines = self.signs.get(&pos).filter(|_| near);
+                sign(out, id == SIGN_STANDING, meta, at, lines, font);
+            }
+            SKULL => {
+                let skull = self.skulls.get(&pos).copied().unwrap_or_default();
+                skull_block(out, meta & 7, skull, at, skins);
+            }
+            _ => {
+                let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
+                banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);
+            }
+        }
     }
 
     fn chest(&self, out: &mut Batches, pos: [i32; 3], id: u16, meta: i32, at: Mat, partial: f32) {
@@ -267,19 +271,8 @@ impl BlockEntities {
             return;
         }
         let double = x_pos || z_pos;
-        let name = match (id, double) {
-            (ENDER_CHEST, _) => "ender",
-            (TRAPPED_CHEST, false) => "trapped",
-            (TRAPPED_CHEST, true) => "trapped_double",
-            (_, false) => "normal",
-            (_, true) => "normal_double",
-        };
-        let turn = match meta {
-            2 => 180.0,
-            4 => 90.0,
-            5 => -90.0,
-            _ => 0.0,
-        };
+        let name = chest_texture(id, double);
+        let turn = wall_turn(meta);
         let lid = self.lids.get(&pos).copied().unwrap_or_default();
         let open = lid.prev + (lid.now - lid.prev) * partial;
         let open = 1.0 - open;
@@ -313,6 +306,17 @@ impl BlockEntities {
         ] {
             part.emit(target, &m, tex, 0.0);
         }
+    }
+}
+
+/// Texture file of a chest under `textures/entity/chest`.
+fn chest_texture(id: u16, double: bool) -> &'static str {
+    match (id, double) {
+        (ENDER_CHEST, _) => "ender",
+        (TRAPPED_CHEST, false) => "trapped",
+        (TRAPPED_CHEST, true) => "trapped_double",
+        (_, false) => "normal",
+        (_, true) => "normal_double",
     }
 }
 
@@ -678,49 +682,53 @@ pub fn banner_key(b: &Banner) -> String {
     format!("banner:{}:{}", b.base, layers.join(","))
 }
 
+const PATTERNS: [(&str, &str); 38] = [
+    ("bs", "stripe_bottom"),
+    ("ts", "stripe_top"),
+    ("ls", "stripe_left"),
+    ("rs", "stripe_right"),
+    ("cs", "stripe_center"),
+    ("ms", "stripe_middle"),
+    ("drs", "stripe_downright"),
+    ("dls", "stripe_downleft"),
+    ("ss", "small_stripes"),
+    ("cr", "cross"),
+    ("sc", "straight_cross"),
+    ("bt", "triangle_bottom"),
+    ("tt", "triangle_top"),
+    ("bts", "triangles_bottom"),
+    ("tts", "triangles_top"),
+    ("ld", "diagonal_left"),
+    ("rd", "diagonal_right"),
+    ("lud", "diagonal_up_left"),
+    ("rud", "diagonal_up_right"),
+    ("mc", "circle"),
+    ("mr", "rhombus"),
+    ("vh", "half_vertical"),
+    ("hh", "half_horizontal"),
+    ("vhr", "half_vertical_right"),
+    ("hhb", "half_horizontal_bottom"),
+    ("bl", "square_bottom_left"),
+    ("br", "square_bottom_right"),
+    ("tl", "square_top_left"),
+    ("tr", "square_top_right"),
+    ("bo", "border"),
+    ("cbo", "curly_border"),
+    ("bri", "bricks"),
+    ("gra", "gradient"),
+    ("gru", "gradient_up"),
+    ("cre", "creeper"),
+    ("sku", "skull"),
+    ("flo", "flower"),
+    ("moj", "mojang"),
+];
+
 /// `TileEntityBanner.EnumBannerPattern` code to texture file.
 fn pattern_file(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "bs" => "stripe_bottom",
-        "ts" => "stripe_top",
-        "ls" => "stripe_left",
-        "rs" => "stripe_right",
-        "cs" => "stripe_center",
-        "ms" => "stripe_middle",
-        "drs" => "stripe_downright",
-        "dls" => "stripe_downleft",
-        "ss" => "small_stripes",
-        "cr" => "cross",
-        "sc" => "straight_cross",
-        "bt" => "triangle_bottom",
-        "tt" => "triangle_top",
-        "bts" => "triangles_bottom",
-        "tts" => "triangles_top",
-        "ld" => "diagonal_left",
-        "rd" => "diagonal_right",
-        "lud" => "diagonal_up_left",
-        "rud" => "diagonal_up_right",
-        "mc" => "circle",
-        "mr" => "rhombus",
-        "vh" => "half_vertical",
-        "hh" => "half_horizontal",
-        "vhr" => "half_vertical_right",
-        "hhb" => "half_horizontal_bottom",
-        "bl" => "square_bottom_left",
-        "br" => "square_bottom_right",
-        "tl" => "square_top_left",
-        "tr" => "square_top_right",
-        "bo" => "border",
-        "cbo" => "curly_border",
-        "bri" => "bricks",
-        "gra" => "gradient",
-        "gru" => "gradient_up",
-        "cre" => "creeper",
-        "sku" => "skull",
-        "flo" => "flower",
-        "moj" => "mojang",
-        _ => return None,
-    })
+    PATTERNS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|&(_, file)| file)
 }
 
 /// `MapColor` of each `EnumDyeColor`, by dye damage (0 black .. 15 white).

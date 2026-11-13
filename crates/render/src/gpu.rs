@@ -1377,11 +1377,7 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
-            for (tex, m) in self.tile_meshes.iter().chain(&self.head_meshes) {
-                pass.set_bind_group(0, self.tile_group(tex), &[]);
-                draw_mesh(&mut pass, m);
-            }
-            pass.set_bind_group(0, &self.world_group, &[]);
+            self.draw_tiles(&mut pass);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);

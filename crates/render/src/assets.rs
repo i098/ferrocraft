@@ -1,5 +1,6 @@
 //! Asset loading from the 1.8.9 client jar (or an extracted copy): block atlas and the ascii font.
 
+use crate::biome::Colormaps;
 use crate::blocks::texture_names;
 use std::collections::HashMap;
 use std::io::Read;
@@ -123,6 +124,8 @@ pub struct Atlas {
     pub tile: u32,
     pub rgba: Vec<u8>,
     cells: HashMap<&'static str, u32>,
+    /// Grass and foliage color maps of the biome tints.
+    pub colormaps: Colormaps,
 }
 
 impl Atlas {
@@ -135,6 +138,7 @@ impl Atlas {
             tile: TILE as u32,
             rgba: vec![255; TILE * TILE * 4],
             cells: HashMap::new(),
+            colormaps: Colormaps::plains(),
         }
     }
 
@@ -143,16 +147,7 @@ impl Atlas {
         let mut images: Vec<Image> = Vec::with_capacity(names.len());
         for name in &names {
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
-            let mut image = source.read(&path).and_then(|b| decode_png(&b));
-            if *name == "grass_side" {
-                // Vanilla draws the tinted overlay over the side; the tint is constant here, so bake it.
-                let overlay = source
-                    .read("assets/minecraft/textures/blocks/grass_side_overlay.png")
-                    .and_then(|b| decode_png(&b));
-                if let (Some(base), Some(over)) = (image.as_mut(), overlay) {
-                    bake_overlay(base, &over, crate::blocks::rgb(crate::blocks::GRASS_COLOR));
-                }
-            }
+            let image = source.read(&path).and_then(|b| decode_png(&b));
             images.push(image.unwrap_or_else(|| Image {
                 width: 0,
                 height: 0,
@@ -190,6 +185,7 @@ impl Atlas {
             tile: tile as u32,
             rgba,
             cells,
+            colormaps: Colormaps::load(source),
         }
     }
     /// Atlas coordinates for texture `name` at tile-local `(u, v)` in `0..=1`.
@@ -241,26 +237,6 @@ fn blit(atlas: &mut [u8], atlas_width: usize, tile: usize, cell: usize, image: &
             let src = (sy * image.width + sx) * 4;
             let dst = ((oy + y) * atlas_width + ox + x) * 4;
             atlas[dst..dst + 4].copy_from_slice(&image.rgba[src..src + 4]);
-        }
-    }
-}
-
-/// Alpha-composite `over` (multiplied by `tint`) onto `base`; ignored when the sizes differ.
-fn bake_overlay(base: &mut Image, over: &Image, tint: [f32; 3]) {
-    if (base.width, base.height) != (over.width, over.height) {
-        return;
-    }
-    for (b, o) in base
-        .rgba
-        .as_chunks_mut::<4>()
-        .0
-        .iter_mut()
-        .zip(over.rgba.as_chunks::<4>().0)
-    {
-        let a = o[3] as f32 / 255.0;
-        for c in 0..3 {
-            let top = o[c] as f32 * tint[c];
-            b[c] = (top * a + b[c] as f32 * (1.0 - a)) as u8;
         }
     }
 }
@@ -344,6 +320,7 @@ mod tests {
             tile: tile as u32,
             rgba: Vec::new(),
             cells: HashMap::from([("a", 17)]),
+            colormaps: Colormaps::plains(),
         };
         assert_eq!(atlas.uv("a", [0.0, 0.0]), [1.0 / 16.0, 0.5]);
         assert_eq!(atlas.uv("a", [1.0, 1.0]), [2.0 / 16.0, 1.0]);

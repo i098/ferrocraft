@@ -202,6 +202,7 @@ pub fn held_mesh(state: u16, atlas: &Atlas) -> MeshData {
         origin: (0, 0),
         center: &blocks,
         neighbors: [None; 8],
+        biomes: [None; 9],
     };
     let m = mesh_chunk(&hood, atlas);
     let mut out = m.opaque;

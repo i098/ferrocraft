@@ -136,6 +136,25 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
     r.set_entities(&draws);
     let after = r.render_to_rgba(&cam, &[]).2;
     assert_ne!(before, after, "the model is not the old box");
+
+    // Vanilla: a small stand is half the size (scale 0.5) and both stand centred on their x.
+    let bounds = |r: &mut Renderer, d: EntityDraw| {
+        r.set_entities(&[d]);
+        let img = r.render_to_rgba(&cam, &[]).2;
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
+        for (i, (a, b)) in img.chunks(4).zip(empty.chunks(4)).enumerate() {
+            if a != b {
+                let (x, y) = (i % 640, i / 640);
+                (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+            }
+        }
+        assert!(x1 >= x0, "stand drew nothing");
+        ((x0 + x1) as f64 / 2.0 - 320.0, (y1 - y0 + 1) as f64)
+    };
+    let (nc, nh) = bounds(&mut r, stand(class, 0.0, StandLook::default()));
+    let (sc, sh) = bounds(&mut r, stand(class, 0.0, arms(1, [None; 6])));
+    assert!((0.4..0.6).contains(&(sh / nh)), "small/normal height {sh}/{nh}");
+    assert!(nc.abs() < 6.0 && sc.abs() < 6.0, "centre offsets {nc} {sc}");
     if let Some(dir) = std::env::var_os("STAND_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("before.png"), 640, 360, &before).unwrap();

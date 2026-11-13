@@ -16,6 +16,7 @@
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
 //! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
 //! `'C'` clip (u8 on, then four f32 corners when on).
+//! `'O'` world values, once per frame: see `overrides.rs`.
 //! Rust to Java, also `'P'` (player tick) and `'C'` (a received chat line, see `chat.rs`).
 
 use std::io::{self, Read, Write};
@@ -240,7 +241,7 @@ fn rect(r: &mut impl Read) -> io::Result<[f32; 4]> {
     Ok([f32_(r)?, f32_(r)?, f32_(r)?, f32_(r)?])
 }
 
-fn u8_(r: &mut impl Read) -> io::Result<u8> {
+pub(crate) fn u8_(r: &mut impl Read) -> io::Result<u8> {
     let mut b = [0; 1];
     r.read_exact(&mut b)?;
     Ok(b[0])
@@ -252,7 +253,7 @@ fn u32_(r: &mut impl Read) -> io::Result<u32> {
     Ok(u32::from_be_bytes(b))
 }
 
-fn f32_(r: &mut impl Read) -> io::Result<f32> {
+pub(crate) fn f32_(r: &mut impl Read) -> io::Result<f32> {
     u32_(r).map(f32::from_bits)
 }
 

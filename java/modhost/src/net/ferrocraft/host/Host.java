@@ -15,7 +15,7 @@ import net.minecraft.launchwrapper.Launch;
  * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF.
  * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
- * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. Any other first byte ends the host.
+ * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'O' asks for the world values mods change, see {@link Overrides}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {
@@ -27,6 +27,7 @@ public final class Host {
     private final Object fml;
     private long lastTick = System.nanoTime();
     private final Player player;
+    private final Overrides overrides;
     private final Chat chat = new Chat();
     private final Mirror mirror;
     private boolean screenOpen;
@@ -36,6 +37,7 @@ public final class Host {
         this.forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
         this.fml = R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance");
         this.player = new Player(mc, R.get(mc, "field_71439_g"), R.get(mc, "field_71474_y"));
+        this.overrides = new Overrides(mc);
         this.mirror = new Mirror(mc, R.get(mc, "field_71439_g"));
     }
 
@@ -102,6 +104,10 @@ public final class Host {
             int tag = in.read();
             if (tag == 'P') {
                 player.tick(in, out);
+                continue;
+            }
+            if (tag == 'O') {
+                overrides.answer(in, out);
                 continue;
             }
             if (tag == 'C') {

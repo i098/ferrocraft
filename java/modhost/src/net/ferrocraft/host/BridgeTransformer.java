@@ -26,6 +26,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 public class BridgeTransformer implements IClassTransformer {
     private static final String SINK = "net/ferrocraft/host/Sink";
     private static final String INPUT = "net/ferrocraft/host/Input";
+    private static final String OVERRIDES = "net/ferrocraft/host/Overrides";
 
     /**
      * Minecraft's own classes arrive obfuscated until FML's deobfuscation transformer has run, so they need a
@@ -137,6 +138,10 @@ public class BridgeTransformer implements IClassTransformer {
             case "glTranslatef(FFF)V":
                 l.add(new VarInsnNode(Opcodes.FLOAD, 0));
                 l.add(new VarInsnNode(Opcodes.FLOAD, 1));
+                l.add(new VarInsnNode(Opcodes.FLOAD, 2));
+                call(l, OVERRIDES, "translate", "(FFF)V");
+                l.add(new VarInsnNode(Opcodes.FLOAD, 0));
+                l.add(new VarInsnNode(Opcodes.FLOAD, 1));
                 call(l, SINK, "translate", "(FF)V");
                 break;
             case "glTranslated(DDD)V":
@@ -144,7 +149,25 @@ public class BridgeTransformer implements IClassTransformer {
                 l.add(new InsnNode(Opcodes.D2F));
                 l.add(new VarInsnNode(Opcodes.DLOAD, 2));
                 l.add(new InsnNode(Opcodes.D2F));
+                l.add(new VarInsnNode(Opcodes.DLOAD, 4));
+                l.add(new InsnNode(Opcodes.D2F));
+                call(l, OVERRIDES, "translate", "(FFF)V");
+                l.add(new VarInsnNode(Opcodes.DLOAD, 0));
+                l.add(new InsnNode(Opcodes.D2F));
+                l.add(new VarInsnNode(Opcodes.DLOAD, 2));
+                l.add(new InsnNode(Opcodes.D2F));
                 call(l, SINK, "translate", "(FF)V");
+                break;
+            case "glRotatef(FFFF)V":
+                for (int i = 0; i < 4; i++) l.add(new VarInsnNode(Opcodes.FLOAD, i));
+                call(l, OVERRIDES, "rotate", "(FFFF)V");
+                break;
+            case "glRotated(DDDD)V":
+                for (int i = 0; i < 4; i++) {
+                    l.add(new VarInsnNode(Opcodes.DLOAD, i * 2));
+                    l.add(new InsnNode(Opcodes.D2F));
+                }
+                call(l, OVERRIDES, "rotate", "(FFFF)V");
                 break;
             case "glScalef(FFF)V":
                 l.add(new VarInsnNode(Opcodes.FLOAD, 0));

@@ -3,6 +3,7 @@
 pub mod chat;
 pub mod keys;
 pub mod mirror;
+pub mod overrides;
 pub mod provision;
 pub mod wire;
 
@@ -20,6 +21,7 @@ use winit::keyboard::PhysicalKey;
 
 pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
 pub use mirror::Mirror;
+pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
 
 /// A random secret for one JVM: only the process that got it can say hello.
@@ -67,10 +69,13 @@ struct Shared {
     /// A player tick the game thread waits on, and the JVM's answer.
     player: Option<PlayerState>,
     answer: Option<PlayerInput>,
+    /// A world values request the game thread waits on, and the JVM's answer.
+    world: Option<WorldState>,
+    world_answer: Option<Overrides>,
     /// A chat line the receiving thread waits on, and the JVM's verdict.
     chat: Option<(ChatKind, String)>,
     chat_answer: Option<ChatVerdict>,
-    /// A player tick got no answer in time: no more are asked until the pump has finished the round trip it is in,
+    /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
     /// `ClientBrandRetriever.getClientModName()` from the hello; `None` until the JVM connected.
@@ -136,6 +141,8 @@ impl ModHost {
                     textures: HashMap::new(),
                     player: None,
                     answer: None,
+                    world: None,
+                    world_answer: None,
                     chat: None,
                     chat_answer: None,
                     stalled: false,
@@ -293,6 +300,30 @@ impl ModHost {
             .unwrap();
         s.player = None;
         let answer = s.answer.take();
+        s.stalled = answer.is_none() && s.phase == Phase::Live;
+        answer
+    }
+
+    /// The world values the mods change (time, weather, camera, FOV, night vision) and what their look hook does to
+    /// the player, once per frame. `None` while the JVM is not live or when it does not answer in time: the engine
+    /// then uses the vanilla values. A late answer stalls like one of `player_tick`.
+    pub fn overrides(&self, state: WorldState) -> Option<Overrides> {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live || s.stalled {
+            return None;
+        }
+        s.world = Some(state);
+        s.world_answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.world_answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.world = None;
+        let answer = s.world_answer.take();
         s.stalled = answer.is_none() && s.phase == Phase::Live;
         answer
     }
@@ -464,7 +495,12 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
         let (input, mirror) = {
             let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live && !s.fresh && s.player.is_none() && s.chat.is_none() {
+            while s.phase == Phase::Live
+                && !s.fresh
+                && s.player.is_none()
+                && s.world.is_none()
+                && s.chat.is_none()
+            {
                 s = link.view.wait(s).unwrap();
             }
             if s.phase != Phase::Live {
@@ -472,26 +508,35 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             }
             if let Some(p) = s.player.take() {
                 drop(s);
-                wire::write_player(&mut stream, &p)?;
-                let answer = wire::read_player(&mut stream)?;
-                let mut s = link.state.lock().unwrap();
-                if !s.stalled {
-                    s.answer = Some(answer);
-                }
-                s.stalled = false;
-                link.answered.notify_all();
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| wire::write_player(st, &p),
+                    wire::read_player,
+                    |s, a| s.answer = Some(a),
+                )?;
+                continue;
+            }
+            if let Some(w) = s.world.take() {
+                drop(s);
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| overrides::write_state(st, &w),
+                    overrides::read_overrides,
+                    |s, a| s.world_answer = Some(a),
+                )?;
                 continue;
             }
             if let Some((kind, text)) = s.chat.take() {
                 drop(s);
-                chat::write_line(&mut stream, kind, &text)?;
-                let verdict = chat::read_verdict(&mut stream)?;
-                let mut s = link.state.lock().unwrap();
-                if !s.stalled {
-                    s.chat_answer = Some(verdict);
-                }
-                s.stalled = false;
-                link.answered.notify_all();
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| chat::write_line(st, kind, &text),
+                    chat::read_verdict,
+                    |s, a| s.chat_answer = Some(a),
+                )?;
                 continue;
             }
             s.fresh = false;
@@ -517,6 +562,25 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
         s.screen = screen;
         s.stalled = false;
     }
+}
+
+/// Sends one request and records the JVM's answer; a stalled client keeps the answer out.
+fn round_trip<T>(
+    stream: &mut TcpStream,
+    link: &Link,
+    write: impl FnOnce(&mut TcpStream) -> io::Result<()>,
+    read: impl FnOnce(&mut TcpStream) -> io::Result<T>,
+    set: impl FnOnce(&mut Shared, T),
+) -> io::Result<()> {
+    write(stream)?;
+    let answer = read(stream)?;
+    let mut s = link.state.lock().unwrap();
+    if !s.stalled {
+        set(&mut s, answer);
+    }
+    s.stalled = false;
+    link.answered.notify_all();
+    Ok(())
 }
 
 impl Config {
@@ -631,6 +695,8 @@ mod tests {
                 textures: HashMap::new(),
                 player: None,
                 answer: None,
+                world: None,
+                world_answer: None,
                 chat: None,
                 chat_answer: None,
                 stalled: false,
@@ -846,6 +912,51 @@ mod tests {
             Some(PlayerInput {
                 sprinting: false,
                 sneaking: true
+            })
+        );
+
+        host.stop();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_world_values_request_returns_what_the_jvm_answers() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+        let state = WorldState {
+            world_time: 18000,
+            ..WorldState::default()
+        };
+
+        let answer = thread::scope(|scope| {
+            let asker = scope.spawn(|| host.overrides(state));
+            let mut request = [0; 54];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(request[0], b'O');
+            assert_eq!(request[22..30], 18000i64.to_be_bytes());
+            // PolyTime at noon: only the time is valid.
+            let mut reply = vec![1];
+            reply.extend(6000i64.to_be_bytes());
+            reply.extend([0; 36]);
+            stream.write_all(&reply).unwrap();
+            asker.join().unwrap()
+        });
+        assert_eq!(
+            answer,
+            Some(Overrides {
+                time: Some(6000),
+                ..Overrides::default()
             })
         );
 

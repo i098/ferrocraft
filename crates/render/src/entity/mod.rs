@@ -6,6 +6,7 @@
 //! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
+mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
 pub mod hanging;
@@ -1018,8 +1019,9 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
             projectile::build(out, id, d, skins);
             return true;
         }
-        // Dropped items draw through `item::build`, item frames through `hanging::build`.
-        if id == 2 || id == 71 {
+        // Dropped items draw through `item::build`, TNT and falling blocks through `block::build`, item
+        // frames through `hanging::build`.
+        if matches!(id, 2 | 50 | 70 | 71) {
             return true;
         }
     }
@@ -1750,7 +1752,7 @@ mod tests {
     #[test]
     fn every_face_of_a_box_winds_counter_clockwise_seen_from_outside() {
         let mut d = steve();
-        d.class = Class::Object(50);
+        d.class = Class::Object(100);
         d.size = (1.0, 1.0);
         let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
         let center = [10.0, 64.5, 10.0];

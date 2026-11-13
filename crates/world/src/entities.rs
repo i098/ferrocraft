@@ -957,6 +957,16 @@ impl Entities {
                 if kind == 90 {
                     e.owner = data;
                 }
+                if kind == 70 {
+                    // `Block.deserialize`: id in the low 12 bits, metadata in the next 4.
+                    e.stack = Some(ItemRef {
+                        id: (data & 4095) as i16,
+                        damage: (data >> 12 & 15) as i16,
+                        count: 1,
+                        dye: None,
+                        glint: false,
+                    });
+                }
                 (id, e)
             }
             _ => return,

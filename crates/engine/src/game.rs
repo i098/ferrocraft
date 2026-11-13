@@ -164,6 +164,8 @@ pub struct Game {
     pub world_time: i64,
     /// `doDaylightCycle`, from the sign of the last Time Update.
     pub daylight_cycle: bool,
+    /// `World.getSpawnPoint` from Spawn Position: the compass target.
+    pub spawn: [i32; 3],
     /// `EntityPlayer.hasReducedDebug`: from `JoinGame` and entity status 22/23.
     pub reduced_debug: bool,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
@@ -245,6 +247,7 @@ impl Game {
             swing: Swing::default(),
             world_time: 6000,
             daylight_cycle: true,
+            spawn: [0; 3],
             reduced_debug: false,
             ticks: 0,
             inv: Inventory::default(),
@@ -578,6 +581,7 @@ impl Game {
                 self.daylight_cycle = time_of_day >= 0;
                 self.world_time = time_of_day.wrapping_abs();
             }
+            NetEvent::SpawnPosition { x, y, z } => self.spawn = [x, y, z],
             NetEvent::GameState { reason, value } => self.weather.apply(reason, value),
             NetEvent::Disconnect(r) => self.disconnected = Some(r),
             _ => {}
@@ -1161,6 +1165,17 @@ mod tests {
             g.tick(IDLE);
         }
         assert_eq!(g.death_ticks, 20);
+    }
+
+    #[test]
+    fn spawn_position_is_kept_for_the_compass() {
+        let mut g = Game::new();
+        g.apply(NetEvent::SpawnPosition {
+            x: -12,
+            y: 70,
+            z: 345,
+        });
+        assert_eq!(g.spawn, [-12, 70, 345]);
     }
 
     #[test]

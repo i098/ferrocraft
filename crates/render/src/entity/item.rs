@@ -5,8 +5,6 @@
 //! origin with its `display` transforms from the item model json. Every piece is placed on the CPU
 //! and sorted by texture: block faces sample the block atlas, sprites their own texture.
 //!
-//! shortcut: bow pull stages, the cast fishing rod and baby holders are not ported; the enchantment
-//! glint covers the whole piece.
 
 use super::{
     glint_uv_item, light_level, model, Class, EntityDraw, Xf, ITEM_GLINT_COLOR, ITEM_UV_SCALE, V3,

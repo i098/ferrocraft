@@ -490,6 +490,38 @@ impl App {
         })
     }
 
+    /// A remote player's held model (cast rod) and a bobber's line to its thrower's rod tip.
+    fn held_and_line(&self, e: &Entity, d: &mut EntityDraw, frac: f64) {
+        if e.kind == Kind::Player {
+            let cast = self.casting(e.id);
+            let drawn = e.use_ticks.map_or(0, |t| t as i32);
+            d.held_damage =
+                world::inventory::items::held_variant(d.held, d.held_damage, drawn, cast);
+        }
+        if e.kind == Kind::Object(90) {
+            d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());
+        }
+    }
+
+    /// `PlayerEntity.fishingBobber != null`: a bobber of this player is out.
+    fn casting(&self, id: i32) -> bool {
+        self.game
+            .entities
+            .iter()
+            .any(|e| e.kind == Kind::Object(90) && e.owner == id)
+    }
+
+    /// The `damage` the held item model is chosen by: bow draw stage and cast rod
+    /// (`ItemRenderer.renderItemInHand`).
+    fn held_variant(&self, id: i16, damage: i16) -> i16 {
+        let drawn = if self.use_ticks > 0 {
+            72_000 - self.use_ticks
+        } else {
+            0
+        };
+        world::inventory::items::held_variant(id, damage, drawn, self.casting(self.game.entity_id))
+    }
+
     /// How far into the current tick the frame is, as vanilla's partial tick.
     fn tick_frac(&self) -> f64 {
         let until = self.next_tick.saturating_duration_since(Instant::now());
@@ -668,7 +700,12 @@ impl App {
                 .held_stack()
                 .as_ref()
                 .is_some_and(world::inventory::glint),
-            held_damage: self.game.inv.held_stack().as_ref().map_or(0, |s| s.damage),
+            held_damage: self
+                .game
+                .inv
+                .held_stack()
+                .as_ref()
+                .map_or(0, |s| self.held_variant(s.id, s.damage)),
             held_dye: self
                 .game
                 .inv
@@ -741,9 +778,7 @@ impl App {
         for (e, d) in self.game.entities.iter().zip(&mut draws) {
             d.view = [cam.yaw, cam.pitch];
             self.team_tag(e, d);
-            if e.kind == Kind::Object(90) {
-                d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());
-            }
+            self.held_and_line(e, d, frac);
         }
         draws.extend(self_model);
         // `RenderGlobal`: the spectated entity is not drawn from its own eyes.
@@ -757,7 +792,12 @@ impl App {
         self.run_effects(effects);
         let held = self.game.inv.held_stack().as_ref().map(|s| {
             let dye = s.nbt.as_ref().and_then(|n| n.dye());
-            (s.id, s.damage, world::inventory::glint(s), dye)
+            (
+                s.id,
+                self.held_variant(s.id, s.damage),
+                world::inventory::glint(s),
+                dye,
+            )
         });
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);

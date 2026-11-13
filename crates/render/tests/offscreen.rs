@@ -1247,3 +1247,61 @@ fn tinted_items_keep_color_and_overlay() {
     let plain = r.render_to_rgba(&cam, &[]).2;
     assert_ne!(image, plain, "dye and potion damage must change the drops");
 }
+
+#[test]
+fn held_bow_and_rod_change_picture_with_draw_and_cast() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    // `damage` is the variant `held_variant` picks: 0 plain, -1..-3 pull stages, -1 cast rod.
+    let mut frame = |id: i16, damage: i16| {
+        r.set_hand(Some(Hand {
+            held: Some(HeldKind::Item {
+                id,
+                damage,
+                dye: None,
+            }),
+            swing: 0.0,
+            lowered: 0.0,
+            using: None,
+            glint: false,
+        }));
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let bows = [0, -1, -2, -3].map(|d| frame(261, d));
+    let rods = [0, -1].map(|d| frame(346, d));
+    for (i, a) in bows.iter().enumerate() {
+        for b in &bows[i + 1..] {
+            assert_ne!(a, b, "each bow draw stage must show its own picture");
+        }
+    }
+    assert_ne!(rods[0], rods[1], "a cast rod must show the cast picture");
+
+    if let Some(dir) = std::env::var_os("RENDER_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, px) in [
+            ("bow", &bows[0]),
+            ("bow_pulling_0", &bows[1]),
+            ("bow_pulling_1", &bows[2]),
+            ("bow_pulling_2", &bows[3]),
+            ("rod", &rods[0]),
+            ("rod_cast", &rods[1]),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
+        }
+    }
+}

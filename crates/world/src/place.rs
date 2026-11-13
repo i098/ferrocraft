@@ -103,7 +103,7 @@ fn circuits(id: u16) -> bool {
 }
 
 /// `World.doesBlockHaveSolidTopSurface`.
-fn solid_top(state: u16) -> bool {
+pub fn solid_top(state: u16) -> bool {
     let (id, meta) = (state >> 4, state & 15);
     opaque_cube(id)
         || (is_stairs(id) && meta & 4 != 0)

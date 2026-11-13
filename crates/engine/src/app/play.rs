@@ -295,6 +295,7 @@ impl App {
         self.boss_tick();
         self.step_sound();
         self.rain_particles();
+        self.ambient_effects();
         self.potion_particles();
         self.entity_fx();
         Self::projectile_fx(&self.game, &mut self.particles);
@@ -482,16 +483,7 @@ impl App {
             return;
         };
         let store = &self.game.store;
-        let top = |x: i32, z: i32| {
-            let biome = store
-                .get(x >> 4, z >> 4)?
-                .biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
-            let y = (0..256)
-                .rev()
-                .find(|&y| render::stops_rain(store.get_block(x, y, z)))
-                .map_or(0, |y| y + 1);
-            Some((y, biome))
-        };
+        let top = precipitation_top(store);
         let (rain, _) = self.game.weather.strengths(1.0);
         let settings = &self.ui.settings;
         let drops = render::rain_particles(
@@ -505,6 +497,50 @@ impl App {
         );
         for (kind, at) in drops {
             self.particles.spawn(kind, at, [0.0; 3], 0);
+        }
+    }
+
+    /// `ClientWorld.doRandomDisplayTicks`, run once per client tick: block flames, smoke, pops and drips.
+    fn ambient_effects(&mut self) {
+        let Some(p) = self.game.player.as_ref() else {
+            return;
+        };
+        let store = &self.game.store;
+        let top = precipitation_top(store);
+        let (rain, _) = self.game.weather.strengths(1.0);
+        // `World.isRaining(pos)`; shortcut: the precipitation height stands in for `canSeeSky`.
+        let raining = |x: i32, y: i32, z: i32| {
+            rain > 0.2
+                && top(x, z)
+                    .is_some_and(|(height, biome)| height <= y && render::splashes(biome, x, y, z))
+        };
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |t| t.as_nanos() as i64);
+        let effects = render::random_display_ticks(
+            p.pos.map(|v| v.floor() as i32),
+            p.pos,
+            self.ui.settings.particles,
+            &mut render::JavaRandom::new(seed),
+            &|x, y, z| store.get_block(x, y, z),
+            &raining,
+        );
+        for effect in effects {
+            match effect {
+                render::AmbientEffect::Particle { kind, pos, motion } => {
+                    self.particles.spawn(kind, pos, motion, 0)
+                }
+                render::AmbientEffect::Sound {
+                    name,
+                    pos,
+                    volume,
+                    pitch,
+                } => {
+                    if let Some(s) = &mut self.sound {
+                        s.play(name, Some(pos), volume, pitch);
+                    }
+                }
+            }
         }
     }
 
@@ -1300,6 +1336,23 @@ fn sprint_dust_state(
     (state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block))
         .then_some(state)
 }
+/// Per column: the precipitation height (the y above the highest rain-stopping block) and the biome id;
+/// `None` for an unloaded column.
+fn precipitation_top(
+    store: &world::chunk::ChunkStore,
+) -> impl Fn(i32, i32) -> Option<(i32, u8)> + '_ {
+    move |x, z| {
+        let biome = store
+            .get(x >> 4, z >> 4)?
+            .biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
+        let y = (0..256)
+            .rev()
+            .find(|&y| render::stops_rain(store.get_block(x, y, z)))
+            .map_or(0, |y| y + 1);
+        Some((y, biome))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, sprint_dust_state, App, ContainerScreen};

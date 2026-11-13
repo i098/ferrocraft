@@ -388,6 +388,7 @@ impl App {
         self.chat_line(vec![ferrocraft_net_client::Styled {
             format: String::new(),
             text,
+            ..Default::default()
         }]);
     }
 
@@ -777,6 +778,16 @@ impl App {
         self.ui.is_open() || self.container.is_some() || self.mod_screen()
     }
 
+    /// `GuiChat.drawScreen`: the tooltip of the hover event under the mouse.
+    fn chat_hover(&self, m: &Fm) -> Option<Vec<String>> {
+        if self.input.chat_input().is_none() || self.modal() {
+            return None;
+        }
+        let hover = self.chat_piece()?.hover.as_ref()?;
+        let advanced = self.ui.settings.advanced_item_tooltips;
+        Some(gui::hover::lines(hover, &self.ui.texts, advanced, m))
+    }
+
     /// A menu, the container, a mod screen or chat is open: vanilla routes input to it, not to the game.
     fn screen_open(&self) -> bool {
         self.modal() || self.input.chat_input().is_some()
@@ -933,6 +944,7 @@ impl App {
                 mods.draw(&mut g, &mut mod_textures);
             }
         }
+        let hover = self.chat_hover(&m);
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
             let view = gui::inventory::InventoryView {
@@ -944,6 +956,9 @@ impl App {
             cs.draw(&mut c, &view, mx, my);
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
+        if let Some(lines) = hover {
+            gui::screens::tooltip(&mut c, &lines, mx, my, scale.width, scale.height);
+        }
         let mut textures = std::mem::take(&mut c.pending_textures);
         textures.extend(mod_textures);
         (g.into_quads(), textures, effects)

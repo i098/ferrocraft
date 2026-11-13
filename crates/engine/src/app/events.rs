@@ -653,7 +653,7 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
 }
 
 /// Opens a web page in the system browser.
-fn open_url(url: &str) {
+pub(super) fn open_url(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

@@ -129,6 +129,8 @@ pub struct Player {
     pub speed_attr: Option<f64>,
     /// Jump Boost level (`amplifier + 1`), 0 without the effect.
     pub jump_boost: f32,
+    /// `EnchantmentHelper.getDepthStriderLevel`: the highest Depth Strider level on the worn armor.
+    pub depth_strider: i32,
     jump_movement_factor: f32,
     jump_ticks: i32,
     /// `Entity.inWater`, set by `handleWaterMovement` at the start of each tick.
@@ -164,6 +166,7 @@ impl Player {
             collided_vertically: false,
             speed_attr: None,
             jump_boost: 0.0,
+            depth_strider: 0,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
             in_water: false,
@@ -333,15 +336,25 @@ impl Player {
         self.vel[2] *= f64::from(friction);
     }
 
-    /// The water branch of `moveEntityWithHeading` without depth strider.
+    /// The water branch of `moveEntityWithHeading`: Depth Strider (capped at 3, halved off the ground)
+    /// blends the 0.8 drag toward 0.54600006 and the 0.02 acceleration toward the movement speed.
     fn swim(&mut self, world: &dyn World, strafe: f32, forward: f32) {
         let y = self.pos[1];
-        self.move_flying(strafe, forward, 0.02);
+        let mut drag = 0.8_f32;
+        let mut accel = 0.02_f32;
+        let mut strider = (self.depth_strider as f32).min(3.0);
+        if !self.on_ground {
+            strider *= 0.5;
+        }
+        if strider > 0.0 {
+            drag += (0.546_000_06_f32 - drag) * strider / 3.0;
+            accel += (self.speed() * 1.0 - accel) * strider / 3.0;
+        }
+        self.move_flying(strafe, forward, accel);
         self.move_entity(world, self.vel);
-        let drag = f64::from(0.8_f32);
-        self.vel[0] *= drag;
-        self.vel[1] *= drag;
-        self.vel[2] *= drag;
+        self.vel[0] *= f64::from(drag);
+        self.vel[1] *= f64::from(0.8_f32);
+        self.vel[2] *= f64::from(drag);
         self.vel[1] -= 0.02;
         self.climb_out_of_liquid(world, y);
     }

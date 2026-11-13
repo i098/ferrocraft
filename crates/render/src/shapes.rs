@@ -101,7 +101,154 @@ fn boxes_0(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
             };
             out.push(px([x.0, step.0, z.0], [x.1, step.1, z.1], t));
         }
+        117 | 118 | 122 | 145 | 154 => decor(state, out),
         _ => boxes_1(state, nb, l, out),
+    }
+}
+
+/// Turn a box `quarters` clockwise (seen from above) around the block centre, as a blockstate `"y"` rotation does.
+fn turn(mut b: Bx, quarters: u8) -> Bx {
+    for _ in 0..quarters {
+        let (lo, hi) = (b.min, b.max);
+        b.min = [1.0 - hi[2], lo[1], lo[0]];
+        b.max = [1.0 - lo[2], hi[1], hi[0]];
+        // North goes to east, east to south, south to west, west to north.
+        let side = [NORTH, EAST, SOUTH, WEST];
+        let (tex, mask) = (b.tex, b.mask);
+        for i in 0..4 {
+            let (from, to) = (side[i], side[(i + 1) % 4]);
+            b.tex[to] = tex[from];
+            b.mask = b.mask & !bit(to) | (mask >> from & 1) << to;
+        }
+        b.rot = (b.rot + 1) % 4;
+    }
+    b
+}
+
+/// Water surface height of a cauldron by level, in px (`cauldron_level1..3` models).
+pub const CAULDRON_WATER: [f32; 4] = [0.0, 9.0, 12.0, 15.0];
+
+/// The three spokes of a brewing stand beside its box parts: `(tip x, tip z, bottle index)` in 1/16 block.
+/// Each spoke is a double-sided plane from the block centre to its tip; bottle `i` shows on spoke `i`.
+pub const BREWING_SPOKES: [([f32; 2], usize); 3] =
+    [([16.0, 8.0], 0), ([0.0, 0.0], 1), ([0.0, 16.0], 2)];
+
+/// Models of the hopper, cauldron, anvil, brewing stand and dragon egg (1.8.9 `models/block/*.json`).
+fn decor(state: u16, out: &mut Vec<Bx>) {
+    let (id, meta) = (state >> 4, state & 15);
+    // Face order: up, down, north, south, west, east.
+    match id {
+        154 => {
+            let (side, top, inside) = ("hopper_outside", "hopper_top", "hopper_inside");
+            let facing = meta & 7;
+            out.push(px(
+                [0.0, 10.0, 0.0],
+                [16.0, 11.0, 16.0],
+                [inside, side, side, side, side, side],
+            ));
+            for (min, max) in [
+                ([0.0, 11.0, 0.0], [2.0, 16.0, 16.0]),
+                ([14.0, 11.0, 0.0], [16.0, 16.0, 16.0]),
+                ([2.0, 11.0, 0.0], [14.0, 16.0, 2.0]),
+                ([2.0, 11.0, 14.0], [14.0, 16.0, 16.0]),
+            ] {
+                out.push(px(min, max, [top, side, side, side, side, side]));
+            }
+            out.push(px([4.0, 4.0, 4.0], [12.0, 10.0, 12.0], [side; 6]));
+            if matches!(facing, 2..=5) {
+                let spout = px([6.0, 4.0, 0.0], [10.0, 8.0, 4.0], [side; 6]);
+                out.push(turn(spout, [0, 0, 0, 2, 3, 1][facing as usize]));
+            } else {
+                out.push(px([6.0, 0.0, 6.0], [10.0, 4.0, 10.0], [side; 6]));
+            }
+        }
+        118 => {
+            let (top, bottom, side, inside) = (
+                "cauldron_top",
+                "cauldron_bottom",
+                "cauldron_side",
+                "cauldron_inner",
+            );
+            for (min, max) in [
+                ([0.0, 3.0, 0.0], [2.0, 16.0, 16.0]),
+                ([14.0, 3.0, 0.0], [16.0, 16.0, 16.0]),
+                ([2.0, 3.0, 0.0], [14.0, 16.0, 2.0]),
+                ([2.0, 3.0, 14.0], [14.0, 16.0, 16.0]),
+            ] {
+                out.push(px(min, max, [top, inside, side, side, side, side]));
+            }
+            out.push(px(
+                [2.0, 3.0, 2.0],
+                [14.0, 4.0, 14.0],
+                [inside, inside, side, side, side, side],
+            ));
+            // Four legs, each two boxes that wrap a corner.
+            for (min, max) in [
+                ([0.0, 0.0, 0.0], [4.0, 3.0, 2.0]),
+                ([0.0, 0.0, 2.0], [2.0, 3.0, 4.0]),
+                ([12.0, 0.0, 0.0], [16.0, 3.0, 2.0]),
+                ([14.0, 0.0, 2.0], [16.0, 3.0, 4.0]),
+                ([0.0, 0.0, 14.0], [4.0, 3.0, 16.0]),
+                ([0.0, 0.0, 12.0], [2.0, 3.0, 14.0]),
+                ([12.0, 0.0, 14.0], [16.0, 3.0, 16.0]),
+                ([14.0, 0.0, 12.0], [16.0, 3.0, 14.0]),
+            ] {
+                out.push(px(min, max, [top, bottom, side, side, side, side]));
+            }
+            let h = CAULDRON_WATER[(meta & 3) as usize];
+            if h > 0.0 {
+                let mut w = px([2.0, h, 2.0], [14.0, h, 14.0], ["water_still"; 6]);
+                w.mask = bit(UP);
+                w.cull = false;
+                out.push(w);
+            }
+        }
+        145 => {
+            let top = [
+                "anvil_top_damaged_0",
+                "anvil_top_damaged_1",
+                "anvil_top_damaged_2",
+            ][(meta >> 2).min(2) as usize];
+            let body = "anvil_base";
+            let parts = [
+                px([2.0, 0.0, 2.0], [14.0, 4.0, 14.0], [body; 6]),
+                px([4.0, 4.0, 3.0], [12.0, 5.0, 13.0], [body; 6]),
+                px([6.0, 5.0, 4.0], [10.0, 10.0, 12.0], [body; 6]),
+                px(
+                    [3.0, 10.0, 0.0],
+                    [13.0, 16.0, 16.0],
+                    [top, body, body, body, body, body],
+                ),
+            ];
+            // `facing`: 0 south, 1 west, 2 north, 3 east, turned 0, 90, 180, 270 degrees.
+            out.extend(parts.map(|b| turn(b, (meta & 3) as u8)));
+        }
+        117 => {
+            let (stand, base) = ("brewing_stand", "brewing_stand_base");
+            out.push(px([7.0, 0.0, 7.0], [9.0, 14.0, 9.0], [stand; 6]));
+            for (min, max) in [
+                ([9.0, 0.0, 5.0], [15.0, 2.0, 11.0]),
+                ([2.0, 0.0, 1.0], [8.0, 2.0, 7.0]),
+                ([2.0, 0.0, 9.0], [8.0, 2.0, 15.0]),
+            ] {
+                out.push(px(min, max, [base; 6]));
+            }
+        }
+        _ => {
+            // Dragon egg: nine stacked boxes.
+            for (min, max) in [
+                ([6.0, 15.0, 6.0], [10.0, 16.0, 10.0]),
+                ([5.0, 14.0, 5.0], [11.0, 15.0, 11.0]),
+                ([5.0, 13.0, 5.0], [11.0, 14.0, 11.0]),
+                ([3.0, 11.0, 3.0], [13.0, 13.0, 13.0]),
+                ([2.0, 8.0, 2.0], [14.0, 11.0, 14.0]),
+                ([1.0, 3.0, 1.0], [15.0, 8.0, 15.0]),
+                ([2.0, 1.0, 2.0], [14.0, 3.0, 14.0]),
+                ([3.0, 0.0, 3.0], [13.0, 1.0, 13.0]),
+            ] {
+                out.push(px(min, max, ["dragon_egg"; 6]));
+            }
+        }
     }
 }
 
@@ -722,6 +869,57 @@ fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], o
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cauldron_box_list_has_water_only_when_filled() {
+        let list = |level: u16| super::boxes(118 << 4 | level, &|_, _, _| 0);
+        let (empty, full) = (list(0), list(3));
+        // Four walls, floor and eight leg boxes.
+        assert_eq!(empty.len(), 13);
+        assert!(empty.iter().all(|b| b.min[1] != b.max[1]));
+        assert_eq!(full.len(), 14);
+        let water = full.last().unwrap();
+        assert_eq!(
+            (water.min, water.max, water.tex[0]),
+            (
+                [0.125, 0.9375, 0.125],
+                [0.875, 0.9375, 0.875],
+                "water_still"
+            )
+        );
+        assert_eq!(water.mask, super::bit(super::UP));
+        assert_eq!(list(1).last().unwrap().min[1], 0.5625);
+    }
+
+    #[test]
+    fn hopper_spout_and_anvil_follow_facing() {
+        let spout = |meta: u16| super::boxes(154 << 4 | meta, &|_, _, _| 0).pop().unwrap();
+        assert_eq!(spout(0).min, [0.375, 0.0, 0.375]);
+        assert_eq!(
+            (spout(2).min, spout(2).max),
+            ([0.375, 0.25, 0.0], [0.625, 0.5, 0.25])
+        );
+        assert_eq!(
+            (spout(3).min, spout(3).max),
+            ([0.375, 0.25, 0.75], [0.625, 0.5, 1.0])
+        );
+        assert_eq!(
+            (spout(4).min, spout(4).max),
+            ([0.0, 0.25, 0.375], [0.25, 0.5, 0.625])
+        );
+        assert_eq!(
+            (spout(5).min, spout(5).max),
+            ([0.75, 0.25, 0.375], [1.0, 0.5, 0.625])
+        );
+        // Anvil head runs along z when facing south or north, along x when facing west or east.
+        let head = |meta: u16| super::boxes(145 << 4 | meta, &|_, _, _| 0)[3].clone();
+        assert_eq!(head(0).max, [0.8125, 1.0, 1.0]);
+        assert_eq!(
+            (head(1).min, head(1).max),
+            ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])
+        );
+        assert_eq!(head(4).tex[0], "anvil_top_damaged_1");
+    }
+
     #[test]
     fn plain_rail_keeps_curve_rotation_for_meta_8_and_9() {
         let rot = |meta: u16| super::boxes(66 << 4 | meta, &|_, _, _| 0)[0].rot;

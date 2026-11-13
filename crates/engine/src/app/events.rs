@@ -85,6 +85,7 @@ impl App {
         } else {
             format!("{host}:{port}")
         };
+        self.server.clone_from(&addr);
         self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
     }
 
@@ -309,6 +310,15 @@ impl App {
             NetEvent::TabComplete(names) => {
                 if let Some(line) = self.input.tab_response(names) {
                     self.chat_note(&line);
+                }
+            }
+            // `handleCustomPayload`: MC|BOpen opens the held written book.
+            NetEvent::PluginMessage { channel, .. } if channel == "MC|BOpen" => {
+                let held = self.game.inv.held_stack().as_ref();
+                if let Some(book) = held.and_then(gui::screens::Book::for_stack) {
+                    let m = metrics!(self);
+                    let q = self.ui.open(&m, Box::new(book));
+                    self.run_effects(q);
                 }
             }
             _ => {}
@@ -596,5 +606,128 @@ fn open_url(url: &str) {
         // Reap the opener so it does not stay a zombie.
         Ok(mut c) => drop(std::thread::spawn(move || c.wait())),
         Err(e) => crate::log::line(&format!("Couldn't open link: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! A fake server logs a real `Session` in, puts `item` in the held slot, then sends a custom
+    //! payload on `channel`. Vanilla `handleCustomPayload` opens `GuiScreenBook` only for
+    //! `MC|BOpen` with a written book (id 387) in hand.
+    use super::*;
+    use crate::args::Args;
+    use ferrocraft_net_client::Session;
+    use ferrocraft_protocol::codec::{ItemStack, Rest};
+    use ferrocraft_protocol::frame::FrameEncoder;
+    use ferrocraft_protocol::nbt::{Nbt, Tag};
+    use ferrocraft_protocol::play::clientbound as cb;
+    use ferrocraft_protocol::{login, PacketSet};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    fn server(item: Option<i16>, channel: &'static str) -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = s.read(&mut buf);
+            let mut enc = FrameEncoder::default();
+            let mut send = |p: Vec<u8>| {
+                let mut out = Vec::new();
+                enc.encode(&p, &mut out).unwrap();
+                s.write_all(&out).unwrap();
+            };
+            send(
+                login::clientbound::Packet::from(login::clientbound::LoginSuccess {
+                    uuid: "00000000-0000-0000-0000-000000000001".into(),
+                    username: "Ferro".into(),
+                })
+                .encode(),
+            );
+            send(
+                cb::Packet::from(cb::JoinGame {
+                    entity_id: 1,
+                    gamemode: 0,
+                    dimension: 0,
+                    difficulty: 0,
+                    max_players: 4,
+                    level_type: "flat".into(),
+                    reduced_debug_info: false,
+                })
+                .encode(),
+            );
+            let item = item.map(|id| ItemStack {
+                id,
+                count: 1,
+                damage: 0,
+                nbt: Some(Nbt {
+                    name: String::new(),
+                    root: vec![(
+                        "pages".into(),
+                        Tag::List(vec![Tag::String("\"p1\"".into())]),
+                    )],
+                }),
+            });
+            // slot 36 is hotbar 0, the held slot after join
+            send(
+                cb::Packet::from(cb::SetSlot {
+                    window_id: 0,
+                    slot: 36,
+                    item,
+                })
+                .encode(),
+            );
+            send(
+                cb::Packet::from(cb::PluginMessage {
+                    channel: channel.into(),
+                    data: Rest(vec![]),
+                })
+                .encode(),
+            );
+            while s.read(&mut buf).is_ok_and(|n| n > 0) {}
+        });
+        port
+    }
+
+    /// Whether a screen is open after the client handled everything the server sent.
+    fn screen_opens(item: Option<i16>, channel: &'static str) -> bool {
+        let port = server(item, channel);
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        let mut session = Session::connect(&format!("127.0.0.1:{port}"), "Ferro", None).unwrap();
+        let (mut got_slot, mut got_msg) = (false, false);
+        let end = Instant::now() + Duration::from_secs(10);
+        while !got_msg {
+            assert!(Instant::now() < end, "server events never arrived");
+            for ev in session.poll() {
+                got_slot |= matches!(ev, NetEvent::SetSlot { .. });
+                if matches!(ev, NetEvent::PluginMessage { .. }) {
+                    got_msg = true;
+                    // drop the title and downloading-terrain screens so only the book can open one
+                    let m = metrics!(app);
+                    app.ui.close(&m);
+                    assert!(!app.ui.is_open());
+                }
+                app.on_event(ev, &mut false, &mut Dirty::new());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(got_slot);
+        app.ui.is_open()
+    }
+
+    #[test]
+    fn bopen_opens_only_for_a_held_written_book() {
+        assert!(screen_opens(Some(387), "MC|BOpen"), "written book");
+        assert!(!screen_opens(Some(386), "MC|BOpen"), "book and quill");
+        assert!(!screen_opens(None, "MC|BOpen"), "empty hand");
+        assert!(!screen_opens(Some(387), "MC|Brand"), "other channel");
     }
 }

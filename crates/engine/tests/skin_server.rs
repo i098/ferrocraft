@@ -244,6 +244,7 @@ fn textures_property_skins_the_spawned_player() {
         held_damage: 0,
         stack: None,
         hover_start: 0.0,
+        hang: Default::default(),
         name: None,
         skin,
         burning: true,

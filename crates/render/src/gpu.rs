@@ -107,6 +107,10 @@ pub struct Renderer {
     glint_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
     item_models: entity::item::Models,
+    /// Wood models of item frames, read the first time one is drawn.
+    frames: Option<entity::hanging::Frames>,
+    /// Colour index bytes of each received map, 128x128.
+    maps: HashMap<i32, Vec<u8>>,
     /// Held and dropped item meshes: the block atlas (`None`) or the sprite texture they sample.
     item_meshes: Vec<(Option<String>, GpuMesh)>,
     fires: Vec<entity::fire::Fire>,
@@ -376,6 +380,8 @@ impl Renderer {
             entity_mesh: None,
             glint_mesh: None,
             item_models: HashMap::new(),
+            frames: None,
+            maps: HashMap::new(),
             item_meshes: Vec::new(),
             fires: Vec::new(),
             on_fire: false,
@@ -532,6 +538,11 @@ impl Renderer {
                 missing_tile()
             })
         };
+        self.insert_texture(tex, &image);
+    }
+
+    /// Uploads `image` as texture `tex`, replacing an earlier one.
+    fn insert_texture(&mut self, tex: &str, image: &Image) {
         let view = upload_texture(
             &self.device,
             &self.queue,
@@ -807,12 +818,19 @@ impl Renderer {
     /// Meshes the held and dropped items into `item_meshes`; returns their glint layer.
     fn upload_items(&mut self, draws: &[EntityDraw]) -> MeshData {
         self.resolve_items(draws);
-        let items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        self.load_frames(draws);
+        let frames = self.frames.take().unwrap_or_default();
+        let items = entity::item::build(draws, &self.item_models, &frames, |p| self.light_at(p));
+        self.frames = Some(frames);
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas))
             .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
         for (tex, mesh) in layers {
             if let Some(tex) = &tex {
+                // A map not yet received has no texture and is not drawn.
+                if tex.starts_with("map/") && !self.textures.contains_key(tex) {
+                    continue;
+                }
                 self.load_texture(tex);
             }
             if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
@@ -820,6 +838,45 @@ impl Renderer {
             }
         }
         items.glint
+    }
+
+    /// Reads the item frame models when a frame is first drawn.
+    fn load_frames(&mut self, draws: &[EntityDraw]) {
+        if self.frames.is_some() || !draws.iter().any(entity::hanging::is_frame) {
+            return;
+        }
+        let frames = self.source.as_mut().map(|source| {
+            let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+            entity::hanging::Frames::load(&mut read)
+        });
+        self.frames = Some(frames.unwrap_or_default());
+    }
+
+    /// `MapData.updateMapData` of S34: the `columns` by `rows` colour bytes at `(x, z)`, then
+    /// `MapRenderer.updateTexture`.
+    pub fn map_update(&mut self, id: i32, area: [usize; 4], data: &[u8]) {
+        let [x, z, columns, rows] = area;
+        let colors = self.maps.entry(id).or_insert_with(|| vec![0; 128 * 128]);
+        for i in 0..columns {
+            for j in 0..rows {
+                if let (Some(&c), Some(slot)) = (
+                    data.get(i + j * columns),
+                    colors.get_mut(x + i + (z + j) * 128),
+                ) {
+                    *slot = c;
+                }
+            }
+        }
+        let rgba = colors
+            .iter()
+            .flat_map(|&c| entity::hanging::map_pixel(c))
+            .collect();
+        let image = Image {
+            width: 128,
+            height: 128,
+            rgba,
+        };
+        self.insert_texture(&format!("map/{id}"), &image);
     }
 
     /// Resolves the model of every held and dropped item that is new.

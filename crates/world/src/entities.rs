@@ -14,6 +14,8 @@ pub enum Kind {
     Mob(u8),
     /// `SpawnObject` type id (2 item, 60 arrow, ...).
     Object(i8),
+    /// `EntityPainting`, from `SpawnPainting`.
+    Painting,
     ExperienceOrb,
 }
 
@@ -28,7 +30,7 @@ impl Kind {
     pub fn size(self) -> (f32, f32) {
         match self {
             Kind::Player => (0.6, 1.8),
-            Kind::ExperienceOrb => (0.5, 0.5),
+            Kind::ExperienceOrb | Kind::Painting => (0.5, 0.5),
             Kind::Object(2) => (0.25, 0.25),
             Kind::Object(60 | 61 | 62 | 65 | 90) => (0.25, 0.25),
             Kind::Object(78) => (0.5, 1.975),
@@ -118,6 +120,8 @@ pub struct SizeMeta {
     pub horse: Option<u8>,
     pub always_name: Option<u8>,
     pub skeleton: Option<u8>,
+    /// Item frames: metadata index 9, the rotation of the displayed item in eighths of a turn.
+    pub rotation: Option<u8>,
 }
 
 impl SizeMeta {
@@ -129,6 +133,7 @@ impl SizeMeta {
         self.horse = new.horse.or(self.horse);
         self.always_name = new.always_name.or(self.always_name);
         self.skeleton = new.skeleton.or(self.skeleton);
+        self.rotation = new.rotation.or(self.rotation);
     }
 }
 
@@ -197,6 +202,59 @@ pub struct Entity {
     pub owner: i32,
     /// Metadata index 8: every active effect is ambient (beacon).
     pub potion_ambient: bool,
+    /// Paintings and item frames: horizontal facing, 0 south, 1 west, 2 north, 3 east.
+    pub facing: u8,
+    /// Paintings: the motive name (`EntityPainting.EnumArt.title`).
+    pub title: String,
+}
+
+/// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
+pub const PAINTINGS: [(&str, u16, u16, u16, u16); 26] = [
+    ("Kebab", 16, 16, 0, 0),
+    ("Aztec", 16, 16, 16, 0),
+    ("Alban", 16, 16, 32, 0),
+    ("Aztec2", 16, 16, 48, 0),
+    ("Bomb", 16, 16, 64, 0),
+    ("Plant", 16, 16, 80, 0),
+    ("Wasteland", 16, 16, 96, 0),
+    ("Pool", 32, 16, 0, 32),
+    ("Courbet", 32, 16, 32, 32),
+    ("Sea", 32, 16, 64, 32),
+    ("Sunset", 32, 16, 96, 32),
+    ("Creebet", 32, 16, 128, 32),
+    ("Wanderer", 16, 32, 0, 64),
+    ("Graham", 16, 32, 16, 64),
+    ("Match", 32, 32, 0, 128),
+    ("Bust", 32, 32, 32, 128),
+    ("Stage", 32, 32, 64, 128),
+    ("Void", 32, 32, 96, 128),
+    ("SkullAndRoses", 32, 32, 128, 128),
+    ("Wither", 32, 32, 160, 128),
+    ("Fighters", 64, 32, 0, 96),
+    ("Pointer", 64, 64, 0, 192),
+    ("Pigscene", 64, 64, 64, 192),
+    ("BurningSkull", 64, 64, 128, 192),
+    ("Skeleton", 64, 48, 192, 64),
+    ("DonkeyKong", 64, 48, 192, 112),
+];
+
+/// `EntityHanging.updateBoundingBox`: the fixed-point centre of a hanging entity at block `pos`
+/// facing `facing`, `width` by `height` pixels.
+fn hanging_raw(pos: [i32; 3], facing: u8, width: u16, height: u16) -> [i32; 3] {
+    let (ox, oz) = match facing & 3 {
+        0 => (0, 1),
+        1 => (-1, 0),
+        2 => (0, -1),
+        _ => (1, 0),
+    };
+    // `rotateYCCW`: south to east, east to north, north to west, west to south.
+    let (lx, lz) = (oz, -ox);
+    let half = |p: u16| if p.is_multiple_of(32) { 16 } else { 0 };
+    [
+        pos[0] * 32 + 16 - ox * 15 + half(width) * lx,
+        pos[1] * 32 + 16 + half(height),
+        pos[2] * 32 + 16 - oz * 15 + half(width) * lz,
+    ]
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -263,6 +321,8 @@ impl Entity {
             age: 0,
             potion_color: 0,
             potion_ambient: false,
+            facing: 0,
+            title: String::new(),
             owner: 0,
         }
     }
@@ -277,7 +337,7 @@ impl Entity {
         match self.kind {
             Kind::Player | Kind::Mob(_) => true,
             Kind::Object(t) => BLOCKING_OBJECTS.contains(&t),
-            Kind::ExperienceOrb => false,
+            Kind::ExperienceOrb | Kind::Painting => false,
         }
     }
 
@@ -537,6 +597,13 @@ pub enum EntityEvent {
         id: i32,
         pos: [i32; 3],
     },
+    /// `SpawnPainting`: motive name, block position and horizontal facing.
+    SpawnPainting {
+        id: i32,
+        title: String,
+        pos: [i32; 3],
+        facing: u8,
+    },
     Move {
         id: i32,
         delta: [i8; 3],
@@ -674,6 +741,21 @@ impl Entities {
         use EntityEvent as E;
         match ev {
             E::SpawnPlayer { .. } | E::SpawnMob { .. } | E::SpawnObject { .. } => self.spawn(ev),
+            E::SpawnPainting {
+                id,
+                title,
+                pos,
+                facing,
+            } => {
+                let (_, w, h, ..) = PAINTINGS
+                    .iter()
+                    .find(|p| p.0 == title)
+                    .copied()
+                    .unwrap_or(PAINTINGS[0]);
+                let mut e = Entity::new(id, Kind::Painting, hanging_raw(pos, facing, w, h), 0, 0);
+                (e.facing, e.title) = (facing & 3, title);
+                self.map.insert(id, e);
+            }
             E::SpawnExperienceOrb { id, pos } => {
                 let e = Entity::new(id, Kind::ExperienceOrb, pos, 0, 0);
                 self.map.insert(id, e);
@@ -791,6 +873,18 @@ impl Entities {
                 data,
             } => {
                 let mut e = Entity::new(id, Kind::Object(kind), pos, yaw, pitch);
+                if kind == 71 {
+                    // The packet carries the block position of an item frame.
+                    let block = pos.map(|c| c.div_euclid(32));
+                    e = Entity::new(
+                        id,
+                        Kind::Object(kind),
+                        hanging_raw(block, data as u8, 12, 12),
+                        0,
+                        0,
+                    );
+                    e.facing = data as u8 & 3;
+                }
                 e.vel = velocity(vel);
                 if kind == 90 {
                     e.owner = data;
@@ -967,6 +1061,23 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `EntityHanging.updateBoundingBox`: a 2x1 painting facing north on the wall of block (4, 70, 9)
+    /// sits 0.46875 towards the wall and half a block along the wall.
+    #[test]
+    fn painting_centres_on_its_wall_like_entity_hanging() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 5,
+            title: "Pool".into(),
+            pos: [4, 70, 9],
+            facing: 2,
+        });
+        let e = es.get(5).unwrap();
+        // North: the wall is to the south; `rotateYCCW` of north is west, so -x.
+        assert_eq!(e.pos, [4.0, 70.5, 9.5 + 0.46875]);
+        assert_eq!((e.facing, e.title.as_str()), (2, "Pool"));
+    }
 
     fn spawn(es: &mut Entities, id: i32, pos: [i32; 3]) {
         es.apply(EntityEvent::SpawnMob {

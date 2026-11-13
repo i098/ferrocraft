@@ -8,6 +8,7 @@
 //! shortcut: bow pull stages, the cast fishing rod and baby holders are not ported; the enchantment
 //! glint covers the whole piece.
 
+use super::hanging;
 use super::{
     glint_uv_item, light_level, model, Class, EntityDraw, Xf, ITEM_GLINT_COLOR, ITEM_UV_SCALE, V3,
 };
@@ -46,7 +47,18 @@ pub struct ItemModel {
     gui3d: bool,
     third: Mat,
     ground: Mat,
+    fixed: Mat,
     ground_scale: V3,
+}
+
+impl ItemModel {
+    pub(super) fn gui3d(&self) -> bool {
+        self.gui3d
+    }
+
+    pub(super) fn fixed(&self) -> Mat {
+        self.fixed
+    }
 }
 
 /// Models by `(id, damage)`; `None` when the item has none to draw.
@@ -68,6 +80,7 @@ pub fn resolve(
     };
     let (third, _) = display("thirdperson");
     let (ground, ground_scale) = display("ground");
+    let (fixed, _) = display("fixed");
     Some(ItemModel {
         tex,
         mesh,
@@ -75,6 +88,7 @@ pub fn resolve(
         normals,
         third,
         ground,
+        fixed,
         ground_scale,
     })
 }
@@ -110,7 +124,9 @@ fn geometry(
 /// The stacks `build` needs models for.
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let held = (holds(d) && d.held != 0).then_some((d.held, d.held_damage));
-    let dropped = dropped(d).map(|s| (s.id, s.damage));
+    let dropped = dropped(d)
+        .or_else(|| d.stack.filter(|_| hanging::is_frame(d)))
+        .map(|s| (s.id, s.damage));
     held.into_iter().chain(dropped)
 }
 
@@ -132,18 +148,18 @@ pub struct Items {
 }
 
 /// `p` through `m`, a column-major affine matrix.
-fn point(m: &Mat, p: V3) -> V3 {
+pub(super) fn point(m: &Mat, p: V3) -> V3 {
     std::array::from_fn(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
 }
 
 /// The direction `n` through the linear part of `m`.
-fn dir(m: &Mat, n: V3) -> V3 {
+pub(super) fn dir(m: &Mat, n: V3) -> V3 {
     std::array::from_fn(|r| m[0][r] * n[0] + m[1][r] * n[1] + m[2][r] * n[2])
 }
 
 /// Face shade of a world-space normal: lit from above like the entity boxes (top 1, side 0.8,
 /// bottom 0.5).
-fn shade(n: V3) -> f32 {
+pub(super) fn shade(n: V3) -> f32 {
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
     let y = n[1] / len;
     if y >= 0.0 {
@@ -161,16 +177,44 @@ impl Items {
         }
     }
 
+    /// One textured quad of a hanging entity, corners counter-clockwise from the front.
+    pub(super) fn quad(
+        &mut self,
+        tex: &str,
+        pos: [V3; 4],
+        uv: [[f32; 2]; 4],
+        shade: f32,
+        light: [f32; 2],
+    ) {
+        let target = self.sprites.entry(tex.to_owned()).or_default();
+        let base = target.vertices.len() as u32;
+        for i in 0..4 {
+            target.vertices.push(Vertex {
+                pos: pos[i],
+                uv: uv[i],
+                color: [shade, shade, shade, 1.0],
+                light,
+            });
+        }
+        target.indices.extend([0, 1, 2, 0, 2, 3].map(|i| i + base));
+    }
+
     /// Places `model` with `to_world` (model units to world coordinates) and `normal_to_world`.
-    fn piece(
+    pub(super) fn piece(
         &mut self,
         model: &ItemModel,
         to_world: &dyn Fn(V3) -> V3,
         normal_to_world: &dyn Fn(V3) -> V3,
         level: [f32; 2],
+        direct: bool,
         glint: Option<f32>,
     ) {
         let mut vertices = model.mesh.vertices.clone();
+        // The front quad of a sprite (the first) winds clockwise, for the hand's model space; placed
+        // straight into the world it needs the reverse order to face outward.
+        if direct && model.normals.is_some() {
+            vertices[..4].reverse();
+        }
         for v in &mut vertices {
             v.pos = to_world(v.pos);
             v.light = level;
@@ -211,9 +255,18 @@ impl Items {
 }
 
 /// Item meshes of every draw. `light` gives the `[sky, block]` level at a world position.
-pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> [f32; 2]) -> Items {
+pub fn build(
+    draws: &[EntityDraw],
+    models: &Models,
+    frames: &hanging::Frames,
+    light: impl Fn([f64; 3]) -> [f32; 2],
+) -> Items {
     let mut out = Items::default();
     for d in draws {
+        if d.class == Class::Painting || hanging::is_frame(d) {
+            hanging::draw(&mut out, d, frames, models, &light);
+            continue;
+        }
         let level = light_level(d, &light, false);
         if holds(d) && d.held != 0 {
             if let Some(Some(m)) = models.get(&(d.held, d.held_damage)) {
@@ -274,7 +327,7 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         [-x, -y, z]
     };
     let glint = d.held_glint.then_some(d.age * 50.0);
-    out.piece(m, &to_world, &normal, level, glint);
+    out.piece(m, &to_world, &normal, level, false, glint);
 }
 
 /// `ItemEntityRenderer.render`: bob, spin and one to five copies by stack size.
@@ -304,7 +357,7 @@ fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level
                 (d.pos[2] + f64::from(z)) as f32,
             ]
         };
-        out.piece(m, &to_world, &|n| dir(&mat, n), level, glint);
+        out.piece(m, &to_world, &|n| dir(&mat, n), level, true, glint);
     }
 }
 

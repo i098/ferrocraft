@@ -7,6 +7,7 @@
 
 pub(crate) mod fire;
 pub(crate) mod guardian;
+pub mod hanging;
 pub mod item;
 mod projectile;
 mod skin;
@@ -20,10 +21,14 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 /// What to draw; mob and object ids are the 1.8.9 network type ids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
-    Player { slim: bool },
+    Player {
+        slim: bool,
+    },
     Mob(u8),
     Object(i8),
     Orb,
+    /// `EntityPainting`; item frames are `Object(71)`.
+    Painting,
 }
 
 /// One entity as the renderer needs it, already interpolated for the frame.
@@ -61,6 +66,8 @@ pub struct EntityDraw {
     pub stack: Option<item::Stack>,
     /// `EntityItem.hoverStart`: phase of the bob and the spin.
     pub hover_start: f32,
+    /// Paintings and item frames: facing, motive and item rotation.
+    pub hang: hanging::Hang,
     pub name: Option<String>,
     /// Player whose downloaded skin to draw; the default skin when none is stored.
     pub skin: Option<u128>,
@@ -538,6 +545,7 @@ fn tint_of(class: Class) -> [f32; 3] {
         }
         Class::Object(_) => [0.7, 0.7, 0.75],
         Class::Orb => [0.5, 1.0, 0.2],
+        Class::Painting => [1.0; 3],
         Class::Player { .. } => [1.0; 3],
     }
 }
@@ -823,9 +831,12 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
             return projectile::build(out, id, d, skins);
         }
         // Dropped items draw through `item::build`.
-        if id == 2 {
+        if id == 2 || id == 71 {
             return;
         }
+    }
+    if d.class == Class::Painting {
+        return;
     }
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
@@ -1182,6 +1193,7 @@ mod tests {
             held_damage: 0,
             stack: None,
             hover_start: 0.0,
+            hang: Default::default(),
             name: None,
             skin: None,
             burning: false,

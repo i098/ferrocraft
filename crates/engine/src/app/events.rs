@@ -224,6 +224,12 @@ impl App {
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
         self.note_session_state(&ev);
         self.entity_sound(&ev);
+        if let NetEvent::Map { id, area, data } = &ev {
+            if let Some(r) = &mut self.renderer {
+                r.map_update(*id, *area, data);
+            }
+            return;
+        }
         let ev = match self.world_event(ev, dirty) {
             Ok(()) => return,
             Err(ev) => ev,

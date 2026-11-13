@@ -497,6 +497,9 @@ fn wrap(mut d: f32) -> f32 {
     d
 }
 
+/// `0.05F` widened to double: the factor `Entity.applyEntityCollision` multiplies the push by.
+const PUSH: f64 = 0.050_000_000_745_058_06;
+
 fn bounds_at(pos: [f64; 3], (w, h): (f32, f32)) -> ([f64; 3], [f64; 3]) {
     let half = f64::from(w) / 2.0;
     (
@@ -688,8 +691,8 @@ impl Entities {
                 d0 /= d2;
                 d1 /= d2;
                 let d3 = (1.0 / d2).min(1.0);
-                push[0] += d0 * d3 * 0.05;
-                push[2] += d1 * d3 * 0.05;
+                push[0] += d0 * d3 * PUSH;
+                push[2] += d1 * d3 * PUSH;
             }
         }
         push
@@ -1030,7 +1033,7 @@ mod tests {
         let mut es = Entities::default();
         spawn(&mut es, 5, [16, 64 * 32, 16]);
         let push = es.push_on(1, [0.6, 64.0, 0.5], (0.6, 1.8));
-        let want = 0.1 / f64::from(0.1_f64.sqrt() as f32) * 0.05;
+        let want = 0.1 / f64::from(0.1_f64.sqrt() as f32) * f64::from(0.05_f32);
         assert!((push[0] - want).abs() < 1e-12);
         assert_eq!(push[2], 0.0);
         assert_eq!(es.push_on(1, [3.0, 64.0, 0.5], (0.6, 1.8)), [0.0; 3]);

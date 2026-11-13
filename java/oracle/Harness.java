@@ -33,6 +33,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak> <using item>
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
  *   state <x> <y> <z> <id> <meta>  like block, any block state of 1.8.9; prints ok, or bad for a meta the block rejects
+ *   other <x> <y> <z>             spawn a still second player; must come after "start"
  *   props <id>                    liquid, solid, blocksMovement (0/1) and slipperiness float bits of a block
  *   boxes <x0> <y0> <z0> <x1> <y1> <z1>  World.getCollisions of the player in the box, one line of six doubles each, then "end"
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
@@ -170,6 +171,17 @@ public class Harness {
                     };
                     player.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), Float.parseFloat(t[4]), 0f);
                     break;
+                case "other": {
+                    PlayerEntity other = new PlayerEntity(world, new GameProfile(UUID.randomUUID(), "other")) {
+                        @Override
+                        public boolean isSpectator() {
+                            return false;
+                        }
+                    };
+                    other.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), 0f, 0f);
+                    world.addEntity(other);
+                    break;
+                }
                 case "state":
                     try {
                         EXTRA.put(blockKey(Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3])),

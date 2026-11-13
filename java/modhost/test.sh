@@ -30,8 +30,11 @@ boot() {
         --gameDir "$game" --assetsDir "$L/minecraft-1.8.9.jar" --version 1.8.9 --accessToken x
 }
 boot PlayerTest
+boot MirrorTest
 # Optional: FERRO_MODS is a folder with the public mod jars (OneConfig bootstrap, EvergreenHUD, Keystrokes, PolySprint, VanillaHUD).
 if [ -n "${FERRO_MODS:-}" ]; then
     mkdir -p "$game/mods" && cp "$FERRO_MODS"/*.jar "$game/mods/"
     boot ModBootTest
+    # MirrorHudTest is the engine's side of the bridge: it needs the token that Host sends in its hello.
+    FERROCRAFT_BRIDGE_TOKEN=0123456789abcdef0123456789abcdef boot MirrorHudTest
 fi

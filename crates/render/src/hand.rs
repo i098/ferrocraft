@@ -68,7 +68,7 @@ pub struct Draw {
     pub model: Mat,
 }
 
-fn ident() -> Mat {
+pub(crate) fn ident() -> Mat {
     let mut m = [[0.0; 4]; 4];
     for (i, c) in m.iter_mut().enumerate() {
         c[i] = 1.0;
@@ -76,7 +76,7 @@ fn ident() -> Mat {
     m
 }
 
-fn mul(a: Mat, b: Mat) -> Mat {
+pub(crate) fn mul(a: Mat, b: Mat) -> Mat {
     let mut o = [[0.0; 4]; 4];
     for c in 0..4 {
         for r in 0..4 {
@@ -86,17 +86,17 @@ fn mul(a: Mat, b: Mat) -> Mat {
     o
 }
 
-fn translate(x: f32, y: f32, z: f32) -> Mat {
+pub(crate) fn translate(x: f32, y: f32, z: f32) -> Mat {
     let mut m = ident();
     m[3] = [x, y, z, 1.0];
     m
 }
 
-fn scale(s: f32) -> Mat {
+pub(crate) fn scale(s: f32) -> Mat {
     scale3([s; 3])
 }
 
-fn scale3(s: [f32; 3]) -> Mat {
+pub(crate) fn scale3(s: [f32; 3]) -> Mat {
     let mut m = ident();
     for (i, c) in m.iter_mut().enumerate().take(3) {
         c[i] = s[i];
@@ -105,7 +105,7 @@ fn scale3(s: [f32; 3]) -> Mat {
 }
 
 /// `glRotatef(deg, axis)` for `axis` 0, 1 or 2.
-fn rotate(deg: f32, axis: usize) -> Mat {
+pub(crate) fn rotate(deg: f32, axis: usize) -> Mat {
     let (s, c) = deg.to_radians().sin_cos();
     let mut m = ident();
     let (a, b) = [(1, 2), (2, 0), (0, 1)][axis];
@@ -116,7 +116,7 @@ fn rotate(deg: f32, axis: usize) -> Mat {
     m
 }
 
-fn chain(ms: &[Mat]) -> Mat {
+pub(crate) fn chain(ms: &[Mat]) -> Mat {
     ms.iter().fold(ident(), |acc, m| mul(acc, *m))
 }
 
@@ -224,9 +224,62 @@ pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
 
 /// A flat item: the extruded sprite with one normal per quad, and its `firstperson` display transform.
 pub struct Flat {
-    mesh: MeshData,
-    normals: Vec<[f32; 3]>,
+    pub(crate) mesh: MeshData,
+    pub(crate) normals: Vec<[f32; 3]>,
     display: Mat,
+}
+
+/// `ItemTransformVec3f.Deserializer` and `ItemCameraTransforms.applyTransform` of one display entry:
+/// translation in 1/16 clamped to 1.5, scale clamped to 4, then translate, rotate y, x, z, scale.
+/// Also returns the scale, which `RenderEntityItem` reads for the ground transform.
+fn transform(d: &Value) -> (Mat, [f32; 3]) {
+    let v3 = |key: &str, default: f32| -> [f32; 3] {
+        let a = d.get(key).and_then(Value::as_array);
+        [0, 1, 2].map(|i| {
+            a.and_then(|a| a.get(i))
+                .and_then(Value::as_f64)
+                .map_or(default, |c| c as f32)
+        })
+    };
+    let [t0, t1, t2] = v3("translation", 0.0).map(|c| (c / 16.0).clamp(-1.5, 1.5));
+    let r = v3("rotation", 0.0);
+    let s = v3("scale", 1.0).map(|c| c.clamp(-4.0, 4.0));
+    let mat = chain(&[
+        translate(t0, t1, t2),
+        rotate(r[1], 1),
+        rotate(r[0], 0),
+        rotate(r[2], 2),
+        scale3(s),
+    ]);
+    (mat, s)
+}
+
+/// The `display` entry `key` (`thirdperson`, `ground`, `fixed`...) of `models/item/<name>.json` or
+/// its nearest parent that has one; absent entries are `ItemTransformVec3f.DEFAULT` (identity).
+pub(crate) fn display(
+    read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    name: &str,
+    key: &str,
+) -> (Mat, [f32; 3]) {
+    let mut next = format!("item/{name}");
+    for _ in 0..16 {
+        if next.starts_with("builtin/") {
+            break;
+        }
+        let Some(v) = read(&format!("models/{next}.json"))
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        else {
+            break;
+        };
+        if let Some(d) = v["display"].get(key) {
+            return transform(d);
+        }
+        let Some(parent) = v["parent"].as_str() else {
+            break;
+        };
+        next = parent.to_string();
+    }
+    (ident(), [1.0; 3])
 }
 
 /// Reads `models/item/<name>.json` and its parents through `read` (paths below `assets/minecraft/`).
@@ -255,28 +308,10 @@ pub fn flat_model(
     let layer = models
         .iter()
         .find_map(|v| v["textures"]["layer0"].as_str())?;
-    let v3 = |v: &Value| -> Option<[f32; 3]> {
-        let a = v.as_array()?;
-        Some([0, 1, 2].map(|i| a.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32))
-    };
-    // `ItemTransformVec3f.Deserializer`: translation in 1/16 clamped to 1.5, scale clamped to 4.
     let display = models
         .iter()
         .find_map(|v| v["display"].get("firstperson"))
-        .map_or(ident(), |d| {
-            let t = d.get("translation").and_then(v3).unwrap_or([0.0; 3]);
-            let [t0, t1, t2] = t.map(|c| (c / 16.0).clamp(-1.5, 1.5));
-            let r = d.get("rotation").and_then(v3).unwrap_or([0.0; 3]);
-            let s = d.get("scale").and_then(v3).unwrap_or([1.0; 3]);
-            // `ItemCameraTransforms.applyTransform`: translate, rotate y, x, z, then scale.
-            chain(&[
-                translate(t0, t1, t2),
-                rotate(r[1], 1),
-                rotate(r[0], 0),
-                rotate(r[2], 2),
-                scale3(s.map(|c| c.clamp(-4.0, 4.0))),
-            ])
-        });
+        .map_or(ident(), |d| transform(d).0);
     Some((format!("textures/{layer}.png"), display))
 }
 

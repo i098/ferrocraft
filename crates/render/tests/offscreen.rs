@@ -249,6 +249,10 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
         name: None,
         skin: None,
         burning: false,
@@ -538,6 +542,10 @@ fn burning_entity_and_first_person_fire() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
         name: None,
         skin: None,
         burning: false,
@@ -630,6 +638,10 @@ fn hurt_entity_flashes_red() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
         name: None,
         skin: None,
         burning: false,
@@ -693,6 +705,10 @@ fn player_in_leather() -> EntityDraw {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
         eye_height: 1.62,
         pitch: 0.0,
         limb_swing: 0.0,
@@ -840,6 +856,10 @@ fn projection_matches_a_drawn_entity() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
         name: None,
         skin: None,
         burning: false,
@@ -861,4 +881,168 @@ fn projection_matches_a_drawn_entity() {
         (cx - ex).abs() < 30.0 && (cy - ey).abs() < 30.0,
         "player drew around ({cx}, {cy}), expected near ({ex:.0}, {ey:.0})"
     );
+}
+
+/// Held items show their sprite or block in the right hand and dropped items bob as models
+/// (`ItemInHandLayer`, `ItemEntityRenderer`); `ITEMS_PROOF_DIR` keeps the frame.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn held_and_dropped_items_draw_as_models() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(640, 360, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let player = |x: f64, id: i16| EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [x, 66.0, 3.0],
+        yaw: 180.0 - 50.0,
+        head_yaw: 130.0,
+        held: id,
+        ..player_in_leather()
+    };
+    let drop = |x: f64, id: i16, count: u8| EntityDraw {
+        class: Class::Object(2),
+        pos: [x, 66.0, 1.0],
+        size: (0.25, 0.25),
+        stack: Some(render::item::Stack {
+            id,
+            damage: 0,
+            count,
+            glint: false,
+        }),
+        age: 12.0,
+        ..player_in_leather()
+    };
+    let draws = [
+        player(5.0, 276),
+        player(7.0, 261),
+        player(9.0, 1),
+        player(11.0, 346),
+        drop(5.0, 276, 1),
+        drop(7.0, 1, 3),
+        drop(9.0, 322, 1),
+    ];
+    let cam = Camera {
+        pos: [8.0, 67.6, -2.5],
+        yaw: 0.0,
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    // The first frame meshes the chunks; entities read their light after it.
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    if let Some(dir) = std::env::var_os("ITEMS_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("items.png"), 640, 360, &image).unwrap();
+    }
+    let bare: Vec<EntityDraw> = draws
+        .iter()
+        .map(|d| EntityDraw {
+            held: 0,
+            stack: None,
+            ..d.clone()
+        })
+        .collect();
+    r.set_entities(&bare);
+    let baseline = r.render_to_rgba(&cam, &[]).2;
+    for (i, d) in draws.iter().enumerate() {
+        let (mid, half) = if matches!(d.class, Class::Player { .. }) {
+            (0.9, 45.0)
+        } else {
+            (0.15, 25.0)
+        };
+        let (cx, cy) = project(&cam, [d.pos[0], d.pos[1] + mid, d.pos[2]], 640.0, 360.0);
+        let mut colours = std::collections::HashSet::new();
+        for y in (cy - half).max(0.0) as usize..((cy + half) as usize).min(360) {
+            for x in (cx - half).max(0.0) as usize..((cx + half) as usize).min(640) {
+                let o = (y * 640 + x) * 4;
+                if image[o..o + 3] != baseline[o..o + 3] {
+                    colours.insert([image[o], image[o + 1], image[o + 2]]);
+                }
+            }
+        }
+        assert!(
+            colours.len() >= 4,
+            "item {i} drew {} distinct colours near ({cx:.0}, {cy:.0}); a flat tint cannot be a model",
+            colours.len()
+        );
+    }
+}
+
+/// Paintings, item frames and the colour map of a frame draw (`RenderPainting`,
+/// `RenderItemFrame`, `MapRenderer`); `HANGING_PROOF_DIR` keeps the frame.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn paintings_frames_and_maps_draw() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(640, 360, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let hang = |x: f64, y: f64, class, title: &str, stack| EntityDraw {
+        class,
+        pos: [x, y, 4.97],
+        hang: render::hanging::Hang {
+            facing: 2,
+            title: title.to_owned(),
+            rotation: 0,
+        },
+        stack,
+        ..player_in_leather()
+    };
+    let item = |id, damage| {
+        Some(render::item::Stack {
+            id,
+            damage,
+            count: 1,
+            glint: false,
+        })
+    };
+    let draws = [
+        hang(4.5, 68.5, Class::Painting, "Fighters", None),
+        hang(7.5, 67.5, Class::Painting, "Kebab", None),
+        hang(9.5, 67.5, Class::Object(71), "", item(276, 0)),
+        hang(11.5, 67.5, Class::Object(71), "", item(358, 3)),
+    ];
+    let colors: Vec<u8> = (0..128 * 128)
+        .map(|i| (4 + (i / 128 / 8 + i % 128 / 8) % 140) as u8)
+        .collect();
+    r.map_update(3, [0, 0, 128, 128], &colors);
+    let cam = Camera {
+        pos: [8.0, 67.6, -1.0],
+        yaw: 0.0,
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    r.render_to_rgba(&cam, &[]);
+    let baseline = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    if let Some(dir) = std::env::var_os("HANGING_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("hanging.png"), 640, 360, &image).unwrap();
+    }
+    for d in &draws {
+        let (cx, cy) = project(&cam, [d.pos[0], d.pos[1], d.pos[2]], 640.0, 360.0);
+        let mut changed = 0;
+        for y in (cy - 20.0).max(0.0) as usize..((cy + 20.0) as usize).min(360) {
+            for x in (cx - 20.0).max(0.0) as usize..((cx + 20.0) as usize).min(640) {
+                let o = (y * 640 + x) * 4;
+                changed += usize::from(image[o..o + 3] != baseline[o..o + 3]);
+            }
+        }
+        assert!(
+            changed > 100,
+            "{:?} at {cx},{cy} changed {changed} pixels",
+            d.class
+        );
+    }
 }

@@ -8,6 +8,41 @@ use serde_json::{Map, Value};
 pub struct Styled {
     pub format: String,
     pub text: String,
+    /// `ChatStyle.getChatClickEvent()`, inherited from the parent component like the other styles.
+    pub click: Option<Click>,
+    /// `ChatStyle.getChatHoverEvent()`.
+    pub hover: Option<Hover>,
+    /// `ChatStyle.getInsertion()`: the text a shift-click puts in the chat field.
+    pub insertion: Option<String>,
+}
+
+/// `ClickEvent.Action` that chat may carry (`open_file` and `twitch_user_page` are dropped, as in vanilla).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickAction {
+    OpenUrl,
+    RunCommand,
+    SuggestCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Click {
+    pub action: ClickAction,
+    pub value: String,
+}
+
+/// `HoverEvent.Action`; `show_entity` is not kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverAction {
+    ShowText,
+    ShowItem,
+    ShowAchievement,
+}
+
+/// A hover event; `value` is the event's component, flattened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hover {
+    pub action: HoverAction,
+    pub value: Vec<Styled>,
 }
 
 /// Runs of a chat component in vanilla iteration order. Text that is not JSON is one unstyled run.
@@ -15,7 +50,7 @@ pub fn styled(json: &str) -> Vec<Styled> {
     let mut out = Vec::new();
     match serde_json::from_str::<Value>(json) {
         Ok(v) => flatten(&v, Style::default(), &mut out),
-        Err(_) => push(&mut out, Style::default(), json),
+        Err(_) => push(&mut out, &Style::default(), json),
     }
     out
 }
@@ -32,7 +67,7 @@ pub fn formatted_text(runs: &[Styled]) -> String {
         .collect()
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct Style {
     color: Option<char>,
     bold: bool,
@@ -40,6 +75,9 @@ struct Style {
     underlined: bool,
     obfuscated: bool,
     strikethrough: bool,
+    click: Option<Click>,
+    hover: Option<Hover>,
+    insertion: Option<String>,
 }
 
 impl Style {
@@ -54,6 +92,15 @@ impl Style {
         self.underlined = flag("underlined", self.underlined);
         self.obfuscated = flag("obfuscated", self.obfuscated);
         self.strikethrough = flag("strikethrough", self.strikethrough);
+        if let Some(c) = o.get("clickEvent").and_then(click) {
+            self.click = Some(c);
+        }
+        if let Some(h) = o.get("hoverEvent").and_then(hover) {
+            self.hover = Some(h);
+        }
+        if let Some(i) = o.get("insertion").and_then(Value::as_str) {
+            self.insertion = Some(i.to_owned());
+        }
         self
     }
 
@@ -73,6 +120,29 @@ impl Style {
         add(self.strikethrough, 'm');
         s
     }
+}
+
+fn click(v: &Value) -> Option<Click> {
+    let action = match v.get("action")?.as_str()?.to_ascii_lowercase().as_str() {
+        "open_url" => ClickAction::OpenUrl,
+        "run_command" => ClickAction::RunCommand,
+        "suggest_command" => ClickAction::SuggestCommand,
+        _ => return None,
+    };
+    let value = v.get("value")?.as_str()?.to_owned();
+    Some(Click { action, value })
+}
+
+fn hover(v: &Value) -> Option<Hover> {
+    let action = match v.get("action")?.as_str()?.to_ascii_lowercase().as_str() {
+        "show_text" => HoverAction::ShowText,
+        "show_item" => HoverAction::ShowItem,
+        "show_achievement" => HoverAction::ShowAchievement,
+        _ => return None,
+    };
+    let mut value = Vec::new();
+    flatten(v.get("value")?, Style::default(), &mut value);
+    Some(Hover { action, value })
 }
 
 fn color_code(name: &str) -> Option<char> {
@@ -98,13 +168,16 @@ fn color_code(name: &str) -> Option<char> {
     char::from_digit(i as u32, 16)
 }
 
-fn push(out: &mut Vec<Styled>, style: Style, text: &str) {
+fn push(out: &mut Vec<Styled>, style: &Style, text: &str) {
     if text.is_empty() {
         return;
     }
     out.push(Styled {
         format: style.code(),
         text: text.to_owned(),
+        click: style.click.clone(),
+        hover: style.hover.clone(),
+        insertion: style.insertion.clone(),
     });
 }
 
@@ -192,40 +265,42 @@ fn translation(key: &str) -> Option<&'static str> {
 
 fn flatten(v: &Value, parent: Style, out: &mut Vec<Styled>) {
     match v {
-        Value::String(s) => push(out, parent, s),
+        Value::String(s) => push(out, &parent, s),
         Value::Array(items) => {
             let Some((first, rest)) = items.split_first() else {
                 return;
             };
-            flatten(first, parent, out);
-            let style = first.as_object().map_or(parent, |o| parent.child(o));
-            rest.iter().for_each(|i| flatten(i, style, out));
+            flatten(first, parent.clone(), out);
+            let style = first
+                .as_object()
+                .map_or_else(|| parent.clone(), |o| parent.clone().child(o));
+            rest.iter().for_each(|i| flatten(i, style.clone(), out));
         }
         Value::Object(o) => {
             let style = parent.child(o);
             if let Some(t) = o.get("text").and_then(Value::as_str) {
-                push(out, style, t);
+                push(out, &style, t);
             } else if let Some(key) = o.get("translate").and_then(Value::as_str) {
                 let args = o
                     .get("with")
                     .and_then(Value::as_array)
                     .map_or(&[][..], |a| a);
-                translate(key, args, style, out);
+                translate(key, args, &style, out);
             }
             if let Some(extra) = o.get("extra").and_then(Value::as_array) {
-                extra.iter().for_each(|e| flatten(e, style, out));
+                extra.iter().for_each(|e| flatten(e, style.clone(), out));
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
-fn translate(key: &str, args: &[Value], style: Style, out: &mut Vec<Styled>) {
+fn translate(key: &str, args: &[Value], style: &Style, out: &mut Vec<Styled>) {
     let Some(pattern) = translation(key) else {
         push(out, style, key);
         for a in args {
             push(out, style, " ");
-            flatten(a, style, out);
+            flatten(a, style.clone(), out);
         }
         return;
     };
@@ -249,7 +324,7 @@ fn translate(key: &str, args: &[Value], style: Style, out: &mut Vec<Styled>) {
             }
         };
         if let Some(a) = args.get(index) {
-            flatten(a, style, out);
+            flatten(a, style.clone(), out);
         }
         rest = &spec[len..];
     }
@@ -309,5 +384,22 @@ mod tests {
             formatted_text(&styled(j)),
             "\u{a7}c\u{a7}la\u{a7}r\u{a7}cb\u{a7}r\u{a7}6\u{a7}l\u{a7}oc\u{a7}r"
         );
+    }
+
+    #[test]
+    fn events_are_kept_and_inherited() {
+        use super::{Click, ClickAction, HoverAction};
+        let j = r#"{"text":"a","clickEvent":{"action":"run_command","value":"/x"},"hoverEvent":{"action":"show_text","value":{"text":"tip","color":"red"}},"extra":[{"text":"b"},{"text":"c","clickEvent":{"action":"open_file","value":"/etc"}}]}"#;
+        let runs = styled(j);
+        let click = Some(Click {
+            action: ClickAction::RunCommand,
+            value: "/x".into(),
+        });
+        assert_eq!(runs.len(), 3);
+        // The child inherits the parent's events; `open_file` is not allowed in chat.
+        assert!(runs.iter().all(|r| r.click == click));
+        let hover = runs[1].hover.as_ref().unwrap();
+        assert_eq!(hover.action, HoverAction::ShowText);
+        assert_eq!(formatted_text(&hover.value), "\u{a7}ctip\u{a7}r");
     }
 }

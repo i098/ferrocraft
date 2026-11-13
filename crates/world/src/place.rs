@@ -59,7 +59,7 @@ fn opposite(face: u8) -> u8 {
     face ^ 1
 }
 
-fn is_stairs(id: u16) -> bool {
+pub(crate) fn is_stairs(id: u16) -> bool {
     matches!(
         id,
         53 | 67 | 108 | 109 | 114 | 128 | 134 | 135 | 136 | 156 | 163 | 164 | 180

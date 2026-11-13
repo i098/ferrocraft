@@ -1,9 +1,32 @@
 //! `GuiNewChat` (the chat lines over the hotbar) and the `GuiChat` input line.
 
 use crate::toolkit::{strip_codes, Gui, Metrics, FONT_HEIGHT};
-use ferrocraft_net_client::Styled;
+use ferrocraft_net_client::{Click, ClickAction, Hover, Styled};
 
 const MAX_LINES: usize = 100;
+
+/// One text component of a wrapped line: `ChatComponentText` with its `ChatStyle` events.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Piece {
+    pub text: String,
+    pub click: Option<Click>,
+    pub hover: Option<Hover>,
+    pub insertion: Option<String>,
+}
+
+/// A wrapped chat line: `getFormattedText()` for drawing, and its components for the hit test.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DrawnLine {
+    pub formatted: String,
+    pub pieces: Vec<Piece>,
+}
+
+impl DrawnLine {
+    /// `getUnformattedText()`: the component texts without the added `§r` codes.
+    pub fn unformatted(&self) -> String {
+        self.pieces.iter().map(|p| p.text.as_str()).collect()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Visibility {
@@ -74,7 +97,7 @@ pub struct Chat {
     /// Whole messages, newest first.
     messages: Vec<Line<Vec<Styled>>>,
     /// Wrapped lines as formatted text, newest first.
-    drawn: Vec<Line<String>>,
+    drawn: Vec<Line<DrawnLine>>,
     scroll_pos: i32,
     scrolled: bool,
 }
@@ -181,7 +204,7 @@ impl Chat {
                     let y = -i * 9;
                     gui.fill(0, y - 9, width + 4, y, ((alpha / 2) as u32) << 24);
                     gui.text(
-                        &line.content,
+                        &line.content.formatted,
                         0.0,
                         (y - 8) as f32,
                         0xFFFFFF | (alpha as u32) << 24,
@@ -209,6 +232,81 @@ impl Chat {
             gui.fill(2, -top, 1, -top - bar, 0xCCCCCC + (a << 24));
         }
     }
+
+    /// `getChatComponent`, for an open chat: the component under the window pixel `(px, py)`,
+    /// where `py` counts up from the bottom edge, like LWJGL's `Mouse.getY`.
+    pub fn component_at(&self, px: i32, py: i32, factor: i32, m: Metrics) -> Option<&Piece> {
+        let s = &self.settings;
+        let j = ((px / factor - 3) as f32 / s.scale).floor() as i32;
+        let k = ((py / factor - 27) as f32 / s.scale).floor() as i32;
+        if j < 0 || k < 0 {
+            return None;
+        }
+        let lines = s.line_count(true).min(self.drawn.len() as i32);
+        if j > (s.chat_width() as f32 / s.scale).floor() as i32 || k >= FONT_HEIGHT * lines + lines
+        {
+            return None;
+        }
+        let line = self
+            .drawn
+            .get(usize::try_from(k / FONT_HEIGHT + self.scroll_pos).ok()?)?;
+        let mut x = 0;
+        line.content.pieces.iter().find(|p| {
+            x += m.width(&p.text);
+            x > j
+        })
+    }
+}
+
+/// What a click on a chat component asks the screen to do (`GuiScreen.handleComponentClick`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChatClick {
+    /// The click is used up and nothing else happens.
+    Handled,
+    /// `run_command`: send it as a chat message.
+    Command(String),
+    /// `suggest_command`: replace the chat field text.
+    Suggest(String),
+    /// Shift-click on an insertion: write at the cursor.
+    Insert(String),
+    /// `open_url` with `chatLinksPrompt`: ask first (`GuiConfirmOpenLink`).
+    ConfirmLink(String),
+    /// `open_url` without the prompt: open the system browser.
+    OpenLink(String),
+}
+
+/// `GuiScreen.handleComponentClick`; `None` means the click is not used (no event, or links are off).
+pub fn click(piece: &Piece, shift: bool, links: bool, prompt: bool) -> Option<ChatClick> {
+    if shift {
+        return Some(
+            piece
+                .insertion
+                .clone()
+                .map_or(ChatClick::Handled, ChatClick::Insert),
+        );
+    }
+    let c = piece.click.as_ref()?;
+    Some(match c.action {
+        ClickAction::OpenUrl if !links => return None,
+        ClickAction::OpenUrl if !web_url(&c.value) => ChatClick::Handled,
+        ClickAction::OpenUrl if prompt => ChatClick::ConfirmLink(c.value.clone()),
+        ClickAction::OpenUrl => ChatClick::OpenLink(c.value.clone()),
+        ClickAction::RunCommand => ChatClick::Command(c.value.clone()),
+        ClickAction::SuggestCommand => ChatClick::Suggest(c.value.clone()),
+    })
+}
+
+/// `new URI(value)` with a scheme of `http` or `https`; vanilla only logs anything else.
+fn web_url(value: &str) -> bool {
+    let Some((scheme, _)) = value.split_once(':') else {
+        return false;
+    };
+    let ok = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    ok && ["http", "https"].contains(&scheme.to_ascii_lowercase().as_str())
+        && !value.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 fn line_alpha(age: i32, open: bool, opacity: f32) -> i32 {
@@ -217,22 +315,27 @@ fn line_alpha(age: i32, open: bool, opacity: f32) -> i32 {
     (alpha as f32 * opacity) as i32
 }
 
-/// `GuiUtilRenderComponents.splitText(component, width, font, false, false)`, each line as
-/// `getFormattedText()`.
-fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<String> {
-    let mut queue: Vec<(String, String)> = runs
-        .iter()
-        .map(|r| (r.format.clone(), r.text.clone()))
-        .collect();
+/// `GuiUtilRenderComponents.splitText(component, width, font, false, false)`: each line as
+/// `getFormattedText()` plus its components.
+pub(crate) fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<DrawnLine> {
+    let mut queue: Vec<Styled> = runs.to_vec();
     let mut lines = Vec::new();
-    let mut line = String::from("\u{a7}r");
+    let mut line = DrawnLine {
+        formatted: String::from("\u{a7}r"),
+        pieces: Vec::new(),
+    };
     let mut used = 0;
     let mut j = 0;
     while j < queue.len() {
-        let (format, mut s) = queue[j].clone();
+        let run = queue[j].clone();
+        let (format, mut s) = (run.format.clone(), run.text.clone());
+        let rest_of = |text: String| Styled {
+            text,
+            ..run.clone()
+        };
         let mut flush = false;
         if let Some(k) = s.find('\n') {
-            queue.insert(j + 1, (format.clone(), s[k + 1..].to_owned()));
+            queue.insert(j + 1, rest_of(s[k + 1..].to_owned()));
             s.truncate(k + 1);
             flush = true;
         }
@@ -245,7 +348,7 @@ fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<String> {
         if used + w > width {
             let (s2, rest) = break_line(m, &s4, width - used, used > 0);
             if let Some(s3) = rest {
-                queue.insert(j + 1, (format.clone(), s3));
+                queue.insert(j + 1, rest_of(s3));
             }
             w = m.width(&s2);
             piece = s2;
@@ -253,14 +356,24 @@ fn split(runs: &[Styled], width: i32, m: Metrics, colors: bool) -> Vec<String> {
         }
         if used + w <= width {
             used += w;
-            line.push_str(&format);
-            line.push_str(&piece);
-            line.push_str("\u{a7}r");
+            line.formatted.push_str(&format);
+            line.formatted.push_str(&piece);
+            line.formatted.push_str("\u{a7}r");
+            line.pieces.push(Piece {
+                text: piece,
+                click: run.click,
+                hover: run.hover,
+                insertion: run.insertion,
+            });
         } else {
             flush = true;
         }
         if flush {
-            lines.push(std::mem::replace(&mut line, String::from("\u{a7}r")));
+            let fresh = DrawnLine {
+                formatted: String::from("\u{a7}r"),
+                pieces: Vec::new(),
+            };
+            lines.push(std::mem::replace(&mut line, fresh));
             used = 0;
         }
         j += 1;
@@ -312,29 +425,112 @@ mod tests {
             .map(|(f, t)| Styled {
                 format: f.to_string(),
                 text: t.to_string(),
+                ..Styled::default()
             })
             .collect()
     }
 
-    #[test]
-    fn split_breaks_at_spaces_and_keeps_styles() {
-        let f = Font {
+    fn mono() -> Font {
+        Font {
             ascii: [6; 256],
             unicode: vec![0; 65536],
             force_unicode: false,
-        };
+        }
+    }
+
+    fn linked(action: ClickAction, value: &str) -> Styled {
+        Styled {
+            text: "CLICK".into(),
+            click: Some(Click {
+                action,
+                value: value.into(),
+            }),
+            ..Styled::default()
+        }
+    }
+
+    fn first_piece(runs: &[Styled]) -> Piece {
+        split(runs, 100, Metrics(None), true)
+            .remove(0)
+            .pieces
+            .remove(0)
+    }
+
+    #[test]
+    fn hit_test_finds_the_clicked_component() {
+        let f = mono();
+        let m = Metrics(Some(&f));
+        let mut c = Chat::default();
+        let mut msg = runs(&[("", "ab ")]);
+        msg.push(linked(ClickAction::RunCommand, "/party accept"));
+        c.print(msg, 0, 0, false, m);
+        // The newest line is the bottom one: window Y 27..36 counted from the bottom.
+        let at = |x, y| c.component_at(x, y, 1, m).map(|p| p.click.is_some());
+        assert_eq!(at(3 + 5, 30), Some(false));
+        assert_eq!(at(3 + 20, 30), Some(true));
+        assert_eq!(at(3 + 45, 30), Some(true));
+        // Past the text, above the last line, left of the box and below the chat field.
+        assert_eq!(at(3 + 46, 30), None);
+        assert_eq!(at(3 + 20, 27 + 9), None);
+        assert_eq!(at(2, 30), None);
+        assert_eq!(at(3 + 20, 26), None);
+    }
+
+    #[test]
+    fn click_actions_follow_vanilla() {
+        let cmd = first_piece(&[linked(ClickAction::RunCommand, "/party accept")]);
+        assert_eq!(
+            click(&cmd, false, true, true),
+            Some(ChatClick::Command("/party accept".into()))
+        );
+        // Shift suppresses the event; no insertion leaves the click used up.
+        assert_eq!(click(&cmd, true, true, true), Some(ChatClick::Handled));
+        let sug = first_piece(&[linked(ClickAction::SuggestCommand, "/msg Bob ")]);
+        assert_eq!(
+            click(&sug, false, true, true),
+            Some(ChatClick::Suggest("/msg Bob ".into()))
+        );
+        let url = first_piece(&[linked(ClickAction::OpenUrl, "https://example.com/a")]);
+        assert_eq!(
+            click(&url, false, true, true),
+            Some(ChatClick::ConfirmLink("https://example.com/a".into()))
+        );
+        assert_eq!(
+            click(&url, false, true, false),
+            Some(ChatClick::OpenLink("https://example.com/a".into()))
+        );
+        assert_eq!(click(&url, false, false, true), None);
+        for bad in ["example.com", "ftp://example.com", "http://a b"] {
+            let p = first_piece(&[linked(ClickAction::OpenUrl, bad)]);
+            assert_eq!(
+                click(&p, false, true, true),
+                Some(ChatClick::Handled),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            click(&first_piece(&runs(&[("", "x")])), false, true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn split_breaks_at_spaces_and_keeps_styles() {
+        let f = mono();
         let m = Metrics(Some(&f));
         // "aaa bbb" is 6*6 + 4 = 40 wide; 30 keeps "aaa" and moves " bbb" down.
         let lines = split(&runs(&[("\u{a7}c", "aaa bbb")]), 30, m, true);
+        let formatted: Vec<_> = lines.iter().map(|l| l.formatted.as_str()).collect();
         assert_eq!(
-            lines,
+            formatted,
             vec![
                 "\u{a7}r\u{a7}c\u{a7}caaa\u{a7}r",
                 "\u{a7}r\u{a7}c\u{a7}c bbb\u{a7}r"
             ]
         );
         let lines = split(&runs(&[("", "a\nb")]), 100, m, true);
-        assert_eq!(lines, vec!["\u{a7}ra\u{a7}r", "\u{a7}rb\u{a7}r"]);
+        let formatted: Vec<_> = lines.iter().map(|l| l.formatted.as_str()).collect();
+        assert_eq!(formatted, vec!["\u{a7}ra\u{a7}r", "\u{a7}rb\u{a7}r"]);
     }
 
     #[test]

@@ -150,6 +150,13 @@ fn border_update(a: ferrocraft_protocol::play::WorldBorderAction) -> world::bord
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
+    match crate::tile::event(&packet) {
+        Some(tile) => Ok(vec![tile]),
+        None => other_events(packet, dimension),
+    }
+}
+
+fn other_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
     Ok(match packet {
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
             x: p.x,
@@ -179,6 +186,15 @@ fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> 
         cb::Packet::SpawnGlobalEntity(s) if s.kind == 1 => vec![NetEvent::Lightning {
             pos: [s.x, s.y, s.z].map(|v| f64::from(v) / 32.0),
         }],
+        cb::Packet::Maps(m) => m
+            .update
+            .iter()
+            .map(|u| NetEvent::Map {
+                id: m.item_damage.0,
+                area: [u.x, u.z, m.columns, u.rows].map(usize::from),
+                data: u.data.0.clone(),
+            })
+            .collect(),
         cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
         cb::Packet::BlockChange(b) => vec![block_change(
             b.location.x,

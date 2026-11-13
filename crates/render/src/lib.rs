@@ -5,6 +5,7 @@ use std::borrow::Cow;
 
 mod assets;
 mod biome;
+mod blockent;
 mod blocks;
 mod border;
 pub use border::Border;
@@ -29,6 +30,8 @@ pub use hand::{Hand, HeldKind, UseAction, Using};
 pub use sky::{Environment, Fluid};
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
+pub use blockent::{Banner, Skull, WornHead};
+pub use entity::{hanging, item};
 pub use entity::{nametags, CapeSway, Class, EntityDraw, Look, NameTag, Thrower};
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

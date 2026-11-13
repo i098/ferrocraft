@@ -31,3 +31,5 @@ Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.
 `render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame; the eight surrounding chunks remesh on the workers because light crosses chunk edges and corners.
 Offscreen renderers wait for every mesh, so `render_to_rgba` shows the whole world.
+Item frames, paintings and dropped items draw through `set_entities` (`entity/hanging.rs`, `entity/item.rs`). A framed filled map shows the texture `map/{id}`.
+Maps: S34 goes to `map_update(id, area, data)`, which merges the colours and uploads `map/{id}`. `clear_maps` runs on connect (map ids restart per server). Across a renderer rebuild, `take_maps` on the old renderer feeds `restore_maps` on the new one.

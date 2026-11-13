@@ -12,6 +12,7 @@ mod pack;
 mod play;
 mod screens;
 mod skin;
+mod tile;
 
 use ferrocraft_protocol::codec::{Bytes, Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
@@ -24,7 +25,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use auth::Auth;
-pub use chat::{formatted_text, plain_text, styled, Styled};
+pub use chat::{
+    formatted_text, plain_text, styled, Click, ClickAction, Hover, HoverAction, Styled,
+};
 pub use events::{PlayerInfo, PlayerListEvent};
 pub use ferrocraft_protocol::play::CombatEventKind;
 pub use pack::PackStatus;
@@ -33,6 +36,7 @@ pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
 pub use skin::{fetch as fetch_skin, parse_textures, SkinInfo};
+pub use tile::TileEvent;
 pub use world::chunk::Chunk;
 
 /// What the server told the client, in packet order.
@@ -52,6 +56,8 @@ pub enum NetEvent {
         channel: String,
         data: Vec<u8>,
     },
+    /// S24, S33 and S35 for chests, signs, skulls and banners.
+    Tile(TileEvent),
     Chunk(Box<Chunk>),
     UnloadChunk(i32, i32),
     BlockChange {
@@ -85,6 +91,12 @@ pub enum NetEvent {
     /// Spawn Global Entity (0x2C) of type 1: a lightning bolt at the world position.
     Lightning {
         pos: [f64; 3],
+    },
+    /// Maps (0x34): colour bytes of the `columns` by `rows` area at `(x, z)` of map `id`.
+    Map {
+        id: i32,
+        area: [usize; 4],
+        data: Vec<u8>,
     },
     /// A chat message (positions 0 and 1) as styled runs.
     Chat(Vec<Styled>),

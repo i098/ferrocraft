@@ -4,12 +4,12 @@ use super::{boxed, App, View};
 use crate::game::Effect;
 use crate::game::Game;
 use crate::link::Link;
-use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent};
+use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent, TileEvent};
 use gui::inventory::ContainerScreen;
 use gui::screens::{Connecting, Death, Effect as UiEffect};
 use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
-use render::Renderer;
+use render::{Banner, Renderer, Skull};
 use std::collections::HashMap;
 use world::entities::{is_baby, EntityEvent, Kind};
 use world::entity_sound;
@@ -80,6 +80,9 @@ impl App {
 
     fn connect(&mut self, host: &str, port: u16) {
         self.game = Game::new();
+        if let Some(r) = &mut self.renderer {
+            r.clear_maps();
+        }
         let addr = if host.contains(':') {
             format!("[{host}]:{port}")
         } else {
@@ -105,8 +108,12 @@ impl App {
     fn refresh_resources(&mut self) {
         let Some(w) = self.window.clone() else { return };
         // Drop the old renderer first: a window holds one surface at a time.
+        let maps = self.renderer.as_mut().map(|r| r.take_maps());
         self.renderer = None;
         self.renderer = Some(Renderer::new(w, self.asset_source()));
+        if let (Some(r), Some(maps)) = (&mut self.renderer, maps) {
+            r.restore_maps(maps);
+        }
         self.load_assets();
         self.apply_settings();
         self.reload_chunks();
@@ -239,6 +246,12 @@ impl App {
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
         self.note_session_state(&ev);
         self.entity_sound(&ev);
+        if let NetEvent::Map { id, area, data } = &ev {
+            if let Some(r) = &mut self.renderer {
+                r.map_update(*id, *area, data);
+            }
+            return;
+        }
         let ev = match self.world_event(ev, dirty) {
             Ok(()) => return,
             Err(ev) => ev,
@@ -512,7 +525,22 @@ impl App {
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
                 dirty.insert((x, z), e);
             }
-            Effect::Chat(runs) => {
+            Effect::Chat(mut runs) => {
+                if let Some(mods) = &self.mods {
+                    match mods.chat(
+                        ferrocraft_modhost::ChatKind::Chat,
+                        &ferrocraft_net_client::formatted_text(&runs),
+                    ) {
+                        ferrocraft_modhost::ChatVerdict::Keep => {}
+                        ferrocraft_modhost::ChatVerdict::Cancel => return,
+                        ferrocraft_modhost::ChatVerdict::Replace(text) => {
+                            runs = vec![ferrocraft_net_client::Styled {
+                                format: String::new(),
+                                text,
+                            }];
+                        }
+                    }
+                }
                 let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
                 let open = self.input.chat_input().is_some();
                 self.hud
@@ -537,6 +565,11 @@ impl App {
                 if let Some(s) = self.link.session() {
                     let r = s.confirm_transaction(window, action, true);
                     self.send_result(r);
+                }
+            }
+            Effect::Tile(t) => {
+                if let Some(r) = &mut self.renderer {
+                    mirror_tile(r, t);
                 }
             }
             Effect::Died => {
@@ -624,8 +657,37 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
     }
 }
 
+/// Hands chest, sign, skull and banner data to the renderer.
+fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
+    match tile {
+        TileEvent::Action {
+            pos,
+            block,
+            event,
+            value,
+        } => r.block_action(pos, block, event, value),
+        TileEvent::Sign { pos, lines } => r.set_sign_text(pos, lines),
+        TileEvent::Skull {
+            pos,
+            kind,
+            rotation,
+            owner,
+        } => {
+            r.set_skull(
+                pos,
+                Skull {
+                    kind,
+                    rotation,
+                    owner,
+                },
+            );
+        }
+        TileEvent::Banner { pos, base, layers } => r.set_banner(pos, Banner { base, layers }),
+    }
+}
+
 /// Opens a web page in the system browser.
-fn open_url(url: &str) {
+pub(super) fn open_url(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

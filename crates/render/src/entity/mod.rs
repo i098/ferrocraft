@@ -3,11 +3,13 @@
 //! enderman models in [`mobs`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: held item models (a held item is a tinted bar). Name tags are laid out by
-//! [`nametags`].
+//! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
+//! are laid out by [`nametags`].
 
 pub(crate) mod fire;
 pub(crate) mod guardian;
+pub mod hanging;
+pub mod item;
 mod mobs;
 mod projectile;
 mod skin;
@@ -28,10 +30,14 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 /// What to draw; mob and object ids are the 1.8.9 network type ids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
-    Player { slim: bool },
+    Player {
+        slim: bool,
+    },
     Mob(u8),
     Object(i8),
     Orb,
+    /// `EntityPainting`; item frames are `Object(71)`.
+    Painting,
 }
 
 /// One entity as the renderer needs it, already interpolated for the frame.
@@ -63,6 +69,14 @@ pub struct EntityDraw {
     /// `ItemStack.hasEffect` of each armor piece (boots first) and of the held item.
     pub armor_glint: [bool; 4],
     pub held_glint: bool,
+    /// Damage value of the held item, which picks the model of block and variant items.
+    pub held_damage: i16,
+    /// Dropped items (object 2): the stack shown.
+    pub stack: Option<item::Stack>,
+    /// `EntityItem.hoverStart`: phase of the bob and the spin.
+    pub hover_start: f32,
+    /// Paintings and item frames: facing, motive and item rotation.
+    pub hang: hanging::Hang,
     pub name: Option<String>,
     /// Player whose downloaded skin to draw; the default skin when none is stored.
     pub skin: Option<u128>,
@@ -577,13 +591,6 @@ fn cow(d: &EntityDraw) -> Model {
     }
 }
 
-/// A tinted bar for the held item, anchored at the right hand.
-fn held_bar(arm: &Part) -> Part {
-    let mut p = Part::new(arm.pivot, [-1.0, 8.0, -9.0], [2.0, 2.0, 12.0], (0.0, 0.0));
-    p.rot = arm.rot;
-    p
-}
-
 fn wrap(mut d: f32) -> f32 {
     d %= 360.0;
     if d >= 180.0 {
@@ -625,9 +632,9 @@ fn tint_of(class: Class) -> [f32; 3] {
                 0.45 + (h >> 16 & 0xFF) as f32 / 600.0,
             ]
         }
-        Class::Object(2) => [1.0, 0.85, 0.3],
         Class::Object(_) => [0.7, 0.7, 0.75],
         Class::Orb => [0.5, 1.0, 0.2],
+        Class::Painting => [1.0; 3],
         Class::Player { .. } => [1.0; 3],
     }
 }
@@ -658,12 +665,12 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
     })
 }
 
-type V3 = [f32; 3];
+pub(crate) type V3 = [f32; 3];
 /// Corners in model space, texel corners, outward normal, shade.
 type Face = ([V3; 4], [[f32; 2]; 4], V3, f32);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.
-fn rotate(p: V3, rot: V3) -> V3 {
+pub(crate) fn rotate(p: V3, rot: V3) -> V3 {
     let [mut x, mut y, mut z] = p;
     let (s, c) = rot[0].sin_cos();
     (y, z) = (y * c - z * s, y * s + z * c);
@@ -736,26 +743,9 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
                     }
                 }
             }
-            let armor_end = out.vertices.len();
-            if d.held_glint && d.held != 0 {
-                if let Some(arm) = m.parts.get(3) {
-                    emit_part(&mut out, &xf, &held_bar(arm), 0.0, [1.0; 3], 0.0);
-                }
-            }
-            for (n, v) in out.vertices[start..].iter_mut().enumerate() {
-                (v.uv, v.color) = if start + n < armor_end {
-                    let uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
-                    (glint_uv_armor(uv, d.age, pass), ARMOR_GLINT_COLOR)
-                } else {
-                    // shortcut: the held bar has no sprite; its model-space position stands in.
-                    let rel = [
-                        v.pos[0] - xf.pos[0] as f32,
-                        v.pos[1] - xf.pos[1] as f32,
-                        v.pos[2] - xf.pos[2] as f32,
-                    ];
-                    let uv = [(rel[0] + rel[2]) * ITEM_UV_SCALE, rel[1] * ITEM_UV_SCALE];
-                    (glint_uv_item(uv, d.age * 50.0, pass), ITEM_GLINT_COLOR)
-                };
+            for v in &mut out.vertices[start..] {
+                let uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
+                (v.uv, v.color) = (glint_uv_armor(uv, d.age, pass), ARMOR_GLINT_COLOR);
                 v.light = [1.0; 2];
             }
         }
@@ -774,15 +764,7 @@ pub fn build(
     for d in draws {
         let start = out.vertices.len();
         let bright = draw_entity(&mut out, d, skins);
-        let level = if d.burning {
-            [1.0, 1.0]
-        } else {
-            light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
-        };
-        let level = [
-            level[0],
-            level[1] + if hurt_flash(d) { HURT_FLAG } else { 0.0 },
-        ];
+        let level = light_level(d, &light, true);
         let bright = bright.max(start);
         for v in &mut out.vertices[start..bright] {
             v.light = level;
@@ -792,6 +774,24 @@ pub fn build(
         }
     }
     out
+}
+
+/// `[sky, block]` light of one entity; `flash` adds the hurt flag of a flashing body.
+fn light_level(d: &EntityDraw, light: &impl Fn([f64; 3]) -> [f32; 2], flash: bool) -> [f32; 2] {
+    let level = if d.burning {
+        [1.0, 1.0]
+    } else {
+        light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
+    };
+    [
+        level[0],
+        level[1]
+            + if flash && hurt_flash(d) {
+                HURT_FLAG
+            } else {
+                0.0
+            },
+    ]
 }
 
 /// Added to the block light of every vertex of a flashing entity; `fs_world` strips it and mixes
@@ -808,7 +808,6 @@ struct Xf {
     pos: [f64; 3],
     st: f32,
     ct: f32,
-    lift: f32,
     sneak_drop: f32,
     fall: f32,
     scale: f32,
@@ -818,7 +817,7 @@ struct Xf {
 
 impl Xf {
     fn new(d: &EntityDraw, generic: bool) -> Xf {
-        let spinning = matches!(d.class, Class::Object(2) | Class::Orb);
+        let spinning = matches!(d.class, Class::Orb);
         let body_yaw = if spinning {
             (d.age * 0.1).to_degrees()
         } else {
@@ -842,11 +841,6 @@ impl Xf {
             pos: d.pos,
             st,
             ct,
-            lift: if matches!(d.class, Class::Object(2)) {
-                (d.age * 0.1).sin() * 0.1 + 0.1
-            } else {
-                0.0
-            },
             sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
             fall,
             // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
@@ -875,7 +869,7 @@ impl Xf {
     fn world(&self, q: V3) -> V3 {
         if self.generic {
             // y-up block coordinates: the box hangs from y = 0 downward in model space.
-            return self.yaw(-q[0] / 16.0, -q[1] / 16.0, q[2] / 16.0, self.lift);
+            return self.yaw(-q[0] / 16.0, -q[1] / 16.0, q[2] / 16.0, 0.0);
         }
         let s = self.scale;
         let (x, y) = (-q[0] / 16.0 * s, (BODY_OFFSET - q[1] / 16.0) * s);
@@ -887,7 +881,7 @@ impl Xf {
         } else {
             (x, y)
         };
-        self.yaw(x, y, z, self.lift - self.sneak_drop)
+        self.yaw(x, y, z, -self.sneak_drop)
     }
 }
 
@@ -1015,6 +1009,13 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
             projectile::build(out, id, d, skins);
             return out.vertices.len();
         }
+        // Dropped items draw through `item::build`, item frames through `hanging::build`.
+        if id == 2 || id == 71 {
+            return out.vertices.len();
+        }
+    }
+    if d.class == Class::Painting {
+        return out.vertices.len();
     }
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
@@ -1040,9 +1041,6 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
     if holds {
         emit_armor(out, &xf, &m, d, skins);
-    }
-    if let Some(arm) = m.parts.get(3).filter(|_| d.held != 0 && holds) {
-        emit_part(out, &xf, &held_bar(arm), 0.0, [0.75, 0.6, 0.35], white);
     }
     if let (Some(sway), Some(cape)) = (d.look.cape, d.skin.and_then(|k| skins.cape(k))) {
         if cape_shown(d) {
@@ -1162,7 +1160,7 @@ fn skin_dims() -> [f32; 2] {
 /// `ModelBox`: six quads with the unfolded-cuboid texture layout of a `layout`-sized box at `uv`
 /// (texels, plus `v_off`); `size` may be larger (inflate).
 #[allow(clippy::too_many_arguments)]
-fn add_box(
+pub(crate) fn add_box(
     out: &mut MeshData,
     tf: &dyn Fn(V3) -> V3,
     min: V3,
@@ -1405,6 +1403,10 @@ mod tests {
             armor_dye: [None; 4],
             armor_glint: [false; 4],
             held_glint: false,
+            held_damage: 0,
+            stack: None,
+            hover_start: 0.0,
+            hang: Default::default(),
             name: None,
             skin: None,
             burning: false,
@@ -1532,7 +1534,7 @@ mod tests {
     }
 
     #[test]
-    fn invisible_player_keeps_armor_and_held_item_but_not_the_body() {
+    fn invisible_player_keeps_armor_but_not_the_body() {
         let count = |d: &EntityDraw| {
             build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
                 .vertices
@@ -1541,12 +1543,12 @@ mod tests {
         let mut d = steve();
         d.invisible = true;
         assert_eq!(count(&d), 0);
+        // The held item is a model in `item`, not part of this mesh.
         d.held = 276;
-        let held = count(&d);
-        assert!(held > 0);
+        assert_eq!(count(&d), 0);
         d.armor = [310; 4];
         let worn = count(&d);
-        assert!(worn > held);
+        assert!(worn > 0);
         d.invisible = false;
         assert!(count(&d) > worn);
     }
@@ -1655,8 +1657,9 @@ mod tests {
         d.armor_glint = [true, false, false, false];
         let boots = build_glint(&[d.clone()]).vertices.len();
         assert_eq!(boots, 2 * 2 * 24, "two boot boxes, two passes");
+        // The held item's glint is drawn with its model in `item`, not here.
         d.held_glint = true;
-        assert_eq!(build_glint(&[d]).vertices.len(), boots + 2 * 24);
+        assert_eq!(build_glint(&[d]).vertices.len(), boots);
     }
 
     #[test]

@@ -1,8 +1,10 @@
 //! Window input: while a menu or container is open it goes to that screen, else to the game.
 
-use super::{App, Fm};
+use super::events::open_url;
+use super::{boxed, App, Fm};
+use gui::chat::ChatClick;
 use gui::inventory::{Key, Mods, Request};
-use gui::screens::Event;
+use gui::screens::{ConfirmLink, Event};
 use input_audio::{lwjgl_from_control, Bind, Control};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -119,6 +121,9 @@ impl App {
 
     fn mouse_button(&mut self, down: bool, button: u8) {
         self.mouse_down = down;
+        if down && button == 0 && self.chat_click() {
+            return;
+        }
         let (mx, my) = self.gui_cursor();
         let mods = self.mods();
         if self.container.is_some() {
@@ -143,6 +148,55 @@ impl App {
         let m = Fm(gui::Metrics(self.renderer.as_ref().and_then(|r| r.font())));
         let q = self.ui.event(&m, ev, self.shift);
         self.run_effects(q);
+    }
+
+    /// `GuiChat.mouseClicked`: a left click on a chat component runs its click event.
+    /// True when the click is used up.
+    fn chat_click(&mut self) -> bool {
+        if self.input.chat_input().is_none() || self.modal() {
+            return false;
+        }
+        let Some(piece) = self.chat_piece().cloned() else {
+            return false;
+        };
+        let s = &self.ui.settings;
+        let Some(click) = gui::chat::click(&piece, self.shift, s.chat_links, s.chat_links_prompt)
+        else {
+            return false;
+        };
+        match click {
+            ChatClick::Handled => {}
+            ChatClick::Command(line) => {
+                if let Some(s) = self.link.session() {
+                    let r = s.send_chat(&line);
+                    self.send_result(r);
+                }
+            }
+            ChatClick::Suggest(text) => self.input.set_chat_text(&text, true),
+            ChatClick::Insert(text) => self.input.set_chat_text(&text, false),
+            ChatClick::ConfirmLink(url) => {
+                let m = metrics!(self);
+                let q = self.ui.open(&m, boxed(ConfirmLink::new(url)));
+                self.run_effects(q);
+            }
+            ChatClick::OpenLink(url) => open_url(&url),
+        }
+        true
+    }
+
+    /// `GuiNewChat.getChatComponent` at the mouse.
+    pub(super) fn chat_piece(&self) -> Option<&gui::chat::Piece> {
+        let r = self.renderer.as_ref()?;
+        let (w, h) = r.size();
+        let scale = gui::GuiScale::new(
+            w,
+            h,
+            u32::from(self.ui.settings.gui_scale),
+            self.ui.unicode(),
+        );
+        let m = gui::Metrics(r.font());
+        let (x, y) = (self.cursor.0 as i32, h as i32 - self.cursor.1 as i32);
+        self.hud.chat.component_at(x, y, scale.factor.max(1), m)
     }
 
     fn ui_now_ms(&self) -> u64 {

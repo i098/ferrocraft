@@ -2,14 +2,14 @@
 
 use crate::swing::Swing;
 use crate::weather::Weather;
-use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled};
+use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled, TileEvent};
 use std::collections::HashMap;
 use world::border::WorldBorder;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
 use world::inventory::Inventory;
-use world::{Block, Input, Player, World};
+use world::{Input, Player, World};
 
 /// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
 pub fn eye_height(sneaking: bool) -> f64 {
@@ -51,17 +51,8 @@ pub enum Effect {
     },
     /// Health fell to zero or below: the death screen.
     Died,
-}
-
-/// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
-/// collision is invisible. Water and lava are not solid; slabs and stairs are not modelled yet.
-fn physics_block(state: u16) -> Block {
-    match state >> 4 {
-        8..=11 => Block::Air,
-        79 | 174 | 212 => Block::Ice,
-        _ if render::is_solid(state) => Block::Stone,
-        _ => Block::Air,
-    }
+    /// Chest, sign, skull or banner data for the renderer.
+    Tile(TileEvent),
 }
 
 /// `World.getCollidingBoundingBoxes`: the chunks, and for a player inside the border every block outside it
@@ -72,14 +63,14 @@ struct Collision<'a> {
 }
 
 impl World for Collision<'_> {
-    fn block(&self, x: i32, y: i32, z: i32) -> Block {
+    fn block(&self, x: i32, y: i32, z: i32) -> u16 {
         if self
             .walls
             .is_some_and(|w| !WorldBorder::contains_block(w, x, z))
         {
-            return Block::Stone;
+            return 1 << 4;
         }
-        physics_block(self.store.get_block(x, y, z))
+        self.store.get_block(x, y, z)
     }
 }
 
@@ -462,6 +453,7 @@ impl Game {
                 self.store.set_block(x, y, z, state);
                 return Some(Effect::Upload(x >> 4, z >> 4));
             }
+            NetEvent::Tile(t) => return Some(Effect::Tile(t)),
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
             NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
@@ -687,6 +679,12 @@ impl Game {
                 walls: inside.then_some(walls),
             };
             p.tick(&collision, input);
+            // `collideWithNearbyEntities` ends `onLivingUpdate`; spectators and riders are not pushed.
+            if self.gamemode != SPECTATOR && self.vehicle.is_none() {
+                let push = self.entities.push_on(self.entity_id, p.pos, (0.6, 1.8));
+                p.vel[0] += push[0];
+                p.vel[2] += push[2];
+            }
         }
     }
 
@@ -1022,20 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn only_drawn_cubes_collide_and_respawn_drops_chunks() {
-        // stone, oak door, glass pane, carpet, snow layer, water, lava, ice
-        let solid = [1, 64, 102, 171, 78, 8, 10, 79].map(|id| physics_block(id << 4));
-        let want = [
-            Block::Stone,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Ice,
-        ];
-        assert!(solid.iter().zip(&want).all(|(a, b)| a == b));
+    fn respawn_drops_chunks() {
         let mut g = Game::new();
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
         assert_eq!(
@@ -1276,6 +1261,40 @@ mod tests {
             dimension_changed: false,
         });
         assert_eq!(g.entity_flags, 0);
+    }
+
+    /// Chest, sign, skull and banner packets reach the renderer unchanged.
+    #[test]
+    fn tile_events_become_render_effects() {
+        let mut g = Game::new();
+        for tile in [
+            TileEvent::Action {
+                pos: [1, 64, 2],
+                block: 54,
+                event: 1,
+                value: 1,
+            },
+            TileEvent::Sign {
+                pos: [1, 64, 2],
+                lines: Default::default(),
+            },
+            TileEvent::Skull {
+                pos: [1, 64, 2],
+                kind: 3,
+                rotation: 4,
+                owner: Some(7),
+            },
+            TileEvent::Banner {
+                pos: [1, 64, 2],
+                base: 1,
+                layers: vec![("bs".into(), 4)],
+            },
+        ] {
+            assert_eq!(
+                g.apply(NetEvent::Tile(tile.clone())),
+                Some(Effect::Tile(tile))
+            );
+        }
     }
 
     #[test]

@@ -152,8 +152,15 @@ impl App {
         }
     }
 
+    fn tick_block_entities(&mut self) {
+        if let Some(r) = &mut self.renderer {
+            r.tick_block_entities();
+        }
+    }
+
     fn tick_once(&mut self) {
         self.chat_tick();
+        self.tick_block_entities();
         self.hud.tick();
         if self.game.player.is_some() {
             self.hud.update_held(self.game.inv.held_stack());
@@ -1015,6 +1022,7 @@ impl App {
                     self.chat_line(vec![ferrocraft_net_client::Styled {
                         format: String::new(),
                         text: line.into(),
+                        ..Default::default()
                     }]);
                 }
             }
@@ -1062,6 +1070,7 @@ impl App {
         let styled = |format: &str, text: String| ferrocraft_net_client::Styled {
             format: format.into(),
             text,
+            ..Default::default()
         };
         self.chat_line(vec![
             styled("\u{a7}e\u{a7}l", "[Debug]:".into()),

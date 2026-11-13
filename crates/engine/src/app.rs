@@ -388,6 +388,7 @@ impl App {
         self.chat_line(vec![ferrocraft_net_client::Styled {
             format: String::new(),
             text,
+            ..Default::default()
         }]);
     }
 
@@ -601,6 +602,10 @@ impl App {
                 .held_stack()
                 .as_ref()
                 .is_some_and(world::inventory::glint),
+            held_damage: self.game.inv.held_stack().as_ref().map_or(0, |s| s.damage),
+            stack: None,
+            hover_start: 0.0,
+            hang: Default::default(),
             name: None,
             skin: None,
             eye_height: eye_height(self.input.sneaking()) as f32,
@@ -745,6 +750,7 @@ impl App {
                 && self.game.burning(),
         );
         r.set_entities(&draws);
+        r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_cracks(self.game.cracks());
         let verts =
@@ -772,6 +778,16 @@ impl App {
     /// A menu, the container or a mod screen is open: input goes to it, and the cursor is free.
     fn modal(&self) -> bool {
         self.ui.is_open() || self.container.is_some() || self.mod_screen()
+    }
+
+    /// `GuiChat.drawScreen`: the tooltip of the hover event under the mouse.
+    fn chat_hover(&self, m: &Fm) -> Option<Vec<String>> {
+        if self.input.chat_input().is_none() || self.modal() {
+            return None;
+        }
+        let hover = self.chat_piece()?.hover.as_ref()?;
+        let advanced = self.ui.settings.advanced_item_tooltips;
+        Some(gui::hover::lines(hover, &self.ui.texts, advanced, m))
     }
 
     /// A menu, the container, a mod screen or chat is open: vanilla routes input to it, not to the game.
@@ -930,6 +946,7 @@ impl App {
                 mods.draw(&mut g, &mut mod_textures);
             }
         }
+        let hover = self.chat_hover(&m);
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
             let view = gui::inventory::InventoryView {
@@ -941,6 +958,9 @@ impl App {
             cs.draw(&mut c, &view, mx, my);
         }
         let effects = self.ui.draw(&m, &mut c, mx, my);
+        if let Some(lines) = hover {
+            gui::screens::tooltip(&mut c, &lines, mx, my, scale.width, scale.height);
+        }
         let mut textures = std::mem::take(&mut c.pending_textures);
         textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
@@ -1142,6 +1162,7 @@ fn entity_draw(
         Kind::Mob(id) => Class::Mob(id),
         Kind::Object(id) => Class::Object(id),
         Kind::ExperienceOrb => Class::Orb,
+        Kind::Painting => Class::Painting,
     };
     let p = partial as f32;
     EntityDraw {
@@ -1169,6 +1190,19 @@ fn entity_draw(
         armor_dye: [1, 2, 3, 4].map(|s| e.equipment[s].and_then(|i| i.dye)),
         armor_glint: [1, 2, 3, 4].map(|s| e.equipment[s].is_some_and(|i| i.glint)),
         held_glint: e.equipment[0].is_some_and(|i| i.glint),
+        held_damage: e.equipment[0].map_or(0, |i| i.damage),
+        stack: e.stack.map(|i| render::item::Stack {
+            id: i.id,
+            damage: i.damage,
+            count: i.count,
+            glint: i.glint,
+        }),
+        hover_start: (e.id as f32 * 0.618) % std::f32::consts::TAU,
+        hang: render::hanging::Hang {
+            facing: e.facing,
+            title: e.title.clone(),
+            rotation: e.meta.rotation.unwrap_or(0),
+        },
         name: e.name.clone(),
         skin,
         burning: e.burning(),

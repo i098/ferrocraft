@@ -131,7 +131,7 @@ impl Parser<'_> {
 
     fn space(&mut self) {
         while self.peek().is_some_and(char::is_whitespace) {
-            self.pos += 1;
+            self.pos += self.peek().map_or(1, char::len_utf8);
         }
     }
 
@@ -247,32 +247,43 @@ impl Parser<'_> {
     }
 }
 
-/// `JsonToNBT.Any.parse`: the suffixed numbers, plain ints, booleans, else a string.
-fn scalar(s: &str) -> Tag {
-    let (body, suffix) = s.split_at(s.len().saturating_sub(1));
-    let digits = |b: &str| {
-        let t = b.strip_prefix(['-', '+']).unwrap_or(b);
-        !t.is_empty() && t.bytes().all(|c| c.is_ascii_digit())
-    };
-    let decimal = |b: &str| {
-        let t = b.strip_prefix(['-', '+']).unwrap_or(b);
-        t.bytes().any(|c| c.is_ascii_digit())
-            && t.bytes().all(|c| c.is_ascii_digit() || c == b'.')
-            && t.bytes().filter(|&c| c == b'.').count() <= 1
-    };
+fn digits(b: &str) -> bool {
+    let t = b.strip_prefix(['-', '+']).unwrap_or(b);
+    !t.is_empty() && t.bytes().all(|c| c.is_ascii_digit())
+}
+
+fn decimal(b: &str) -> bool {
+    let t = b.strip_prefix(['-', '+']).unwrap_or(b);
+    t.bytes().any(|c| c.is_ascii_digit())
+        && t.bytes().all(|c| c.is_ascii_digit() || c == b'.')
+        && t.bytes().filter(|&c| c == b'.').count() <= 1
+}
+
+/// A number with a type suffix such as `1b` or `1.5f`.
+fn suffixed(body: &str, suffix: &str) -> Option<Tag> {
     match suffix {
         "b" | "B" if digits(body) => body.parse().map(Tag::Byte).ok(),
         "s" | "S" if digits(body) => body.parse().map(Tag::Short).ok(),
         "l" | "L" if digits(body) => body.parse().map(Tag::Long).ok(),
         "f" | "F" if decimal(body) => body.parse().map(Tag::Float).ok(),
         "d" | "D" if decimal(body) => body.parse().map(Tag::Double).ok(),
-        _ if digits(s) => s.parse().map(Tag::Int).ok(),
-        _ if decimal(s) && s.contains('.') => s.parse().map(Tag::Double).ok(),
-        _ if s.eq_ignore_ascii_case("true") => Some(Tag::Byte(1)),
-        _ if s.eq_ignore_ascii_case("false") => Some(Tag::Byte(0)),
         _ => None,
     }
-    .unwrap_or_else(|| Tag::String(s.to_owned()))
+}
+
+/// `JsonToNBT.Any.parse`: the suffixed numbers, plain ints, booleans, else a string.
+fn scalar(s: &str) -> Tag {
+    let cut = s.char_indices().last().map_or(0, |(i, _)| i);
+    let (body, suffix) = s.split_at(cut);
+    suffixed(body, suffix)
+        .or_else(|| match s {
+            _ if digits(s) => s.parse().map(Tag::Int).ok(),
+            _ if decimal(s) && s.contains('.') => s.parse().map(Tag::Double).ok(),
+            _ if s.eq_ignore_ascii_case("true") => Some(Tag::Byte(1)),
+            _ if s.eq_ignore_ascii_case("false") => Some(Tag::Byte(0)),
+            _ => None,
+        })
+        .unwrap_or_else(|| Tag::String(s.to_owned()))
 }
 
 #[cfg(test)]
@@ -347,6 +358,13 @@ mod tests {
             ]))
         );
         assert_eq!(get("j"), Some(Tag::String("q\"".into())));
+    }
+
+    #[test]
+    fn snbt_skips_multibyte_whitespace() {
+        assert!(matches!(parse("{id:1,\u{a0}Count:1b}"), Some(Tag::Compound(_))));
+        assert!(matches!(parse("{id:1,\u{3000}Count:1b}"), Some(Tag::Compound(_))));
+        assert!(matches!(parse("{id:1,Count:\u{e9}}"), Some(Tag::Compound(_))));
     }
 
     #[test]

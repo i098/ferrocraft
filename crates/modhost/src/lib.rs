@@ -1,6 +1,7 @@
 //! Rust side of the mod host. See the README of this crate.
 
 pub mod keys;
+pub mod mirror;
 pub mod wire;
 
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use std::time::Duration;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
+pub use mirror::Mirror;
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
 
 /// A random secret for one JVM: only the process that got it can say hello.
@@ -50,6 +52,8 @@ struct Shared {
     /// A view arrived since the last frame was sent.
     fresh: bool,
     input: Input,
+    /// The HUD state for the next frame, sent once.
+    mirror: Option<Mirror>,
     commands: Vec<DrawCmd>,
     /// A screen a mod opened is current in the JVM.
     screen: bool,
@@ -117,6 +121,7 @@ impl ModHost {
                     phase: Phase::Starting,
                     fresh: false,
                     input: Input::default(),
+                    mirror: None,
                     commands: Vec::new(),
                     screen: false,
                     sources: HashMap::new(),
@@ -155,6 +160,11 @@ impl ModHost {
         s.input.mouse = mouse;
         s.fresh = true;
         self.link.view.notify_one();
+    }
+
+    /// Set the engine state that HUD mods read; it goes to the JVM with the next frame.
+    pub fn set_mirror(&self, mirror: Mirror) {
+        self.link.state.lock().unwrap().mirror = Some(mirror);
     }
 
     /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
@@ -405,7 +415,7 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<TcpStream> {
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
 fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
-        let input = {
+        let (input, mirror) = {
             let mut s = link.state.lock().unwrap();
             while s.phase == Phase::Live && !s.fresh && s.player.is_none() {
                 s = link.view.wait(s).unwrap();
@@ -428,8 +438,11 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.fresh = false;
             let input = s.input.clone();
             s.input.events.clear();
-            input
+            (input, s.mirror.take())
         };
+        if let Some(m) = &mirror {
+            mirror::write(&mut stream, m)?;
+        }
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
         let mut s = link.state.lock().unwrap();
@@ -552,6 +565,7 @@ mod tests {
                 phase: Phase::Starting,
                 fresh: false,
                 input: Input::default(),
+                mirror: None,
                 commands: Vec::new(),
                 screen: false,
                 sources: HashMap::new(),

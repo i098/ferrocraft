@@ -171,6 +171,7 @@ fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
                 .as_ref()
                 .map_or_else(String::new, |d| d.value.clone()),
             mode: p.mode as u8,
+            hearts: p.data.as_ref().is_some_and(|d| d.kind == "hearts"),
         },
         P::UpdateScore(p) => NetEvent::ScoreUpdate {
             name: p.name.clone(),
@@ -193,6 +194,11 @@ fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
                 .info
                 .as_ref()
                 .map_or_else(String::new, |i| i.suffix.clone()),
+            visibility: p
+                .info
+                .as_ref()
+                .map_or_else(String::new, |i| i.name_tag_visibility.clone()),
+            color: p.info.as_ref().map_or(0, |i| i.color),
             members: p.players.clone().unwrap_or_default(),
         },
         _ => return None,
@@ -445,6 +451,7 @@ mod tests {
                 name: "obj".into(),
                 display: "Kills".into(),
                 mode: 0,
+                hearts: false,
             }]
         );
         let ev = wire(cb::UpdateScore {
@@ -507,6 +514,8 @@ mod tests {
                 mode: 0,
                 prefix: "§c".into(),
                 suffix: "§r".into(),
+                visibility: "always".into(),
+                color: 12,
                 members: vec!["Steve".into()],
             }]
         );

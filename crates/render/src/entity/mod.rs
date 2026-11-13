@@ -88,6 +88,8 @@ pub struct EntityDraw {
     pub always_name: bool,
     /// The entity under the crosshair (`RenderManager.pointedEntity`).
     pub pointed: bool,
+    /// Scoreboard data of a player's tag; see [`TeamTag`].
+    pub team_tag: TeamTag,
     /// Another entity rides this one (`riddenByEntity != null`), which hides its tag.
     pub ridden: bool,
     /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
@@ -100,6 +102,15 @@ pub struct EntityDraw {
     pub line: Option<([f64; 3], f32)>,
     /// Metadata the models read; see [`Look`].
     pub look: Look,
+}
+
+/// What the scoreboard says about a player's name tag.
+#[derive(Clone, Debug, Default)]
+pub struct TeamTag {
+    /// The team's `nameTagVisibility` decision for this viewer; `None` for a player with no team.
+    pub shown: Option<bool>,
+    /// The `"<score> <objective>"` line of display slot 2 (`BELOW_NAME`).
+    pub below: Option<String>,
 }
 
 /// Per-entity appearance data that comes from metadata and the profile.
@@ -1346,6 +1357,9 @@ pub struct NameTag {
 /// `canRenderName` of the entity's renderer, before the distance test: armor stands follow the
 /// always-show byte alone, other mobs need it or the crosshair, players only need to be visible.
 fn shows_name(d: &EntityDraw) -> bool {
+    if let (Class::Player { .. }, Some(shown)) = (&d.class, d.team_tag.shown) {
+        return shown;
+    }
     match d.class {
         Class::Object(78) => d.always_name,
         Class::Mob(_) => !d.invisible && !d.ridden && (d.always_name || d.pointed),
@@ -1385,32 +1399,52 @@ pub fn nametags(
             if d.sneaking {
                 y -= 0.25;
             }
-            let anchor = [d.pos[0], y, d.pos[2]];
-            let p = anchor.map(|v| v as f32);
-            let c: Vec<f32> = (0..4)
-                .map(|r| {
-                    view_proj[0][r] * p[0]
-                        + view_proj[1][r] * p[1]
-                        + view_proj[2][r] * p[2]
-                        + view_proj[3][r]
+            let tag = |y: f64, text: &String| {
+                let anchor = [d.pos[0], y, d.pos[2]];
+                let p = anchor.map(|v| v as f32);
+                let c: Vec<f32> = (0..4)
+                    .map(|r| {
+                        view_proj[0][r] * p[0]
+                            + view_proj[1][r] * p[1]
+                            + view_proj[2][r] * p[2]
+                            + view_proj[3][r]
+                    })
+                    .collect();
+                (c[3] > 0.0).then(|| NameTag {
+                    screen: [
+                        (c[0] / c[3] * 0.5 + 0.5) * width,
+                        (0.5 - c[1] / c[3] * 0.5) * height,
+                    ],
+                    scale: 0.026_666_67 * px_per_block / c[3],
+                    anchor,
+                    sneaking: d.sneaking,
+                    text: text.clone(),
                 })
-                .collect();
-            if c[3] <= 0.0 {
-                return None;
-            }
-            Some(NameTag {
-                screen: [
-                    (c[0] / c[3] * 0.5 + 0.5) * width,
-                    (0.5 - c[1] / c[3] * 0.5) * height,
-                ],
-                scale: 0.026_666_67 * px_per_block / c[3],
-                anchor,
-                sneaking: d.sneaking,
-                text: name.clone(),
-            })
+            };
+            // `RenderPlayer.renderNameTag`: within 10 blocks (the test is on the squared distance) a standing
+            // player's score line takes the tag's place and the name moves up by one line.
+            let below = d.team_tag.below.as_ref().filter(|_| {
+                matches!(d.class, Class::Player { .. }) && !d.sneaking && dist_sq < 100.0
+            });
+            let name_y = if below.is_some() {
+                y + BELOW_NAME_LIFT
+            } else {
+                y
+            };
+            Some(
+                below
+                    .and_then(|b| tag(y, b))
+                    .into_iter()
+                    .chain(tag(name_y, name))
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
         .collect()
 }
+
+/// `fontHeight * 1.15 * 0.02666667` blocks: how far `renderNameTag` lifts the name over the score line.
+const BELOW_NAME_LIFT: f64 = 9.0 * 1.15 * 0.026_666_67;
 
 #[cfg(test)]
 mod tests {
@@ -1442,6 +1476,7 @@ mod tests {
             hover_start: 0.0,
             hang: Default::default(),
             name: None,
+            team_tag: TeamTag::default(),
             skin: None,
             burning: false,
             eye_height: 1.62,
@@ -1890,6 +1925,49 @@ mod tests {
         })[0];
         assert!((child.anchor[1] - (0.9 + 0.5 - 0.45)).abs() < 1e-6);
         assert!(tag(&|d| d.ridden = true).is_empty());
+    }
+
+    #[test]
+    fn team_decides_the_tag_and_below_name_lifts_it() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let tags = |z: f64, f: &dyn Fn(&mut EntityDraw)| {
+            let mut d = steve();
+            d.pos = [0.0, 0.0, z];
+            d.name = Some("N".into());
+            d.team_tag.below = Some("17 HP".into());
+            f(&mut d);
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0)
+        };
+        let text = |t: &[NameTag]| t.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+        let near = tags(-9.9, &|_| {});
+        assert_eq!(text(&near).len(), 2);
+        let (below, name) = (
+            near.iter().find(|t| t.text == "17 HP").unwrap(),
+            near.iter().find(|t| t.text == "N").unwrap(),
+        );
+        assert!((name.anchor[1] - below.anchor[1] - 0.276).abs() < 1e-6);
+        assert_eq!(
+            text(&tags(-10.0, &|_| {})),
+            ["N"],
+            "10 blocks: squared distance is not under 100"
+        );
+        assert_eq!(text(&tags(-5.0, &|d| d.sneaking = true)), ["N"]);
+        // A team with a visible tag shows an invisible player; `never` hides a visible one.
+        let shown = |s: Option<bool>| move |d: &mut EntityDraw| d.team_tag.shown = s;
+        assert_eq!(
+            tags(-5.0, &|d| {
+                d.invisible = true;
+                shown(Some(true))(d)
+            })
+            .len(),
+            2
+        );
+        assert!(tags(-5.0, &shown(Some(false))).is_empty());
     }
 
     /// `w = -z` so a point at negative z is in front, like the real projection.

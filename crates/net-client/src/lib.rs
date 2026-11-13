@@ -202,11 +202,12 @@ pub enum NetEvent {
         stay: i32,
         fade_out: i32,
     },
-    /// S3B: `mode` 0 create, 1 remove, 2 update display text.
+    /// S3B: `mode` 0 create, 1 remove, 2 update display text. `hearts` is the `hearts` render type.
     ScoreboardObjective {
         name: String,
         display: String,
         mode: u8,
+        hearts: bool,
     },
     /// S3C.
     ScoreUpdate {
@@ -221,12 +222,15 @@ pub enum NetEvent {
         name: String,
     },
     /// S3E: `mode` 0 create, 1 remove, 2 update info, 3 add members, 4 remove members.
-    /// `prefix`/`suffix` are empty in modes 1, 3 and 4.
+    /// `prefix`, `suffix`, `visibility` (`nameTagVisibility`) and `color` (`Formatting` id, -1 none)
+    /// are empty or 0 in modes 1, 3 and 4.
     Team {
         name: String,
         mode: u8,
         prefix: String,
         suffix: String,
+        visibility: String,
+        color: i8,
         members: Vec<String>,
     },
     /// S29: `pos` in blocks.

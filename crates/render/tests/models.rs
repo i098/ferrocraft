@@ -51,6 +51,7 @@ fn draw(class: Class, x: f64, size: (f32, f32)) -> EntityDraw {
         burning: false,
         eye_height: size.1 * 0.85,
         always_name: false,
+        team_tag: Default::default(),
         pointed: false,
         ridden: false,
         child: false,

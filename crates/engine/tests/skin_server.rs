@@ -250,6 +250,7 @@ fn textures_property_skins_the_spawned_player() {
         burning: true,
         eye_height: 1.62,
         always_name: false,
+        team_tag: Default::default(),
         pointed: false,
         ridden: false,
         child: false,

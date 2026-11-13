@@ -717,6 +717,8 @@ impl Game {
                 ..input
             };
             p.speed_attr = Some(self.speed.value(input.sprint));
+            // Window 0 slots 5 to 8 are the worn armor; Depth Strider is enchantment 8.
+            p.depth_strider = world::dig::highest_enchant_level(&self.inv.player[5..=8], 8);
             p.jump_boost = self
                 .effects
                 .get(world::effects::id::JUMP_BOOST)
@@ -1415,5 +1417,59 @@ mod tests {
             dimension_changed: true,
         });
         assert_eq!(g.border, WorldBorder::default());
+    }
+
+    /// Oracle: 1.8.9 `EntityLivingBase.moveEntityWithHeading` raises the water speed with Depth Strider on
+    /// worn armor only (`EnchantmentHelper.getDepthStrider` reads `getInventory()`, the 4 armor slots).
+    #[test]
+    fn depth_strider_boots_speed_up_swimming_only_when_worn() {
+        use world::inventory::{ItemStack, Nbt, Tag};
+        let boots = |lvl: i16| {
+            let ench = Tag::Compound(vec![
+                ("id".into(), Tag::Short(8)),
+                ("lvl".into(), Tag::Short(lvl)),
+            ]);
+            Some(ItemStack {
+                id: 301,
+                count: 1,
+                damage: 0,
+                nbt: Some(Nbt {
+                    name: String::new(),
+                    root: vec![("ench".into(), Tag::List(vec![ench]))],
+                }),
+            })
+        };
+        let swim = |slot: Option<usize>, lvl: i16| {
+            let mut g = Game::new();
+            let mut c = floor_chunk();
+            for x in 0..16 {
+                for z in 0..16 {
+                    for y in 64..70 {
+                        c.set_block(x, y, z, 9 << 4);
+                    }
+                }
+            }
+            g.store.insert(c);
+            g.player = Some(world::Player::new([8.5, 64.0, 1.5], 0.0));
+            if let Some(i) = slot {
+                g.inv.player[i] = boots(lvl);
+            }
+            let go = Input {
+                forward: 1.0,
+                sprint: true,
+                ..IDLE
+            };
+            for _ in 0..12 {
+                g.tick(go);
+            }
+            g.player.as_ref().unwrap().pos[2] - 1.5
+        };
+        let bare = swim(None, 0);
+        let worn = swim(Some(8), 3);
+        assert!(bare > 0.0);
+        assert!(worn > bare * 1.2, "worn {worn} vs bare {bare}");
+        assert!(swim(Some(8), 1) > bare && swim(Some(8), 1) < worn);
+        assert_eq!(swim(Some(36), 3), bare, "a hotbar stack is not armor");
+        assert_eq!(swim(Some(5), 3), worn, "any armor slot counts");
     }
 }

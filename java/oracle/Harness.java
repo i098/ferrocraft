@@ -33,6 +33,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak> <using item>
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
  *   state <x> <y> <z> <id> <meta>  like block, any block state of 1.8.9; prints ok, or bad for a meta the block rejects
+ *   boots <level>                 wear leather boots with Depth Strider <level> (0 = none); needs "start"
  *   other <x> <y> <z>             spawn a still second player; must come after "start"
  *   props <id>                    liquid, solid, blocksMovement (0/1) and slipperiness float bits of a block
  *   boxes <x0> <y0> <z0> <x1> <y1> <z1>  World.getCollisions of the player in the box, one line of six doubles each, then "end"
@@ -185,6 +186,14 @@ public class Harness {
                     };
                     player.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), Float.parseFloat(t[4]), 0f);
                     break;
+                case "boots": {
+                    net.minecraft.flat.ItemStack boots = new net.minecraft.flat.ItemStack(net.minecraft.flat.Items.LEATHER_BOOTS);
+                    if (Integer.parseInt(t[1]) > 0) {
+                        boots.addEnchantment(net.minecraft.flat.Enchantment.DEPTH_STRIDER, Integer.parseInt(t[1]));
+                    }
+                    player.setEquipment(1, boots);
+                    break;
+                }
                 case "other": {
                     PlayerEntity other = new PlayerEntity(world, new GameProfile(UUID.randomUUID(), "other")) {
                         @Override

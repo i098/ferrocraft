@@ -3,6 +3,7 @@
 mod app;
 mod args;
 mod game;
+mod game_state;
 mod link;
 mod log;
 mod skins;

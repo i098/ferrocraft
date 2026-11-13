@@ -24,7 +24,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use auth::Auth;
-pub use chat::{formatted_text, plain_text, styled, Styled};
+pub use chat::{
+    formatted_text, plain_text, styled, Click, ClickAction, Hover, HoverAction, Styled,
+};
 pub use events::{PlayerInfo, PlayerListEvent};
 pub use ferrocraft_protocol::play::CombatEventKind;
 pub use pack::PackStatus;

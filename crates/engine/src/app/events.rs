@@ -533,7 +533,22 @@ impl App {
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
                 dirty.insert((x, z), e);
             }
-            Effect::Chat(runs) => {
+            Effect::Chat(mut runs) => {
+                if let Some(mods) = &self.mods {
+                    match mods.chat(
+                        ferrocraft_modhost::ChatKind::Chat,
+                        &ferrocraft_net_client::formatted_text(&runs),
+                    ) {
+                        ferrocraft_modhost::ChatVerdict::Keep => {}
+                        ferrocraft_modhost::ChatVerdict::Cancel => return,
+                        ferrocraft_modhost::ChatVerdict::Replace(text) => {
+                            runs = vec![ferrocraft_net_client::Styled {
+                                format: String::new(),
+                                text,
+                            }];
+                        }
+                    }
+                }
                 let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
                 let open = self.input.chat_input().is_some();
                 self.hud
@@ -652,7 +667,7 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
 }
 
 /// Opens a web page in the system browser.
-fn open_url(url: &str) {
+pub(super) fn open_url(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

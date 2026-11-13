@@ -1752,7 +1752,7 @@ mod tests {
     #[test]
     fn every_face_of_a_box_winds_counter_clockwise_seen_from_outside() {
         let mut d = steve();
-        d.class = Class::Object(50);
+        d.class = Class::Object(100);
         d.size = (1.0, 1.0);
         let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
         let center = [10.0, 64.5, 10.0];

@@ -1399,6 +1399,8 @@ fn entity_draw(
             },
             cape: Some(CapeSway::default()),
             stand: stand_look(e),
+            id: e.id,
+            arrows: e.meta.arrows.unwrap_or(0),
             ..Look::default()
         },
     }

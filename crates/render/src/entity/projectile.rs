@@ -112,6 +112,24 @@ fn rot_z(p: V3, a: f32) -> V3 {
 
 /// `ArrowRenderer`: two end caps and four 16x4 long faces of the 32x32 texture, in 1/16 blocks.
 fn arrow(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
+    arrow_model(out, skins, d.yaw, d.pitch, |p| {
+        [
+            (d.pos[0] + f64::from(p[0])) as f32,
+            (d.pos[1] + f64::from(p[1])) as f32,
+            (d.pos[2] + f64::from(p[2])) as f32,
+        ]
+    });
+}
+
+/// The arrow model turned by `yaw` and `pitch`; `at` maps a block offset from the arrow origin to
+/// world space.
+pub(super) fn arrow_model(
+    out: &mut MeshData,
+    skins: &Skins,
+    yaw: f32,
+    pitch: f32,
+    at: impl Fn(V3) -> V3,
+) {
     let v_off = skins.v_offset(Skin::Arrow);
     let tex = [Skins::width() as f32, Skins::height() as f32];
     let uv = |u: f32, v: f32| [u * 32.0 / tex[0], (v * 32.0 + v_off) / tex[1]];
@@ -119,13 +137,8 @@ fn arrow(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
         let s = 0.056_25;
         let p = [(p[0] - 4.0) * s, p[1] * s, p[2] * s];
         let p = rot_x(p, spin);
-        let p = rot_z(p, d.pitch.to_radians());
-        let p = rot_y(p, (d.yaw - 90.0).to_radians());
-        [
-            (d.pos[0] + f64::from(p[0])) as f32,
-            (d.pos[1] + f64::from(p[1])) as f32,
-            (d.pos[2] + f64::from(p[2])) as f32,
-        ]
+        let p = rot_z(p, pitch.to_radians());
+        at(rot_y(p, (yaw - 90.0).to_radians()))
     };
     let spin = 45.0_f32.to_radians();
     let (u0, u1, v0, v1) = (0.0, 0.156_25, 5.0 / 32.0, 10.0 / 32.0);

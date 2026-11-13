@@ -576,7 +576,7 @@ impl App {
     /// The scoreboard's say on a remote player's tag: the team-formatted name (`getDisplayName`), the team's
     /// visibility for this viewer and the below-name line.
     fn team_tag(&self, e: &Entity, d: &mut EntityDraw) {
-        let (Some(name), sb) = (&e.name, &self.hud.scoreboard) else {
+        let (Kind::Player, Some(name), sb) = (e.kind, &e.name, &self.hud.scoreboard) else {
             return;
         };
         d.name = Some(sb.format_name(name));
@@ -731,9 +731,7 @@ impl App {
             .collect();
         for (e, d) in self.game.entities.iter().zip(&mut draws) {
             d.view = [cam.yaw, cam.pitch];
-            if e.kind == Kind::Player {
-                self.team_tag(e, d);
-            }
+            self.team_tag(e, d);
             if e.kind == Kind::Object(90) {
                 d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());
             }

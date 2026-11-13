@@ -128,25 +128,7 @@ impl TabList {
             gui.fill(j2, k2, j2 + i1, k2 + 8, 553_648_127);
             gui.set_color(0xFFFF_FFFF);
             if flag {
-                let (x, y) = (j2 as f32, k2 as f32);
-                gui.blit_tinted(
-                    STEVE,
-                    x,
-                    y,
-                    8.0,
-                    8.0,
-                    [0.125, 0.125, 0.25, 0.25],
-                    0xFFFF_FFFF,
-                );
-                gui.blit_tinted(
-                    STEVE,
-                    x,
-                    y,
-                    8.0,
-                    8.0,
-                    [0.625, 0.125, 0.75, 0.25],
-                    0xFFFF_FFFF,
-                );
+                draw_head(gui, j2, k2);
                 j2 += 9;
             }
             let opened = self.opened;
@@ -238,68 +220,102 @@ fn draw_hearts(
     (opened, clock): (i64, Clock),
     (x1, x2, y): (i32, i32, i32),
 ) {
-    let (now, ticks) = (clock.now_ms, i64::from(clock.ticks));
-    if opened == h.render_visibility {
-        if score < h.last_health {
-            h.last_update = now;
-            h.flash_until = ticks + 20;
-        } else if score > h.last_health {
-            h.last_update = now;
-            h.flash_until = ticks + 10;
-        }
-    }
-    if now - h.last_update > 1000 || opened != h.render_visibility {
-        h.last_health = score;
-        h.health = score;
-        h.last_update = now;
-    }
-    h.render_visibility = opened;
-    h.last_health = score;
+    h.track(score, opened, clock);
     let shown = (score.max(h.health) as f32 / 2.0).ceil() as i32;
     let total = (score / 2).max((h.health / 2).max(10));
-    let flash = h.flash_until > ticks && (h.flash_until - ticks) / 3 % 2 == 1;
     if shown <= 0 {
         return;
     }
     let step = (((x2 - x1 - 4) as f32) / total as f32).min(9.0);
     if step > 3.0 {
-        let heart = |gui: &mut Gui, m: i32, u: i32| {
-            let x = x1 as f32 + m as f32 * step;
-            let uv = [u as f32 / 256.0, 0.0, (u + 9) as f32 / 256.0, 9.0 / 256.0];
-            gui.blit_tinted(ICONS, x, y as f32, 9.0, 9.0, uv, 0xFFFF_FFFF);
-        };
-        let container = if flash { 25 } else { 16 };
-        gui.set_color(0xFFFF_FFFF);
-        for m in shown..total {
-            heart(gui, m, container);
-        }
-        for m in 0..shown {
-            heart(gui, m, container);
-            let (half, wide) = (m * 2 + 1, m >= 10);
-            if flash {
-                if half < h.health {
-                    heart(gui, m, 70);
-                }
-                if half == h.health {
-                    heart(gui, m, 79);
-                }
-            }
-            if half < score {
-                heart(gui, m, if wide { 160 } else { 52 });
-            }
-            if half == score {
-                heart(gui, m, if wide { 169 } else { 61 });
-            }
-        }
+        let flash = h.flash_until > i64::from(clock.ticks)
+            && (h.flash_until - i64::from(clock.ticks)) / 3 % 2 == 1;
+        draw_heart_icons(gui, h, score, flash, (shown, total, step), (x1, y));
     } else {
-        let g = (score as f32 / 20.0).clamp(0.0, 1.0);
-        let color = ((((1.0 - g) * 255.0) as u32) << 16) | (((g * 255.0) as u32) << 8);
-        let mut s = format!("{:?}", score as f32 / 2.0);
-        if x2 - gui.width(&format!("{s}hp")) >= x1 {
-            s.push_str("hp");
+        draw_hearts_text(gui, score, (x1, x2, y));
+    }
+}
+
+impl HeartState {
+    /// The `PlayerInfo` bookkeeping at the top of `renderDisplayScore`.
+    fn track(&mut self, score: i32, opened: i64, clock: Clock) {
+        let (now, ticks) = (clock.now_ms, i64::from(clock.ticks));
+        if opened == self.render_visibility {
+            if score < self.last_health {
+                self.last_update = now;
+                self.flash_until = ticks + 20;
+            } else if score > self.last_health {
+                self.last_update = now;
+                self.flash_until = ticks + 10;
+            }
         }
-        let x = (x2 + x1) / 2 - gui.width(&s) / 2;
-        gui.text(&s, x as f32, y as f32, 0xFF00_0000 | color);
+        if now - self.last_update > 1000 || opened != self.render_visibility {
+            self.last_health = score;
+            self.health = score;
+            self.last_update = now;
+        }
+        self.render_visibility = opened;
+        self.last_health = score;
+    }
+}
+
+/// `shown` hearts of `total` containers, `step` px apart, over the empty containers.
+fn draw_heart_icons(
+    gui: &mut Gui,
+    h: &HeartState,
+    score: i32,
+    flash: bool,
+    (shown, total, step): (i32, i32, f32),
+    (x1, y): (i32, i32),
+) {
+    let heart = |gui: &mut Gui, m: i32, u: i32| {
+        let x = x1 as f32 + m as f32 * step;
+        let uv = [u as f32 / 256.0, 0.0, (u + 9) as f32 / 256.0, 9.0 / 256.0];
+        gui.blit_tinted(ICONS, x, y as f32, 9.0, 9.0, uv, 0xFFFF_FFFF);
+    };
+    let container = if flash { 25 } else { 16 };
+    gui.set_color(0xFFFF_FFFF);
+    for m in shown..total {
+        heart(gui, m, container);
+    }
+    for m in 0..shown {
+        heart(gui, m, container);
+        let half = m * 2 + 1;
+        if flash {
+            if half < h.health {
+                heart(gui, m, 70);
+            }
+            if half == h.health {
+                heart(gui, m, 79);
+            }
+        }
+        let u = if m >= 10 { [160, 169] } else { [52, 61] };
+        if half < score {
+            heart(gui, m, u[0]);
+        }
+        if half == score {
+            heart(gui, m, u[1]);
+        }
+    }
+}
+
+/// The `<n>hp` text, green for full health and red for none.
+fn draw_hearts_text(gui: &mut Gui, score: i32, (x1, x2, y): (i32, i32, i32)) {
+    let g = (score as f32 / 20.0).clamp(0.0, 1.0);
+    let color = ((((1.0 - g) * 255.0) as u32) << 16) | (((g * 255.0) as u32) << 8);
+    let mut s = format!("{:?}", score as f32 / 2.0);
+    if x2 - gui.width(&format!("{s}hp")) >= x1 {
+        s.push_str("hp");
+    }
+    let x = (x2 + x1) / 2 - gui.width(&s) / 2;
+    gui.text(&s, x as f32, y as f32, 0xFF00_0000 | color);
+}
+
+/// The head and its hat layer; every head is Steve's.
+fn draw_head(gui: &mut Gui, x: i32, y: i32) {
+    let (x, y) = (x as f32, y as f32);
+    for uv in [[0.125, 0.125, 0.25, 0.25], [0.625, 0.125, 0.75, 0.25]] {
+        gui.blit_tinted(STEVE, x, y, 8.0, 8.0, uv, 0xFFFF_FFFF);
     }
 }
 

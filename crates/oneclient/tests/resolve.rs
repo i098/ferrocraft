@@ -78,6 +78,61 @@ fn a_download_with_the_wrong_sha1_is_refused() {
     let _ = std::fs::remove_dir_all(out);
 }
 
+/// `/projects` answers with no projects: a denied mod must not slip through under its raw id.
+struct NoSlugs;
+
+impl Http for NoSlugs {
+    fn post_json(&self, u: &str, b: &Value) -> Result<Value, Error> {
+        Recorded.post_json(u, b)
+    }
+    fn get_json(&self, u: &str) -> Result<Value, Error> {
+        if u.contains("/projects?ids=") {
+            return Ok(Value::Array(vec![]));
+        }
+        Recorded.get_json(u)
+    }
+    fn get_bytes(&self, u: &str) -> Result<Vec<u8>, Error> {
+        Recorded.get_bytes(u)
+    }
+}
+
+/// Every Forge version file lacks its sha1.
+struct NoSha1;
+
+impl Http for NoSha1 {
+    fn post_json(&self, u: &str, b: &Value) -> Result<Value, Error> {
+        Recorded.post_json(u, b)
+    }
+    fn get_json(&self, u: &str) -> Result<Value, Error> {
+        let mut v = Recorded.get_json(u)?;
+        if let Some(versions) = v.as_array_mut() {
+            for ver in versions {
+                for f in ver["files"].as_array_mut().into_iter().flatten() {
+                    f["hashes"] = Value::Object(Default::default());
+                }
+            }
+        }
+        Ok(v)
+    }
+    fn get_bytes(&self, u: &str) -> Result<Vec<u8>, Error> {
+        Recorded.get_bytes(u)
+    }
+}
+
+#[test]
+fn a_missing_slug_is_an_error_not_a_pass() {
+    let out = std::env::temp_dir().join(format!("fc-oneclient-slug-{}", std::process::id()));
+    let err = resolve_with(&NoSlugs, &cluster(), &out).unwrap_err();
+    assert!(matches!(err, Error::Format(_)), "{err}");
+}
+
+#[test]
+fn a_version_file_without_sha1_is_an_error_not_no_forge() {
+    let out = std::env::temp_dir().join(format!("fc-oneclient-nosha-{}", std::process::id()));
+    let err = resolve_with(&NoSha1, &cluster(), &out).unwrap_err();
+    assert!(matches!(err, Error::Format(_)), "{err}");
+}
+
 /// Recorded replies, but each file's sha1 is the sha1 of its URL, which `get_bytes` returns:
 /// the jars themselves are not in the fixture.
 struct HonestFixture;

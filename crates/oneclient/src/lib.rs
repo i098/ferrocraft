@@ -153,7 +153,8 @@ pub fn resolve_with(
         let slug = slugs
             .iter()
             .find(|(i, _)| i == id)
-            .map_or(id, |(_, s)| s.as_str());
+            .map(|(_, s)| s.as_str())
+            .ok_or_else(|| Error::Format(format!("/projects returned no slug for {id}")))?;
         if DENY.contains(&slug) {
             out.denied.push(slug.to_owned());
         } else if let Some(file) = newest_forge_file(api, id)? {
@@ -225,12 +226,15 @@ fn newest_forge_file(api: &dyn Http, project: &str) -> Result<Option<File>, Erro
         .iter()
         .find(|f| f["primary"] == true)
         .or(files.first());
-    Ok(f.and_then(|f| {
-        Some(File {
-            url: f["url"].as_str()?.into(),
-            name: f["filename"].as_str()?.into(),
-            sha1: f["hashes"]["sha1"].as_str()?.to_ascii_lowercase(),
-        })
+    let Some(f) = f else { return Ok(None) };
+    let field = |v: Option<&str>| {
+        v.map(str::to_owned)
+            .ok_or_else(|| Error::Format(format!("{project}: version file lacks url/filename/sha1")))
+    };
+    Ok(Some(File {
+        url: field(f["url"].as_str())?,
+        name: field(f["filename"].as_str())?,
+        sha1: field(f["hashes"]["sha1"].as_str())?.to_ascii_lowercase(),
     }))
 }
 

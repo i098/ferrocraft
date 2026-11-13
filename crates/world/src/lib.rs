@@ -192,34 +192,7 @@ impl Player {
         self.sneaking = input.sneak;
         self.pushed_by_water = input.fly_speed.is_none();
         self.handle_water_movement(world);
-        // `EntityPlayerSP.onLivingUpdate`: the vertical flight keys, before `mobTick`.
-        if let Some(fly) = input.fly_speed {
-            if input.sneak {
-                self.vel[1] -= f64::from(fly * 3.0_f32);
-            }
-            if input.jump {
-                self.vel[1] += f64::from(fly * 3.0_f32);
-            }
-        }
-        if self.jump_ticks > 0 {
-            self.jump_ticks -= 1;
-        }
-        for v in &mut self.vel {
-            if v.abs() < 0.005 {
-                *v = 0.0;
-            }
-        }
-        if input.jump {
-            // `jumpInWater` and `jumpInLava` add 0.04F.
-            if self.in_water || self.in_lava(world) {
-                self.vel[1] += f64::from(0.04_f32);
-            } else if self.on_ground && self.jump_ticks == 0 {
-                self.jump();
-                self.jump_ticks = 10;
-            }
-        } else {
-            self.jump_ticks = 0;
-        }
+        self.apply_jump_and_flight_keys(world, input);
         // `MovementInputFromOptions` (0.3 while sneaking), then `onLivingUpdate` (0.2 while using an item).
         let (mut strafe, mut forward) = (input.strafe, input.forward);
         if input.sneak {
@@ -236,6 +209,36 @@ impl Player {
         if self.sprinting {
             self.jump_movement_factor =
                 (f64::from(self.jump_movement_factor) + f64::from(FLYING_SPEED) * 0.3) as f32;
+        }
+    }
+
+    /// The vertical flight keys and the jump key of `EntityPlayerSP.onLivingUpdate`, before `mobTick`.
+    fn apply_jump_and_flight_keys(&mut self, world: &dyn World, input: Input) {
+        if let Some(fly) = input.fly_speed {
+            let lift = f64::from(fly * 3.0_f32);
+            if input.sneak {
+                self.vel[1] -= lift;
+            }
+            if input.jump {
+                self.vel[1] += lift;
+            }
+        }
+        if self.jump_ticks > 0 {
+            self.jump_ticks -= 1;
+        }
+        for v in &mut self.vel {
+            if v.abs() < 0.005 {
+                *v = 0.0;
+            }
+        }
+        if !input.jump {
+            self.jump_ticks = 0;
+        } else if self.in_water || self.in_lava(world) {
+            // `jumpInWater` and `jumpInLava` add 0.04F.
+            self.vel[1] += f64::from(0.04_f32);
+        } else if self.on_ground && self.jump_ticks == 0 {
+            self.jump();
+            self.jump_ticks = 10;
         }
     }
 
@@ -618,18 +621,7 @@ impl Player {
         if !self.in_water {
             self.handle_water_movement(world);
         }
-        let (x, z) = (floor(self.pos[0]), floor(self.pos[2]));
-        let y = floor(self.pos[1] - 0.200_000_002_980_232_24);
-        let mut under = world.block(x, y, z) >> 4;
-        // Standing on a fence post or a wall counts: their boxes reach 0.5 above the block.
-        if under == 0
-            && matches!(
-                world.block(x, y - 1, z) >> 4,
-                85 | 107 | 113 | 139 | 183..=192
-            )
-        {
-            under = world.block(x, y - 1, z) >> 4;
-        }
+        let under = Self::block_below(world, self.pos);
         if motion[0] != d[0] {
             self.vel[0] = 0.0;
         }
@@ -646,6 +638,37 @@ impl Player {
         }
     }
 
+    /// The block id that `moveEntity` passes to `updateFallState`: the cell 0.2 under the feet; for
+    /// air, a fence post or a wall below counts, as their boxes reach 0.5 above the block.
+    fn block_below(world: &dyn World, pos: [f64; 3]) -> u16 {
+        let (x, z) = (floor(pos[0]), floor(pos[2]));
+        let y = floor(pos[1] - 0.200_000_002_980_232_24);
+        let under = world.block(x, y, z) >> 4;
+        let below = world.block(x, y - 1, z) >> 4;
+        if under == 0 && matches!(below, 85 | 107 | 113 | 139 | 183..=192) {
+            below
+        } else {
+            under
+        }
+    }
+
+    /// `Block.onEntityCollidedWithBlock` of cobweb, soul sand and slime for one cell.
+    fn collide_with(&mut self, id: u16) {
+        match id {
+            30 => self.in_web = true,
+            88 => {
+                self.vel[0] *= 0.4;
+                self.vel[2] *= 0.4;
+            }
+            165 if self.vel[1].abs() < 0.1 && !self.sneaking => {
+                let slow = 0.4 + self.vel[1].abs() * 0.2;
+                self.vel[0] *= slow;
+                self.vel[2] *= slow;
+            }
+            _ => {}
+        }
+    }
+
     /// `Entity.doBlockCollisions`: cobweb, soul sand and slime act on a player inside their cell.
     fn block_collisions(&mut self, world: &dyn World) {
         let lo = [0, 1, 2].map(|a| floor(self.bb.min[a] + 0.001));
@@ -653,19 +676,7 @@ impl Player {
         for z in lo[2]..=hi[2] {
             for y in lo[1]..=hi[1] {
                 for x in lo[0]..=hi[0] {
-                    match world.block(x, y, z) >> 4 {
-                        30 => self.in_web = true,
-                        88 => {
-                            self.vel[0] *= 0.4;
-                            self.vel[2] *= 0.4;
-                        }
-                        165 if self.vel[1].abs() < 0.1 && !self.sneaking => {
-                            let slow = 0.4 + self.vel[1].abs() * 0.2;
-                            self.vel[0] *= slow;
-                            self.vel[2] *= slow;
-                        }
-                        _ => {}
-                    }
+                    self.collide_with(world.block(x, y, z) >> 4);
                 }
             }
         }

@@ -375,17 +375,22 @@ pub(crate) fn push_boxes(at: At, pos: [i32; 3], out: &mut Vec<Cell>) {
         139 => out.extend(selection_box(at, pos).map(|b| [b[0], b[1], b[2], b[3], 1.5, b[5]])),
         64 | 71 | 193..=197 => out.extend(selection_box(at, pos)),
         _ if id > 197 || NO_COLLISION.contains(&id) => {}
-        _ => match SHAPES.iter().find(|s| s.0 == id) {
-            None => out.push([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
-            Some((_, groups)) => {
-                // A metadata value that vanilla rejects falls back to the first group.
-                let group = groups
-                    .iter()
-                    .find(|g| g.0 >> meta & 1 != 0)
-                    .unwrap_or(&groups[0]);
-                out.extend_from_slice(group.1);
-            }
-        },
+        _ => table_boxes(id, meta, out),
+    }
+}
+
+/// The boxes of a block state from `SHAPES`; a full cube for ids without an entry.
+fn table_boxes(id: u16, meta: u16, out: &mut Vec<Cell>) {
+    match SHAPES.iter().find(|s| s.0 == id) {
+        None => out.push([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+        Some((_, groups)) => {
+            // A metadata value that vanilla rejects falls back to the first group.
+            let group = groups
+                .iter()
+                .find(|g| g.0 >> meta & 1 != 0)
+                .unwrap_or(&groups[0]);
+            out.extend_from_slice(group.1);
+        }
     }
 }
 
@@ -404,120 +409,153 @@ fn fence(at: At, [x, y, z]: [i32; 3], id: u16, out: &mut Vec<Cell>) {
     }
 }
 
-/// `BlockPane.addCollisionBoxesToList`.
+/// `BlockPane.addCollisionBoxesToList`: one slab along x, one along z. `lo` and `hi` are the
+/// joins at the low and high end of the axis, `any` a join on either axis.
+fn pane_arm(lo: bool, hi: bool, any: bool, along_x: bool, out: &mut Vec<Cell>) {
+    let (a, b) = if (!lo || !hi) && any {
+        if lo {
+            (0.0, 0.5)
+        } else if hi {
+            (0.5, 1.0)
+        } else {
+            return;
+        }
+    } else {
+        (0.0, 1.0)
+    };
+    out.push(if along_x {
+        [a, 0.0, 0.4375, b, 1.0, 0.5625]
+    } else {
+        [0.4375, 0.0, a, 0.5625, 1.0, b]
+    });
+}
+
 fn pane(at: At, [x, y, z]: [i32; 3], out: &mut Vec<Cell>) {
     let joins = |p: [i32; 3]| pane_joins(at(p) >> 4);
     let (n, s) = (joins([x, y, z - 1]), joins([x, y, z + 1]));
     let (w, e) = (joins([x - 1, y, z]), joins([x + 1, y, z]));
     let any = n || s || w || e;
-    if (!w || !e) && any {
-        if w {
-            out.push([0.0, 0.0, 0.4375, 0.5, 1.0, 0.5625]);
-        } else if e {
-            out.push([0.5, 0.0, 0.4375, 1.0, 1.0, 0.5625]);
-        }
-    } else {
-        out.push([0.0, 0.0, 0.4375, 1.0, 1.0, 0.5625]);
+    pane_arm(w, e, any, true, out);
+    pane_arm(n, s, any, false, out);
+}
+
+const EAST: u16 = 0;
+const WEST: u16 = 1;
+const SOUTH: u16 = 2;
+const NORTH: u16 = 3;
+
+/// Neighbour lookups of one stair: same half, and the facing it asks about.
+struct Stair<'a> {
+    at: At<'a>,
+    facing: u16,
+    top: bool,
+}
+
+impl Stair<'_> {
+    /// A neighbouring stair of the same half and `facing`, as `func_176307_f`.
+    fn same(&self, p: [i32; 3]) -> bool {
+        self.other(p) == Some(self.facing)
     }
-    if (!n || !s) && any {
-        if n {
-            out.push([0.4375, 0.0, 0.0, 0.5625, 1.0, 0.5]);
-        } else if s {
-            out.push([0.4375, 0.0, 0.5, 0.5625, 1.0, 1.0]);
+
+    /// The facing of a neighbouring stair of the same half.
+    fn other(&self, p: [i32; 3]) -> Option<u16> {
+        let s = (self.at)(p);
+        (is_stairs(s >> 4) && (s & 4 != 0) == self.top).then_some(s & 3)
+    }
+
+    /// `func_176306_h`: the step on the side the stair faces, cut where a stair beside it turns.
+    /// Returns `[x0, x1, z0, z1]` and whether the step is uncut.
+    fn step(&self, pos: [i32; 3]) -> ([f64; 4], bool) {
+        if self.facing <= WEST {
+            self.step_x(pos)
+        } else {
+            self.step_z(pos)
         }
-    } else {
-        out.push([0.4375, 0.0, 0.0, 0.5625, 1.0, 1.0]);
+    }
+
+    fn step_x(&self, [x, y, z]: [i32; 3]) -> ([f64; 4], bool) {
+        let east = self.facing == EAST;
+        let mut b = [0.0, 1.0, 0.0, 1.0];
+        b[usize::from(!east)] = 0.5;
+        let cut = match self.other([if east { x + 1 } else { x - 1 }, y, z]) {
+            Some(NORTH) if !self.same([x, y, z + 1]) => Some(3),
+            Some(SOUTH) if !self.same([x, y, z - 1]) => Some(2),
+            _ => None,
+        };
+        if let Some(i) = cut {
+            b[i] = 0.5;
+        }
+        (b, cut.is_none())
+    }
+
+    fn step_z(&self, [x, y, z]: [i32; 3]) -> ([f64; 4], bool) {
+        let south = self.facing == SOUTH;
+        let mut b = [0.0, 1.0, 0.0, 0.5];
+        if south {
+            (b[2], b[3]) = (0.5, 1.0);
+        }
+        let cut = match self.other([x, y, if south { z + 1 } else { z - 1 }]) {
+            Some(EAST) if !self.same([x + 1, y, z]) => Some(1),
+            Some(WEST) if !self.same([x - 1, y, z]) => Some(0),
+            _ => None,
+        };
+        if let Some(i) = cut {
+            b[i] = 0.5;
+        }
+        (b, cut.is_none())
+    }
+
+    /// `func_176304_i`: the second step of an inner corner, on the side opposite the stair beside.
+    /// Returns `[x0, z0, x1, z1]`.
+    fn corner(&self, pos: [i32; 3]) -> Option<[f64; 4]> {
+        if self.facing <= WEST {
+            self.corner_x(pos)
+        } else {
+            self.corner_z(pos)
+        }
+    }
+
+    fn corner_x(&self, [x, y, z]: [i32; 3]) -> Option<[f64; 4]> {
+        let east = self.facing == EAST;
+        let (c0, c1) = if east { (0.0, 0.5) } else { (0.5, 1.0) };
+        match self.other([if east { x - 1 } else { x + 1 }, y, z]) {
+            Some(NORTH) if !self.same([x, y, z - 1]) => Some([c0, 0.0, c1, 0.5]),
+            Some(SOUTH) if !self.same([x, y, z + 1]) => Some([c0, 0.5, c1, 1.0]),
+            _ => None,
+        }
+    }
+
+    fn corner_z(&self, [x, y, z]: [i32; 3]) -> Option<[f64; 4]> {
+        let south = self.facing == SOUTH;
+        let (c0, c1) = if south { (0.0, 0.5) } else { (0.5, 1.0) };
+        match self.other([x, y, if south { z - 1 } else { z + 1 }]) {
+            Some(EAST) if !self.same([x + 1, y, z]) => Some([0.0, c0, 0.5, c1]),
+            Some(WEST) if !self.same([x - 1, y, z]) => Some([0.5, c0, 1.0, c1]),
+            _ => None,
+        }
     }
 }
 
 /// `BlockStairs.addCollisionBoxesToList`: the slab half, the step, and the second step of an
 /// inner corner. Facing of metadata bits 0 and 1: east, west, south, north.
-fn stairs(at: At, [x, y, z]: [i32; 3], state: u16, out: &mut Vec<Cell>) {
-    const EAST: u16 = 0;
-    const WEST: u16 = 1;
-    const SOUTH: u16 = 2;
-    const NORTH: u16 = 3;
-    let (facing, top) = (state & 3, state & 4 != 0);
-    let (lo, hi) = if top { (0.0, 0.5) } else { (0.5, 1.0) };
-    out.push(if top {
+fn stairs(at: At, pos: [i32; 3], state: u16, out: &mut Vec<Cell>) {
+    let stair = Stair {
+        at,
+        facing: state & 3,
+        top: state & 4 != 0,
+    };
+    let (lo, hi) = if stair.top { (0.0, 0.5) } else { (0.5, 1.0) };
+    out.push(if stair.top {
         [0.0, 0.5, 0.0, 1.0, 1.0, 1.0]
     } else {
         [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]
     });
-    // A neighbouring stair of the same half and `facing`, as `func_176307_f`.
-    let same = |p: [i32; 3]| {
-        let s = at(p);
-        is_stairs(s >> 4) && s & 3 == facing && (s & 4 != 0) == top
-    };
-    // The facing of a neighbouring stair of the same half.
-    let other = |p: [i32; 3]| {
-        let s = at(p);
-        (is_stairs(s >> 4) && (s & 4 != 0) == top).then_some(s & 3)
-    };
-    // `func_176306_h`: the step on the side the stair faces, cut where a stair beside it turns.
-    let (mut x0, mut x1, mut z0, mut z1) = (0.0, 1.0, 0.0, 0.5);
-    let mut plain = true;
-    match facing {
-        EAST | WEST => {
-            let side = if facing == EAST { 1 } else { -1 };
-            if facing == EAST {
-                x0 = 0.5;
-            } else {
-                x1 = 0.5;
-            }
-            z1 = 1.0;
-            match other([x + side, y, z]) {
-                Some(NORTH) if !same([x, y, z + 1]) => (z1, plain) = (0.5, false),
-                Some(SOUTH) if !same([x, y, z - 1]) => (z0, plain) = (0.5, false),
-                _ => {}
-            }
-        }
-        _ => {
-            let side = if facing == SOUTH { 1 } else { -1 };
-            if facing == SOUTH {
-                (z0, z1) = (0.5, 1.0);
-            }
-            match other([x, y, z + side]) {
-                Some(EAST) if !same([x + 1, y, z]) => (x1, plain) = (0.5, false),
-                Some(WEST) if !same([x - 1, y, z]) => (x0, plain) = (0.5, false),
-                _ => {}
-            }
-        }
-    }
+    let ([x0, x1, z0, z1], plain) = stair.step(pos);
     out.push([x0, lo, z0, x1, hi, z1]);
     if !plain {
         return;
     }
-    // `func_176304_i`: the second step of an inner corner, on the side opposite the stair beside.
-    let corner = match facing {
-        EAST | WEST => {
-            let side = if facing == EAST { -1 } else { 1 };
-            let (cx0, cx1) = if facing == EAST {
-                (0.0, 0.5)
-            } else {
-                (0.5, 1.0)
-            };
-            match other([x + side, y, z]) {
-                Some(NORTH) if !same([x, y, z - 1]) => Some([cx0, 0.0, cx1, 0.5]),
-                Some(SOUTH) if !same([x, y, z + 1]) => Some([cx0, 0.5, cx1, 1.0]),
-                _ => None,
-            }
-        }
-        _ => {
-            let side = if facing == SOUTH { -1 } else { 1 };
-            let (cz0, cz1) = if facing == SOUTH {
-                (0.0, 0.5)
-            } else {
-                (0.5, 1.0)
-            };
-            match other([x, y, z + side]) {
-                Some(EAST) if !same([x + 1, y, z]) => Some([0.0, cz0, 0.5, cz1]),
-                Some(WEST) if !same([x - 1, y, z]) => Some([0.5, cz0, 1.0, cz1]),
-                _ => None,
-            }
-        }
-    };
-    if let Some([a, b, c, d]) = corner {
+    if let Some([a, b, c, d]) = stair.corner(pos) {
         out.push([a, lo, b, c, hi, d]);
     }
 }

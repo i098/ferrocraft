@@ -1077,18 +1077,32 @@ impl TextField {
         }
     }
 
+    fn draw_frame(&self, c: &mut dyn Canvas) {
+        if !self.background {
+            return;
+        }
+        c.fill(
+            self.x - 1,
+            self.y - 1,
+            self.x + self.w + 1,
+            self.y + self.h + 1,
+            0xffa0a0a0,
+        );
+        c.fill(self.x, self.y, self.x + self.w, self.y + self.h, 0xff000000);
+    }
+
+    /// Where the text starts: padded and centred in the box, or at the corner without a background.
+    fn text_origin(&self) -> (i32, i32) {
+        if self.background {
+            (self.x + 4, self.y + (self.h - 8) / 2)
+        } else {
+            (self.x, self.y)
+        }
+    }
+
     /// `drawTextBox`.
     pub fn draw(&self, c: &mut dyn Canvas) {
-        if self.background {
-            c.fill(
-                self.x - 1,
-                self.y - 1,
-                self.x + self.w + 1,
-                self.y + self.h + 1,
-                0xffa0a0a0,
-            );
-            c.fill(self.x, self.y, self.x + self.w, self.y + self.h, 0xff000000);
-        }
+        self.draw_frame(c);
         let color = self.color;
         let len = self.len();
         let shown = trim(c, self.slice(self.scroll, len), self.inner_width(), false);
@@ -1097,11 +1111,7 @@ impl TextField {
         let sel = (self.sel as isize - self.scroll as isize).min(shown_len as isize);
         let cursor_in = cur >= 0 && cur as usize <= shown_len;
         let blink = self.focused && (self.ticks / 6).is_multiple_of(2) && cursor_in;
-        let (x0, y0) = if self.background {
-            (self.x + 4, self.y + (self.h - 8) / 2)
-        } else {
-            (self.x, self.y)
-        };
+        let (x0, y0) = self.text_origin();
         let byte_at = |i: usize| shown.char_indices().nth(i).map_or(shown.len(), |(b, _)| b);
         let mut x = x0;
         if !shown.is_empty() {

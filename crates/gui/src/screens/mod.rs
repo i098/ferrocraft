@@ -848,6 +848,15 @@ impl TextField {
         self.text.chars().count()
     }
 
+    /// `getCursorPosition`, in chars.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn units(&self) -> usize {
+        self.text.encode_utf16().count()
+    }
+
     fn byte(&self, i: usize) -> usize {
         self.text
             .char_indices()
@@ -861,7 +870,7 @@ impl TextField {
 
     /// `setText`.
     pub fn set(&mut self, s: &str, m: &dyn Metrics) {
-        self.text = s.chars().take(self.max_len).collect();
+        self.text = fit_units(s, self.max_len);
         self.move_end(m);
     }
 
@@ -895,11 +904,13 @@ impl TextField {
     }
 
     /// `writeText`.
-    fn write(&mut self, s: &str, m: &dyn Metrics) {
+    pub fn write(&mut self, s: &str, m: &dyn Metrics) {
         let allowed: String = s.chars().filter(|&c| allowed_char(c)).collect();
         let (a, b) = (self.cursor.min(self.sel), self.cursor.max(self.sel));
-        let room = self.max_len.saturating_sub(self.len() - (b - a));
-        let ins: String = allowed.chars().take(room).collect();
+        let room = self
+            .max_len
+            .saturating_sub(self.units() - self.slice(a, b).encode_utf16().count());
+        let ins = fit_units(&allowed, room);
         let n = ins.chars().count();
         self.text = format!("{}{}{}", self.slice(0, a), ins, self.slice(b, self.len()));
         self.set_cursor(a + n, m);
@@ -951,7 +962,7 @@ impl TextField {
     }
 
     /// `setCursorPosition`: moves both ends.
-    fn set_cursor(&mut self, i: usize, m: &dyn Metrics) {
+    pub fn set_cursor(&mut self, i: usize, m: &dyn Metrics) {
         self.cursor = i.min(self.len());
         self.set_sel(self.cursor, m);
     }
@@ -1173,6 +1184,17 @@ fn draw_caret(c: &mut dyn Canvas, mid: bool, caret: i32, y0: i32, color: u32) {
     } else {
         c.text("_", caret as f32, y0 as f32, color, true);
     }
+}
+
+/// The longest prefix of `s` that fits `room` UTF-16 units, as Java `String.length` counts.
+fn fit_units(s: &str, room: usize) -> String {
+    let mut used = 0;
+    s.chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= room
+        })
+        .collect()
 }
 
 /// `ChatAllowedCharacters.isAllowedCharacter`.

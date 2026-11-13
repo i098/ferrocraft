@@ -1,5 +1,7 @@
 //! `GuiNewChat` (the chat lines over the hotbar) and the `GuiChat` input line.
 
+use crate::canvas::GuiCanvas;
+use crate::screens::TextField;
 use crate::toolkit::{strip_codes, Gui, Metrics, FONT_HEIGHT};
 use ferrocraft_net_client::{Click, ClickAction, Hover, Styled};
 
@@ -398,20 +400,11 @@ fn break_line(m: Metrics, s4: &str, room: i32, line_used: bool) -> (String, Opti
     }
 }
 
-/// `GuiChat.drawScreen` input line: the dark bar and the text field with its blinking `_`.
-pub fn draw_input(gui: &mut Gui, text: &str, cursor_counter: i32) {
+/// `GuiChat.drawScreen` input line: the dark bar and the text field with its caret and selection.
+pub fn draw_input(gui: &mut Gui, field: &TextField) {
     let (w, h) = (gui.scale.width, gui.scale.height);
     gui.fill(2, h - 14, w - 2, h - 2, 0x8000_0000);
-    let field = w - 4;
-    let shown = if gui.width(text) > field {
-        gui.metrics().trim(text, field, true)
-    } else {
-        text.to_owned()
-    };
-    let end = gui.text(&shown, 4.0, (h - 12) as f32, 0xE0E0E0);
-    if cursor_counter / 6 % 2 == 0 {
-        gui.text("_", end as f32, (h - 12) as f32, 0xE0E0E0);
-    }
+    field.draw(&mut GuiCanvas::new(gui));
 }
 
 #[cfg(test)]

@@ -445,23 +445,7 @@ impl Game {
     /// Chunks, blocks, entities, time, weather, chat and disconnects.
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::Respawn => {
-                self.entity_flags = 0;
-                self.vehicle = None;
-                self.border = WorldBorder::default();
-                self.camera = None;
-                (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
-                (self.death_message, self.killer_id, self.score) = (None, -1, 0);
-                self.effects.clear();
-                self.speed = world::effects::Speed::default();
-                self.potion_color = 0;
-                self.potion_ambient = false;
-                self.digger = Digger::default();
-                self.cracks.clear();
-                self.bolts.clear();
-                self.store.clear();
-                return Some(Effect::Clear);
-            }
+            NetEvent::Respawn { dimension_changed } => return Some(self.respawn(dimension_changed)),
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
                 self.store.insert(*c);
@@ -483,6 +467,26 @@ impl Game {
             ev => self.apply_state(ev),
         }
         None
+    }
+
+    fn respawn(&mut self, dimension_changed: bool) -> Effect {
+        self.entity_flags = 0;
+        self.vehicle = None;
+        if dimension_changed {
+            self.border = WorldBorder::default();
+        }
+        self.camera = None;
+        (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
+        (self.death_message, self.killer_id, self.score) = (None, -1, 0);
+        self.effects.clear();
+        self.speed = world::effects::Speed::default();
+        self.potion_color = 0;
+        self.potion_ambient = false;
+        self.digger = Digger::default();
+        self.cracks.clear();
+        self.bolts.clear();
+        self.store.clear();
+        Effect::Clear
     }
 
     fn apply_entity(&mut self, e: EntityEvent) {
@@ -1032,7 +1036,10 @@ mod tests {
         assert!(solid.iter().zip(&want).all(|(a, b)| a == b));
         let mut g = Game::new();
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
-        assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
+        assert_eq!(
+            g.apply(NetEvent::Respawn { dimension_changed: false }),
+            Some(Effect::Clear)
+        );
         assert!(g.store.is_empty());
     }
 
@@ -1218,7 +1225,7 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Steve was slain by Bob"));
-        g.apply(NetEvent::Respawn);
+        g.apply(NetEvent::Respawn { dimension_changed: false });
         assert_eq!(g.death_message, None);
         assert_eq!(g.score, 0);
         assert_eq!(g.killer_id, -1);
@@ -1259,7 +1266,18 @@ mod tests {
         g.apply(flags(7, Some(0)));
         assert_eq!(g.entity_flags, 0);
         g.apply(flags(7, Some(1)));
-        g.apply(NetEvent::Respawn);
+        g.apply(NetEvent::Respawn { dimension_changed: false });
         assert_eq!(g.entity_flags, 0);
+    }
+
+    #[test]
+    fn respawn_resets_border_only_on_dimension_change() {
+        let mut g = Game::new();
+        g.apply(NetEvent::WorldBorder(world::border::Update::SetSize(100.0)));
+        assert_ne!(g.border, WorldBorder::default());
+        g.apply(NetEvent::Respawn { dimension_changed: false });
+        assert_ne!(g.border, WorldBorder::default());
+        g.apply(NetEvent::Respawn { dimension_changed: true });
+        assert_eq!(g.border, WorldBorder::default());
     }
 }

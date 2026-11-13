@@ -59,9 +59,10 @@ fn handle(
             vec![]
         }
         cb::Packet::Respawn(r) => {
+            let changed = *dimension != r.dimension;
             *dimension = r.dimension;
             vec![
-                NetEvent::Respawn,
+                NetEvent::Respawn { dimension_changed: changed },
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
                 NetEvent::Difficulty(r.difficulty),

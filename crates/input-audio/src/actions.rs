@@ -29,7 +29,7 @@ pub enum Action {
     /// One wheel step in game: -1 or +1 as vanilla `Mouse.getEventDWheel` sign.
     /// Apply it with [`scroll_slot`].
     HotbarScroll(i32),
-    /// One wheel step while chat is open: scroll the chat window.
+    /// One wheel step while chat is open: scroll the chat window by this many lines (7, or 1 with Shift).
     ChatScroll(i32),
     /// PageUp (+1) or PageDown (-1) in chat: `GuiNewChat.scroll` by a page less one line.
     ChatPage(i32),

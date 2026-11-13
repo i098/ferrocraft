@@ -275,7 +275,9 @@ impl InputState {
             return;
         }
         if self.chat.is_some() {
-            self.actions.push_back(Action::ChatScroll(step));
+            // `GuiChat.handleMouseInput`: 7 lines a step, 1 with Shift held.
+            let lines = if self.shift_down { 1 } else { 7 };
+            self.actions.push_back(Action::ChatScroll(step * lines));
         } else if !self.screen_open {
             self.actions.push_back(Action::HotbarScroll(step));
         }
@@ -1057,6 +1059,19 @@ mod tests {
         s.key_event(KeyCode::ControlLeft, true, false, None, (&Mono, &mut clip));
         s.key_event(KeyCode::KeyV, true, false, None, (&Mono, &mut clip));
         assert_eq!(s.chat_input().map(|t| t.encode_utf16().count()), Some(99));
+    }
+
+    #[test]
+    fn chat_wheel_scrolls_7_lines_or_1_with_shift() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        s.wheel(1.0);
+        press(&mut s, KeyCode::ShiftLeft);
+        s.wheel(-1.0);
+        assert_eq!(
+            s.take_actions(),
+            [Action::ChatScroll(7), Action::ChatScroll(-1)]
+        );
     }
 
     #[test]

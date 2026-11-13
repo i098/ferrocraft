@@ -1000,13 +1000,13 @@ impl App {
         }
     }
 
-    /// The wheel scrolls 7 lines. `GuiChat.keyTyped` scrolls `getLineCount() - 1` for PageUp and the
+    /// `GuiChat.keyTyped` scrolls `getLineCount() - 1` for PageUp and the
     /// negative for PageDown.
     fn scroll_chat(&mut self, action: Action) {
         let open = self.input.chat_input().is_some();
         let lines = self.hud.chat.settings.line_count(true) - 1;
         match action {
-            Action::ChatScroll(step) => self.hud.chat.scroll(step * 7, open),
+            Action::ChatScroll(lines) => self.hud.chat.scroll(lines, open),
             Action::ChatPage(step) => self.hud.chat.scroll(step * lines, true),
             _ => {}
         }

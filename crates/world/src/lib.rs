@@ -9,6 +9,7 @@
 //! strider, riding.
 //! The differential tests check every tick against the real 1.8.9 jar through `oracle`.
 
+pub mod border;
 pub mod chunk;
 pub mod dig;
 pub mod effects;

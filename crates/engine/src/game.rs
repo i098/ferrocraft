@@ -4,6 +4,7 @@ use crate::swing::Swing;
 use crate::weather::Weather;
 use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled};
 use std::collections::HashMap;
+use world::border::WorldBorder;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
@@ -52,12 +53,30 @@ pub enum Effect {
     Died,
 }
 
-struct Collision<'a>(&'a ChunkStore);
+/// `World.getCollidingBoundingBoxes`: the chunks, and for a player inside the border every block outside it
+/// is stone, which is what stops the walk at the wall. `walls` is `WorldBorder::bounds`.
+struct Collision<'a> {
+    store: &'a ChunkStore,
+    walls: Option<[f64; 4]>,
+}
 
 impl World for Collision<'_> {
     fn block(&self, x: i32, y: i32, z: i32) -> u16 {
-        self.0.get_block(x, y, z)
+        if self
+            .walls
+            .is_some_and(|w| !WorldBorder::contains_block(w, x, z))
+        {
+            return 1 << 4;
+        }
+        self.store.get_block(x, y, z)
     }
+}
+
+/// `System.currentTimeMillis`, which the border's resize runs on.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Local block removals of the dig state machine, remembering which chunks changed.
@@ -87,6 +106,10 @@ pub struct Game {
     pub entity_id: i32,
     pub entity_flags: u8,
     pub vehicle: Option<i32>,
+    /// `World.getWorldBorder`, set by `S44`.
+    pub border: WorldBorder,
+    /// `Entity.isOutsideBorder` of the local player.
+    border_outside: bool,
     /// `Minecraft.renderViewEntity` when it is not the local player: the spectated entity.
     /// Join and respawn set the player back without a shader change, as vanilla does.
     pub camera: Option<i32>,
@@ -173,6 +196,8 @@ impl Game {
             entity_id: -1,
             entity_flags: 0,
             vehicle: None,
+            border: WorldBorder::default(),
+            border_outside: false,
             camera: None,
             creative: false,
             gamemode: 0,
@@ -277,6 +302,7 @@ impl Game {
                 self.health_seen = false;
                 (self.death_message, self.killer_id, self.score) = (None, -1, 0);
                 self.vehicle = None;
+                self.border = WorldBorder::default();
                 self.camera = None;
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
@@ -284,6 +310,7 @@ impl Game {
                 self.inv = Inventory::default();
                 self.set_gamemode(gamemode);
             }
+            NetEvent::WorldBorder(u) => self.border.apply(u, now_ms()),
             NetEvent::Difficulty(d) => self.difficulty = d,
             NetEvent::Entity(EntityEvent::Metadata { id, flags, .. }) if id == self.entity_id => {
                 self.entity_flags = flags.unwrap_or(self.entity_flags);
@@ -407,21 +434,8 @@ impl Game {
     /// Chunks, blocks, entities, time, weather, chat and disconnects.
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::Respawn => {
-                self.entity_flags = 0;
-                self.vehicle = None;
-                self.camera = None;
-                (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
-                (self.death_message, self.killer_id, self.score) = (None, -1, 0);
-                self.effects.clear();
-                self.speed = world::effects::Speed::default();
-                self.potion_color = 0;
-                self.potion_ambient = false;
-                self.digger = Digger::default();
-                self.cracks.clear();
-                self.bolts.clear();
-                self.store.clear();
-                return Some(Effect::Clear);
+            NetEvent::Respawn { dimension_changed } => {
+                return Some(self.respawn(dimension_changed))
             }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
@@ -444,6 +458,26 @@ impl Game {
             ev => self.apply_state(ev),
         }
         None
+    }
+
+    fn respawn(&mut self, dimension_changed: bool) -> Effect {
+        self.entity_flags = 0;
+        self.vehicle = None;
+        if dimension_changed {
+            self.border = WorldBorder::default();
+        }
+        self.camera = None;
+        (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
+        (self.death_message, self.killer_id, self.score) = (None, -1, 0);
+        self.effects.clear();
+        self.speed = world::effects::Speed::default();
+        self.potion_color = 0;
+        self.potion_ambient = false;
+        self.digger = Digger::default();
+        self.cracks.clear();
+        self.bolts.clear();
+        self.store.clear();
+        Effect::Clear
     }
 
     fn apply_entity(&mut self, e: EntityEvent) {
@@ -614,7 +648,13 @@ impl Game {
             (p.pos[0].floor() as i32) >> 4,
             (p.pos[2].floor() as i32) >> 4,
         );
-        if self.store.get(cx, cz).is_some() {
+        // `Entity.updateRiderPosition`: the rider sits on its vehicle (the player's `getYOffset` is -0.35).
+        if let Some(v) = self.vehicle.and_then(|id| self.entities.get(id)) {
+            let off = v.kind.mounted_y_offset() + f64::from(-0.35f32);
+            p.pos = [v.pos[0], v.pos[1] + off, v.pos[2]];
+            p.vel = [0.0; 3];
+            p.on_ground = false;
+        } else if self.store.get(cx, cz).is_some() {
             let flying = self.abilities & 2 != 0;
             let input = world::Input {
                 fly_speed: flying.then_some(self.fly_speed),
@@ -625,7 +665,17 @@ impl Game {
                 .effects
                 .get(world::effects::id::JUMP_BOOST)
                 .map_or(0.0, |e| f32::from(e.amplifier) + 1.0);
-            p.tick(&Collision(&self.store), input);
+            let now = now_ms();
+            self.border.settle(now);
+            let walls = self.border.bounds(now);
+            // `isInsideBorder` decides, and `setOutsideBorder` remembers, whether the walls are solid.
+            let inside = WorldBorder::inside(walls, p.pos[0], p.pos[2], self.border_outside);
+            self.border_outside = !inside;
+            let collision = Collision {
+                store: &self.store,
+                walls: inside.then_some(walls),
+            };
+            p.tick(&collision, input);
             // `collideWithNearbyEntities` ends `onLivingUpdate`; spectators and riders are not pushed.
             if self.gamemode != SPECTATOR && self.vehicle.is_none() {
                 let push = self.entities.push_on(self.entity_id, p.pos, (0.6, 1.8));
@@ -970,7 +1020,12 @@ mod tests {
     fn respawn_drops_chunks() {
         let mut g = Game::new();
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
-        assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));
+        assert_eq!(
+            g.apply(NetEvent::Respawn {
+                dimension_changed: false
+            }),
+            Some(Effect::Clear)
+        );
         assert!(g.store.is_empty());
     }
 
@@ -1156,7 +1211,9 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Steve was slain by Bob"));
-        g.apply(NetEvent::Respawn);
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
         assert_eq!(g.death_message, None);
         assert_eq!(g.score, 0);
         assert_eq!(g.killer_id, -1);
@@ -1197,7 +1254,24 @@ mod tests {
         g.apply(flags(7, Some(0)));
         assert_eq!(g.entity_flags, 0);
         g.apply(flags(7, Some(1)));
-        g.apply(NetEvent::Respawn);
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
         assert_eq!(g.entity_flags, 0);
+    }
+
+    #[test]
+    fn respawn_resets_border_only_on_dimension_change() {
+        let mut g = Game::new();
+        g.apply(NetEvent::WorldBorder(world::border::Update::SetSize(100.0)));
+        assert_ne!(g.border, WorldBorder::default());
+        g.apply(NetEvent::Respawn {
+            dimension_changed: false,
+        });
+        assert_ne!(g.border, WorldBorder::default());
+        g.apply(NetEvent::Respawn {
+            dimension_changed: true,
+        });
+        assert_eq!(g.border, WorldBorder::default());
     }
 }

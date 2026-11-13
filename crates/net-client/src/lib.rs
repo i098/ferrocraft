@@ -45,7 +45,7 @@ pub enum NetEvent {
         /// `reducedDebugInfo` game rule: F3 hides coordinates.
         reduced_debug_info: bool,
     },
-    /// S3F custom payload: the channel and its raw bytes; the engine does not act on it yet.
+    /// S3F custom payload: the channel and its raw bytes; the engine acts on `MC|BOpen` only.
     PluginMessage {
         channel: String,
         data: Vec<u8>,
@@ -129,11 +129,6 @@ pub enum NetEvent {
     },
     /// S09: the selected hotbar slot, 0 to 8.
     HeldItem(u8),
-    /// S3F: a custom payload; the engine acts on `MC|BOpen` only.
-    PluginMessage {
-        channel: String,
-        data: Vec<u8>,
-    },
     /// S2F: window -1 and slot -1 is the cursor stack.
     SetSlot {
         window: i8,

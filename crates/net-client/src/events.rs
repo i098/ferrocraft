@@ -89,10 +89,6 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             level: p.level.0,
             total: p.total.0,
         },
-        P::PluginMessage(p) => NetEvent::PluginMessage {
-            channel: p.channel.clone(),
-            data: p.data.0.clone(),
-        },
         P::HeldItemChange(p) => NetEvent::HeldItem(p.slot as u8),
         P::SetSlot(p) => NetEvent::SetSlot {
             window: p.window_id,

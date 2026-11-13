@@ -19,6 +19,9 @@ const POTION: i16 = 373;
 const ENDER_EYE: i16 = 381;
 const FOOTPRINT_LIFE: u32 = 200;
 
+/// `Items.egg` id, the shard texture of a broken egg.
+const EGG_ITEM: i32 = 344;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Explode,
@@ -216,6 +219,10 @@ impl Particles {
 
     pub fn len(&self) -> usize {
         self.list.len()
+    }
+
+    pub fn positions(&self) -> impl Iterator<Item = [f64; 3]> + '_ {
+        self.list.iter().map(|p| p.pos)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -956,6 +963,44 @@ impl Particles {
         }
     }
 
+    /// `EntityArrow.onUpdate` when critical: 4 crits along this tick's path from `from`, thrown back against the flight `vel`.
+    pub fn arrow_crit(&mut self, from: [f64; 3], vel: [f64; 3]) {
+        for i in 0..4 {
+            let at = [0, 1, 2].map(|k| from[k] + vel[k] * f64::from(i) / 4.0);
+            self.spawn(Kind::Crit, at, [-vel[0], -vel[1] + 0.2, -vel[2]], 0);
+        }
+    }
+
+    /// Arrows, thrown entities and fireballs in water: 4 bubbles a quarter step behind `pos`, moving with `vel`.
+    pub fn bubble_trail(&mut self, pos: [f64; 3], vel: [f64; 3]) {
+        for _ in 0..4 {
+            let at = [0, 1, 2].map(|k| pos[k] - vel[k] * 0.25);
+            self.spawn(Kind::Bubble, at, vel, 0);
+        }
+    }
+
+    /// Fireballs and primed TNT: one smoke puff half a block above `pos` every tick.
+    pub fn smoke_puff(&mut self, pos: [f64; 3]) {
+        self.spawn(Kind::Smoke, [pos[0], pos[1] + 0.5, pos[2]], [0.0; 3], 0);
+    }
+
+    /// `onImpact` of a snowball (61: 8 poofs), egg (62: 8 egg shards) and ender pearl (65: 32 portal specks).
+    pub fn thrown_impact(&mut self, object: i8, pos: [f64; 3]) {
+        match object {
+            61 => (0..8).for_each(|_| self.spawn(Kind::Snowball, pos, [0.0; 3], 0)),
+            62 => (0..8).for_each(|_| {
+                let m = [0, 1, 2].map(|_| (self.rand() as f32 as f64 - 0.5) * 0.08);
+                self.spawn(Kind::ItemCrack, pos, m, EGG_ITEM);
+            }),
+            65 => (0..32).for_each(|_| {
+                let at = [pos[0], pos[1] + self.rand() * 2.0, pos[2]];
+                let m = [self.gaussian(), 0.0, self.gaussian()];
+                self.spawn(Kind::Portal, at, m, 0);
+            }),
+            _ => {}
+        }
+    }
+
     /// `EntityLivingBase.onDeathUpdate` at tick 20: 20 explosion puffs inside the hitbox.
     pub fn death_puff(&mut self, pos: [f64; 3], (width, height): (f32, f32)) {
         let (w, h) = (f64::from(width), f64::from(height));
@@ -1549,6 +1594,20 @@ fn basis(yaw: f32, pitch: f32) -> ([f32; 3], [f32; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_critical_arrow_spawns_four_crits_a_tick() {
+        let mut ps = Particles::new();
+        ps.arrow_crit([0.0, 64.0, 0.0], [1.0, 0.0, 0.0]);
+        assert_eq!(ps.len(), 4);
+    }
+
+    #[test]
+    fn an_ender_pearl_impact_makes_32_portal_specks() {
+        let mut ps = Particles::new();
+        ps.thrown_impact(65, [0.0; 3]);
+        assert_eq!(ps.len(), 32);
+    }
 
     #[test]
     fn break_block_spawns_64_shards_that_fall_and_expire() {

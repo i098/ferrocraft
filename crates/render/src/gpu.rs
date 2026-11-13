@@ -136,6 +136,9 @@ pub struct Renderer {
     /// Lightning bolts `(position, seed)` for the next frames.
     bolts: Vec<([f64; 3], i64)>,
     bolt_pipe: wgpu::RenderPipeline,
+    border_pipe: wgpu::RenderPipeline,
+    /// The world border to draw, if any.
+    border: Option<crate::Border>,
     hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
@@ -358,7 +361,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe, border_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -399,6 +402,8 @@ impl Renderer {
             crack_pipe,
             cracks: Vec::new(),
             bolt_pipe,
+            border_pipe,
+            border: None,
             hand_glint_pipe,
             bolts: Vec::new(),
             selection: None,
@@ -449,6 +454,11 @@ impl Renderer {
     /// Lightning bolts `(position, seed)` to draw: see [`crate::Bolts::shapes`].
     pub fn set_lightning(&mut self, bolts: Vec<([f64; 3], i64)>) {
         self.bolts = bolts;
+    }
+
+    /// The world border walls for the next frames; `None` draws none.
+    pub fn set_border(&mut self, border: Option<crate::Border>) {
+        self.border = border;
     }
 
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
@@ -1408,6 +1418,13 @@ impl Renderer {
         let bolt_mesh = (!self.bolts.is_empty())
             .then(|| crate::lightning::build(&self.bolts, cam.pos))
             .and_then(|d| self.upload_mesh(d, cam.pos.map(|c| c as f32)));
+        let border_mesh = self
+            .border
+            .map(|b| crate::border::quads(&b, cam.pos))
+            .and_then(|v| self.upload_mesh(quad_mesh(v), cam.pos.map(|c| c as f32)));
+        if border_mesh.is_some() {
+            self.load_texture(crate::border::TEXTURE);
+        }
         let (rain, snow) = self.rain_mesh(&env, cam);
         let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
         let offset = cam.pos.map(|c| c as f32);
@@ -1546,6 +1563,13 @@ impl Renderer {
                 .values()
                 .filter_map(|m| m.water.as_ref())
                 .for_each(|m| draw_mesh(&mut pass, m));
+            // `renderWorldBorder`: additive, no depth write, no culling, polygon offset (the `fs_crack` pipeline).
+            if let Some(m) = &border_mesh {
+                pass.set_pipeline(&self.border_pipe);
+                pass.set_bind_group(0, &self.textures[crate::border::TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
             if let Some(buf) = &sel_buf {
                 pass.set_bind_group(0, &self.world_group, &[]);
                 pass.set_pipeline(&self.line_pipe);
@@ -1825,7 +1849,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 13] {
+) -> [wgpu::RenderPipeline; 14] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2074,6 +2098,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let border_pipe = pipe(
+        "vs_world",
+        "fs_crack",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -2088,6 +2122,7 @@ fn build_pipelines(
         bolt_pipe,
         fire_pipe,
         hand_glint_pipe,
+        border_pipe,
     ]
 }
 

@@ -60,6 +60,8 @@ pub struct Frame<'a> {
     pub fancy: bool,
     /// `thePlayer.getBrightness(partialTicks)`, 0..=1.
     pub brightness: f32,
+    /// `WorldBorder` warning of `renderVignette`, 0..=1: how deep the player is inside the warning band.
+    pub border_warning: f32,
     /// The camera is the player (not spectating another entity): the hotbar is drawn.
     pub player_view: bool,
     /// Health, food, armor, air and XP; `None` hides them.
@@ -115,7 +117,7 @@ impl Hud {
         let (w, h) = (gui.scale.width, gui.scale.height);
         gui.set_blend(Blend::Alpha);
         if f.fancy {
-            self.draw_vignette(gui, f.brightness);
+            self.draw_vignette(gui, f.brightness, f.border_warning);
         }
         if f.player_view {
             self.draw_hotbar(gui, f);
@@ -218,21 +220,20 @@ impl Hud {
     }
 
     /// `renderVignette`: darkens the screen edges more the darker the player's spot is.
-    fn draw_vignette(&mut self, gui: &mut Gui, brightness: f32) {
+    fn draw_vignette(&mut self, gui: &mut Gui, brightness: f32, border_warning: f32) {
         let level = brightness.clamp(0.0, 1.0);
         self.vignette_lag += (level - self.vignette_lag) * 0.01;
         let v = ((1.0 - self.vignette_lag).clamp(0.0, 1.0) * 255.0) as u32;
+        // Inside the border's warning band the vignette is cyan: `color(0, f, f, 1)`.
+        let tint = if border_warning > 0.0 {
+            let c = (border_warning.min(1.0) * 255.0) as u32;
+            0xFF00_0000 | (c << 8) | c
+        } else {
+            0xFF00_0000 | (v * 0x010101)
+        };
         let (w, h) = (gui.scale.width as f32, gui.scale.height as f32);
         gui.set_blend(Blend::Darken);
-        gui.blit_tinted(
-            VIGNETTE,
-            0.0,
-            0.0,
-            w,
-            h,
-            [0.0, 0.0, 1.0, 1.0],
-            0xFF00_0000 | (v * 0x010101),
-        );
+        gui.blit_tinted(VIGNETTE, 0.0, 0.0, w, h, [0.0, 0.0, 1.0, 1.0], tint);
         gui.set_blend(Blend::Alpha);
     }
 }

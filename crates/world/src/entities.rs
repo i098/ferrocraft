@@ -41,6 +41,16 @@ impl Kind {
             Kind::Mob(id) => mob_size(id),
         }
     }
+
+    /// `Entity.getMountedYOffset`: where a rider sits above the entity's feet. Boats and minecarts seat it
+    /// 0.3 below their feet line; the rest use three quarters of their height.
+    // shortcut: horses use the default; vanilla adds rearing and stand offsets, which need horse metadata.
+    pub fn mounted_y_offset(self) -> f64 {
+        match self {
+            Kind::Object(1 | 10..=12) => f64::from(-0.3f32),
+            _ => f64::from(self.size().1) * 0.75,
+        }
+    }
 }
 
 /// Hitbox `(width, height)` per `SpawnMob` type id; other ids are 0.6 x 1.8.
@@ -918,13 +928,8 @@ impl Entities {
                 }
             }),
             E::Animation { id, animation } => {
-                if let (4 | 5, true) = (animation, self.map.contains_key(&id)) {
-                    self.emitters.push(Emitter {
-                        id,
-                        magic: animation == 5,
-                        age: 0,
-                    });
-                    self.burst(self.emitters.len() - 1);
+                if let 4 | 5 = animation {
+                    self.emit_hit(id, animation == 5);
                 }
                 self.with(id, |e| e.animate(animation))
             }
@@ -971,6 +976,15 @@ impl Entities {
             }
             keep
         });
+    }
+
+    /// `EffectRenderer.emitParticleAtEntity`: starts the 3-tick crit (or, with `magic`, enchant crit) emitter on
+    /// entity `id`. The server animation 4 and 5 and a local attack (`EntityPlayer.onCriticalHit`) both start it.
+    pub fn emit_hit(&mut self, id: i32, magic: bool) {
+        if self.map.contains_key(&id) {
+            self.emitters.push(Emitter { id, magic, age: 0 });
+            self.burst(self.emitters.len() - 1);
+        }
     }
 
     /// `EmitterParticle.tick` for emitter `i`: one burst request, then one tick older.

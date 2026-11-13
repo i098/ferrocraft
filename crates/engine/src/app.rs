@@ -470,9 +470,9 @@ impl App {
         (1.0 - until.as_secs_f64() / TICK.as_secs_f64()).clamp(0.0, 1.0)
     }
 
-    /// Ask the mods once per frame for the values they change (kept in `mod_view` for the frame to draw) and
-    /// for what their look hook leaves of this frame's mouse look, in degrees. Vanilla look without mods, in
-    /// a menu or when the JVM is late.
+    /// Ask the mods once per drawn frame for the values they change (kept in `mod_view` for the frame to draw)
+    /// and for what their look hook leaves of this frame's mouse look, in degrees. Vanilla look without mods
+    /// or when the JVM is late.
     fn mod_look(&mut self, dx: f32, dy: f32) -> (f32, f32) {
         self.mod_view = ferrocraft_modhost::Overrides::default();
         let (Some(mods), Some(p)) = (&self.mods, &self.game.player) else {
@@ -720,10 +720,10 @@ impl App {
         if self.fps.2.elapsed() >= Duration::from_secs(1) {
             self.fps = (0, self.fps.0, Instant::now());
         }
-        let (rain, thunder) = self
-            .mod_view
-            .weather
-            .unwrap_or_else(|| self.game.weather.strengths(frac as f32));
+        let (rain, thunder) = self.mod_view.weather.unwrap_or_else(|| {
+            let (rain, thunder) = self.game.weather.strengths(frac as f32);
+            (rain, thunder * rain)
+        });
         r.set_environment(Environment {
             world_time: self.mod_view.time.unwrap_or(self.game.world_time),
             ticks: self.game.ticks,
@@ -1049,21 +1049,24 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.pump_network();
-        let (dx, dy) = self.input.take_look_delta();
-        let dy = if self.ui.settings.invert_mouse {
-            -dy
-        } else {
-            dy
-        };
-        let (dx, dy) = self.mod_look(dx, dy);
-        self.game.look(dx, dy);
+        let due = self.pace_frame(el);
+        if due {
+            let (dx, dy) = self.input.take_look_delta();
+            let dy = if self.ui.settings.invert_mouse {
+                -dy
+            } else {
+                dy
+            };
+            let (dx, dy) = self.mod_look(dx, dy);
+            self.game.look(dx, dy);
+        }
         self.handle_actions();
         self.run_ticks();
         self.sync_cursor();
         if self.quit || self.deadline.is_some_and(|d| Instant::now() >= d) {
             el.exit();
         }
-        if self.pace_frame(el) {
+        if due {
             if let Some(w) = &self.window {
                 w.request_redraw();
             }

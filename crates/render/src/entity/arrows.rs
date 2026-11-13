@@ -137,9 +137,17 @@ mod tests {
     fn placement_matches_java_util_random() {
         let m = crate::entity::model(&steve());
         let angles = [
-            ([-0.9027153f32, 0.52511847, -0.7151768], -128.38805f32, 24.510975f32),
+            (
+                [-0.9027153f32, 0.52511847, -0.7151768],
+                -128.38805f32,
+                24.510975f32,
+            ),
             ([-0.09944248, 0.3280952, 0.8147125], -6.959007, 21.788868),
-            ([0.30618525, 0.088238716, -0.23462808], 127.462746, 12.884638),
+            (
+                [0.30618525, 0.088238716, -0.23462808],
+                127.462746,
+                12.884638,
+            ),
         ];
         for (thin, idx) in [(false, [10, 5, 3]), (true, [5, 0, 15])] {
             let parts = boxes(&m, thin);
@@ -149,12 +157,20 @@ mod tests {
                 let (dir, yaw, pitch) = angles[i];
                 assert_eq!(s.part, idx[i], "thin={thin} arrow {i}");
                 assert!((s.yaw - yaw).abs() < 1e-4, "yaw {} vs {yaw}", s.yaw);
-                assert!((s.pitch - pitch).abs() < 1e-4, "pitch {} vs {pitch}", s.pitch);
+                assert!(
+                    (s.pitch - pitch).abs() < 1e-4,
+                    "pitch {} vs {pitch}",
+                    s.pitch
+                );
                 let p = &parts[s.part];
                 for k in 0..3 {
                     let f = (1.0 - dir[k]) / 2.0;
                     let want = p.min[k] + p.size[k] * f;
-                    assert!((s.at[k] - want).abs() < 1e-4, "at[{k}] {} vs {want}", s.at[k]);
+                    assert!(
+                        (s.at[k] - want).abs() < 1e-4,
+                        "at[{k}] {} vs {want}",
+                        s.at[k]
+                    );
                 }
             }
         }

@@ -715,6 +715,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrocraft-oneclient"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha1",
+ "ureq",
+]
+
+[[package]]
 name = "ferrocraft-protocol"
 version = "0.1.0"
 dependencies = [

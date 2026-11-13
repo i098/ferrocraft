@@ -11,6 +11,7 @@ fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
         id: s.id,
         damage: s.damage,
+        count: s.count.max(0) as u8,
         dye: s.nbt.as_ref().and_then(|n| n.dye()),
         glint: world::inventory::glint(s),
     })
@@ -57,7 +58,8 @@ fn potion(id: i32, meta: &Metadata) -> Option<EntityEvent> {
 }
 
 fn stack(meta: &Metadata) -> Option<ItemRef> {
-    match find(meta, 10) {
+    // An item entity keeps its stack at index 10, an item frame at index 8.
+    match find(meta, 10).or_else(|| find(meta, 8)) {
         Some(MetaValue::Slot(s)) => item(s),
         _ => None,
     }
@@ -79,6 +81,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         horse: byte(19),
         always_name: byte(3),
         skeleton: byte(13),
+        rotation: byte(9),
     }
 }
 
@@ -134,6 +137,12 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
             pitch: p.pitch,
             vel: p.velocity.unwrap_or([0; 3]),
             data: p.data,
+        },
+        P::SpawnPainting(p) => EntityEvent::SpawnPainting {
+            id: p.entity_id.0,
+            title: p.title.clone(),
+            pos: [p.location.x, p.location.y, p.location.z],
+            facing: p.direction,
         },
         P::SpawnExperienceOrb(p) => EntityEvent::SpawnExperienceOrb {
             id: p.entity_id.0,
@@ -240,6 +249,32 @@ fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
 }
 
 impl Session {
+    /// C05 `PlayerLook`: `EntityPlayerSP.onUpdate` sends it instead of a position while riding.
+    pub fn send_look(&mut self, yaw: f32, pitch: f32, on_ground: bool) -> io::Result<()> {
+        let p = sb::PlayerLook {
+            yaw,
+            pitch,
+            on_ground,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C0C `SteerVehicle` (`PacketInput`): flag 1 is jump, flag 2 is the dismount (sneak).
+    pub fn send_steer(
+        &mut self,
+        sideways: f32,
+        forward: f32,
+        jump: bool,
+        dismount: bool,
+    ) -> io::Result<()> {
+        let p = sb::SteerVehicle {
+            sideways,
+            forward,
+            flags: u8::from(jump) | u8::from(dismount) << 1,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
     /// Left click on an entity: `UseEntity` attack. The caller sends the arm swing first.
     pub fn attack_entity(&mut self, target: i32) -> io::Result<()> {
         send(

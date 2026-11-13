@@ -97,8 +97,8 @@ pub fn random_display_ticks(
 fn display_tick(cx: &mut Cx, state: u16, pos: [i32; 3], rng: &mut JavaRandom) {
     let (id, meta) = (state >> 4, state & 15);
     match id {
-        50 => torch(cx, pos, meta, false),
-        76 => torch(cx, pos, meta, true),
+        50 => torch(cx, pos, meta),
+        76 => redstone_torch(cx, pos, meta, rng),
         51 => fire(cx, pos, rng),
         8..=11 => liquid(cx, id, meta, pos, rng),
         55 => wire(cx, pos, meta, rng),
@@ -136,18 +136,30 @@ fn torch_lean(meta: u16) -> Option<[f64; 2]> {
     }
 }
 
-/// `TorchBlock`, and the `RedstoneTorchBlock` dust when `redstone` (lit only).
-fn torch(cx: &mut Cx, [x, y, z]: [i32; 3], meta: u16, redstone: bool) {
-    let mut at = [d(x) + 0.5, d(y) + 0.7, d(z) + 0.5];
-    if let Some([ox, oz]) = torch_lean(meta) {
-        at = [at[0] + 0.27 * ox, at[1] + 0.22, at[2] + 0.27 * oz];
+/// Flame spot of a `TorchBlock`, offset by `jitter` and leaning away from its wall.
+fn torch_spot([x, y, z]: [i32; 3], meta: u16, jitter: [f64; 3]) -> [f64; 3] {
+    let at = [
+        d(x) + 0.5 + jitter[0],
+        d(y) + 0.7 + jitter[1],
+        d(z) + 0.5 + jitter[2],
+    ];
+    match torch_lean(meta) {
+        Some([ox, oz]) => [at[0] + 0.27 * ox, at[1] + 0.22, at[2] + 0.27 * oz],
+        None => at,
     }
-    if redstone {
-        cx.particle(Kind::RedDust, at, [0.0; 3]);
-    } else {
-        cx.particle(Kind::Smoke, at, [0.0; 3]);
-        cx.particle(Kind::Flame, at, [0.0; 3]);
-    }
+}
+
+/// `TorchBlock`.
+fn torch(cx: &mut Cx, pos: [i32; 3], meta: u16) {
+    let at = torch_spot(pos, meta, [0.0; 3]);
+    cx.particle(Kind::Smoke, at, [0.0; 3]);
+    cx.particle(Kind::Flame, at, [0.0; 3]);
+}
+
+/// `RedstoneTorchBlock` dust (lit only).
+fn redstone_torch(cx: &mut Cx, pos: [i32; 3], meta: u16, rng: &mut JavaRandom) {
+    let jitter = [0; 3].map(|_| (rng.next_double() - 0.5) * 0.2);
+    cx.particle(Kind::RedDust, torch_spot(pos, meta, jitter), [0.0; 3]);
 }
 
 /// `FireBlock.isFlammable`: the blocks `FireBlock.init` registers with a burn chance.
@@ -515,7 +527,7 @@ mod tests {
 
     #[test]
     fn floor_torch_spawns_smoke_and_flame_at_the_flame_spot() {
-        let out = run(50 << 4 | 5, |cx, p, _| torch(cx, p, 5, false), 1, 1);
+        let out = run(50 << 4 | 5, |cx, p, _| torch(cx, p, 5), 1, 1);
         let at = [0.5, 0.7, 0.5];
         assert_eq!(
             out,
@@ -531,6 +543,32 @@ mod tests {
                     motion: [0.0; 3]
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn lit_redstone_torch_dust_jitters_each_axis_then_leans() {
+        let mut oracle = JavaRandom::new(7);
+        let j: Vec<f64> = (0..3).map(|_| (oracle.next_double() - 0.5) * 0.2).collect();
+        let mut after = oracle;
+        let seen = std::cell::Cell::new(None);
+        let out = run(
+            76 << 4 | 1,
+            |cx, p, rng| {
+                redstone_torch(cx, p, 1, rng);
+                seen.set(Some(rng.next_double()));
+            },
+            7,
+            1,
+        );
+        assert_eq!(seen.get(), Some(after.next_double()));
+        assert_eq!(
+            out,
+            vec![Effect::Particle {
+                kind: Kind::RedDust,
+                pos: [0.5 + j[0] - 0.27, 0.7 + j[1] + 0.22, 0.5 + j[2]],
+                motion: [0.0; 3]
+            }]
         );
     }
 

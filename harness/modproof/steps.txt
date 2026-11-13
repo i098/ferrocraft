@@ -1,0 +1,25 @@
+# id | search text typed into the OneConfig search field | note
+# One row per mod. The script opens OneConfig with Right Shift, types the text, clicks the first card and saves the page.
+# A row passes when the card opens a page that differs from the filtered grid. `oneconfig` has no card: it passes when Right Shift opens the Mods page.
+oneconfig||OneConfig 0.2.2 (bootstrap 1.0.3)
+evergreenhud|EvergreenHUD|EvergreenHUD 2.1.7
+polysprint|PolySprint|PolySprint 1.0.2
+polytime|PolyTime|PolyTime 1.0.2
+polyweather|Weather|PolyWeather 1.0.0
+freelook|Freelook|FreeLook 0.1.6
+behindyou|BehindYou|BehindYou 3.2.2
+betternightvision|BetterNightVision|BetterNightVision 1.0.0
+vanillahud|VanillaHUD|VanillaHUD 2.2.12
+polycrosshair|PolyCrosshair|PolyCrosshair 1.0.3
+redaction|REDACTION|REDACTION 1.3.9
+chatting|Chatting|Chatting 2.0.6
+chatblock|ChatBlock|ChatBlock 1.7.2
+damagetint|DamageTint|DamageTint 3.3.0
+polyhitbox|Hitbox|PolyHitbox 1.0.3
+polynametag|Nametag|PolyNametag 1.0.10
+tntcountdown|Countdown|TNT Countdown 1.4.1
+glintcolorizer|GlintColorizer|GlintColorizer 2.0.1
+overflowanimations|OverflowAnimations|OverflowAnimations 2.2.5
+overflowparticles|OverflowParticles|OverflowParticles 1.0.2
+polyblur|PolyBlur|PolyBlur 1.0.2
+colorsaturation|ColorSaturation|ColorSaturation 1.0.0

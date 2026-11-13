@@ -26,7 +26,7 @@ pub use disconnect::Disconnected;
 pub use language::{languages, Language};
 pub use link::ConfirmLink;
 pub use multiplayer::Multiplayer;
-pub use options::{KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
+pub use options::{key_name, KeyBind, Opt, Options, Settings, SoundCategory, MODEL_PARTS};
 pub use pack_prompt::PackPrompt;
 pub use packs::{default_description, selected_paths};
 pub use pause::Pause;

@@ -6,6 +6,7 @@
 //! (an empty hand never digs there; the swing is kept) and the world border.
 //! The break speed of every block is checked against the real 1.8.9 jar through `oracle`.
 
+use crate::entities::Kind;
 use crate::{cos, sin};
 
 /// Block ids 0..=197 of 1.8.9: `Block.blockHardness`, -1 for unbreakable.
@@ -782,6 +783,79 @@ impl Digger {
     }
 }
 
+/// The attacker's state in the crit test of `EntityPlayer.attackTargetEntityWithCurrentItem`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Attacker {
+    pub fall_distance: f32,
+    pub on_ground: bool,
+    pub on_ladder: bool,
+    pub in_water: bool,
+    pub blind: bool,
+    pub riding: bool,
+}
+
+impl Attacker {
+    /// Falling, not on the ground, ladder or in water, not blind, not riding, and the target is an
+    /// `EntityLivingBase`. Vanilla also needs the attack damage above zero, which holds for every hand
+    /// the client can have (base 1.0; only a level 2 weakness without a weapon takes it away).
+    // shortcut: the damage test is skipped; add it with the item attribute table.
+    pub fn is_critical(&self, target_living: bool) -> bool {
+        self.fall_distance > 0.0
+            && !self.on_ground
+            && !self.on_ladder
+            && !self.in_water
+            && !self.blind
+            && !self.riding
+            && target_living
+    }
+}
+
+/// `EnumCreatureAttribute` of a target, as far as damage enchantments care.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Creature {
+    Undefined,
+    Undead,
+    Arthropod,
+}
+
+/// `SpawnMob` ids of the undead (skeleton, zombie, zombie pigman, wither) and of the arthropods
+/// (spider, silverfish, cave spider, endermite).
+// shortcut: undead horses (type 3 and 4) count as undefined until horse metadata is read.
+pub fn creature(kind: Kind) -> Creature {
+    match kind {
+        Kind::Mob(51 | 54 | 57 | 64) => Creature::Undead,
+        Kind::Mob(52 | 59 | 60 | 67) => Creature::Arthropod,
+        _ => Creature::Undefined,
+    }
+}
+
+/// `EnchantmentHelper.getModifierForCreature`: sharpness (16) 1.25 per level, smite (17) against the
+/// undead and bane of arthropods (18) against arthropods 2.5 per level.
+pub fn enchant_bonus(held: &crate::inventory::Slot, target: Creature) -> f32 {
+    use crate::inventory::Tag;
+    let Some(nbt) = held.as_ref().and_then(|s| s.nbt.as_ref()) else {
+        return 0.0;
+    };
+    let Some((_, Tag::List(list))) = nbt.root.iter().find(|(k, _)| k == "ench") else {
+        return 0.0;
+    };
+    let short = |c: &[(String, Tag)], key: &str| match c.iter().find(|(k, _)| k == key) {
+        Some((_, Tag::Short(v))) => i32::from(*v),
+        _ => 0,
+    };
+    list.iter()
+        .map(|t| {
+            let Tag::Compound(c) = t else { return 0.0 };
+            let level = short(c, "lvl") as f32;
+            match (short(c, "id"), target) {
+                (16, _) => level * 1.25,
+                (17, Creature::Undead) | (18, Creature::Arthropod) => level * 2.5,
+                _ => 0.0,
+            }
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1121,5 +1195,61 @@ mod tests {
             _ => 0,
         };
         assert_eq!(raycast(&at, [0.9, 64.5, 0.5], 0.0, 0.0, 4.5), None);
+    }
+
+    fn falling() -> Attacker {
+        Attacker {
+            fall_distance: 1.0,
+            ..Attacker::default()
+        }
+    }
+
+    /// `attackTargetEntityWithCurrentItem`: every clause of the crit test must hold.
+    #[test]
+    fn crit_needs_a_fall_and_no_ground_ladder_water_blindness_or_mount() {
+        assert!(falling().is_critical(true));
+        assert!(!falling().is_critical(false));
+        assert!(!Attacker::default().is_critical(true));
+        for no in [
+            Attacker { on_ground: true, ..falling() },
+            Attacker { on_ladder: true, ..falling() },
+            Attacker { in_water: true, ..falling() },
+            Attacker { blind: true, ..falling() },
+            Attacker { riding: true, ..falling() },
+        ] {
+            assert!(!no.is_critical(true), "{no:?}");
+        }
+    }
+
+    fn enchanted(id: i16, lvl: i16) -> crate::inventory::Slot {
+        use crate::inventory::{ItemStack, Nbt, Tag};
+        let ench = Tag::Compound(vec![
+            ("id".into(), Tag::Short(id)),
+            ("lvl".into(), Tag::Short(lvl)),
+        ]);
+        Some(ItemStack {
+            id: 276,
+            count: 1,
+            damage: 0,
+            nbt: Some(Nbt {
+                name: String::new(),
+                root: vec![("ench".into(), Tag::List(vec![ench]))],
+            }),
+        })
+    }
+
+    /// `DamageEnchantment.calcModifierDamage`: sharpness hits all, smite the undead, bane the arthropods.
+    #[test]
+    fn damage_enchantments_by_creature() {
+        let creature = |id| creature(Kind::Mob(id));
+        assert_eq!(creature(54), Creature::Undead);
+        assert_eq!(creature(52), Creature::Arthropod);
+        assert_eq!(creature(50), Creature::Undefined);
+        assert_eq!(enchant_bonus(&enchanted(16, 3), Creature::Undefined), 3.75);
+        assert_eq!(enchant_bonus(&enchanted(17, 2), Creature::Undead), 5.0);
+        assert_eq!(enchant_bonus(&enchanted(17, 2), Creature::Undefined), 0.0);
+        assert_eq!(enchant_bonus(&enchanted(18, 1), Creature::Arthropod), 2.5);
+        assert_eq!(enchant_bonus(&enchanted(34, 3), Creature::Undead), 0.0);
+        assert_eq!(enchant_bonus(&None, Creature::Undead), 0.0);
     }
 }

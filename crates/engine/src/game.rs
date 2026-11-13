@@ -761,14 +761,20 @@ impl Game {
         Effect::OpenWindow
     }
 
-    /// `EntityPlayerSP.isRidingHorse`: the vehicle is a horse with a saddle.
-    pub fn riding_saddled_horse(&self) -> bool {
+    /// `ClientPlayerInteractionManager.hasRidingInventory`: the vehicle is a horse, saddled or not.
+    pub fn riding_horse(&self) -> bool {
         self.vehicle
             .and_then(|id| self.entities.get(id))
-            .is_some_and(|v| {
-                v.kind == world::entities::Kind::Mob(100)
-                    && v.meta.horse_flags.is_some_and(horse::is_saddled)
-            })
+            .is_some_and(|v| v.kind == world::entities::Kind::Mob(100))
+    }
+
+    /// `LocalClientPlayerEntity.isRidingRideableMob`: the vehicle is a horse with a saddle.
+    pub fn riding_saddled_horse(&self) -> bool {
+        self.riding_horse()
+            && self
+                .vehicle
+                .and_then(|id| self.entities.get(id))
+                .is_some_and(|v| v.meta.horse_flags.is_some_and(horse::is_saddled))
     }
 
     fn set_gamemode(&mut self, mode: u8) {

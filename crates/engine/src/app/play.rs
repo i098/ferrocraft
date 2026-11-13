@@ -1117,8 +1117,8 @@ impl App {
         if self.container.is_some() || self.ui.is_open() {
             return;
         }
-        // `Minecraft.runTick`: on a saddled horse the key asks the server for the horse window (`sendHorseInventory`).
-        if self.game.riding_saddled_horse() {
+        // `Minecraft.runTick`: on any horse the key asks the server for the horse window (`openRidingInventory`).
+        if self.game.riding_horse() {
             let id = self.game.entity_id;
             let r = self.session_send(|s| s.entity_action(id, 6, 0));
             self.send_result(r);

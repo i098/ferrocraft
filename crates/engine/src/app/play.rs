@@ -320,6 +320,15 @@ impl App {
                 self.send_result(r);
             }
         }
+        if let Some(text) = self.input.take_tab_request() {
+            if let Some(s) = self.link.session() {
+                let r = s.send_tab_complete(&text);
+                self.send_result(r);
+            }
+        }
+        if let Some(names) = self.input.take_chat_note() {
+            self.chat_note(&names);
+        }
         let chat_open = self.input.chat_input().is_some();
         if self.chat_open && !chat_open {
             self.hud.chat.reset_scroll();
@@ -958,6 +967,19 @@ impl App {
             1 => self.entity_shader(None),
             _ => {}
         }
+    }
+
+    /// `printChatMessageWithOptionalDeletion(.., 1)`: the Tab name list replaces the last one.
+    pub(super) fn chat_note(&mut self, text: &str) {
+        let m = gui::Metrics(self.renderer.as_ref().and_then(render::Renderer::font));
+        let line = vec![ferrocraft_net_client::Styled {
+            text: text.into(),
+            ..Default::default()
+        }];
+        let open = self.input.chat_input().is_some();
+        self.hud
+            .chat
+            .print(line, 1, self.hud.update_counter, open, m);
     }
 
     pub(super) fn chat_line(&mut self, runs: Vec<ferrocraft_net_client::Styled>) {

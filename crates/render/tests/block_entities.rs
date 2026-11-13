@@ -79,8 +79,8 @@ fn chests_single_double_and_ender_open_and_closed() {
     let closed = frame(&mut r, &cam(3.5, 4.5), "chests_closed");
     assert!(differs(&empty, &closed) > 2000, "chests draw");
 
-    for x in [0, 2, 3, 5] {
-        r.block_action([x, 64, 4], 1, 1);
+    for (x, id) in [(0, 54), (2, 54), (3, 54), (5, 130)] {
+        r.block_action([x, 64, 4], id, 1, 1);
     }
     for _ in 0..5 {
         r.tick_block_entities();
@@ -88,8 +88,8 @@ fn chests_single_double_and_ender_open_and_closed() {
     let open = frame(&mut r, &cam(3.5, 4.5), "chests_half_open");
     assert!(differs(&closed, &open) > 300, "the lids lift");
     // After the chest closes the frame returns.
-    for x in [0, 2, 3, 5] {
-        r.block_action([x, 64, 4], 1, 0);
+    for (x, id) in [(0, 54), (2, 54), (3, 54), (5, 130)] {
+        r.block_action([x, 64, 4], id, 1, 0);
     }
     for _ in 0..12 {
         r.tick_block_entities();

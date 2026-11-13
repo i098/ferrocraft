@@ -414,7 +414,6 @@ fn look_3(id: u16, meta: u16) -> Look {
             _ => cross(0x4a8a30, "tallgrass", Tint::Grass),
         },
         32 => cross(0x7a5a33, "deadbush", Tint::None),
-        34 => mk(Kind::Skip, 0, ["stone"; 6]),
         _ => look_4(id, meta),
     }
 }
@@ -977,7 +976,7 @@ fn look_17(id: u16, meta: u16) -> Look {
     }
 }
 
-fn look_18(id: u16, _meta: u16) -> Look {
+fn look_18(id: u16, meta: u16) -> Look {
     match id {
         181 => cube3(
             0xa85a2a,
@@ -985,9 +984,51 @@ fn look_18(id: u16, _meta: u16) -> Look {
             "red_sandstone_bottom",
             "red_sandstone_normal",
         ),
+        _ => look_19(id, meta),
+    }
+}
+
+/// Redstone parts and other small models that `shapes.rs` builds from several textures; `tex` names the main one.
+fn look_19(id: u16, meta: u16) -> Look {
+    match id {
+        34 => shape(0x9a8260, ["piston_top_normal"; 6]),
+        69 => shape(0x8a8a8a, ["cobblestone"; 6]),
+        77 => shape(0x7d7d7d, ["stone"; 6]),
+        143 => shape(0xb08850, ["planks_oak"; 6]),
+        127 => shape(0x8b5a2b, ["cocoa_stage_2"; 6]),
+        131 => shape(0xb08850, ["trip_wire_source"; 6]),
+        132 => shape(0xe0e0e0, ["trip_wire"; 6]),
+        147 => shape(0xf8d73e, ["gold_block"; 6]),
+        148 => shape(0xdcdcdc, ["iron_block"; 6]),
+        149 | 150 => shape(
+            0x9a9a9a,
+            [if id == 150 || meta & 8 != 0 {
+                "comparator_on"
+            } else {
+                "comparator_off"
+            }; 6],
+        ),
         _ => mk(Kind::Skip, 0, ["stone"; 6]),
     }
 }
+
+/// Textures that only `shapes.rs` boxes use, so no `look` lists them.
+const SHAPE_TEXTURES: [&str; 14] = [
+    "cobblestone",
+    "lever",
+    "planks_oak",
+    "piston_side",
+    "piston_top_sticky",
+    "stone_slab_top",
+    "redstone_torch_on",
+    "redstone_torch_off",
+    "cocoa_stage_0",
+    "cocoa_stage_1",
+    "cocoa_stage_2",
+    "trip_wire",
+    "trip_wire_source",
+    "comparator_off",
+];
 
 pub fn pane_top(meta: u16) -> &'static str {
     PANE_TOP[meta as usize & 15]
@@ -1089,6 +1130,62 @@ pub fn cached(state: u16) -> &'static Look {
     &TABLE[state as usize & 4095]
 }
 
+/// `Material.isSolid`: full cubes, and shaped blocks except the plant, circuit, snow-layer, carpet,
+/// web, fire and portal materials.
+pub fn material_solid(state: u16) -> bool {
+    match cached(state).kind {
+        Kind::Opaque | Kind::Cutout => true,
+        Kind::Shape => !matches!(
+            state >> 4,
+            6 | 27
+                | 28
+                | 30
+                | 31
+                | 32
+                | 37
+                | 38
+                | 39
+                | 40
+                | 50
+                | 51
+                | 55
+                | 59
+                | 65
+                | 66
+                | 69
+                | 75
+                | 76
+                | 77
+                | 78
+                | 83
+                | 90
+                | 104
+                | 105
+                | 106
+                | 111
+                | 115
+                | 119
+                | 127
+                | 131
+                | 132
+                | 93
+                | 94
+                | 140
+                | 141
+                | 142
+                | 143
+                | 144
+                | 149
+                | 150
+                | 157
+                | 171
+                | 175
+                | 198
+        ),
+        _ => false,
+    }
+}
+
 /// Texture and tint of the upper half of a double plant whose lower half has `variant` metadata.
 pub fn double_plant_top(variant: u16) -> (&'static str, Tint) {
     match variant & 7 {
@@ -1135,6 +1232,7 @@ pub fn texture_names() -> Vec<&'static str> {
         ])
         .collect();
     names.extend(PANE_TOP);
+    names.extend(SHAPE_TEXTURES);
     names.sort_unstable();
     names.dedup();
     names

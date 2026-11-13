@@ -75,8 +75,16 @@ impl App {
                     }
                 }
             }
-            _ => self.input.on_window_event(event),
+            _ => self.chat_event(event),
         }
+    }
+
+    /// A key while chat is open: the field needs the font widths and the clipboard.
+    fn chat_event(&mut self, event: &WindowEvent) {
+        let m = metrics!(self);
+        let ctrl = matches!(event, WindowEvent::KeyboardInput { .. }) && self.mods().ctrl;
+        let (input, ui) = (&mut self.input, &mut self.ui);
+        ui.with_clipboard(ctrl, |clip| input.on_window_event_in(event, &m, clip));
     }
 }
 
@@ -172,8 +180,14 @@ impl App {
                     self.send_result(r);
                 }
             }
-            ChatClick::Suggest(text) => self.input.set_chat_text(&text, true),
-            ChatClick::Insert(text) => self.input.set_chat_text(&text, false),
+            ChatClick::Suggest(text) => {
+                let m = metrics!(self);
+                self.input.set_chat_text(&text, true, &m);
+            }
+            ChatClick::Insert(text) => {
+                let m = metrics!(self);
+                self.input.set_chat_text(&text, false, &m);
+            }
             ChatClick::ConfirmLink(url) => {
                 let m = metrics!(self);
                 let q = self.ui.open(&m, boxed(ConfirmLink::new(url)));

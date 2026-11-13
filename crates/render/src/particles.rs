@@ -1520,62 +1520,6 @@ fn is_water(state: u16) -> bool {
     matches!(state >> 4, 8 | 9)
 }
 
-/// `Material.isSolid`: full cubes, and shaped blocks except the plant, circuit, snow-layer, carpet,
-/// web, fire and portal materials.
-fn material_solid(state: u16) -> bool {
-    match crate::blocks::look(state).kind {
-        crate::blocks::Kind::Opaque | crate::blocks::Kind::Cutout => true,
-        crate::blocks::Kind::Shape => !matches!(
-            state >> 4,
-            6 | 27
-                | 28
-                | 30
-                | 31
-                | 32
-                | 37
-                | 38
-                | 39
-                | 40
-                | 50
-                | 51
-                | 55
-                | 59
-                | 65
-                | 66
-                | 69
-                | 75
-                | 76
-                | 77
-                | 78
-                | 83
-                | 90
-                | 104
-                | 105
-                | 106
-                | 111
-                | 115
-                | 119
-                | 127
-                | 131
-                | 132
-                | 93
-                | 94
-                | 140
-                | 141
-                | 142
-                | 143
-                | 144
-                | 149
-                | 150
-                | 157
-                | 171
-                | 175
-                | 198
-        ),
-        _ => false,
-    }
-}
-
 /// Whether the cell holding `pos` has a liquid surface or solid top above `pos` (`LiquidBlock.getHeightLoss`;
 /// rain splashes use the block's real top, drips the full cell).
 fn buried(block: &impl Fn(i32, i32, i32) -> u16, pos: [f64; 3], real_top: bool) -> bool {
@@ -1584,7 +1528,7 @@ fn buried(block: &impl Fn(i32, i32, i32) -> u16, pos: [f64; 3], real_top: bool) 
     let top = if matches!(state >> 4, 8..=11) {
         let level = state & 15;
         1.0 - f64::from(if level >= 8 { 1 } else { level + 1 }) / 9.0
-    } else if !material_solid(state) {
+    } else if !crate::blocks::material_solid(state) {
         return false;
     } else if real_top {
         let at = |p: [i32; 3]| block(p[0], p[1], p[2]);

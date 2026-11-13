@@ -8,7 +8,6 @@
 //! shortcut: bow pull stages, the cast fishing rod and baby holders are not ported; the enchantment
 //! glint covers the whole piece.
 
-use super::hanging;
 use super::{
     glint_uv_item, light_level, model, Class, EntityDraw, Xf, ITEM_GLINT_COLOR, ITEM_UV_SCALE, V3,
 };
@@ -124,10 +123,7 @@ fn geometry(
 /// The stacks `build` needs models for.
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let held = (holds(d) && d.held != 0).then_some((d.held, d.held_damage));
-    let dropped = dropped(d)
-        .or_else(|| d.stack.filter(|_| hanging::is_frame(d)))
-        .map(|s| (s.id, s.damage));
-    held.into_iter().chain(dropped)
+    held.into_iter().chain(dropped(d).map(|s| (s.id, s.damage)))
 }
 
 fn holds(d: &EntityDraw) -> bool {
@@ -255,18 +251,9 @@ impl Items {
 }
 
 /// Item meshes of every draw. `light` gives the `[sky, block]` level at a world position.
-pub fn build(
-    draws: &[EntityDraw],
-    models: &Models,
-    frames: &hanging::Frames,
-    light: impl Fn([f64; 3]) -> [f32; 2],
-) -> Items {
+pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> [f32; 2]) -> Items {
     let mut out = Items::default();
     for d in draws {
-        if d.class == Class::Painting || hanging::is_frame(d) {
-            hanging::draw(&mut out, d, frames, models, &light);
-            continue;
-        }
         let level = light_level(d, &light, false);
         if holds(d) && d.held != 0 {
             if let Some(Some(m)) = models.get(&(d.held, d.held_damage)) {

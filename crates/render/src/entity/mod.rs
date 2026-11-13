@@ -830,7 +830,7 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
         if projectile::handles(id) {
             return projectile::build(out, id, d, skins);
         }
-        // Dropped items draw through `item::build`.
+        // Dropped items draw through `item::build`, item frames through `hanging::build`.
         if id == 2 || id == 71 {
             return;
         }

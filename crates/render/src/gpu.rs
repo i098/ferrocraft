@@ -820,7 +820,10 @@ impl Renderer {
         self.resolve_items(draws);
         self.load_frames(draws);
         let frames = self.frames.take().unwrap_or_default();
-        let items = entity::item::build(draws, &self.item_models, &frames, |p| self.light_at(p));
+        let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        entity::hanging::build(&mut items, draws, &frames, &self.item_models, |p| {
+            self.light_at(p)
+        });
         self.frames = Some(frames);
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas))
@@ -899,7 +902,10 @@ impl Renderer {
 
     /// Resolves the model of every held and dropped item that is new.
     fn resolve_items(&mut self, draws: &[EntityDraw]) {
-        for key in draws.iter().flat_map(entity::item::wanted) {
+        for key in draws
+            .iter()
+            .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))
+        {
             if self.item_models.contains_key(&key) {
                 continue;
             }

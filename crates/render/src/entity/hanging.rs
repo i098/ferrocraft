@@ -150,8 +150,29 @@ pub fn map_pixel(c: u8) -> [u8; 4] {
     [ch(16), ch(8), ch(0), 255]
 }
 
-/// Draws every painting and item frame of `d`; `light` gives the `[sky, block]` level.
-pub fn draw(
+/// The stack a frame shows, whose model `draw` needs.
+pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
+    d.stack
+        .filter(|_| is_frame(d))
+        .map(|s| (s.id, s.damage))
+        .into_iter()
+}
+
+/// Adds every painting and item frame of `draws` to `out`; `light` gives the `[sky, block]` level.
+pub fn build(
+    out: &mut Items,
+    draws: &[EntityDraw],
+    frames: &Frames,
+    models: &Models,
+    light: impl Fn([f64; 3]) -> [f32; 2],
+) {
+    for d in draws {
+        draw(out, d, frames, models, &light);
+    }
+}
+
+/// Draws the painting or item frame `d`.
+fn draw(
     out: &mut Items,
     d: &EntityDraw,
     frames: &Frames,

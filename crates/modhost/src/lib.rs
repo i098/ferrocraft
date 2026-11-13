@@ -508,38 +508,35 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             }
             if let Some(p) = s.player.take() {
                 drop(s);
-                wire::write_player(&mut stream, &p)?;
-                let answer = wire::read_player(&mut stream)?;
-                let mut s = link.state.lock().unwrap();
-                if !s.stalled {
-                    s.answer = Some(answer);
-                }
-                s.stalled = false;
-                link.answered.notify_all();
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| wire::write_player(st, &p),
+                    wire::read_player,
+                    |s, a| s.answer = Some(a),
+                )?;
                 continue;
             }
             if let Some(w) = s.world.take() {
                 drop(s);
-                overrides::write_state(&mut stream, &w)?;
-                let answer = overrides::read_overrides(&mut stream)?;
-                let mut s = link.state.lock().unwrap();
-                if !s.stalled {
-                    s.world_answer = Some(answer);
-                }
-                s.stalled = false;
-                link.answered.notify_all();
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| overrides::write_state(st, &w),
+                    overrides::read_overrides,
+                    |s, a| s.world_answer = Some(a),
+                )?;
                 continue;
             }
             if let Some((kind, text)) = s.chat.take() {
                 drop(s);
-                chat::write_line(&mut stream, kind, &text)?;
-                let verdict = chat::read_verdict(&mut stream)?;
-                let mut s = link.state.lock().unwrap();
-                if !s.stalled {
-                    s.chat_answer = Some(verdict);
-                }
-                s.stalled = false;
-                link.answered.notify_all();
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| chat::write_line(st, kind, &text),
+                    chat::read_verdict,
+                    |s, a| s.chat_answer = Some(a),
+                )?;
                 continue;
             }
             s.fresh = false;
@@ -565,6 +562,25 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
         s.screen = screen;
         s.stalled = false;
     }
+}
+
+/// Sends one request and records the JVM's answer; a stalled client keeps the answer out.
+fn round_trip<T>(
+    stream: &mut TcpStream,
+    link: &Link,
+    write: impl FnOnce(&mut TcpStream) -> io::Result<()>,
+    read: impl FnOnce(&mut TcpStream) -> io::Result<T>,
+    set: impl FnOnce(&mut Shared, T),
+) -> io::Result<()> {
+    write(stream)?;
+    let answer = read(stream)?;
+    let mut s = link.state.lock().unwrap();
+    if !s.stalled {
+        set(&mut s, answer);
+    }
+    s.stalled = false;
+    link.answered.notify_all();
+    Ok(())
 }
 
 impl Config {

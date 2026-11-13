@@ -15,6 +15,31 @@ pub const DIAMOND_CHESTPLATE: i16 = 311;
 pub const ENCHANTED_BOOK: i16 = 403;
 pub const LEATHER_HELMET: i16 = 298;
 pub const LEATHER_BOOTS: i16 = 301;
+pub const DYE: i16 = 351;
+/// `EnumDyeColor.BLUE.getDyeDamage()`: lapis lazuli is dye 4.
+pub const LAPIS_DAMAGE: i16 = 4;
+const POTION: i16 = 373;
+const GLASS_BOTTLE: i16 = 374;
+
+/// `SlotPotion.canHoldPotion`: potions and glass bottles fit a brewing stand bottle slot.
+pub fn holds_potion(id: i16) -> bool {
+    id == POTION || id == GLASS_BOTTLE
+}
+
+/// `Item.isPotionIngredient`: the items with a `setPotionEffect` in 1.8.9, and pufferfish.
+pub fn is_potion_ingredient(id: i16, damage: i16) -> bool {
+    // gunpowder, redstone, glowstone dust, sugar, nether wart, ghast tear, blaze powder,
+    // magma cream, spider eye, fermented spider eye, speckled melon, golden carrot, rabbit foot
+    matches!(
+        id,
+        289 | 331 | 348 | 353 | 372 | 370 | 377 | 378 | 375 | 376 | 382 | 396 | 414
+    ) || (id == 349 && damage == 3)
+}
+
+/// `SlotBeacon.isItemValid`: iron, gold, diamond and emerald.
+pub fn is_beacon_payment(id: i16) -> bool {
+    matches!(id, 265 | 266 | 264 | 388)
+}
 
 #[derive(Debug)]
 pub struct Item {

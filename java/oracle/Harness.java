@@ -39,6 +39,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
+ *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -49,24 +50,37 @@ public class Harness {
     static Block floor;
     static World world;
 
-    /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
-    static String bidiReorder(String hexText) throws Exception {
+    static String fromHex(String hexText) {
         byte[] raw = new byte[hexText.length() / 2];
         for (int i = 0; i < raw.length; i++) {
             raw[i] = (byte) Integer.parseInt(hexText.substring(2 * i, 2 * i + 2), 16);
         }
-        String text = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+        return new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    static String toHex(String text) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : text.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
+    static String bidiReorder(String hexText) throws Exception {
+        String text = fromHex(hexText);
         String out = text;
         if (com.ibm.icu.text.Bidi.requiresBidi(text.toCharArray(), 0, text.length())) {
             com.ibm.icu.text.Bidi bidi = new com.ibm.icu.text.Bidi(new com.ibm.icu.text.ArabicShaping(8).shape(text), 127);
             bidi.setReorderingMode(0);
             out = bidi.writeReordered(2);
         }
-        StringBuilder sb = new StringBuilder();
-        for (byte b : out.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
+        return toHex(out);
+    }
+
+    /** One line of `C12PacketUpdateSign.writePacketData`: `IChatComponent.Serializer.componentToJson(new ChatComponentText(line))`. */
+    static String signLine(String hexText) {
+        return toHex(net.minecraft.flat.Text.Serializer.toJson(new net.minecraft.flat.LiteralText(fromHex(hexText))));
     }
 
     static long key(int x, int z) {
@@ -269,6 +283,9 @@ public class Harness {
                 }
                 case "bidi":
                     System.out.println(bidiReorder(t.length > 1 ? t[1] : ""));
+                    break;
+                case "signjson":
+                    System.out.println(signLine(t.length > 1 ? t[1] : ""));
                     break;
                 default:
                     throw new IllegalArgumentException(line);

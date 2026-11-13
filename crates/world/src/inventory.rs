@@ -6,10 +6,11 @@
 //! Window 0 is `ContainerPlayer`: 0 craft result, 1-4 craft grid, 5-8 armor (helmet first),
 //! 9-35 main, 36-44 hotbar. Every other window is its own slots, then the 27 main slots, then
 //! the 9 hotbar slots, which are the same stacks as window 0 slots 9-44.
-//! Not ported: crafting and smelting recipes (the server sends the result slot), and the
-//! brewing, enchanting, anvil, beacon, villager and horse windows.
+//! Not ported: crafting and smelting recipes (the server sends the result slot), the anvil
+//! cost and rename logic, the enchantment offers, brewing and the horse window.
 
 pub mod items;
+pub mod merchant;
 
 pub use ferrocraft_protocol::codec::{ItemStack, Slot};
 pub use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
@@ -39,6 +40,16 @@ pub enum Kind {
     /// `minecraft:dispenser` and `minecraft:dropper`.
     Dispenser,
     Hopper,
+    /// `minecraft:anvil`: 0 left input, 1 right input, 2 result.
+    Anvil,
+    /// `minecraft:enchanting_table`: 0 item, 1 lapis lazuli.
+    Enchanting,
+    /// `minecraft:brewing_stand`: 0-2 bottles, 3 ingredient.
+    Brewing,
+    /// `minecraft:beacon`: 0 payment.
+    Beacon,
+    /// `minecraft:villager`: 0 and 1 payment, 2 result.
+    Merchant,
 }
 
 impl Kind {
@@ -50,6 +61,11 @@ impl Kind {
             "minecraft:furnace" => Kind::Furnace,
             "minecraft:dispenser" | "minecraft:dropper" => Kind::Dispenser,
             "minecraft:hopper" => Kind::Hopper,
+            "minecraft:anvil" => Kind::Anvil,
+            "minecraft:enchanting_table" => Kind::Enchanting,
+            "minecraft:brewing_stand" => Kind::Brewing,
+            "minecraft:beacon" => Kind::Beacon,
+            "minecraft:villager" => Kind::Merchant,
             _ => return None,
         })
     }
@@ -63,12 +79,20 @@ impl Kind {
             Kind::Furnace => 3,
             Kind::Dispenser => 9,
             Kind::Hopper => 5,
+            Kind::Anvil | Kind::Merchant => 3,
+            Kind::Enchanting => 2,
+            Kind::Brewing => 4,
+            Kind::Beacon => 1,
         }
     }
 
     /// Index of the crafting result slot, if any.
     fn result_slot(self) -> Option<usize> {
-        matches!(self, Kind::Player | Kind::Crafting).then_some(0)
+        match self {
+            Kind::Player | Kind::Crafting => Some(0),
+            Kind::Anvil | Kind::Merchant => Some(2),
+            _ => None,
+        }
     }
 }
 
@@ -80,8 +104,14 @@ pub struct Window {
     /// Title as plain text (the caller flattens the chat JSON of `OpenWindow`).
     pub title: String,
     pub own: Vec<Slot>,
-    /// `WindowProperty` values (furnace: 0 burn time left, 1 burn time total, 2 cook progress, 3 cook total).
-    pub props: [i16; 4],
+    /// `WindowProperty` values. Furnace: 0 burn time left, 1 burn time total, 2 cook progress,
+    /// 3 cook total. Enchanting: 0-2 costs, 3 seed, 4-6 hint enchantment, 7-9 hint level.
+    /// Anvil: 0 cost. Brewing: 0 brew time. Beacon: 0 levels, 1 primary, 2 secondary.
+    pub props: [i16; 10],
+    /// `MC|TrList` trades of a villager window.
+    pub recipes: Vec<merchant::Recipe>,
+    /// `InventoryMerchant.currentRecipeIndex`, set by `MC|TrSel`.
+    pub recipe_index: usize,
     transaction: i16,
 }
 
@@ -116,6 +146,8 @@ pub struct Inventory {
     pub held: u8,
     pub open: Option<Window>,
     pub creative: bool,
+    /// `EntityPlayer.experienceLevel`, which the anvil and the enchanting table check.
+    pub xp_level: i32,
     player_transaction: i16,
     drag: Drag,
 }
@@ -128,6 +160,7 @@ impl Default for Inventory {
             held: 0,
             open: None,
             creative: false,
+            xp_level: 0,
             player_transaction: 0,
             drag: Drag::default(),
         }
@@ -217,6 +250,26 @@ impl Inventory {
         }
     }
 
+    /// `ContainerRepair` result `Slot.canTakeStack`: the player has the levels the repair costs.
+    pub fn anvil_can_take(&self) -> bool {
+        let cost = self.open.as_ref().map_or(0, |w| i32::from(w.props[0]));
+        (self.creative || self.xp_level >= cost) && cost > 0 && self.slot(2).is_some()
+    }
+
+    /// `ContainerEnchantment.enchantItem` as the client checks it before it sends `EnchantItem`.
+    pub fn can_enchant(&self, button: usize) -> bool {
+        let Some(w) = self.open.as_ref().filter(|w| w.kind == Kind::Enchanting) else {
+            return false;
+        };
+        let need = button as i32 + 1;
+        let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
+        (lapis >= need || self.creative)
+            && i32::from(w.props[button]) > 0
+            && w.own[0].is_some()
+            && (self.creative
+                || (self.xp_level >= need && self.xp_level >= i32::from(w.props[button])))
+    }
+
     /// The stack in the selected hotbar slot.
     pub fn held_stack(&self) -> &Slot {
         &self.player[36 + usize::from(self.held)]
@@ -234,7 +287,14 @@ impl Inventory {
             kind,
             title,
             own: vec![None; own],
-            props: [0; 4],
+            // `ContainerEnchantment`: no enchantment clue yet.
+            props: if kind == Kind::Enchanting {
+                [0, 0, 0, 0, -1, -1, -1, 0, 0, 0]
+            } else {
+                [0; 10]
+            },
+            recipes: Vec::new(),
+            recipe_index: 0,
             transaction: 0,
         });
         true
@@ -271,6 +331,9 @@ impl Inventory {
             && i < self.slot_count()
         {
             *self.slot_mut(i) = item;
+            if i < 2 {
+                self.refresh_merchant();
+            }
         }
     }
 
@@ -325,16 +388,23 @@ impl Inventory {
 
     pub fn slot_accepts(&self, i: usize, s: &ItemStack) -> bool {
         match (self.kind(), i) {
-            (Kind::Player | Kind::Crafting, 0) | (Kind::Furnace, 2) => false,
+            (Kind::Player | Kind::Crafting, 0)
+            | (Kind::Furnace, 2)
+            | (Kind::Anvil | Kind::Merchant, 2) => false,
             (Kind::Player, 5..=8) => armor_fits(s, i - 5),
             (Kind::Furnace, 1) => items::is_fuel(s.id, s.damage) || s.id == items::BUCKET,
+            (Kind::Enchanting, 1) => s.id == items::DYE && s.damage == items::LAPIS_DAMAGE,
+            (Kind::Brewing, 0..=2) => items::holds_potion(s.id),
+            (Kind::Brewing, 3) => items::is_potion_ingredient(s.id, s.damage),
+            (Kind::Beacon, 0) => items::is_beacon_payment(s.id),
             _ => true,
         }
     }
 
     pub fn slot_limit(&self, i: usize, s: &ItemStack) -> i32 {
         match (self.kind(), i) {
-            (Kind::Player, 5..=8) => 1,
+            (Kind::Player, 5..=8) | (Kind::Enchanting, 0) | (Kind::Brewing, 0..=2) => 1,
+            (Kind::Beacon, 0) => 1,
             (Kind::Furnace, 1) if s.id == items::BUCKET => 1,
             _ => 64,
         }
@@ -350,18 +420,73 @@ impl Inventory {
         let grid = match self.kind() {
             Kind::Player => 1..5,
             Kind::Crafting => 1..10,
+            // shortcut: the anvil also spends the materials by its cost, which needs the
+            // repair formula; both inputs clear and the server's SetSlot corrects them
+            Kind::Anvil if i == 2 => 0..2,
+            Kind::Merchant if i == 2 => return self.take_trade(),
             _ => return,
         };
-        if i != 0 {
+        if i != 0 && self.kind() != Kind::Anvil {
             return;
         }
         for g in grid {
-            take(self.slot_mut(g), 1);
+            if self.kind() == Kind::Anvil {
+                *self.slot_mut(g) = None;
+            } else {
+                take(self.slot_mut(g), 1);
+            }
         }
+    }
+
+    /// `SlotMerchantResult.onPickupFromSlot`: pay the trade from the inputs and count its use.
+    fn take_trade(&mut self) {
+        let Some(w) = self.open.as_mut() else { return };
+        let Some(r) = merchant::find(&w.recipes, w.recipe_index, &w.own[0], &w.own[1]) else {
+            return;
+        };
+        let (mut a, mut b) = (w.own[0].take(), w.own[1].take());
+        let paid = merchant::pay(&w.recipes[r], &mut a, &mut b)
+            || merchant::pay(&w.recipes[r], &mut b, &mut a);
+        if paid {
+            w.recipes[r].uses += 1;
+        }
+        w.own[0] = a.filter(|s| s.count > 0);
+        w.own[1] = b.filter(|s| s.count > 0);
+    }
+
+    /// `InventoryMerchant.resetRecipeAndSlots`: the result slot shows the first usable trade.
+    fn refresh_merchant(&mut self) {
+        let Some(w) = self.open.as_mut().filter(|w| w.kind == Kind::Merchant) else {
+            return;
+        };
+        w.own[2] = merchant::find(&w.recipes, w.recipe_index, &w.own[0], &w.own[1])
+            .and_then(|r| w.recipes[r].sell.clone());
+    }
+
+    /// `S3F MC|TrList`: the villager's trades.
+    pub fn set_recipes(&mut self, window_id: u8, recipes: Vec<merchant::Recipe>) {
+        if let Some(w) = self.open.as_mut().filter(|w| w.id == window_id) {
+            w.recipes = recipes;
+        }
+        self.refresh_merchant();
+    }
+
+    /// `GuiMerchant.actionPerformed`: select the trade whose result the inputs buy.
+    pub fn select_recipe(&mut self, index: usize) {
+        if let Some(w) = self.open.as_mut().filter(|w| index < w.recipes.len()) {
+            w.recipe_index = index;
+        }
+        self.refresh_merchant();
     }
 
     /// `Container.slotClick` of 1.8.9; returns the stack that `ClickWindow` carries.
     pub fn slot_click(&mut self, slot_id: i32, button: i32, mode: i8) -> Slot {
+        let sent = self.click_inner(slot_id, button, mode);
+        self.refresh_merchant();
+        sent
+    }
+
+    fn click_inner(&mut self, slot_id: i32, button: i32, mode: i8) -> Slot {
         match mode {
             5 => self.drag_click(slot_id, button),
             _ if self.drag.event != 0 => self.drag = Drag::default(),
@@ -442,6 +567,9 @@ impl Inventory {
             return None;
         }
         let i = self.window_slot(slot_id)?;
+        if self.kind() == Kind::Anvil && i == 2 && !self.anvil_can_take() {
+            return None;
+        }
         if mode == 0 {
             let result = self.slot(i).clone();
             self.pick_or_place(i, button);
@@ -758,13 +886,13 @@ impl Inventory {
     fn transfer_merge(&mut self, kind: Kind, i: usize, s: &mut ItemStack) -> bool {
         match kind {
             Kind::Player => self.transfer_player(i, s),
-            Kind::Crafting => match i {
-                0 => self.merge(s, 10, 46, true),
-                10..=36 => self.merge(s, 37, 46, false),
-                37..=45 => self.merge(s, 10, 37, false),
-                _ => self.merge(s, 10, 46, false),
-            },
+            Kind::Crafting => self.transfer_crafting(i, s),
             Kind::Furnace => self.transfer_furnace(i, s),
+            Kind::Anvil => self.transfer_anvil(i, s),
+            Kind::Enchanting => self.transfer_enchanting(i, s),
+            Kind::Brewing => self.transfer_brewing(i, s),
+            Kind::Beacon => self.transfer_beacon(i, s),
+            Kind::Merchant => self.transfer_merchant(i, s),
             Kind::Chest(_) | Kind::Dispenser | Kind::Hopper => {
                 let n = self.slot_count();
                 let own = n - PLAYER_PART;
@@ -774,6 +902,88 @@ impl Inventory {
                     self.merge(s, 0, own, false)
                 }
             }
+        }
+    }
+
+    /// `ContainerPlayer`-style crafting table `transferStackInSlot`.
+    fn transfer_crafting(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            0 => self.merge(s, 10, 46, true),
+            10..=36 => self.merge(s, 37, 46, false),
+            37..=45 => self.merge(s, 10, 37, false),
+            _ => self.merge(s, 10, 46, false),
+        }
+    }
+
+    /// `ContainerRepair.transferStackInSlot`.
+    fn transfer_anvil(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            2 => self.merge(s, 3, 39, true),
+            0 | 1 => self.merge(s, 3, 39, false),
+            _ => self.merge(s, 0, 2, false),
+        }
+    }
+
+    /// `ContainerMerchant.transferStackInSlot`.
+    fn transfer_merchant(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            2 => self.merge(s, 3, 39, true),
+            0 | 1 => self.merge(s, 3, 39, false),
+            3..=29 => self.merge(s, 30, 39, false),
+            _ => self.merge(s, 3, 30, false),
+        }
+    }
+
+    /// `ContainerBeacon.transferStackInSlot`.
+    fn transfer_beacon(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        match i {
+            0 => self.merge(s, 1, 37, true),
+            _ if self.slot(0).is_none() && items::is_beacon_payment(s.id) && s.count == 1 => {
+                self.merge(s, 0, 1, false)
+            }
+            1..=27 => self.merge(s, 28, 37, false),
+            28..=36 => self.merge(s, 1, 28, false),
+            _ => false,
+        }
+    }
+
+    /// `ContainerEnchantment.transferStackInSlot`: one item goes to the item slot, lapis to its slot.
+    fn transfer_enchanting(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        if i < 2 {
+            return self.merge(s, 2, 38, true);
+        }
+        if s.id == items::DYE && s.damage == items::LAPIS_DAMAGE {
+            return self.merge(s, 1, 2, true);
+        }
+        if self.slot(0).is_some() {
+            return false;
+        }
+        if s.nbt.is_some() && s.count == 1 {
+            *self.slot_mut(0) = Some(s.clone());
+            s.count = 0;
+        } else if s.count >= 1 {
+            *self.slot_mut(0) = Some(ItemStack {
+                count: 1,
+                nbt: None,
+                ..s.clone()
+            });
+            s.count -= 1;
+        }
+        true
+    }
+
+    /// `ContainerBrewingStand.transferStackInSlot`.
+    fn transfer_brewing(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        if i <= 3 {
+            self.merge(s, 4, 40, true)
+        } else if self.slot(3).is_none() && items::is_potion_ingredient(s.id, s.damage) {
+            self.merge(s, 3, 4, false)
+        } else if items::holds_potion(s.id) {
+            self.merge(s, 0, 3, false)
+        } else if i < 31 {
+            self.merge(s, 31, 40, false)
+        } else {
+            self.merge(s, 4, 31, false)
         }
     }
 
@@ -923,6 +1133,58 @@ mod tests {
         inv.click(-999, 2, 5);
         assert_eq!(inv.player[9..12], [stack(1, 3), stack(1, 3), stack(1, 3)]);
         assert_eq!(inv.cursor, stack(1, 1));
+    }
+
+    #[test]
+    fn enchanting_table_takes_one_item_and_lapis_by_shift_click() {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(1, "minecraft:enchanting_table", String::new(), 0));
+        assert_eq!(inv.slot_count(), 38);
+        inv.player[9] = stack(276, 1);
+        inv.player[10] = Some(ItemStack {
+            id: 351,
+            count: 12,
+            damage: 4,
+            nbt: None,
+        });
+        let n = inv.slot_count();
+        // window slot 2 is the first main slot: the sword goes to the item slot
+        inv.slot_click(2, 0, 1);
+        assert_eq!(inv.slot(0), &stack(276, 1));
+        inv.slot_click(3, 0, 1);
+        assert_eq!(inv.slot(1).as_ref().map(|s| s.count), Some(12));
+        assert!(!inv.slot_accepts(
+            1,
+            &ItemStack {
+                id: 351,
+                count: 1,
+                damage: 1,
+                nbt: None
+            }
+        ));
+        assert!(n > 2);
+    }
+
+    #[test]
+    fn villager_result_follows_the_inputs_and_taking_it_pays() {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(2, "minecraft:villager", String::new(), 0));
+        inv.set_recipes(
+            2,
+            vec![merchant::Recipe {
+                buy: stack(339, 24),
+                buy2: None,
+                sell: stack(388, 1),
+                uses: 0,
+                max_uses: 7,
+            }],
+        );
+        inv.set_slot(2, 0, stack(339, 30));
+        assert_eq!(inv.slot(2), &stack(388, 1));
+        inv.slot_click(2, 0, 0);
+        assert_eq!(inv.cursor, stack(388, 1));
+        assert_eq!(inv.slot(0), &stack(339, 6));
+        assert_eq!(inv.slot(2), &None, "6 paper no longer buys the trade");
     }
 
     #[test]

@@ -120,6 +120,34 @@ impl Session {
         send(&self.writer, sb::Packet::from(p))
     }
 
+    /// C11: press button `button` (0 to 2) of the enchanting table.
+    pub fn enchant_item(&mut self, window: u8, button: i8) -> io::Result<()> {
+        let p = sb::EnchantItem {
+            window_id: window,
+            enchantment: button,
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C17: a custom payload (`MC|ItemName`, `MC|Beacon`, `MC|TrSel`).
+    pub fn plugin_message(&mut self, channel: &str, data: Vec<u8>) -> io::Result<()> {
+        let p = sb::PluginMessage {
+            channel: channel.to_string(),
+            data: ferrocraft_protocol::codec::Rest(data),
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C12: the four sign lines as plain text components (`ChatComponentText`).
+    pub fn update_sign(&mut self, pos: [i32; 3], lines: &[String; 4]) -> io::Result<()> {
+        let [x, y, z] = pos;
+        let p = sb::UpdateSign {
+            location: Position { x, y, z },
+            lines: lines.each_ref().map(|l| sign_line_json(l)),
+        };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
     /// C13: `flags` 2 is flying.
     pub fn abilities(&mut self, flags: u8, fly_speed: f32, walk_speed: f32) -> io::Result<()> {
         let p = sb::PlayerAbilities {
@@ -128,5 +156,44 @@ impl Session {
             walking_speed: walk_speed,
         };
         send(&self.writer, sb::Packet::from(p))
+    }
+}
+
+/// `IChatComponent.Serializer.componentToJson(new ChatComponentText(line))`: a plain text component is a bare
+/// JSON string, and Gson writes `< > & = '` and the line separators as `\u` escapes.
+fn sign_line_json(line: &str) -> String {
+    let json = serde_json::Value::from(line).to_string();
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        match c {
+            '<' | '>' | '&' | '=' | '\'' | '\u{2028}' | '\u{2029}' => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sign_line_json;
+
+    /// The bytes the 1.8.9 client writes for each line: `IChatComponent.Serializer.componentToJson(new
+    /// ChatComponentText(line))`, recorded from the oracle harness.
+    #[test]
+    fn sign_lines_match_the_vanilla_serializer() {
+        for (line, json) in [
+            ("", "\"\""),
+            ("hello", "\"hello\""),
+            ("a\"b\\c", "\"a\\\"b\\\\c\""),
+            ("\u{a7}cred", "\"\u{a7}cred\""),
+            ("\u{e9}\u{20ac}\u{1f600}", "\"\u{e9}\u{20ac}\u{1f600}\""),
+            ("<>&='", "\"\\u003c\\u003e\\u0026\\u003d\\u0027\""),
+            ("a\tb\nc\u{1}\u{1f}", "\"a\\tb\\nc\\u0001\\u001f\""),
+            ("\u{2028}\u{2029}", "\"\\u2028\\u2029\""),
+        ] {
+            assert_eq!(sign_line_json(line), json, "line {line:?}");
+        }
     }
 }

@@ -14,6 +14,7 @@ mod entity;
 mod gpu;
 mod hand;
 mod jrandom;
+pub use jrandom::JavaRandom;
 mod lightning;
 pub use lightning::Bolts;
 mod glsl;

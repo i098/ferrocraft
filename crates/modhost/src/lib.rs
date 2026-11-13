@@ -1,6 +1,7 @@
 //! Rust side of the mod host. See the README of this crate.
 
 pub mod keys;
+pub mod overrides;
 pub mod wire;
 
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use std::time::Duration;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
+pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
 
 /// A random secret for one JVM: only the process that got it can say hello.
@@ -60,7 +62,10 @@ struct Shared {
     /// A player tick the game thread waits on, and the JVM's answer.
     player: Option<PlayerState>,
     answer: Option<PlayerInput>,
-    /// A player tick got no answer in time: no more are asked until the pump has finished the round trip it is in,
+    /// A world values request the game thread waits on, and the JVM's answer.
+    world: Option<WorldState>,
+    world_answer: Option<Overrides>,
+    /// A player tick or a world values request got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
 }
@@ -123,6 +128,8 @@ impl ModHost {
                     textures: HashMap::new(),
                     player: None,
                     answer: None,
+                    world: None,
+                    world_answer: None,
                     stalled: false,
                 }),
                 view: Condvar::new(),
@@ -276,6 +283,30 @@ impl ModHost {
         answer
     }
 
+    /// The world values the mods change (time, weather, camera, FOV, night vision) and what their look hook does to
+    /// the player, once per frame. `None` while the JVM is not live or when it does not answer in time: the engine
+    /// then uses the vanilla values. A late answer stalls like one of `player_tick`.
+    pub fn overrides(&self, state: WorldState) -> Option<Overrides> {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live || s.stalled {
+            return None;
+        }
+        s.world = Some(state);
+        s.world_answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.world_answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.world = None;
+        let answer = s.world_answer.take();
+        s.stalled = answer.is_none() && s.phase == Phase::Live;
+        answer
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -407,7 +438,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
         let input = {
             let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live && !s.fresh && s.player.is_none() {
+            while s.phase == Phase::Live && !s.fresh && s.player.is_none() && s.world.is_none() {
                 s = link.view.wait(s).unwrap();
             }
             if s.phase != Phase::Live {
@@ -420,6 +451,18 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                 let mut s = link.state.lock().unwrap();
                 if !s.stalled {
                     s.answer = Some(answer);
+                }
+                s.stalled = false;
+                link.answered.notify_all();
+                continue;
+            }
+            if let Some(w) = s.world.take() {
+                drop(s);
+                overrides::write_state(&mut stream, &w)?;
+                let answer = overrides::read_overrides(&mut stream)?;
+                let mut s = link.state.lock().unwrap();
+                if !s.stalled {
+                    s.world_answer = Some(answer);
                 }
                 s.stalled = false;
                 link.answered.notify_all();
@@ -558,6 +601,8 @@ mod tests {
                 textures: HashMap::new(),
                 player: None,
                 answer: None,
+                world: None,
+                world_answer: None,
                 stalled: false,
             }),
             view: Condvar::new(),
@@ -702,6 +747,51 @@ mod tests {
             Some(PlayerInput {
                 sprinting: false,
                 sneaking: true
+            })
+        );
+
+        host.stop();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_world_values_request_returns_what_the_jvm_answers() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+        let state = WorldState {
+            world_time: 18000,
+            ..WorldState::default()
+        };
+
+        let answer = thread::scope(|scope| {
+            let asker = scope.spawn(|| host.overrides(state));
+            let mut request = [0; 54];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(request[0], b'O');
+            assert_eq!(request[22..30], 18000i64.to_be_bytes());
+            // PolyTime at noon: only the time is valid.
+            let mut reply = vec![1];
+            reply.extend(6000i64.to_be_bytes());
+            reply.extend([0; 36]);
+            stream.write_all(&reply).unwrap();
+            asker.join().unwrap()
+        });
+        assert_eq!(
+            answer,
+            Some(Overrides {
+                time: Some(6000),
+                ..Overrides::default()
             })
         );
 

@@ -103,12 +103,25 @@ fn display_tick(cx: &mut Cx, state: u16, pos: [i32; 3], rng: &mut JavaRandom) {
         8..=11 => liquid(cx, id, meta, pos, rng),
         55 => wire(cx, pos, meta, rng),
         74 => lit_ore(cx, pos, rng),
+        _ => decor_tick(cx, id, meta, pos, rng),
+    }
+}
+
+/// The blocks that decorate a build rather than burn or spark.
+fn decor_tick(cx: &mut Cx, id: u16, meta: u16, pos: [i32; 3], rng: &mut JavaRandom) {
+    match id {
         62 => furnace(cx, pos, meta, rng),
         116 => enchanting_table(cx, pos, rng),
         90 => portal(cx, pos, rng),
         119 => end_portal(cx, pos, rng),
         110 => mycelium(cx, pos, rng),
         18 | 161 => leaves(cx, pos, rng),
+        _ => props_tick(cx, id, meta, pos, rng),
+    }
+}
+
+fn props_tick(cx: &mut Cx, id: u16, meta: u16, pos: [i32; 3], rng: &mut JavaRandom) {
+    match id {
         117 => brewing_stand(cx, pos, rng),
         130 => ender_chest(cx, pos, rng),
         94 => repeater(cx, pos, meta, rng),

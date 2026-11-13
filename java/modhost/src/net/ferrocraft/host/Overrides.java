@@ -63,13 +63,22 @@ public final class Overrides {
         if (recorded != null) recorded.add(new float[] {'T', x, y, z, 0});
     }
 
+    /** The values a request got, and which groups are valid. */
+    private static final class Reply {
+        int valid;
+        long time;
+        final float[] weather = new float[2];
+        final float[] camera = new float[3];
+        float fov;
+        float nightVision;
+        final float[] look = new float[2];
+    }
+
     /** Reads one request, asks the getters and writes the reply. */
     void answer(DataInputStream in, DataOutputStream out) throws IOException {
         float partial = in.readFloat();
-        float yaw = in.readFloat();
-        float pitch = in.readFloat();
-        float lookYaw = in.readFloat();
-        float lookPitch = in.readFloat();
+        float[] angles = {in.readFloat(), in.readFloat()};
+        float[] mouse = {in.readFloat(), in.readFloat()};
         int perspective = in.readUnsignedByte();
         long time = in.readLong();
         float rain = in.readFloat();
@@ -79,90 +88,106 @@ public final class Overrides {
         float hand = in.readFloat();
         int nightVision = in.readInt();
 
-        int valid = 0;
-        long timeOut = 0;
-        float[] weather = new float[2];
-        float[] camera = new float[3];
-        float fovOut = 0;
-        float nvOut = 0;
-        float[] look = new float[2];
-
+        Reply r = new Reply();
         // The look first: the camera and the angles below start from where it left the player.
-        R.set(entity, "field_70177_z", yaw);
-        R.set(entity, "field_70125_A", pitch);
-        R.set(entity, "field_70126_B", yaw);
-        R.set(entity, "field_70127_C", pitch);
-        try {
-            R.call(entity, "func_70082_c", (float) (lookYaw / MOUSE_SCALE), (float) (-lookPitch / MOUSE_SCALE)); // setAngles
-            float newYaw = (Float) R.get(entity, "field_70177_z");
-            float newPitch = (Float) R.get(entity, "field_70125_A");
-            look[0] = newYaw - yaw;
-            look[1] = newPitch - pitch;
-            yaw = newYaw;
-            pitch = newPitch;
-            valid |= 32;
-        } catch (RuntimeException e) {
-            failed("look", e);
-        }
-        R.set(entity, "field_70177_z", yaw);
-        R.set(entity, "field_70125_A", pitch);
-        R.set(entity, "field_70126_B", yaw);
-        R.set(entity, "field_70127_C", pitch);
-
-        try {
-            Object info = R.get(world, "field_72986_A");
-            R.set(info, "field_76094_f", time); // worldTime
-            R.set(info, "field_82575_g", time); // totalTime
-            timeOut = (Long) R.call(world, "func_72820_D"); // World.getWorldTime
-            valid |= 1;
-        } catch (RuntimeException e) {
-            failed("time", e);
-        }
-
-        try {
-            for (String f : new String[] {"field_73004_o", "field_73017_q"}) R.set(world, f, rain); // prev and now rainingStrength
-            for (String f : new String[] {"field_73018_p", "field_73016_r"}) R.set(world, f, thunder); // prev and now thunderingStrength
-            weather[0] = (Float) R.call(world, "func_72867_j", partial); // World.getRainStrength
-            weather[1] = (Float) R.call(world, "func_72819_i", partial); // World.getThunderStrength
-            valid |= 2;
-        } catch (RuntimeException e) {
-            failed("weather", e);
-        }
-
+        placeEntity(angles);
+        look(angles, mouse, r);
+        placeEntity(angles);
+        time(time, r);
+        weather(rain, thunder, partial, r);
         double posY = (Double) R.get(entity, "field_70163_u");
         double prevY = (Double) R.get(entity, "field_70167_r");
         R.set(entity, "field_70163_u", VOID_Y);
         R.set(entity, "field_70167_r", VOID_Y);
+        camera(partial, perspective, r);
+        fov(partial, fov, handPrev, hand, r);
+        R.set(entity, "field_70163_u", posY);
+        R.set(entity, "field_70167_r", prevY);
+        nightVision(partial, nightVision, r);
+
+        out.writeByte(r.valid);
+        out.writeLong(r.time);
+        for (float v : new float[] {r.weather[0], r.weather[1], r.camera[0], r.camera[1], r.camera[2], r.fov, r.nightVision, r.look[0], r.look[1]}) out.writeFloat(v);
+        out.flush();
+    }
+
+    /** Puts the stand-in view entity at the angles, with no turn between the previous and the current. */
+    private void placeEntity(float[] angles) {
+        R.set(entity, "field_70177_z", angles[0]);
+        R.set(entity, "field_70125_A", angles[1]);
+        R.set(entity, "field_70126_B", angles[0]);
+        R.set(entity, "field_70127_C", angles[1]);
+    }
+
+    /** Entity.setAngles; angles holds the result afterwards and the reply what the look changed. */
+    private void look(float[] angles, float[] mouse, Reply r) {
+        try {
+            R.call(entity, "func_70082_c", (float) (mouse[0] / MOUSE_SCALE), (float) (-mouse[1] / MOUSE_SCALE));
+            float newYaw = (Float) R.get(entity, "field_70177_z");
+            float newPitch = (Float) R.get(entity, "field_70125_A");
+            r.look[0] = newYaw - angles[0];
+            r.look[1] = newPitch - angles[1];
+            angles[0] = newYaw;
+            angles[1] = newPitch;
+            r.valid |= 32;
+        } catch (RuntimeException e) {
+            failed("look", e);
+        }
+    }
+
+    private void time(long time, Reply r) {
+        try {
+            Object info = R.get(world, "field_72986_A");
+            R.set(info, "field_76094_f", time); // worldTime
+            R.set(info, "field_82575_g", time); // totalTime
+            r.time = (Long) R.call(world, "func_72820_D"); // World.getWorldTime
+            r.valid |= 1;
+        } catch (RuntimeException e) {
+            failed("time", e);
+        }
+    }
+
+    private void weather(float rain, float thunder, float partial, Reply r) {
+        try {
+            for (String f : new String[] {"field_73004_o", "field_73017_q"}) R.set(world, f, rain); // prev and now rainingStrength
+            for (String f : new String[] {"field_73018_p", "field_73016_r"}) R.set(world, f, thunder); // prev and now thunderingStrength
+            r.weather[0] = (Float) R.call(world, "func_72867_j", partial); // World.getRainStrength
+            r.weather[1] = (Float) R.call(world, "func_72819_i", partial); // World.getThunderStrength
+            r.valid |= 2;
+        } catch (RuntimeException e) {
+            failed("weather", e);
+        }
+    }
+
+    private void camera(float partial, int perspective, Reply r) {
         try {
             R.set(settings, "field_74320_O", perspective); // thirdPersonView
-            if (orient(partial, perspective, camera)) valid |= 4;
+            if (orient(partial, perspective, r.camera)) r.valid |= 4;
         } catch (RuntimeException e) {
             failed("camera", e);
         }
+    }
+
+    private void fov(float partial, float fov, float handPrev, float hand, Reply r) {
         try {
             R.set(settings, "field_74334_X", fov); // fovSetting
             R.set(renderer, "field_78506_S", handPrev); // fovModifierHandPrev
             R.set(renderer, "field_78507_R", hand); // fovModifierHand
-            fovOut = (Float) R.call(renderer, "func_78481_a", partial, true); // EntityRenderer.getFOVModifier
-            valid |= 8;
+            r.fov = (Float) R.call(renderer, "func_78481_a", partial, true); // EntityRenderer.getFOVModifier
+            r.valid |= 8;
         } catch (RuntimeException e) {
             failed("fov", e);
         }
-        R.set(entity, "field_70163_u", posY);
-        R.set(entity, "field_70167_r", prevY);
+    }
 
+    private void nightVision(float partial, int ticks, Reply r) {
         try {
-            nvOut = nightVision(partial, nightVision);
-            valid |= 16;
+            r.nightVision = nightVisionBrightness(partial, ticks);
+            r.valid |= 16;
         } catch (RuntimeException e) {
             // Without the effect vanilla throws here and no mod answers; that is the vanilla value, not a failure.
-            if (nightVision >= 0) failed("night vision", e);
+            if (ticks >= 0) failed("night vision", e);
         }
-
-        out.writeByte(valid);
-        out.writeLong(timeOut);
-        for (float v : new float[] {weather[0], weather[1], camera[0], camera[1], camera[2], fovOut, nvOut, look[0], look[1]}) out.writeFloat(v);
-        out.flush();
     }
 
     /**
@@ -187,9 +212,9 @@ public final class Overrides {
         Float pitch = null;
         Float distance = null;
         for (float[] c : calls) {
-            if (c[0] == 'R' && c[2] == 1 && c[3] == 0 && c[4] == 0) pitch = c[1];
-            if (c[0] == 'R' && c[2] == 0 && c[3] == 1 && c[4] == 0) yaw = c[1] - 180f;
-            if (c[0] == 'T' && c[1] == 0 && c[2] == 0 && c[3] < 0 && distance == null) distance = -c[3];
+            if (isRotation(c, 1, 0)) pitch = c[1];
+            if (isRotation(c, 0, 1)) yaw = c[1] - 180f;
+            if (distance == null && c[0] == 'T' && c[3] < 0 && c[1] == 0 && c[2] == 0) distance = -c[3];
         }
         if (yaw == null || pitch == null) return false;
         camera[0] = yaw;
@@ -198,8 +223,13 @@ public final class Overrides {
         return true;
     }
 
+    /** A recorded rotation about the x axis (1, 0) or the y axis (0, 1). */
+    private static boolean isRotation(float[] c, float x, float y) {
+        return c[0] == 'R' && c[2] == x && c[3] == y && c[4] == 0;
+    }
+
     /** EntityRenderer.getNightVisionBrightness on the stand-in player, which holds the effect only for the call. */
-    private float nightVision(float partial, int ticks) {
+    private float nightVisionBrightness(float partial, int ticks) {
         @SuppressWarnings("unchecked")
         HashMap<Object, Object> effects = (HashMap<Object, Object>) R.get(entity, "field_70713_bf"); // activePotionsMap
         Object had = effects.get(NIGHT_VISION_ID);

@@ -362,9 +362,18 @@ mod tests {
 
     #[test]
     fn snbt_skips_multibyte_whitespace() {
-        assert!(matches!(parse("{id:1,\u{a0}Count:1b}"), Some(Tag::Compound(_))));
-        assert!(matches!(parse("{id:1,\u{3000}Count:1b}"), Some(Tag::Compound(_))));
-        assert!(matches!(parse("{id:1,Count:\u{e9}}"), Some(Tag::Compound(_))));
+        assert!(matches!(
+            parse("{id:1,\u{a0}Count:1b}"),
+            Some(Tag::Compound(_))
+        ));
+        assert!(matches!(
+            parse("{id:1,\u{3000}Count:1b}"),
+            Some(Tag::Compound(_))
+        ));
+        assert!(matches!(
+            parse("{id:1,Count:\u{e9}}"),
+            Some(Tag::Compound(_))
+        ));
     }
 
     #[test]

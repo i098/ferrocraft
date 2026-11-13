@@ -60,23 +60,32 @@ impl App {
             UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
-            UiEffect::Respawn => {
-                let r = self.link.session().map(|s| s.respawn());
-                self.send_result(r.unwrap_or(Ok(())));
-            }
+            UiEffect::Respawn => self.respawn(),
             UiEffect::SignText { pos, lines } => self.send_sign(pos, &lines),
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
             UiEffect::LanguageChanged => self.change_language(),
             UiEffect::OpenUrl(url) => open_url(&url),
-            UiEffect::SuperSecret => {
-                if let Some(s) = &mut self.sound {
-                    s.play_super_secret();
-                }
-                self.next_shader();
-            }
+            UiEffect::SuperSecret => self.super_secret(),
             UiEffect::ResourcesChanged => self.refresh_resources(),
+            UiEffect::ServerPackAnswer {
+                url,
+                hash,
+                accepted,
+            } => self.answer_server_pack(&url, &hash, accepted),
         }
+    }
+
+    fn super_secret(&mut self) {
+        if let Some(s) = &mut self.sound {
+            s.play_super_secret();
+        }
+        self.next_shader();
+    }
+
+    fn respawn(&mut self) {
+        let r = self.link.session().map(|s| s.respawn());
+        self.send_result(r.unwrap_or(Ok(())));
     }
 
     fn open_sign_editor(&mut self, pos: [i32; 3]) {
@@ -109,6 +118,7 @@ impl App {
             .and_then(|m| m.client_brand())
             .unwrap_or_else(|| "vanilla".into());
         self.server.clone_from(&addr);
+        self.pack_mode = self.saved_pack_mode();
         self.link = Link::connect(
             addr,
             self.args.username.clone(),
@@ -157,6 +167,7 @@ impl App {
         self.ui.in_world = false;
         self.ui.difficulty = None;
         self.awaiting_terrain = false;
+        self.pending_pack = None;
         self.perspective = 0;
         self.sneak_sent = false;
         self.sprint_sent = false;
@@ -223,6 +234,19 @@ impl App {
         }
     }
 
+    /// The first position packet closes `GuiDownloadingTerrain`; a held pack prompt opens then.
+    fn finish_terrain_wait(&mut self) {
+        if self.awaiting_terrain && self.game.player.is_some() {
+            self.awaiting_terrain = false;
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+            if let Some((url, hash)) = self.pending_pack.take() {
+                self.offer_server_pack(&url, &hash);
+            }
+        }
+    }
+
     pub(super) fn pump_network(&mut self) {
         if let Some(e) = self.link.poll_login() {
             let m = metrics!(self);
@@ -244,12 +268,7 @@ impl App {
             }
             upload(r, &self.game, dirty);
         }
-        if self.awaiting_terrain && self.game.player.is_some() {
-            self.awaiting_terrain = false;
-            let m = metrics!(self);
-            let q = self.ui.close(&m);
-            self.run_effects(q);
-        }
+        self.finish_terrain_wait();
         if let Some(reason) = self.game.disconnected.take() {
             self.leave_world();
             let m = metrics!(self);
@@ -347,11 +366,7 @@ impl App {
                 self.run_effects(q);
                 self.send_client_settings();
             }
-            NetEvent::ResourcePack { url, hash } => {
-                let dir = self.args.game_dir.clone();
-                let r = self.session_send(|s| s.accept_resource_pack(url, hash, &dir));
-                self.send_result(r);
-            }
+            NetEvent::ResourcePack { url, hash } => self.offer_server_pack(url, hash),
             NetEvent::ResourcePackReady { hash, path } => {
                 // The loader skips a pack it cannot open, as vanilla does; the server still hears about it.
                 let status = if render::AssetSource::open(path).is_some() {
@@ -842,5 +857,31 @@ mod tests {
         assert!(!screen_opens(Some(386), "MC|BOpen"), "book and quill");
         assert!(!screen_opens(None, "MC|BOpen"), "empty hand");
         assert!(!screen_opens(Some(387), "MC|Brand"), "other channel");
+    }
+
+    #[test]
+    fn pack_prompt_waits_for_terrain_screen_to_close() {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.ui.in_world = true;
+        let m = metrics!(app);
+        app.ui.close(&m);
+        app.awaiting_terrain = true;
+        app.offer_server_pack("http://h/p.zip", "abc");
+        assert!(
+            !app.ui.is_open(),
+            "prompt must not open over the terrain screen"
+        );
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
+        app.finish_terrain_wait();
+        assert!(
+            app.ui.is_open(),
+            "prompt opens once the terrain screen closes"
+        );
     }
 }

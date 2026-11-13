@@ -342,7 +342,7 @@ impl Entity {
         match self.kind {
             Kind::Player | Kind::Mob(_) => true,
             Kind::Object(t) => matches!(t, 1 | 10..=12),
-            Kind::ExperienceOrb => false,
+            Kind::ExperienceOrb | Kind::Painting => false,
         }
     }
 

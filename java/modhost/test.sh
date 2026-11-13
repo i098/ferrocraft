@@ -20,9 +20,9 @@ cp="$here/cls/test:$here/cls:$others$fj:$mcj"
 game=$(mktemp -d)
 trap 'rm -rf "$game"' EXIT
 cd "$game"
-# The 21 Forge twins of the OneClient mods (mod ids, not file names), plus Keystrokes: 22 mods. oneconfig is the loader the
-# bootstrap downloads at first boot.
-twins=oneconfig,evergreenhud,polysprint,vanillahud,polycrosshair,redaction,chatting,chatblock,polytime,polyweather,freelook,behindyouv3,betternightvision,damagetint,polyhitbox,polynametag,countdown,glintcolorizer,overflowanimations,overflowparticles,polyblur,colorsaturation,polyfrostkeystrokes
+# The 22 twins of the OneClient mods (mod ids, not file names): oneconfig, the loader the bootstrap downloads at first boot,
+# plus 21 mods; and Keystrokes and mixinbooter, which chatblock requires.
+twins=oneconfig,evergreenhud,polysprint,vanillahud,polycrosshair,redaction,chatting,chatblock,polytime,polyweather,freelook,behindyouv3,betternightvision,damagetint,polyhitbox,polynametag,countdown,glintcolorizer,overflowanimations,overflowparticles,polyblur,colorsaturation,polyfrostkeystrokes,mixinbooter
 boot() {
     # FML refuses a Minecraft jar whose classes are not signed, and the generated jar is a patched copy: ignore that.
     # The mod boot needs network on a cold cache: OneConfig's bootstrap downloads its loader, and Cloudflare drops

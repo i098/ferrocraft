@@ -1,4 +1,4 @@
-# role | file | pinned Modrinth URL (1.8.9 Forge): the 21 Forge twins of the OneClient mods, plus Keystrokes (22 mods) and the OneConfig bootstrap
+# role | file | pinned Modrinth URL (1.8.9 Forge): 22 twins = OneConfig bootstrap + 21 mods; Keystrokes and MixinBooter (a dependency of chatblock) are extra jars listed apart
 OneConfig bootstrap|oneconfig-bootstrap-1.0.3.jar|https://cdn.modrinth.com/data/AibBIVmj/versions/TcuRDj1R/Aoneconfigbootstrap-1.8.9-forge-1.0.3.jar
 Keystrokes|Keystrokes-1.0.0.jar|https://cdn.modrinth.com/data/G2Hmyf0G/versions/70oHEIpB/Keystrokes-1.8.9-forge-1.0.0.jar
 evergreenhud|EvergreenHUD-1.8.9-forge-2.1.7.jar|https://cdn.modrinth.com/data/1yIQcc2b/versions/YAwKwEPz/EvergreenHUD-1.8.9-forge-2.1.7.jar
@@ -22,3 +22,4 @@ overflowparticles|OverflowParticles-1.8.9-forge-1.0.2.jar|https://cdn.modrinth.c
 polyblur|PolyBlur-1.8.9-forge-1.0.2.jar|https://cdn.modrinth.com/data/xT45UG5o/versions/w6XrPOU5/PolyBlur-1.8.9-forge-1.0.2.jar
 colorsaturation|ColorSaturation-1.8.9-forge-1.0.0.jar|https://cdn.modrinth.com/data/fLNnSWgM/versions/UIoBGYDU/ColorSaturation-1.8.9-forge-1.0.0.jar
 freelook|Freelook-0.1.6+1.8.9-forge.jar|https://cdn.modrinth.com/data/S1v2ASLQ/versions/3PYYuY2M/Freelook-0.1.6%2B1.8.9-forge.jar
+MixinBooter (dependency of chatblock)|mixinbooter-12.3.jar|https://cdn.modrinth.com/data/G1ckZuWK/versions/NgQyOl3j/%21mixinbooter-12.3.jar

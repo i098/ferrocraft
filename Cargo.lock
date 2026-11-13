@@ -909,7 +909,7 @@ name = "ferrocraft-oneclient"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "sha1",
+ "sha1 0.10.7",
  "ureq",
 ]
 

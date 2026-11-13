@@ -3,8 +3,8 @@
 
 use crate::assets::Atlas;
 use crate::blocks::{
-    cached, double_plant_top, is_opaque_cube, tint_color, uses_neighbor_light, Kind, Look, Tint,
-    DOWN, NORTH, UP,
+    cached, double_plant_top, is_opaque_cube, material_solid, tint_color, uses_neighbor_light,
+    Kind, Look, Tint, DOWN, NORTH, UP,
 };
 use crate::light::Light;
 use crate::shapes::{boxes, Bx};
@@ -438,7 +438,7 @@ impl Mesher<'_> {
                 }
                 f += pct;
                 n += 1.0;
-            } else if !matches!(cached(s).kind, Kind::Opaque | Kind::Cutout | Kind::Shape) {
+            } else if !material_solid(s) {
                 f += 1.0;
                 n += 1.0;
             }

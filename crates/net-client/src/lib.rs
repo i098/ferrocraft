@@ -129,6 +129,8 @@ pub enum NetEvent {
     },
     /// S09: the selected hotbar slot, 0 to 8.
     HeldItem(u8),
+    /// S3A: the completions for the last `send_tab_complete`.
+    TabComplete(Vec<String>),
     /// S2F: window -1 and slot -1 is the cursor stack.
     SetSlot {
         window: i8,
@@ -335,6 +337,17 @@ impl Session {
     /// `Animation`: the arm swing.
     pub fn send_swing(&mut self) -> io::Result<()> {
         send(&self.writer, sb::Packet::from(sb::Animation {}))
+    }
+
+    /// `C14PacketTabComplete`: the chat text before the cursor, no looked-at block.
+    pub fn send_tab_complete(&mut self, text: &str) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::TabComplete {
+                text: text.to_owned(),
+                looked_at: ferrocraft_protocol::codec::Opt(None),
+            }),
+        )
     }
 
     pub fn send_chat(&mut self, message: &str) -> io::Result<()> {

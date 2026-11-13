@@ -13,7 +13,7 @@ vanillahud|VanillaHUD|VanillaHUD 2.2.12
 polycrosshair|PolyCrosshair|PolyCrosshair 1.0.3
 redaction|REDACTION|REDACTION 1.3.9
 chatting|Chatting|Chatting 2.0.6
-chatblock|ChatBlock|ChatBlock 1.7.2
+chatblock|Block|ChatBlock 1.7.2
 damagetint|DamageTint|DamageTint 3.3.0
 polyhitbox|Hitbox|PolyHitbox 1.0.3
 polynametag|Nametag|PolyNametag 1.0.10

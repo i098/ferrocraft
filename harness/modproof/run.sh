@@ -79,7 +79,7 @@ geo=$("$XDO" getwindowgeometry "$win" | awk '/Geometry/ {print $2}')
 sleep "${FC_LOAD_SECS:-60}"
 "$XDO" windowfocus "$win"; "$XDO" mousemove 400 300; sleep 1
 
-shot() { ffmpeg -loglevel error -y -f x11grab -video_size "$geo" -i "$DISP" -frames:v 1 "$1"; }
+shot() { ffmpeg -nostdin -loglevel error -y -f x11grab -video_size "$geo" -i "$DISP" -frames:v 1 "$1"; }
 # Pixels in the OneConfig content area (x 160-780, y 110-530) that differ by more than 16 in some channel between two
 # frames. The HUD text at the top left (coordinates, play time) changes on its own and stays outside.
 diffpx() {

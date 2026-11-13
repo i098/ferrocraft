@@ -416,25 +416,32 @@ const FIXED: [Skin; ARMOR_FIRST as usize] = [
 ];
 
 fn slot(skin: Skin) -> Option<u32> {
-    match skin {
+    mob_slot(skin).or(match skin {
         Skin::Player(i) => Some(SLOTS + u32::from(i)),
         Skin::Cape(i) => Some(SLOTS + PLAYER_SLOTS as u32 + u32::from(i)),
         Skin::White => None,
-        Skin::Villager(i) => Some(MOBS_FIRST as u32 + u32::from(i)),
-        Skin::IronGolem => Some(34),
-        Skin::Silverfish => Some(36),
-        Skin::Chicken => Some(37),
-        Skin::Sheep => Some(38),
-        Skin::SheepFur => Some(39),
-        Skin::Spider => Some(40),
-        Skin::CaveSpider => Some(41),
-        Skin::Enderman => Some(42),
-        Skin::SpiderEyes => Some(43),
-        Skin::EndermanEyes => Some(44),
         Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
         Skin::GuardianElder => Some(ELDER_SLOT),
         fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
-    }
+    })
+}
+
+/// Slots of the mob textures that come after the elder guardian, in `SKINS` order.
+fn mob_slot(skin: Skin) -> Option<u32> {
+    Some(match skin {
+        Skin::Villager(i) => MOBS_FIRST as u32 + u32::from(i),
+        Skin::IronGolem => 34,
+        Skin::Silverfish => 36,
+        Skin::Chicken => 37,
+        Skin::Sheep => 38,
+        Skin::SheepFur => 39,
+        Skin::Spider => 40,
+        Skin::CaveSpider => 41,
+        Skin::Enderman => 42,
+        Skin::SpiderEyes => 43,
+        Skin::EndermanEyes => 44,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

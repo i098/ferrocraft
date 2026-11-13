@@ -1004,19 +1004,30 @@ fn emit_carried(out: &mut MeshData, xf: &Xf, block: u16, v_off: f32) {
 /// Meshes one entity into `out` and returns the index of the first full-bright vertex (the eye
 /// layers), or the vertex count when there are none.
 fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
+    if other_drawer(out, d, skins) {
+        return out.vertices.len();
+    }
+    draw_body(out, d, skins)
+}
+
+/// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
+/// `d` was one of them.
+fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
     if let Class::Object(id) = d.class {
         if projectile::handles(id) {
             projectile::build(out, id, d, skins);
-            return out.vertices.len();
+            return true;
         }
         // Dropped items draw through `item::build`, item frames through `hanging::build`.
         if id == 2 || id == 71 {
-            return out.vertices.len();
+            return true;
         }
     }
-    if d.class == Class::Painting {
-        return out.vertices.len();
-    }
+    d.class == Class::Painting
+}
+
+/// The body model, its armor and layers; returns where the full-bright layers start.
+fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
     let generic = m.skin == Skin::White
@@ -1042,22 +1053,35 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     if holds {
         emit_armor(out, &xf, &m, d, skins);
     }
+    emit_layers(out, &xf, &m, d, skins, white)
+}
+
+/// The held item bar, the cape, the carried block and the model layers; returns where the
+/// full-bright layers start.
+fn emit_layers(
+    out: &mut MeshData,
+    xf: &Xf,
+    m: &Model,
+    d: &EntityDraw,
+    skins: &Skins,
+    white: f32,
+) -> usize {
     if let (Some(sway), Some(cape)) = (d.look.cape, d.skin.and_then(|k| skins.cape(k))) {
         if cape_shown(d) {
-            emit_cape(out, &xf, d, sway, skins.v_offset(cape));
+            emit_cape(out, xf, d, sway, skins.v_offset(cape));
         }
     }
     if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
-        emit_carried(out, &xf, d.look.carried, white);
+        emit_carried(out, xf, d.look.carried, white);
     }
     let mut bright = None;
-    for layer in mobs::layers(d, &m).iter().filter(|l| skins.has(l.skin)) {
+    for layer in mobs::layers(d, m).iter().filter(|l| skins.has(l.skin)) {
         if layer.bright {
             bright.get_or_insert(out.vertices.len());
         }
         let v_off = skins.v_offset(layer.skin);
         for part in &layer.parts {
-            emit_part(out, &xf, part, part.inflate, layer.tint, v_off);
+            emit_part(out, xf, part, part.inflate, layer.tint, v_off);
         }
     }
     bright.unwrap_or(out.vertices.len())
@@ -1125,6 +1149,9 @@ fn armor_pass(
 const LEATHER_DEFAULT: i32 = 0xA0_65_40;
 
 fn fallback_tint(skin: Skin) -> [f32; 3] {
+    if let Some(c) = mob_tint(skin) {
+        return c;
+    }
     match skin {
         Skin::Steve | Skin::Alex => [0.75, 0.6, 0.5],
         Skin::Zombie => [0.35, 0.6, 0.3],
@@ -1141,7 +1168,13 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         | Skin::FireCharge
         | Skin::Bobber
         | Skin::SplashPotion => [0.8, 0.8, 0.85],
-        Skin::White | Skin::Player(_) | Skin::Cape(_) => [1.0; 3],
+        _ => [1.0; 3],
+    }
+}
+
+/// Flat color of a mob texture that has no vertex tint of its own.
+fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
+    Some(match skin {
         Skin::Villager(_) => [0.7, 0.55, 0.45],
         Skin::IronGolem => [0.75, 0.75, 0.7],
         Skin::Silverfish => [0.5, 0.5, 0.52],
@@ -1150,7 +1183,8 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Spider | Skin::CaveSpider => [0.25, 0.22, 0.2],
         Skin::Enderman => [0.1, 0.08, 0.12],
         Skin::SpiderEyes | Skin::EndermanEyes => [1.0; 3],
-    }
+        _ => return None,
+    })
 }
 
 fn skin_dims() -> [f32; 2] {

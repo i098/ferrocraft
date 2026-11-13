@@ -413,7 +413,6 @@ fn look_3(id: u16, meta: u16) -> Look {
             _ => cross(0x4a8a30, "tallgrass", Tint::Grass),
         },
         32 => cross(0x7a5a33, "deadbush", Tint::None),
-        34 => mk(Kind::Skip, 0, ["stone"; 6]),
         _ => look_4(id, meta),
     }
 }
@@ -976,7 +975,7 @@ fn look_17(id: u16, meta: u16) -> Look {
     }
 }
 
-fn look_18(id: u16, _meta: u16) -> Look {
+fn look_18(id: u16, meta: u16) -> Look {
     match id {
         181 => cube3(
             0xa85a2a,
@@ -984,9 +983,51 @@ fn look_18(id: u16, _meta: u16) -> Look {
             "red_sandstone_bottom",
             "red_sandstone_normal",
         ),
+        _ => look_19(id, meta),
+    }
+}
+
+/// Redstone parts and other small models that `shapes.rs` builds from several textures; `tex` names the main one.
+fn look_19(id: u16, meta: u16) -> Look {
+    match id {
+        34 => shape(0x9a8260, ["piston_top_normal"; 6]),
+        69 => shape(0x8a8a8a, ["cobblestone"; 6]),
+        77 => shape(0x7d7d7d, ["stone"; 6]),
+        143 => shape(0xb08850, ["planks_oak"; 6]),
+        127 => shape(0x8b5a2b, ["cocoa_stage_2"; 6]),
+        131 => shape(0xb08850, ["trip_wire_source"; 6]),
+        132 => shape(0xe0e0e0, ["trip_wire"; 6]),
+        147 => shape(0xf8d73e, ["gold_block"; 6]),
+        148 => shape(0xdcdcdc, ["iron_block"; 6]),
+        149 | 150 => shape(
+            0x9a9a9a,
+            [if id == 150 || meta & 8 != 0 {
+                "comparator_on"
+            } else {
+                "comparator_off"
+            }; 6],
+        ),
         _ => mk(Kind::Skip, 0, ["stone"; 6]),
     }
 }
+
+/// Textures that only `shapes.rs` boxes use, so no `look` lists them.
+const SHAPE_TEXTURES: [&str; 14] = [
+    "cobblestone",
+    "lever",
+    "planks_oak",
+    "piston_side",
+    "piston_top_sticky",
+    "stone_slab_top",
+    "redstone_torch_on",
+    "redstone_torch_off",
+    "cocoa_stage_0",
+    "cocoa_stage_1",
+    "cocoa_stage_2",
+    "trip_wire",
+    "trip_wire_source",
+    "comparator_off",
+];
 
 pub fn pane_top(meta: u16) -> &'static str {
     PANE_TOP[meta as usize & 15]
@@ -1134,6 +1175,7 @@ pub fn texture_names() -> Vec<&'static str> {
         ])
         .collect();
     names.extend(PANE_TOP);
+    names.extend(SHAPE_TEXTURES);
     names.sort_unstable();
     names.dedup();
     names

@@ -71,6 +71,8 @@ pub struct App {
     hud: gui::Hud,
     /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set.
     mods: Option<ferrocraft_modhost::ModHost>,
+    /// `host:port` of the server last connected to, for the mod host's mirror.
+    server: String,
     ui: Ui,
     icons: Option<Icons>,
     container: Option<ContainerScreen>,
@@ -143,6 +145,7 @@ impl App {
             renderer: None,
             hud: gui::Hud::default(),
             mods: None,
+            server: String::new(),
             ui,
             icons: None,
             container: None,
@@ -752,6 +755,56 @@ impl App {
         self.modal() || self.input.chat_input().is_some()
     }
 
+    /// What HUD mods read from `Minecraft` and `EntityPlayerSP`, as the engine has it now. `None` without a player.
+    fn mod_mirror(&self) -> Option<ferrocraft_modhost::Mirror> {
+        use ferrocraft_modhost::mirror::{Effect, Stack, SLOTS};
+        let (p, g) = (self.game.player.as_ref()?, &self.game);
+        let stack = |i: usize| {
+            g.inv.player.get(i)?.as_ref().map(|s| Stack {
+                id: s.id,
+                count: s.count,
+                damage: s.damage,
+            })
+        };
+        // mainInventory: the hotbar is window slots 36..45 and comes first; armorInventory runs boots to helmet.
+        let slots: [Option<Stack>; SLOTS] = std::array::from_fn(|i| match i {
+            0..9 => stack(36 + i),
+            9..36 => stack(i),
+            _ => stack(44 - i),
+        });
+        let (x, z) = (p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        let biome = g.store.get(x >> 4, z >> 4).map_or(1, |c| {
+            c.biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize)
+        });
+        Some(ferrocraft_modhost::Mirror {
+            fps: self.fps.1 as i32,
+            ping: self
+                .hud
+                .tablist
+                .entries
+                .iter()
+                .find(|e| e.name == self.args.username)
+                .map_or(0, |e| e.ping),
+            pos: p.pos,
+            yaw: p.yaw,
+            pitch: g.pitch,
+            biome,
+            health: g.health,
+            held: g.inv.held,
+            effects: g
+                .effects
+                .iter()
+                .map(|e| Effect {
+                    id: e.id,
+                    amplifier: e.amplifier,
+                    duration: e.duration,
+                })
+                .collect(),
+            slots,
+            server: self.server.clone(),
+        })
+    }
+
     /// The F3 left column, `None` without a player.
     fn debug_lines(&self, frac: f64) -> Option<Vec<String>> {
         let ray = self.view_ray(frac);
@@ -833,6 +886,9 @@ impl App {
             );
         }
         let mut mod_textures = Vec::new();
+        if let (Some(mods), Some(m)) = (&self.mods, self.mod_mirror()) {
+            mods.set_mirror(m);
+        }
         if let Some(mods) = &self.mods {
             mods.set_view(
                 w as i32,

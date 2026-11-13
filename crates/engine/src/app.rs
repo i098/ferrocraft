@@ -11,6 +11,7 @@ macro_rules! metrics {
 mod events;
 mod input;
 mod own_sounds;
+mod pack;
 mod play;
 mod screen;
 
@@ -75,6 +76,8 @@ pub struct App {
     server_pack: Option<std::path::PathBuf>,
     /// `host:port` of the server last connected to, for the mod host's mirror.
     server: String,
+    /// `ServerData.getResourceMode` of that server: `None` asks, `Some(true)` accepts, `Some(false)` declines.
+    pack_mode: Option<bool>,
     ui: Ui,
     icons: Option<Icons>,
     container: Option<ContainerScreen>,
@@ -121,6 +124,8 @@ pub struct App {
     equip: (f32, f32, Option<(i16, i16, bool)>),
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
+    /// A server pack offer that arrived before that screen closed; the prompt opens once it has.
+    pending_pack: Option<(String, String)>,
     cursor: (f64, f64),
     ctrl: bool,
     shift: bool,
@@ -151,6 +156,7 @@ impl App {
             mods: None,
             server_pack: None,
             server: String::new(),
+            pack_mode: None,
             ui,
             icons: None,
             container: None,
@@ -181,6 +187,7 @@ impl App {
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
             awaiting_terrain: false,
+            pending_pack: None,
             cursor: (0.0, 0.0),
             ctrl: false,
             shift: false,

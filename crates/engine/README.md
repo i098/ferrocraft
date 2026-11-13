@@ -12,6 +12,7 @@ Input and chat come from `input-audio`.
 
 Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`.
 The renderer reads textures and the font from a client jar. The boot jar passes the classpath jar that holds `ascii.png` as a file value of `--assetsDir`, and the engine uses it as is. Otherwise the engine looks for `versions/1.8.9/1.8.9.jar` (or `versions/<--version>/<--version>.jar`) under the assets dir's parent, `--gameDir` or its parent. It logs a warning when no font is found. Resource packs listed in `resourcePacks` in `options.txt` layer over the jar.
+A server resource pack is offered through a Yes/No prompt screen unless the `servers.dat` entry decides it; see `src/app/pack.rs`.
 The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`, `--port` and `FERROCRAFT_SERVER` are all unset, the title screen opens and nothing connects.
 The debug text shows `N fps (X ms)`. Vsync follows the in-game VSync option (`enableVsync` in `options.txt`, default on). `FERROCRAFT_VSYNC` overrides it: `0` turns vsync off (Immediate or Mailbox present mode), any other value turns it on.
 The engine starts the mod host when the `FERROCRAFT_MODHOST_*` variables are set (see `crates/modhost`). It draws the mods' HUD commands over the HUD, and treats a screen a mod opened as an open screen.

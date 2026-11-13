@@ -8,7 +8,12 @@ use ferrocraft_protocol::play::clientbound as cb;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TileEvent {
     /// Chest lid: `event` 1 carries the number of viewers in `value`.
-    Action { pos: [i32; 3], block: u16, event: u8, value: u8 },
+    Action {
+        pos: [i32; 3],
+        block: u16,
+        event: u8,
+        value: u8,
+    },
     /// The four lines of a sign as formatted text (§ codes).
     Sign { pos: [i32; 3], lines: [String; 4] },
     /// `SkullType`, `Rot` and the owner's UUID.

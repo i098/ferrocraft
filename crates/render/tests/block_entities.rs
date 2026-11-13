@@ -248,5 +248,8 @@ fn sign_text_survives_chunk_reupload_after_block_change() {
         differs(&bare, &after) > 200,
         "sign text still drawn after re-upload"
     );
-    assert!(differs(&texted, &after) < 50, "same frame as before re-upload");
+    assert!(
+        differs(&texted, &after) < 50,
+        "same frame as before re-upload"
+    );
 }

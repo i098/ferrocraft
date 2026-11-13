@@ -955,8 +955,14 @@ mod tests {
 
     #[test]
     fn chunk_reload_keeps_data_of_unchanged_tiles_only() {
-        let tile = |kind: u16| move |x: usize, y: usize, z: usize| {
-            if (x, y, z) == (1, 5, 2) { kind << 4 } else { 0 }
+        let tile = |kind: u16| {
+            move |x: usize, y: usize, z: usize| {
+                if (x, y, z) == (1, 5, 2) {
+                    kind << 4
+                } else {
+                    0
+                }
+            }
         };
         let pos = [17, 5, 2];
         let lines = || ["a".to_string(), String::new(), String::new(), String::new()];

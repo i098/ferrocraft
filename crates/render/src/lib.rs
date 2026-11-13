@@ -79,6 +79,9 @@ pub struct Camera {
     /// Roll in degrees of `EntityRenderer.applyHurtCam` (hit tilt and death roll), applied
     /// before the bobbing.
     pub hurt_roll: f32,
+    /// Nausea and portal wobble of `EntityRenderer.setupCameraTransform`: the angle in degrees about
+    /// the axis (0, 1, 1) and the x scale between the two rotations; applied after the bobbing.
+    pub nausea: [f32; 2],
     /// Field of view of the hand: `getFOVModifier(partial, false)`, so without the option.
     pub hand_fov_deg: f32,
 }
@@ -92,6 +95,7 @@ impl Default for Camera {
             fov_deg: 70.0,
             bob: [0.0; 4],
             hurt_roll: 0.0,
+            nausea: [0.0, 1.0],
             hand_fov_deg: 70.0,
         }
     }

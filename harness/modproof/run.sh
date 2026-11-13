@@ -131,8 +131,15 @@ while IFS='|' read -r id term note; do
     shot "$page"
     d=$(diffpx "$grid" "$page")
   fi
+  # A dead mod host leaves the bare world, which also changes between frames: it must never get PASS.
+  if grep -q 'mod host stopped' "$OUT/engine.log" || ! kill -0 "${pids[-1]}" 2>/dev/null; then
+    printf '%s %-20s FAIL  mod host not running (see %s)\n' "$nn" "$id" "$OUT/engine.log" | tee -a "$OUT/sheet.txt"
+    echo "mod host stopped: sheet is invalid" >&2; exit 1
+  fi
   if [ "$d" -ge "$DIFF_PX" ]; then v=PASS; else v=FAIL; fails=$((fails+1)); fi
   printf '%s %-20s %s  changed_px=%s  %s\n' "$nn" "$id" "$v" "$d" "$note" | tee -a "$OUT/sheet.txt"
+  # No OneConfig GUI means no mod to prove: stop instead of printing 21 more rows.
+  [ "$id" = oneconfig ] && [ "$v" = FAIL ] && { echo "oneconfig GUI did not open: sheet is invalid" >&2; exit 1; }
   close_gui
 done < "$here/steps.txt"
 echo "rows=$n fail=$fails sheet=$OUT/sheet.txt shots=$OUT/shots"

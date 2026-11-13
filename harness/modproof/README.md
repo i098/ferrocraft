@@ -31,4 +31,4 @@ A row passes when the card of the mod opens a page that differs from the filtere
 It does not show the effect of the mod in the game. The `oneconfig` row passes when Right Shift opens the Mods page.
 A mod whose effect is not driven yet has no extra check. A later slice adds its own effect step to `steps.txt` (a key, or a click on a setting) and compares with this sheet.
 
-The script never connects to a live server and never signs in to a Microsoft account. It exits 0 when the sheet has 22 rows, also when a row is FAIL.
+The script never connects to a live server and never signs in to a Microsoft account. It exits 0 when the sheet has 22 rows, also when a row is FAIL. It exits 1 with no valid sheet when the mod host stops (a `mod host stopped` line in `engine.log`, or the engine process gone) or when the `oneconfig` row FAILs.

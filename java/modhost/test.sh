@@ -20,18 +20,21 @@ cp="$here/cls/test:$here/cls:$others$fj:$mcj"
 game=$(mktemp -d)
 trap 'rm -rf "$game"' EXIT
 cd "$game"
+# The 22 twins of the OneClient mods (mod ids, not file names): oneconfig, the loader the bootstrap downloads at first boot,
+# plus 21 mods; and Keystrokes and mixinbooter, which chatblock requires.
+twins=oneconfig,evergreenhud,polysprint,vanillahud,polycrosshair,redaction,chatting,chatblock,polytime,polyweather,freelook,behindyouv3,betternightvision,damagetint,polyhitbox,polynametag,countdown,glintcolorizer,overflowanimations,overflowparticles,polyblur,colorsaturation,polyfrostkeystrokes,mixinbooter
 boot() {
     # FML refuses a Minecraft jar whose classes are not signed, and the generated jar is a patched copy: ignore that.
     # The mod boot needs network on a cold cache: OneConfig's bootstrap downloads its loader, and Cloudflare drops
     # this JDK's TLS 1.3 offer, so TLS 1.2 is pinned.
-    "$J/java" -Dferro.test="$1" -Dferro.mods=oneconfig,evergreenhud,polyfrostkeystrokes,polysprint,vanillahud -Dfml.ignoreInvalidMinecraftCertificates=true -Djdk.tls.client.protocols=TLSv1.2 -cp "$cp" net.minecraft.launchwrapper.Launch \
+    "$J/java" -Dferro.test="$1" -Dferro.mods=$twins -Dfml.ignoreInvalidMinecraftCertificates=true -Djdk.tls.client.protocols=TLSv1.2 -cp "$cp" net.minecraft.launchwrapper.Launch \
         --tweakClass net.minecraftforge.fml.common.launcher.FMLTweaker \
         --tweakClass net.ferrocraft.tweak.HostTweaker \
         --gameDir "$game" --assetsDir "$L/minecraft-1.8.9.jar" --version 1.8.9 --accessToken x
 }
 boot PlayerTest
 boot MirrorTest
-# Optional: FERRO_MODS is a folder with the public mod jars (OneConfig bootstrap, EvergreenHUD, Keystrokes, PolySprint, VanillaHUD).
+# Optional: FERRO_MODS is a folder with the public mod jars listed in java/modhost-accept/mods.txt.
 if [ -n "${FERRO_MODS:-}" ]; then
     mkdir -p "$game/mods" && cp "$FERRO_MODS"/*.jar "$game/mods/"
     boot ModBootTest

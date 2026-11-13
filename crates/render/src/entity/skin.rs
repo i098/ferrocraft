@@ -1,13 +1,17 @@
-//! One texture for every entity model: 64x64 slots stacked vertically. The fixed slots come first, then one
-//! plain white slot, then [`PLAYER_SLOTS`] slots for downloaded player skins.
+//! One texture for every entity model: 128x64 slots stacked vertically (the iron golem texture is 128x128 and
+//! takes two). The fixed slots come first, then one plain white slot, then [`PLAYER_SLOTS`] slots for downloaded
+//! player skins and [`CAPE_SLOTS`] for downloaded capes.
 
 use crate::assets::{decode_png, AssetSource, Image};
 
+/// Height of one slot; most textures are 64 wide, so they fill the left half of a row.
 pub const SLOT: u32 = 64;
+/// Width of the atlas, for the 128 wide iron golem texture.
+const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 28] = [
+const SKINS: [&str; 45] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -36,11 +40,33 @@ const SKINS: [&str; 28] = [
     "models/armor/leather_layer_1_overlay.png",
     "models/armor/leather_layer_2_overlay.png",
     "entity/guardian_elder.png",
+    "entity/villager/villager.png",
+    "entity/villager/farmer.png",
+    "entity/villager/librarian.png",
+    "entity/villager/priest.png",
+    "entity/villager/smith.png",
+    "entity/villager/butcher.png",
+    "entity/iron_golem.png",
+    // The second half of the 128x128 golem texture.
+    "",
+    "entity/silverfish.png",
+    "entity/chicken.png",
+    "entity/sheep/sheep.png",
+    "entity/sheep/sheep_fur.png",
+    "entity/spider/spider.png",
+    "entity/spider/cave_spider.png",
+    "entity/enderman/enderman.png",
+    "entity/spider_eyes.png",
+    "entity/enderman/enderman_eyes.png",
 ];
+/// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
+const MOBS_FIRST: usize = 28;
+/// Slots of the eye layer textures; their black counts as transparent (additive blending).
+const EYES: [usize; 2] = [43, 44];
 /// Index of the first armor layer in `SKINS`.
 const ARMOR_FIRST: u8 = 15;
-/// Slot of `guardian_elder.png`, the last one in `SKINS`.
-const ELDER_SLOT: u32 = SKINS.len() as u32 - 1;
+/// Slot of `guardian_elder.png`, the last one before the mob textures.
+const ELDER_SLOT: u32 = MOBS_FIRST as u32 - 1;
 
 /// Slots from this index on hold sprites and projectile textures, not player-layout skins.
 const FIRST_SPRITE: usize = 8;
@@ -70,6 +96,20 @@ pub enum Skin {
     SplashPotion,
     /// `textures/entity/guardian_elder.png`, drawn by the curse effect.
     GuardianElder,
+    /// `textures/entity/villager/`: 0 villager, then farmer, librarian, priest, smith, butcher.
+    Villager(u8),
+    IronGolem,
+    Silverfish,
+    Chicken,
+    Sheep,
+    SheepFur,
+    Spider,
+    CaveSpider,
+    Enderman,
+    SpiderEyes,
+    EndermanEyes,
+    /// A downloaded cape in dynamic slot `n`.
+    Cape(u8),
     /// An armor texture, by index into the armor part of the slot table.
     Armor(u8),
     /// Plain white: shapes take their color from the vertex tint.
@@ -82,13 +122,16 @@ pub enum Skin {
 pub const SLOTS: u32 = SKINS.len() as u32 + 1;
 /// Downloaded player skins kept at once; the least recently drawn one is replaced.
 pub const PLAYER_SLOTS: usize = 32;
-const TOTAL: u32 = SLOTS + PLAYER_SLOTS as u32;
+/// Downloaded capes kept at once.
+pub const CAPE_SLOTS: usize = 8;
+const TOTAL: u32 = SLOTS + (PLAYER_SLOTS + CAPE_SLOTS) as u32;
 
 pub struct Skins {
     pub rgba: Vec<u8>,
     loaded: [bool; SKINS.len()],
     /// Owner key and last-use tick of each dynamic slot.
     players: [Option<(u128, u64)>; PLAYER_SLOTS],
+    capes: [Option<(u128, u64)>; CAPE_SLOTS],
     clock: u64,
 }
 
@@ -112,7 +155,7 @@ impl Skin {
 
 impl Skins {
     pub fn width() -> u32 {
-        SLOT
+        WIDTH
     }
 
     pub fn height() -> u32 {
@@ -122,9 +165,10 @@ impl Skins {
     /// All slots white: models draw flat-colored.
     pub fn flat() -> Skins {
         Skins {
-            rgba: vec![255; (SLOT * SLOT * TOTAL * 4) as usize],
+            rgba: vec![255; (WIDTH * SLOT * TOTAL * 4) as usize],
             loaded: [false; SKINS.len()],
             players: [None; PLAYER_SLOTS],
+            capes: [None; CAPE_SLOTS],
             clock: 0,
         }
     }
@@ -147,18 +191,47 @@ impl Skins {
         let slot = SLOTS + i as u32;
         self.blit(slot, img);
         self.fix_alpha(slot);
-        let from = (slot * SLOT * SLOT * 4) as usize;
-        (
-            slot * SLOT,
-            &self.rgba[from..from + (SLOT * SLOT * 4) as usize],
-        )
+        (slot * SLOT, self.slot_rows(slot))
+    }
+
+    /// Stores the cape of player `key`, like [`Skins::set_player`]; no skin fixes apply to a cape.
+    pub fn set_cape(&mut self, key: u128, img: &Image) -> (u32, &[u8]) {
+        let i = self
+            .capes
+            .iter()
+            .position(|p| p.is_some_and(|(k, _)| k == key))
+            .or_else(|| self.capes.iter().position(Option::is_none))
+            .unwrap_or_else(|| {
+                (0..CAPE_SLOTS)
+                    .min_by_key(|&i| self.capes[i].map_or(0, |p| p.1))
+                    .unwrap_or(0)
+            });
+        self.clock += 1;
+        self.capes[i] = Some((key, self.clock));
+        let slot = SLOTS + (PLAYER_SLOTS + i) as u32;
+        self.blit_plain(slot, img);
+        (slot * SLOT, self.slot_rows(slot))
+    }
+
+    /// The cape slot of player `key`, when one is stored.
+    pub fn cape(&self, key: u128) -> Option<Skin> {
+        let i = self
+            .capes
+            .iter()
+            .position(|p| p.is_some_and(|(k, _)| k == key))?;
+        Some(Skin::Cape(i as u8))
+    }
+
+    fn slot_rows(&self, slot: u32) -> &[u8] {
+        let from = (slot * SLOT * WIDTH * 4) as usize;
+        &self.rgba[from..from + (SLOT * WIDTH * 4) as usize]
     }
 
     /// `ImageBufferDownload.parseUserSkin`: the base layers are forced opaque. An outer layer that
     /// is fully opaque is an image editor without alpha, so it becomes transparent.
     fn fix_alpha(&mut self, slot: u32) {
         let base = (slot * SLOT) as usize;
-        let px = |x: usize, y: usize| (base + y) * SLOT as usize * 4 + x * 4 + 3;
+        let px = |x: usize, y: usize| (base + y) * WIDTH as usize * 4 + x * 4 + 3;
         for (x0, y0, x1, y1, opaque) in [
             (0, 0, 32, 16, true),
             (32, 0, 64, 32, false),
@@ -204,15 +277,18 @@ impl Skins {
 
     pub fn from_assets(source: &mut AssetSource) -> Skins {
         let mut s = Skins::flat();
-        for (i, name) in SKINS.iter().enumerate() {
+        for (i, name) in SKINS.iter().enumerate().filter(|(_, n)| !n.is_empty()) {
             let path = format!("assets/minecraft/textures/{name}");
             let Some(img) = source.read(&path).and_then(|b| decode_png(&b)) else {
                 continue;
             };
             if i == BOBBER_SLOT {
                 s.blit_plain(i as u32, &crop(&img, BOBBER_CELL));
-            } else if i >= FIRST_SPRITE && i < ARMOR_FIRST as usize {
+            } else if (FIRST_SPRITE..ARMOR_FIRST as usize).contains(&i) || i >= MOBS_FIRST {
                 s.blit_plain(i as u32, &img);
+                if EYES.contains(&i) {
+                    s.clear_black(i as u32);
+                }
             } else {
                 s.blit(i as u32, &img);
             }
@@ -221,15 +297,28 @@ impl Skins {
         s
     }
 
-    /// Copies a sprite into the top-left corner of its slot, with no skin-layout fixes.
+    /// Copies a sprite into the top-left corner of its slot, with no skin-layout fixes. A sprite
+    /// taller than a slot (the iron golem) runs on into the next slot.
     fn blit_plain(&mut self, slot: u32, img: &Image) {
         let base = (slot * SLOT) as usize;
-        let w = SLOT as usize;
-        self.rgba[base * w * 4..(base + w) * w * 4].fill(0);
-        for y in 0..img.height.min(w) {
+        let w = WIDTH as usize;
+        let rows = img.height.max(SLOT as usize);
+        self.rgba[base * w * 4..(base + rows) * w * 4].fill(0);
+        for y in 0..img.height {
             let n = img.width.min(w);
             let dst = ((base + y) * w) * 4;
             self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
+        }
+    }
+
+    /// Makes the black texels of a slot transparent: an eye layer is drawn additively in vanilla,
+    /// where black adds nothing.
+    fn clear_black(&mut self, slot: u32) {
+        let base = (slot * SLOT) as usize * WIDTH as usize * 4;
+        for px in self.rgba[base..base + (SLOT * WIDTH * 4) as usize].chunks_exact_mut(4) {
+            if px[..3] == [0, 0, 0] {
+                px[3] = 0;
+            }
         }
     }
 
@@ -237,10 +326,10 @@ impl Skins {
     /// of the 64x64 layout, flipping each face as `ImageBufferDownload` does.
     fn blit(&mut self, slot: u32, img: &Image) {
         let base = (slot * SLOT) as usize;
-        let w = SLOT as usize;
-        self.rgba[base * w * 4..(base + w) * w * 4].fill(0);
-        for y in 0..img.height.min(w) {
-            let n = img.width.min(w);
+        let w = WIDTH as usize;
+        self.rgba[base * w * 4..(base + SLOT as usize) * w * 4].fill(0);
+        for y in 0..img.height.min(SLOT as usize) {
+            let n = img.width.min(SLOT as usize);
             let dst = ((base + y) * w) * 4;
             self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
         }
@@ -275,7 +364,8 @@ impl Skins {
 
     /// Whether the real texture of `skin` was found; a missing one is drawn white with a tint.
     pub fn has(&self, skin: Skin) -> bool {
-        matches!(skin, Skin::Player(_)) || slot(skin).is_some_and(|s| self.loaded[s as usize])
+        matches!(skin, Skin::Player(_) | Skin::Cape(_))
+            || slot(skin).is_some_and(|s| self.loaded[s as usize])
     }
 
     /// Row offset in texels of the slot to sample for `skin`.
@@ -325,7 +415,19 @@ const FIXED: [Skin; ARMOR_FIRST as usize] = [
 fn slot(skin: Skin) -> Option<u32> {
     match skin {
         Skin::Player(i) => Some(SLOTS + u32::from(i)),
+        Skin::Cape(i) => Some(SLOTS + PLAYER_SLOTS as u32 + u32::from(i)),
         Skin::White => None,
+        Skin::Villager(i) => Some(MOBS_FIRST as u32 + u32::from(i)),
+        Skin::IronGolem => Some(34),
+        Skin::Silverfish => Some(36),
+        Skin::Chicken => Some(37),
+        Skin::Sheep => Some(38),
+        Skin::SheepFur => Some(39),
+        Skin::Spider => Some(40),
+        Skin::CaveSpider => Some(41),
+        Skin::Enderman => Some(42),
+        Skin::SpiderEyes => Some(43),
+        Skin::EndermanEyes => Some(44),
         Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
         Skin::GuardianElder => Some(ELDER_SLOT),
         fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
@@ -371,7 +473,7 @@ mod tests {
         let mut skins = Skins::flat();
         skins.blit(0, &img);
         let at = |x: usize, y: usize| {
-            let i = (y * SLOT as usize + x) * 4;
+            let i = (y * WIDTH as usize + x) * 4;
             (skins.rgba[i], skins.rgba[i + 1])
         };
         // ImageBufferDownload: right leg front (4,20) goes to the left leg front (20,52), flipped.

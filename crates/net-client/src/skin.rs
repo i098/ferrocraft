@@ -14,9 +14,11 @@ const MAX_BYTES: u64 = 1 << 20;
 pub struct SkinInfo {
     pub url: String,
     pub slim: bool,
+    /// `textures.CAPE.url`, when the profile has a cape.
+    pub cape: Option<String>,
 }
 
-/// Decodes the base64 JSON of a `textures` property: `textures.SKIN.url` and `metadata.model`.
+/// Decodes the base64 JSON of a `textures` property: `textures.SKIN.url`, `metadata.model` and `textures.CAPE.url`.
 /// Only hosts that `SkinManager` trusts (`.minecraft.net`, `.mojang.com`) are accepted. The host in
 /// `FERROCRAFT_SKIN_HOST` is accepted too, for the local test server.
 pub fn parse_textures(value: &str) -> Option<SkinInfo> {
@@ -27,7 +29,12 @@ pub fn parse_textures(value: &str) -> Option<SkinInfo> {
         return None;
     }
     let slim = skin.pointer("/metadata/model").and_then(Value::as_str) == Some("slim");
-    Some(SkinInfo { url, slim })
+    let cape = json
+        .pointer("/textures/CAPE/url")
+        .and_then(Value::as_str)
+        .filter(|u| trusted(u))
+        .map(str::to_string);
+    Some(SkinInfo { url, slim, cape })
 }
 
 fn trusted(url: &str) -> bool {
@@ -107,10 +114,18 @@ mod tests {
             info(&plain),
             SkinInfo {
                 url: url.into(),
-                slim: false
+                slim: false,
+                cape: None
             }
         );
         assert!(info(&slim).slim);
+        let caped = format!(
+            r#"{{"textures":{{"SKIN":{{"url":"{url}"}},"CAPE":{{"url":"http://textures.minecraft.net/texture/cape"}}}}}}"#
+        );
+        assert_eq!(
+            info(&caped).cape.as_deref(),
+            Some("http://textures.minecraft.net/texture/cape")
+        );
     }
 
     #[test]

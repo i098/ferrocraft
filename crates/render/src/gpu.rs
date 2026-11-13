@@ -810,6 +810,35 @@ impl Renderer {
         );
     }
 
+    /// Stores the decoded cape of player `key` and uploads its slot.
+    pub fn set_player_cape(&mut self, key: u128, img: &Image) {
+        let (row, rgba) = self.entity_skins.set_cape(key, img);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.entity_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(Skins::width() * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: Skins::width(),
+                height: Skins::width(),
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Whether the cape of player `key` is stored.
+    pub fn has_player_cape(&self, key: u128) -> bool {
+        self.entity_skins.cape(key).is_some()
+    }
+
     /// Whether the skin of player `key` is stored; a replaced one has to be sent again.
     pub fn has_player_skin(&self, key: u128) -> bool {
         self.entity_skins.player(key).is_some()

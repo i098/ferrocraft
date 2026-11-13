@@ -260,6 +260,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         using: None,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     }]);
     let third = frame(&mut r, 0.0, None);
     r.set_entities(&[]);
@@ -548,6 +549,7 @@ fn burning_entity_and_first_person_fire() {
         using: None,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     };
     r.set_entities(&[entity.clone()]);
     let before = r.render_to_rgba(&cam, &[]).2;
@@ -639,6 +641,7 @@ fn hurt_entity_flashes_red() {
         using: None,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     };
     // Chunk light is known after the first frame, so the entity is lit only from the second.
     r.render_to_rgba(&cam, &[]);
@@ -711,6 +714,7 @@ fn player_in_leather() -> EntityDraw {
         child: false,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     }
 }
 
@@ -847,6 +851,7 @@ fn projection_matches_a_drawn_entity() {
         using: None,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     }]);
     let px = r.render_to_rgba(&cam, &[]).2;
     let (x0, y0, x1, y1) = changed_box(&clear, &px, 854).expect("the player must draw");

@@ -205,6 +205,8 @@ impl Mesher<'_> {
             Kind::Opaque | Kind::Cutout => self.cube(at, state, &l),
             Kind::Water | Kind::Lava => self.liquid(at, state, &l),
             Kind::Cross => self.cross(at, state, &l),
+            // Chests are drawn as models (`blockent.rs`); their box only serves picking and cracks.
+            Kind::Shape if matches!(state >> 4, 54 | 130 | 146) => {}
             Kind::Shape => {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
                 let list = boxes(state, &nb);

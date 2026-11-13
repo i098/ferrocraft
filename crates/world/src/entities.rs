@@ -265,6 +265,15 @@ impl Entity {
         }
     }
 
+    /// `Entity.canBePushed`: living entities, boats and minecarts; not armor stands, items or arrows.
+    pub fn can_be_pushed(&self) -> bool {
+        match self.kind {
+            Kind::Player | Kind::Mob(_) => true,
+            Kind::Object(t) => matches!(t, 1 | 10..=12),
+            Kind::ExperienceOrb => false,
+        }
+    }
+
     pub fn is_dead(&self) -> bool {
         self.death_time > 0
     }
@@ -651,6 +660,41 @@ impl Entities {
         self.map.get(&id)
     }
 
+    /// `EntityLivingBase.collideWithNearbyEntities` for the local player at `pos` with a box of
+    /// `size`: the velocity that `Entity.applyEntityCollision` adds to it for every pushable
+    /// entity within the box grown by 0.2 on x and z. Armor stands and items do not push.
+    pub fn push_on(&self, id: i32, pos: [f64; 3], size: (f32, f32)) -> [f64; 3] {
+        let (lo, hi) = bounds_at(pos, size);
+        let (lo, hi) = (
+            [lo[0] - 0.2, lo[1], lo[2] - 0.2],
+            [hi[0] + 0.2, hi[1], hi[2] + 0.2],
+        );
+        let mut others: Vec<&Entity> = self
+            .map
+            .values()
+            .filter(|e| e.id != id && e.can_be_pushed())
+            .collect();
+        others.sort_unstable_by_key(|e| e.id);
+        let mut push = [0.0; 3];
+        for e in others {
+            let (elo, ehi) = e.bounds();
+            if (0..3).any(|a| ehi[a] <= lo[a] || elo[a] >= hi[a]) {
+                continue;
+            }
+            let (mut d0, mut d1) = (pos[0] - e.pos[0], pos[2] - e.pos[2]);
+            let mut d2 = d0.abs().max(d1.abs());
+            if d2 >= 0.01 {
+                d2 = f64::from(d2.sqrt() as f32);
+                d0 /= d2;
+                d1 /= d2;
+                let d3 = (1.0 / d2).min(1.0);
+                push[0] += d0 * d3 * 0.05;
+                push[2] += d1 * d3 * 0.05;
+            }
+        }
+        push
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Entity> {
         self.map.values()
     }
@@ -979,6 +1023,17 @@ mod tests {
             health: None,
             size: SizeMeta::default(),
         });
+    }
+
+    #[test]
+    fn overlapping_mob_pushes_the_player_away_like_apply_entity_collision() {
+        let mut es = Entities::default();
+        spawn(&mut es, 5, [16, 64 * 32, 16]);
+        let push = es.push_on(1, [0.6, 64.0, 0.5], (0.6, 1.8));
+        let want = 0.1 / f64::from(0.1_f64.sqrt() as f32) * 0.05;
+        assert!((push[0] - want).abs() < 1e-12);
+        assert_eq!(push[2], 0.0);
+        assert_eq!(es.push_on(1, [3.0, 64.0, 0.5], (0.6, 1.8)), [0.0; 3]);
     }
 
     #[test]

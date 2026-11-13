@@ -1,10 +1,12 @@
 //! Player movement physics of Minecraft 1.8.9, ported method by method from vanilla.
 //!
-//! Ported: `PlayerEntity.mobTick` (the movement part of `onLivingUpdate`), `moveEntityWithHeading`,
-//! `moveFlying`, `jump` and `Entity.moveEntity` (axis-wise collision and step-up), all with
-//! the exact `f32`/`f64` arithmetic of the Java code, and the flying branch of `moveEntityWithHeading`
-//! with the vertical keys of `EntityPlayerSP.onLivingUpdate`. Not ported yet: water, lava, ladders,
-//! webs, sneaking, potion effects, soul sand and slime, entity pushing.
+//! Ported: `PlayerEntity.mobTick` (the movement part of `onLivingUpdate`), `moveEntityWithHeading`
+//! with its water, lava and ladder branches, `moveFlying`, `jump`, `jumpInWater`, `handleWaterMovement`
+//! (water flow push) and `Entity.moveEntity` (axis-wise collision with the real block shapes,
+//! step-up, cobweb, soul sand and slime), all with the exact `f32`/`f64` arithmetic of the Java
+//! code, and the flying branch of `moveEntityWithHeading` with the vertical keys of
+//! `EntityPlayerSP.onLivingUpdate`. Not ported yet: potion effects other than jump boost, depth
+//! strider, riding.
 //! The differential tests check every tick against the real 1.8.9 jar through `oracle`.
 
 pub mod chunk;
@@ -12,39 +14,18 @@ pub mod dig;
 pub mod effects;
 pub mod entities;
 pub mod entity_sound;
+pub mod fluid;
 pub mod inventory;
 pub mod motion_sound;
 pub mod place;
 pub mod potion_brew;
+pub mod shape;
 
 use std::sync::LazyLock;
 
-/// Block kinds that the differential harness can place.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Block {
-    Air,
-    Stone,
-    Ice,
-}
-
-impl Block {
-    /// `Block.slipperiness`: 0.98 for ice, 0.6 for every other block.
-    fn slipperiness(self) -> f32 {
-        match self {
-            Block::Ice => 0.98,
-            _ => 0.6,
-        }
-    }
-
-    /// Every block that is not air is a full cube here.
-    fn is_solid(self) -> bool {
-        self != Block::Air
-    }
-}
-
-/// Block lookup for the simulation.
+/// Block lookup for the simulation: the 1.8 block state, `id << 4 | metadata`.
 pub trait World {
-    fn block(&self, x: i32, y: i32, z: i32) -> Block;
+    fn block(&self, x: i32, y: i32, z: i32) -> u16;
 }
 
 /// Player input for one tick, as the client sets it before `onLivingUpdate`.
@@ -148,6 +129,12 @@ pub struct Player {
     pub jump_boost: f32,
     jump_movement_factor: f32,
     jump_ticks: i32,
+    /// `Entity.inWater`, set by `handleWaterMovement` at the start of each tick.
+    in_water: bool,
+    /// `isPushedByWater()` of this tick: false while flying.
+    pushed_by_water: bool,
+    /// `Entity.isInWeb`, set by a cobweb the last move touched; the next move is slowed.
+    in_web: bool,
     bb: Aabb,
 }
 
@@ -177,6 +164,9 @@ impl Player {
             jump_boost: 0.0,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
+            in_water: false,
+            pushed_by_water: true,
+            in_web: false,
             bb: Aabb {
                 min: [0.0; 3],
                 max: [0.0; 3],
@@ -196,10 +186,12 @@ impl Player {
         };
     }
 
-    /// One game tick: `PlayerEntity.mobTick` for a player that is on land and not flying.
+    /// One game tick: `Entity.handleWaterMovement` of `onEntityUpdate`, then `PlayerEntity.mobTick`.
     pub fn tick(&mut self, world: &dyn World, input: Input) {
         self.sprinting = input.sprint;
         self.sneaking = input.sneak;
+        self.pushed_by_water = input.fly_speed.is_none();
+        self.handle_water_movement(world);
         // `EntityPlayerSP.onLivingUpdate`: the vertical flight keys, before `mobTick`.
         if let Some(fly) = input.fly_speed {
             if input.sneak {
@@ -218,7 +210,10 @@ impl Player {
             }
         }
         if input.jump {
-            if self.on_ground && self.jump_ticks == 0 {
+            // `jumpInWater` and `jumpInLava` add 0.04F.
+            if self.in_water || self.in_lava(world) {
+                self.vel[1] += f64::from(0.04_f32);
+            } else if self.on_ground && self.jump_ticks == 0 {
                 self.jump();
                 self.jump_ticks = 10;
             }
@@ -268,9 +263,8 @@ impl Player {
         }
     }
 
-    /// `EntityPlayer.moveEntityWithHeading` without the water, lava and ladder branches. A flying player
-    /// (`fly` is the fly speed) accelerates in the air by that speed, doubled while sprinting, and keeps
-    /// 0.6 of its vertical speed instead of gravity.
+    /// `EntityPlayer.moveEntityWithHeading`. A flying player (`fly` is the fly speed) accelerates in the
+    /// air by that speed, doubled while sprinting, and keeps 0.6 of its vertical speed instead of gravity.
     fn move_with_heading(
         &mut self,
         world: &dyn World,
@@ -282,14 +276,24 @@ impl Player {
         if let Some(fly) = fly {
             self.jump_movement_factor = fly * if self.sprinting { 2.0 } else { 1.0 };
         }
+        if fly.is_some() {
+            self.walk(world, strafe, forward);
+            self.vel[1] = kept_y * 0.6;
+            self.jump_movement_factor = kept_factor;
+        } else if self.in_water {
+            self.swim(world, strafe, forward);
+        } else if self.in_lava(world) {
+            self.wade_lava(world, strafe, forward);
+        } else {
+            self.walk(world, strafe, forward);
+        }
+    }
+
+    /// The land and air branch of `EntityLivingBase.moveEntityWithHeading`, with the ladder.
+    fn walk(&mut self, world: &dyn World, strafe: f32, forward: f32) {
         let mut friction = 0.91_f32;
         if self.on_ground {
-            let below = world.block(
-                floor(self.pos[0]),
-                floor(self.bb.min[1]) - 1,
-                floor(self.pos[2]),
-            );
-            friction = below.slipperiness() * 0.91;
+            friction = self.ground_slipperiness(world) * 0.91;
         }
         let f = 0.162_771_36_f32 / (friction * friction * friction);
         let accel = if self.on_ground {
@@ -299,15 +303,156 @@ impl Player {
         };
         self.move_flying(strafe, forward, accel);
 
+        friction = 0.91_f32;
+        if self.on_ground {
+            friction = self.ground_slipperiness(world) * 0.91;
+        }
+        if self.is_climbing(world) {
+            let limit = f64::from(0.15_f32);
+            self.vel[0] = self.vel[0].clamp(-limit, limit);
+            self.vel[2] = self.vel[2].clamp(-limit, limit);
+            if self.vel[1] < -0.15 {
+                self.vel[1] = -0.15;
+            }
+            if self.sneaking && self.vel[1] < 0.0 {
+                self.vel[1] = 0.0;
+            }
+        }
         self.move_entity(world, self.vel);
+        if self.collided_horizontally && self.is_climbing(world) {
+            self.vel[1] = 0.2;
+        }
         self.vel[1] -= 0.08;
         self.vel[1] *= f64::from(0.98_f32);
         self.vel[0] *= f64::from(friction);
         self.vel[2] *= f64::from(friction);
-        if fly.is_some() {
-            self.vel[1] = kept_y * 0.6;
-            self.jump_movement_factor = kept_factor;
+    }
+
+    /// The water branch of `moveEntityWithHeading` without depth strider.
+    fn swim(&mut self, world: &dyn World, strafe: f32, forward: f32) {
+        let y = self.pos[1];
+        self.move_flying(strafe, forward, 0.02);
+        self.move_entity(world, self.vel);
+        let drag = f64::from(0.8_f32);
+        self.vel[0] *= drag;
+        self.vel[1] *= drag;
+        self.vel[2] *= drag;
+        self.vel[1] -= 0.02;
+        self.climb_out_of_liquid(world, y);
+    }
+
+    /// The lava branch of `moveEntityWithHeading`.
+    fn wade_lava(&mut self, world: &dyn World, strafe: f32, forward: f32) {
+        let y = self.pos[1];
+        self.move_flying(strafe, forward, 0.02);
+        self.move_entity(world, self.vel);
+        for v in &mut self.vel {
+            *v *= 0.5;
         }
+        self.vel[1] -= 0.02;
+        self.climb_out_of_liquid(world, y);
+    }
+
+    /// A wall in the way and a free spot 0.6 above the surface: kick out of the liquid.
+    fn climb_out_of_liquid(&mut self, world: &dyn World, start_y: f64) {
+        if self.collided_horizontally {
+            let up = self.vel[1] + 0.600_000_023_841_857_9 - self.pos[1] + start_y;
+            if self.can_move(world, [self.vel[0], up, self.vel[2]]) {
+                self.vel[1] = 0.300_000_011_920_928_96;
+            }
+        }
+    }
+
+    /// `Block.slipperiness` of the block under the feet.
+    fn ground_slipperiness(&self, world: &dyn World) -> f32 {
+        let below = world.block(
+            floor(self.pos[0]),
+            floor(self.bb.min[1]) - 1,
+            floor(self.pos[2]),
+        );
+        shape::slipperiness(below >> 4)
+    }
+
+    /// `LivingEntity.isClimbing`: the feet are in a ladder or a vine.
+    fn is_climbing(&self, world: &dyn World) -> bool {
+        let id = world.block(
+            floor(self.pos[0]),
+            floor(self.bb.min[1]),
+            floor(self.pos[2]),
+        ) >> 4;
+        matches!(id, 65 | 106)
+    }
+
+    /// `Entity.handleWaterMovement`: set `in_water` and let flowing water push the player.
+    fn handle_water_movement(&mut self, world: &dyn World) {
+        let (min, max) = (self.bb.min, self.bb.max);
+        let area = Aabb {
+            min: [
+                min[0] + 0.001,
+                min[1] + 0.400_000_005_960_464_5 + 0.001,
+                min[2] + 0.001,
+            ],
+            max: [
+                max[0] - 0.001,
+                max[1] - 0.400_000_005_960_464_5 - 0.001,
+                max[2] - 0.001,
+            ],
+        };
+        let (in_water, push) = fluid::water_drag(
+            &|p| world.block(p[0], p[1], p[2]),
+            area.min,
+            area.max,
+            self.pushed_by_water,
+        );
+        for (v, p) in self.vel.iter_mut().zip(push) {
+            *v += p;
+        }
+        self.in_water = in_water;
+    }
+
+    /// `Entity.isInLava`.
+    fn in_lava(&self, world: &dyn World) -> bool {
+        let (min, max) = (self.bb.min, self.bb.max);
+        let (grow, drop) = (0.100_000_001_490_116_12, 0.400_000_005_960_464_5);
+        let lo = [min[0] + grow, min[1] + drop, min[2] + grow];
+        let hi = [max[0] - grow, max[1] - drop, max[2] - grow];
+        Self::any_block(world, lo, hi, |id| matches!(id, 10 | 11))
+    }
+
+    /// A block of the cells touched by the box `lo` to `hi` satisfies `test` (`World.isMaterialInBB`).
+    fn any_block(
+        world: &dyn World,
+        lo: [f64; 3],
+        hi: [f64; 3],
+        test: impl Fn(u16) -> bool,
+    ) -> bool {
+        let cells = |a: usize| floor(lo[a])..floor(hi[a] + 1.0);
+        cells(0).any(|x| cells(1).any(|y| cells(2).any(|z| test(world.block(x, y, z) >> 4))))
+    }
+
+    /// `Entity.canMove`: the box moved by `d` touches no block shape and no liquid.
+    fn can_move(&self, world: &dyn World, d: [f64; 3]) -> bool {
+        let moved = Aabb {
+            min: [
+                self.bb.min[0] + d[0],
+                self.bb.min[1] + d[1],
+                self.bb.min[2] + d[2],
+            ],
+            max: [
+                self.bb.max[0] + d[0],
+                self.bb.max[1] + d[1],
+                self.bb.max[2] + d[2],
+            ],
+        };
+        !Self::collides(world, &moved)
+            && !Self::any_block(world, moved.min, moved.max, shape::is_liquid)
+    }
+
+    /// `World.getCollidingBoundingBoxes` is not empty: a block shape overlaps `area`.
+    fn collides(world: &dyn World, area: &Aabb) -> bool {
+        Self::colliding_boxes(world, area)
+            .iter()
+            .any(|o| (0..3).all(|a| area.max[a] > o.min[a] && area.min[a] < o.max[a]))
     }
 
     /// `moveFlying`.
@@ -330,22 +475,24 @@ impl Player {
         }
     }
 
-    /// `World.getCollidingBoundingBoxes` for full-cube blocks.
+    /// `World.getCollidingBoundingBoxes`: the shapes of the blocks around `area`, touching ones included.
     fn colliding_boxes(world: &dyn World, area: &Aabb) -> Vec<Aabb> {
         let (x0, x1) = (floor(area.min[0]), floor(area.max[0] + 1.0));
         let (y0, y1) = (floor(area.min[1]), floor(area.max[1] + 1.0));
         let (z0, z1) = (floor(area.min[2]), floor(area.max[2] + 1.0));
+        let at = |p: [i32; 3]| world.block(p[0], p[1], p[2]);
         let mut boxes = Vec::new();
+        let mut cell = Vec::new();
         for x in x0..x1 {
             for z in z0..z1 {
                 for y in (y0 - 1)..y1 {
-                    if world.block(x, y, z).is_solid() {
-                        let min = [f64::from(x), f64::from(y), f64::from(z)];
-                        boxes.push(Aabb {
-                            min,
-                            max: [min[0] + 1.0, min[1] + 1.0, min[2] + 1.0],
-                        });
-                    }
+                    cell.clear();
+                    shape::push_boxes(&at, [x, y, z], &mut cell);
+                    let o = [f64::from(x), f64::from(y), f64::from(z)];
+                    boxes.extend(cell.iter().map(|b| Aabb {
+                        min: [o[0] + b[0], o[1] + b[1], o[2] + b[2]],
+                        max: [o[0] + b[3], o[1] + b[4], o[2] + b[5]],
+                    }));
                 }
             }
         }
@@ -394,6 +541,15 @@ impl Player {
 
     /// `Entity.moveEntity`.
     fn move_entity(&mut self, world: &dyn World, mut motion: [f64; 3]) {
+        if self.in_web {
+            self.in_web = false;
+            motion = [
+                motion[0] * 0.25,
+                motion[1] * 0.050_000_000_745_058_06,
+                motion[2] * 0.25,
+            ];
+            self.vel = [0.0; 3];
+        }
         let original = self.bb;
         if self.on_ground && self.sneaking {
             motion = self.edge_guard(world, motion);
@@ -419,7 +575,8 @@ impl Player {
             (bb.min[2] + bb.max[2]) / 2.0,
         ];
         self.bb = bb;
-        self.set_collisions(motion, d);
+        self.set_collisions(world, motion, d);
+        self.block_collisions(world);
     }
 
     /// The sneak part of `Entity.moveEntity`: step back by 0.05 until a block is under the new spot.
@@ -427,11 +584,7 @@ impl Player {
         const STEP: f64 = 0.05;
         let empty = |x: f64, z: f64| {
             let b = self.bb.offset(0, x);
-            let b = b.offset(1, -1.0).offset(2, z);
-            // `getCollidingBoundingBoxes` keeps only boxes that overlap `b`; `colliding_boxes` also lists touching ones.
-            !Self::colliding_boxes(world, &b)
-                .iter()
-                .any(|o| (0..3).all(|a| b.max[a] > o.min[a] && b.min[a] < o.max[a]))
+            !Self::collides(world, &b.offset(1, -1.0).offset(2, z))
         };
         let back = |v: f64| {
             if (-STEP..STEP).contains(&v) {
@@ -455,15 +608,65 @@ impl Player {
         m
     }
 
-    /// Collision flags and stopped velocity after moving `d` of the wanted `motion`.
-    fn set_collisions(&mut self, motion: [f64; 3], d: [f64; 3]) {
+    /// Collision flags and stopped velocity after moving `d` of the wanted `motion`; the block
+    /// under the feet decides what a landing does to the vertical speed (`Block.onLanded`).
+    fn set_collisions(&mut self, world: &dyn World, motion: [f64; 3], d: [f64; 3]) {
         self.collided_horizontally = motion[0] != d[0] || motion[2] != d[2];
         self.collided_vertically = motion[1] != d[1];
         self.on_ground = self.collided_vertically && motion[1] < 0.0;
-        // Block.onLanded on y; no bouncy blocks yet
-        for a in 0..3 {
-            if motion[a] != d[a] {
-                self.vel[a] = 0.0;
+        // `updateFallState` runs `handleWaterMovement` at the new position when not yet in water.
+        if !self.in_water {
+            self.handle_water_movement(world);
+        }
+        let (x, z) = (floor(self.pos[0]), floor(self.pos[2]));
+        let y = floor(self.pos[1] - 0.200_000_002_980_232_24);
+        let mut under = world.block(x, y, z) >> 4;
+        // Standing on a fence post or a wall counts: their boxes reach 0.5 above the block.
+        if under == 0
+            && matches!(
+                world.block(x, y - 1, z) >> 4,
+                85 | 107 | 113 | 139 | 183..=192
+            )
+        {
+            under = world.block(x, y - 1, z) >> 4;
+        }
+        if motion[0] != d[0] {
+            self.vel[0] = 0.0;
+        }
+        if motion[1] != d[1] {
+            // `BlockSlime.onLanded` bounces a player that is not sneaking.
+            if under != 165 || self.sneaking {
+                self.vel[1] = 0.0;
+            } else if self.vel[1] < 0.0 {
+                self.vel[1] = -self.vel[1];
+            }
+        }
+        if motion[2] != d[2] {
+            self.vel[2] = 0.0;
+        }
+    }
+
+    /// `Entity.doBlockCollisions`: cobweb, soul sand and slime act on a player inside their cell.
+    fn block_collisions(&mut self, world: &dyn World) {
+        let lo = [0, 1, 2].map(|a| floor(self.bb.min[a] + 0.001));
+        let hi = [0, 1, 2].map(|a| floor(self.bb.max[a] - 0.001));
+        for z in lo[2]..=hi[2] {
+            for y in lo[1]..=hi[1] {
+                for x in lo[0]..=hi[0] {
+                    match world.block(x, y, z) >> 4 {
+                        30 => self.in_web = true,
+                        88 => {
+                            self.vel[0] *= 0.4;
+                            self.vel[2] *= 0.4;
+                        }
+                        165 if self.vel[1].abs() < 0.1 && !self.sneaking => {
+                            let slow = 0.4 + self.vel[1].abs() * 0.2;
+                            self.vel[0] *= slow;
+                            self.vel[2] *= slow;
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -483,369 +686,5 @@ impl Player {
         (x, z, bb.offset(2, z))
     }
 }
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use oracle::{Oracle, TickState};
-    use std::collections::HashMap;
-    use std::fmt::Write;
-
-    struct TestWorld {
-        floor: Block,
-        blocks: HashMap<(i32, i32, i32), Block>,
-    }
-
-    impl World for TestWorld {
-        fn block(&self, x: i32, y: i32, z: i32) -> Block {
-            match self.blocks.get(&(x, y, z)) {
-                Some(b) => *b,
-                None if y <= 63 => self.floor,
-                None => Block::Air,
-            }
-        }
-    }
-
-    fn name(b: Block) -> &'static str {
-        match b {
-            Block::Air => "air",
-            Block::Stone => "stone",
-            Block::Ice => "ice",
-        }
-    }
-
-    /// `(ticks, input)` runs after a spawn at `start` facing `yaw`.
-    struct Scenario {
-        floor: Block,
-        blocks: Vec<((i32, i32, i32), Block)>,
-        start: [f64; 3],
-        yaw: f32,
-        steps: Vec<(u32, Input)>,
-    }
-
-    impl Scenario {
-        fn new(steps: Vec<(u32, Input)>) -> Scenario {
-            Scenario {
-                floor: Block::Stone,
-                blocks: vec![],
-                start: [0.5, 64.0, 0.5],
-                yaw: 0.0,
-                steps,
-            }
-        }
-
-        fn script(&self) -> String {
-            let mut s = format!("floor {}\n", name(self.floor));
-            for ((x, y, z), b) in &self.blocks {
-                writeln!(s, "block {x} {y} {z} {}", name(*b)).unwrap();
-            }
-            let [x, y, z] = self.start;
-            writeln!(s, "start {x:?} {y:?} {z:?} {:?}", self.yaw).unwrap();
-            for (n, i) in &self.steps {
-                writeln!(
-                    s,
-                    "tick {n} {:?} {:?} {} {} {:?} {} {}",
-                    i.forward,
-                    i.strafe,
-                    i.jump as u8,
-                    i.sprint as u8,
-                    i.fly_speed.unwrap_or(0.0),
-                    i.sneak as u8,
-                    i.using_item as u8
-                )
-                .unwrap();
-            }
-            s
-        }
-
-        fn simulate(&self) -> Vec<TickState> {
-            let world = TestWorld {
-                floor: self.floor,
-                blocks: self.blocks.iter().copied().collect(),
-            };
-            let mut p = Player::new(self.start, self.yaw);
-            let mut out = Vec::new();
-            for (n, input) in &self.steps {
-                for _ in 0..*n {
-                    p.tick(&world, *input);
-                    out.push(TickState {
-                        pos: p.pos.map(f64::to_bits),
-                        vel: p.vel.map(f64::to_bits),
-                        on_ground: p.on_ground,
-                    });
-                }
-            }
-            out
-        }
-
-        /// Run the real jar and the port; fail on the first tick that differs in any bit.
-        fn check(&self, label: &str) {
-            let lines = Oracle::get().run(&self.script()).unwrap();
-            let truth: Vec<TickState> =
-                lines.iter().map(|l| TickState::parse(l).unwrap()).collect();
-            let ours = self.simulate();
-            assert_eq!(truth.len(), ours.len(), "{label}: tick count");
-            let show = |s: &TickState| {
-                format!(
-                    "pos {:?} vel {:?} ground {}",
-                    s.pos.map(f64::from_bits),
-                    s.vel.map(f64::from_bits),
-                    s.on_ground
-                )
-            };
-            for (i, (t, o)) in truth.iter().zip(&ours).enumerate() {
-                assert_eq!(
-                    t,
-                    o,
-                    "{label}: tick {i}\n  jar : {}\n  port: {}",
-                    show(t),
-                    show(o)
-                );
-            }
-        }
-    }
-
-    fn input(forward: f32, strafe: f32, jump: bool, sprint: bool) -> Input {
-        Input {
-            forward,
-            strafe,
-            jump,
-            sprint,
-            sneak: false,
-            using_item: false,
-            fly_speed: None,
-        }
-    }
-
-    const IDLE: Input = Input {
-        forward: 0.0,
-        strafe: 0.0,
-        jump: false,
-        sprint: false,
-        sneak: false,
-        using_item: false,
-        fly_speed: None,
-    };
-
-    #[test]
-    fn walk() {
-        Scenario::new(vec![
-            (5, IDLE),
-            (40, input(1.0, 0.0, false, false)),
-            (20, IDLE),
-        ])
-        .check("walk");
-    }
-
-    #[test]
-    fn sprint_then_stop() {
-        Scenario::new(vec![
-            (3, IDLE),
-            (40, input(1.0, 0.0, false, true)),
-            (30, IDLE),
-        ])
-        .check("sprint");
-    }
-
-    #[test]
-    fn standing_jump_held() {
-        Scenario::new(vec![
-            (3, IDLE),
-            (60, input(0.0, 0.0, true, false)),
-            (20, IDLE),
-        ])
-        .check("jump");
-    }
-
-    #[test]
-    fn sprint_jump_with_yaw() {
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (60, input(1.0, 0.0, true, true)),
-            (30, IDLE),
-        ]);
-        s.yaw = 33.0;
-        s.check("sprint jump");
-    }
-
-    #[test]
-    fn flying_climbs_hovers_sprints_and_descends() {
-        let fly = |forward, jump, sprint, sneak| Input {
-            forward,
-            strafe: 0.0,
-            jump,
-            sprint,
-            sneak,
-            using_item: false,
-            fly_speed: Some(0.05),
-        };
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (15, fly(0.0, true, false, false)),
-            (10, fly(0.0, false, false, false)),
-            (20, fly(1.0, false, false, false)),
-            (20, fly(1.0, false, true, false)),
-            (15, fly(0.0, false, false, true)),
-            (10, fly(0.0, false, false, false)),
-        ]);
-        s.yaw = 33.0;
-        s.check("flying");
-    }
-
-    #[test]
-    fn walk_strafe_in_air_and_on_ground() {
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (10, input(1.0, 1.0, false, false)),
-            (1, input(1.0, -1.0, true, false)),
-            (20, input(0.5, -1.0, false, false)),
-            (25, input(-1.0, 0.3, false, false)),
-        ]);
-        s.yaw = -141.5;
-        s.check("strafe");
-    }
-
-    #[test]
-    fn ice_keeps_momentum() {
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (30, input(1.0, 0.0, false, true)),
-            (60, IDLE),
-        ]);
-        s.floor = Block::Ice;
-        s.check("ice");
-    }
-
-    #[test]
-    fn wall_blocks_and_slides() {
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (40, input(1.0, 0.4, false, true)),
-            (10, input(1.0, 0.0, true, true)),
-        ]);
-        s.blocks = (0..=2)
-            .flat_map(|x| (64..=65).map(move |y| ((x, y, 4), Block::Stone)))
-            .collect();
-        s.yaw = 12.0;
-        s.check("wall");
-    }
-
-    #[test]
-    fn ceiling_stops_jump() {
-        let mut s = Scenario::new(vec![(3, IDLE), (30, input(0.0, 0.0, true, false))]);
-        s.blocks = vec![((0, 66, 0), Block::Stone)];
-        s.check("ceiling");
-    }
-
-    #[test]
-    fn sneak_walk() {
-        let sneak = Input {
-            forward: 1.0,
-            sneak: true,
-            ..IDLE
-        };
-        Scenario::new(vec![(3, IDLE), (40, sneak), (20, IDLE)]).check("sneak walk");
-    }
-
-    #[test]
-    fn sword_block_walk() {
-        let block = Input {
-            forward: 1.0,
-            strafe: 1.0,
-            using_item: true,
-            ..IDLE
-        };
-        Scenario::new(vec![(3, IDLE), (40, block), (20, IDLE)]).check("block walk");
-    }
-
-    #[test]
-    fn sprint_then_block_walk() {
-        let sprint = input(1.0, 0.0, false, true);
-        let block = Input {
-            forward: 1.0,
-            using_item: true,
-            ..IDLE
-        };
-        Scenario::new(vec![(3, IDLE), (12, sprint), (20, block)]).check("sprint then block");
-    }
-
-    #[test]
-    fn sneak_stops_at_a_block_edge() {
-        let sneak = Input {
-            forward: 1.0,
-            sneak: true,
-            ..IDLE
-        };
-        let mut s = Scenario::new(vec![(3, IDLE), (120, sneak), (20, IDLE)]);
-        s.blocks = (-3..=3)
-            .flat_map(|x| {
-                (-3..=3).map(move |z| ((x, 63, z), if z >= 3 { Block::Air } else { Block::Stone }))
-            })
-            .collect();
-        s.check("sneak edge");
-        let last = s.simulate().pop().unwrap();
-        assert!(last.on_ground, "sneaking player fell off the ledge");
-    }
-
-    #[test]
-    fn walks_off_an_edge() {
-        let mut s = Scenario::new(vec![
-            (3, IDLE),
-            (30, input(1.0, 0.0, false, true)),
-            (20, IDLE),
-        ]);
-        s.blocks = (-3..=3)
-            .flat_map(|x| {
-                (-3..=3).map(move |z| ((x, 63, z), if z >= 3 { Block::Air } else { Block::Stone }))
-            })
-            .collect();
-        s.floor = Block::Stone;
-        s.check("edge");
-    }
-
-    fn peak_height(boost: f32) -> f64 {
-        let world = TestWorld {
-            floor: Block::Stone,
-            blocks: HashMap::new(),
-        };
-        let mut p = Player::new([0.5, 64.0, 0.5], 0.0);
-        p.jump_boost = boost;
-        let jump = input(0.0, 0.0, true, false);
-        let mut top = 64.0_f64;
-        for _ in 0..30 {
-            p.tick(&world, jump);
-            top = top.max(p.pos[1]);
-        }
-        top
-    }
-
-    #[test]
-    fn jump_boost_raises_the_jump_by_a_tenth_of_a_block_speed_per_level() {
-        let (plain, one, two) = (peak_height(0.0), peak_height(1.0), peak_height(2.0));
-        assert!(plain < one && one < two);
-        assert!(
-            (plain - 65.25).abs() < 0.01,
-            "plain jump is 1.25 blocks: {plain}"
-        );
-    }
-
-    #[test]
-    fn the_movement_attribute_drives_ground_speed() {
-        let world = TestWorld {
-            floor: Block::Stone,
-            blocks: HashMap::new(),
-        };
-        let walked = |attr: Option<f64>| {
-            let mut p = Player::new([0.5, 64.0, 0.5], 0.0);
-            p.speed_attr = attr;
-            for _ in 0..10 {
-                p.tick(&world, input(1.0, 0.0, false, false));
-            }
-            p.pos[2].abs()
-        };
-        let base = walked(None);
-        assert_eq!(walked(Some(0.100_000_001_490_116_12)), base);
-        assert!(walked(Some(0.12)) > base);
-        assert!(walked(Some(0.05)) < base);
-    }
-}
+mod tests;

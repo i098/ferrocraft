@@ -8,7 +8,7 @@ use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
 use world::inventory::Inventory;
-use world::{Block, Input, Player, World};
+use world::{Input, Player, World};
 
 /// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
 pub fn eye_height(sneaking: bool) -> f64 {
@@ -52,22 +52,11 @@ pub enum Effect {
     Died,
 }
 
-/// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
-/// collision is invisible. Water and lava are not solid; slabs and stairs are not modelled yet.
-fn physics_block(state: u16) -> Block {
-    match state >> 4 {
-        8..=11 => Block::Air,
-        79 | 174 | 212 => Block::Ice,
-        _ if render::is_solid(state) => Block::Stone,
-        _ => Block::Air,
-    }
-}
-
 struct Collision<'a>(&'a ChunkStore);
 
 impl World for Collision<'_> {
-    fn block(&self, x: i32, y: i32, z: i32) -> Block {
-        physics_block(self.0.get_block(x, y, z))
+    fn block(&self, x: i32, y: i32, z: i32) -> u16 {
+        self.0.get_block(x, y, z)
     }
 }
 
@@ -637,6 +626,12 @@ impl Game {
                 .get(world::effects::id::JUMP_BOOST)
                 .map_or(0.0, |e| f32::from(e.amplifier) + 1.0);
             p.tick(&Collision(&self.store), input);
+            // `collideWithNearbyEntities` ends `onLivingUpdate`; spectators and riders are not pushed.
+            if self.gamemode != SPECTATOR && self.vehicle.is_none() {
+                let push = self.entities.push_on(self.entity_id, p.pos, (0.6, 1.8));
+                p.vel[0] += push[0];
+                p.vel[2] += push[2];
+            }
         }
     }
 
@@ -972,20 +967,7 @@ mod tests {
     }
 
     #[test]
-    fn only_drawn_cubes_collide_and_respawn_drops_chunks() {
-        // stone, oak door, glass pane, carpet, snow layer, water, lava, ice
-        let solid = [1, 64, 102, 171, 78, 8, 10, 79].map(|id| physics_block(id << 4));
-        let want = [
-            Block::Stone,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Air,
-            Block::Ice,
-        ];
-        assert!(solid.iter().zip(&want).all(|(a, b)| a == b));
+    fn respawn_drops_chunks() {
         let mut g = Game::new();
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
         assert_eq!(g.apply(NetEvent::Respawn), Some(Effect::Clear));

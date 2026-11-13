@@ -32,6 +32,9 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   start <x> <y> <z> <yaw>           spawn the player and build the world
  *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak> <using item>
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
+ *   state <x> <y> <z> <id> <meta>  like block, any block state of 1.8.9; prints ok, or bad for a meta the block rejects
+ *   props <id>                    liquid, solid, blocksMovement (0/1) and slipperiness float bits of a block
+ *   boxes <x0> <y0> <z0> <x1> <y1> <z1>  World.getCollisions of the player in the box, one line of six doubles each, then "end"
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
@@ -41,7 +44,7 @@ public class Harness {
     static final Map<String, Block> BLOCKS = new HashMap<>();
     static final Map<Long, ProtoChunk> PROTO = new HashMap<>();
     static final Map<Long, WorldChunk> CHUNKS = new HashMap<>();
-    static final Map<Long, Block> EXTRA = new HashMap<>();
+    static final Map<Long, BlockState> EXTRA = new HashMap<>();
     static Block floor;
     static World world;
 
@@ -79,12 +82,12 @@ public class Harness {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     for (int y = 0; y < 256; y++) {
-                        Block b = EXTRA.get(blockKey(cx * 16 + x, y, cz * 16 + z));
+                        BlockState b = EXTRA.get(blockKey(cx * 16 + x, y, cz * 16 + z));
                         if (b == null && y <= 63) {
-                            b = floor;
+                            b = floor.defaultState();
                         }
-                        if (b != null && b != Blocks.AIR) {
-                            p.setBlockState(x, y, z, b.defaultState());
+                        if (b != null && b.getBlock() != Blocks.AIR) {
+                            p.setBlockState(x, y, z, b);
                         }
                     }
                 }
@@ -155,7 +158,7 @@ public class Harness {
                     floor = BLOCKS.get(t[1]);
                     break;
                 case "block":
-                    EXTRA.put(blockKey(Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3])), BLOCKS.get(t[4]));
+                    EXTRA.put(blockKey(Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3])), BLOCKS.get(t[4]).defaultState());
                     break;
                 case "start":
                     world = newWorld();
@@ -167,6 +170,32 @@ public class Harness {
                     };
                     player.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), Float.parseFloat(t[4]), 0f);
                     break;
+                case "state":
+                    try {
+                        EXTRA.put(blockKey(Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3])),
+                            Block.byId(Integer.parseInt(t[4])).getStateFromMetadata(Integer.parseInt(t[5])));
+                        System.out.println("ok");
+                    } catch (RuntimeException e) {
+                        System.out.println("bad");
+                    }
+                    break;
+                case "props": {
+                    Block b = Block.byId(Integer.parseInt(t[1]));
+                    net.minecraft.flat.Material m = b.getMaterial();
+                    System.out.println((m.isLiquid() ? 1 : 0) + " " + (m.isSolid() ? 1 : 0) + " " + (m.blocksMovement() ? 1 : 0) + " "
+                        + Integer.toHexString(Float.floatToRawIntBits(b.slipperiness)));
+                    break;
+                }
+                case "boxes": {
+                    net.minecraft.flat.net_minecraft_util_math_Box area = new net.minecraft.flat.net_minecraft_util_math_Box(
+                        Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]),
+                        Double.parseDouble(t[4]), Double.parseDouble(t[5]), Double.parseDouble(t[6]));
+                    for (net.minecraft.flat.net_minecraft_util_math_Box b : world.getCollisions(player, area)) {
+                        System.out.println(hex(b.minX) + " " + hex(b.minY) + " " + hex(b.minZ) + " " + hex(b.maxX) + " " + hex(b.maxY) + " " + hex(b.maxZ));
+                    }
+                    System.out.println("end");
+                    break;
+                }
                 case "tick":
                     int n = Integer.parseInt(t[1]);
                     float fwd = Float.parseFloat(t[2]);
@@ -205,6 +234,8 @@ public class Harness {
                                 player.velocityY += (double) (fly * 3.0f);
                             }
                         }
+                        // Entity.onEntityUpdate runs handleWaterMovement before onLivingUpdate.
+                        player.checkWaterCollisions();
                         player.mobTick();
                         System.out.println(hex(player.x) + " " + hex(player.y) + " " + hex(player.z) + " "
                             + hex(player.velocityX) + " " + hex(player.velocityY) + " " + hex(player.velocityZ) + " "

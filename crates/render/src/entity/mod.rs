@@ -89,6 +89,8 @@ pub struct EntityDraw {
     pub always_name: bool,
     /// The entity under the crosshair (`RenderManager.pointedEntity`).
     pub pointed: bool,
+    /// Scoreboard data of a player's tag; see [`TeamTag`].
+    pub team_tag: TeamTag,
     /// Another entity rides this one (`riddenByEntity != null`), which hides its tag.
     pub ridden: bool,
     /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
@@ -101,6 +103,15 @@ pub struct EntityDraw {
     pub line: Option<([f64; 3], f32)>,
     /// Metadata the models read; see [`Look`].
     pub look: Look,
+}
+
+/// What the scoreboard says about a player's name tag.
+#[derive(Clone, Debug, Default)]
+pub struct TeamTag {
+    /// The team's `nameTagVisibility` decision for this viewer; `None` for a player with no team.
+    pub shown: Option<bool>,
+    /// The `"<score> <objective>"` line of display slot 2 (`BELOW_NAME`).
+    pub below: Option<String>,
 }
 
 /// Per-entity appearance data that comes from metadata and the profile.
@@ -1348,6 +1359,9 @@ pub struct NameTag {
 /// `canRenderName` of the entity's renderer, before the distance test: armor stands follow the
 /// always-show byte alone, other mobs need it or the crosshair, players only need to be visible.
 fn shows_name(d: &EntityDraw) -> bool {
+    if let (Class::Player { .. }, Some(shown)) = (&d.class, d.team_tag.shown) {
+        return shown;
+    }
     match d.class {
         Class::Object(78) => d.always_name,
         Class::Mob(_) => !d.invisible && !d.ridden && (d.always_name || d.pointed),
@@ -1367,7 +1381,11 @@ pub fn nametags(
     width: f32,
     height: f32,
 ) -> Vec<NameTag> {
-    let px_per_block = height * 0.5 / (fov_deg.to_radians() * 0.5).tan();
+    let view = TagView {
+        view_proj,
+        px_per_block: height * 0.5 / (fov_deg.to_radians() * 0.5).tan(),
+        size: [width, height],
+    };
     draws
         .iter()
         .filter_map(|d| {
@@ -1377,42 +1395,69 @@ pub fn nametags(
             }
             let dist_sq: f64 = (0..3).map(|i| (d.pos[i] - viewer[i]).powi(2)).sum();
             let limit = if d.sneaking { 32.0 } else { 64.0 };
-            if dist_sq >= limit * limit {
-                return None;
-            }
-            let mut y = d.pos[1] + f64::from(d.size.1) + 0.5;
-            if d.child {
-                y -= f64::from(d.size.1) / 2.0;
-            }
-            if d.sneaking {
-                y -= 0.25;
-            }
-            let anchor = [d.pos[0], y, d.pos[2]];
-            let p = anchor.map(|v| v as f32);
-            let c: Vec<f32> = (0..4)
-                .map(|r| {
-                    view_proj[0][r] * p[0]
-                        + view_proj[1][r] * p[1]
-                        + view_proj[2][r] * p[2]
-                        + view_proj[3][r]
-                })
-                .collect();
-            if c[3] <= 0.0 {
-                return None;
-            }
-            Some(NameTag {
-                screen: [
-                    (c[0] / c[3] * 0.5 + 0.5) * width,
-                    (0.5 - c[1] / c[3] * 0.5) * height,
-                ],
-                scale: 0.026_666_67 * px_per_block / c[3],
-                anchor,
-                sneaking: d.sneaking,
-                text: name.clone(),
-            })
+            (dist_sq < limit * limit).then(|| view.tags(d, name, dist_sq))
         })
+        .flatten()
         .collect()
 }
+
+/// The projection that places name tags.
+struct TagView<'a> {
+    view_proj: &'a [[f32; 4]; 4],
+    px_per_block: f32,
+    size: [f32; 2],
+}
+
+impl TagView<'_> {
+    /// The tags of one entity in range: its name, and for a standing player in front of a below-name
+    /// objective the score line (`RenderPlayer.renderNameTag`: within 10 blocks, the test is on the squared
+    /// distance) with the name moved up by one line.
+    fn tags(&self, d: &EntityDraw, name: &str, dist_sq: f64) -> Vec<NameTag> {
+        let mut y = d.pos[1] + f64::from(d.size.1) + 0.5;
+        if d.child {
+            y -= f64::from(d.size.1) / 2.0;
+        }
+        if d.sneaking {
+            y -= 0.25;
+        }
+        let below =
+            d.team_tag.below.as_ref().filter(|_| {
+                matches!(d.class, Class::Player { .. }) && !d.sneaking && dist_sq < 100.0
+            });
+        let name_y = if below.is_some() {
+            y + BELOW_NAME_LIFT
+        } else {
+            y
+        };
+        below
+            .and_then(|b| self.tag(d, y, b))
+            .into_iter()
+            .chain(self.tag(d, name_y, name))
+            .collect()
+    }
+
+    fn tag(&self, d: &EntityDraw, y: f64, text: &str) -> Option<NameTag> {
+        let anchor = [d.pos[0], y, d.pos[2]];
+        let p = anchor.map(|v| v as f32);
+        let m = self.view_proj;
+        let c: Vec<f32> = (0..4)
+            .map(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
+            .collect();
+        (c[3] > 0.0).then(|| NameTag {
+            screen: [
+                (c[0] / c[3] * 0.5 + 0.5) * self.size[0],
+                (0.5 - c[1] / c[3] * 0.5) * self.size[1],
+            ],
+            scale: 0.026_666_67 * self.px_per_block / c[3],
+            anchor,
+            sneaking: d.sneaking,
+            text: text.into(),
+        })
+    }
+}
+
+/// `fontHeight * 1.15 * 0.02666667` blocks: how far `renderNameTag` lifts the name over the score line.
+const BELOW_NAME_LIFT: f64 = 9.0 * 1.15 * 0.026_666_67;
 
 #[cfg(test)]
 mod tests {
@@ -1444,6 +1489,7 @@ mod tests {
             hover_start: 0.0,
             hang: Default::default(),
             name: None,
+            team_tag: TeamTag::default(),
             skin: None,
             burning: false,
             eye_height: 1.62,
@@ -1892,6 +1938,49 @@ mod tests {
         })[0];
         assert!((child.anchor[1] - (0.9 + 0.5 - 0.45)).abs() < 1e-6);
         assert!(tag(&|d| d.ridden = true).is_empty());
+    }
+
+    #[test]
+    fn team_decides_the_tag_and_below_name_lifts_it() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let tags = |z: f64, f: &dyn Fn(&mut EntityDraw)| {
+            let mut d = steve();
+            d.pos = [0.0, 0.0, z];
+            d.name = Some("N".into());
+            d.team_tag.below = Some("17 HP".into());
+            f(&mut d);
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0)
+        };
+        let text = |t: &[NameTag]| t.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+        let near = tags(-9.9, &|_| {});
+        assert_eq!(text(&near).len(), 2);
+        let (below, name) = (
+            near.iter().find(|t| t.text == "17 HP").unwrap(),
+            near.iter().find(|t| t.text == "N").unwrap(),
+        );
+        assert!((name.anchor[1] - below.anchor[1] - 0.276).abs() < 1e-6);
+        assert_eq!(
+            text(&tags(-10.0, &|_| {})),
+            ["N"],
+            "10 blocks: squared distance is not under 100"
+        );
+        assert_eq!(text(&tags(-5.0, &|d| d.sneaking = true)), ["N"]);
+        // A team with a visible tag shows an invisible player; `never` hides a visible one.
+        let shown = |s: Option<bool>| move |d: &mut EntityDraw| d.team_tag.shown = s;
+        assert_eq!(
+            tags(-5.0, &|d| {
+                d.invisible = true;
+                shown(Some(true))(d)
+            })
+            .len(),
+            2
+        );
+        assert!(tags(-5.0, &shown(Some(false))).is_empty());
     }
 
     /// `w = -z` so a point at negative z is in front, like the real projection.

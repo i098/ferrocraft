@@ -700,7 +700,6 @@ fn hurt_entity_flashes_red() {
     }
 }
 
-/// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
 /// `LayerArrow`: arrows stuck in a player change the frame; the proof images go to `FIGHT_PROOF_DIR`.
 #[test]
 #[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
@@ -740,6 +739,7 @@ fn stuck_arrows_draw_in_a_player() {
     }
 }
 
+/// Armor assets dir with a white leather layer 1 and, optionally, an opaque blue overlay.
 fn leather_assets(overlay: bool) -> std::path::PathBuf {
     let dir =
         std::env::temp_dir().join(format!("ferrocraft-armor-{}-{overlay}", std::process::id()));

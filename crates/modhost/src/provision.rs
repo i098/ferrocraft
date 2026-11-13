@@ -64,6 +64,7 @@ impl Config {
     /// executable, or in the source tree this was built from.
     pub fn provision() -> Result<Config, Error> {
         let main = main_dir()?;
+        let host = host_jar()?;
         let mut installer =
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
@@ -86,7 +87,6 @@ impl Config {
             link(jar, &lib.join(lib_name(jar, &main.join("versions"))))?;
         }
 
-        let host = host_jar()?;
         let host_dst = main.join(HOST_JAR);
         fs::copy(&host, &host_dst)?;
         let mut class_path = vec![host_dst];

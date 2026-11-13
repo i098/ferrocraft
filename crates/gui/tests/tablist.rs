@@ -48,7 +48,8 @@ fn tab_list_draws_the_custom_skin_face_and_hat() {
     hud.tablist.set_visible(true, 0);
     hud.tablist.draw(&mut g, &hud.scoreboard, Clock::default());
     let (w, h, rgba) = r.render_to_rgba(&Camera::default(), &g.into_quads());
-    let path = std::env::var("TAB_PNG").unwrap_or_else(|_| "target/tablist.png".into());
+    let path = std::env::var("TAB_PNG")
+        .unwrap_or_else(|_| concat!(env!("CARGO_TARGET_TMPDIR"), "/tablist.png").into());
     encode_png(std::path::Path::new(&path), w, h, &rgba).expect("write png");
     let count = |c: [u8; 3]| {
         rgba.as_chunks::<4>()

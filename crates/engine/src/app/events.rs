@@ -85,6 +85,7 @@ impl App {
         } else {
             format!("{host}:{port}")
         };
+        self.server.clone_from(&addr);
         self.link = Link::connect(addr, self.args.username.clone(), self.args.auth.clone());
     }
 

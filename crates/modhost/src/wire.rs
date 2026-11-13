@@ -10,6 +10,7 @@
 //! number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel (argument is the LWJGL delta, 120 per
 //! notch). The character is 0 for buttons and wheel. State bit 2 on any kind: a screen was open when the event
 //! arrived.
+//! Rust to Java before a frame, optional: `'M'`, the HUD state mirror of `mirror.rs`.
 //! Java to Rust, per frame: u8 mod screen open (a screen a mod opened is current), u32 command count,
 //! then the commands of `Sink.java`: `'R'` rect, `'G'` gradient, `'T'` text, `'D'` define (a resource
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),

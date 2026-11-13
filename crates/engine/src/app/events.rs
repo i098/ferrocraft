@@ -525,28 +525,7 @@ impl App {
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
                 dirty.insert((x, z), e);
             }
-            Effect::Chat(mut runs) => {
-                if let Some(mods) = &self.mods {
-                    match mods.chat(
-                        ferrocraft_modhost::ChatKind::Chat,
-                        &ferrocraft_net_client::formatted_text(&runs),
-                    ) {
-                        ferrocraft_modhost::ChatVerdict::Keep => {}
-                        ferrocraft_modhost::ChatVerdict::Cancel => return,
-                        ferrocraft_modhost::ChatVerdict::Replace(text) => {
-                            runs = vec![ferrocraft_net_client::Styled {
-                                format: String::new(),
-                                text,
-                            }];
-                        }
-                    }
-                }
-                let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
-                let open = self.input.chat_input().is_some();
-                self.hud
-                    .chat
-                    .print(runs, 0, self.hud.update_counter, open, m);
-            }
+            Effect::Chat(runs) => self.print_chat(runs),
             Effect::ActionBar(text) => self.hud.set_action_bar(text),
             Effect::OpenWindow => {
                 self.container = Some(ContainerScreen::new(
@@ -583,6 +562,31 @@ impl App {
                 self.run_effects(q);
             }
         }
+    }
+
+    /// Prints a received chat line, through the mod host when one is live; a mod that cancels it
+    /// stops the line.
+    fn print_chat(&mut self, mut runs: Vec<ferrocraft_net_client::Styled>) {
+        if let Some(mods) = &self.mods {
+            match mods.chat(
+                ferrocraft_modhost::ChatKind::Chat,
+                &ferrocraft_net_client::formatted_text(&runs),
+            ) {
+                ferrocraft_modhost::ChatVerdict::Keep => {}
+                ferrocraft_modhost::ChatVerdict::Cancel => return,
+                ferrocraft_modhost::ChatVerdict::Replace(text) => {
+                    runs = vec![ferrocraft_net_client::Styled {
+                        text,
+                        ..Default::default()
+                    }];
+                }
+            }
+        }
+        let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+        let open = self.input.chat_input().is_some();
+        self.hud
+            .chat
+            .print(runs, 0, self.hud.update_counter, open, m);
     }
 
     /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.

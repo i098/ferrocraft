@@ -33,6 +33,7 @@ boot() {
         --gameDir "$game" --assetsDir "$L/minecraft-1.8.9.jar" --version 1.8.9 --accessToken x
 }
 boot PlayerTest
+boot ChatTest
 boot MirrorTest
 # Optional: FERRO_MODS is a folder with the public mod jars listed in java/modhost-accept/mods.txt.
 if [ -n "${FERRO_MODS:-}" ]; then

@@ -306,6 +306,15 @@ impl App {
             }
             NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
+            // `handleCustomPayload`: MC|BOpen opens the held written book.
+            NetEvent::PluginMessage { channel, .. } if channel == "MC|BOpen" => {
+                let held = self.game.inv.held_stack().as_ref();
+                if let Some(book) = held.and_then(gui::screens::Book::for_stack) {
+                    let m = metrics!(self);
+                    let q = self.ui.open(&m, Box::new(book));
+                    self.run_effects(q);
+                }
+            }
             _ => {}
         }
     }

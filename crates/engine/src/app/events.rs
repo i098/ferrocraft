@@ -658,11 +658,21 @@ mod tests {
                 damage: 0,
                 nbt: Some(Nbt {
                     name: String::new(),
-                    root: vec![("pages".into(), Tag::List(vec![Tag::String("\"p1\"".into())]))],
+                    root: vec![(
+                        "pages".into(),
+                        Tag::List(vec![Tag::String("\"p1\"".into())]),
+                    )],
                 }),
             });
             // slot 36 is hotbar 0, the held slot after join
-            send(cb::Packet::from(cb::SetSlot { window_id: 0, slot: 36, item }).encode());
+            send(
+                cb::Packet::from(cb::SetSlot {
+                    window_id: 0,
+                    slot: 36,
+                    item,
+                })
+                .encode(),
+            );
             send(
                 cb::Packet::from(cb::PluginMessage {
                     channel: channel.into(),

@@ -164,7 +164,7 @@ pub fn blended(
             }
         }
     }
-    sum.map(|s| (s / 9 & 255) as f32 / 255.0)
+    sum.map(|s| ((s / 9) & 255) as f32 / 255.0)
 }
 
 /// What falls on a column in rain: `renderRainSnow` picks rain at 0.15 and above, snow below.
@@ -300,6 +300,9 @@ mod tests {
 
     /// Colors printed by the 1.8.9 client (`BiomeColors.getGrassColor`, `getFoliageColor` and the water
     /// multiplier over a world of one biome), as `[grass, foliage, water]`. Needs the client jar.
+    /// Biome id, block position and the `[grass, foliage, water]` colors there.
+    type Row = (u8, (i32, i32, i32), [u32; 3]);
+
     #[test]
     fn tints_match_vanilla() {
         let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR") else {
@@ -309,7 +312,7 @@ mod tests {
         let maps = Colormaps::load(&mut AssetSource::open(jar.as_ref()).unwrap());
         let hex = |c: [f32; 3]| c.map(|v| (v * 255.0).round() as u32);
         let rgb = |c: u32| [c >> 16, c >> 8 & 255, c & 255];
-        let want: [(u8, (i32, i32, i32), [u32; 3]); 40] = [
+        let want: [Row; 40] = [
             (0, (100, 64, -37), [0x8eb971, 0x71a74d, 0xffffff]),
             (0, (0, 70, 0), [0x8db971, 0x71a64e, 0xffffff]),
             (0, (-2000, 100, 513), [0x8db976, 0x71a653, 0xffffff]),

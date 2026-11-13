@@ -233,6 +233,7 @@ impl App {
         self.rain_particles();
         self.potion_particles();
         self.entity_fx();
+        Self::projectile_fx(&self.game, &mut self.particles);
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
@@ -273,6 +274,63 @@ impl App {
         }
         for (pos, vel, width, state) in dust {
             self.particles.sprint_dust(pos, vel, width, state);
+        }
+    }
+
+    /// Tick particles of arrows, thrown entities, fireballs and primed TNT (`onUpdate` of each class).
+    fn projectile_fx(g: &crate::game::Game, particles: &mut render::Particles) {
+        let block = |x, y, z| g.store.get_block(x, y, z);
+        let b = g.body();
+        let body = g
+            .player
+            .is_some()
+            .then(|| ([b[0], b[1], b[2]], [b[3], b[4], b[5]]));
+        for e in g.entities.iter().filter(|e| !e.is_dead()) {
+            let vel = [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]);
+            let moving = vel != [0.0; 3];
+            let Kind::Object(object) = e.kind else {
+                continue;
+            };
+            let wet = || world::motion_sound::in_water(e.pos, f64::from(e.size().1), block);
+            let (bubbles, smoke) = match object {
+                // A stuck arrow does not move and runs neither branch.
+                60 if moving => {
+                    if e.critical_arrow() {
+                        particles.arrow_crit(e.prev_pos, vel);
+                    }
+                    (wet(), false)
+                }
+                61 | 62 | 65 | 73 | 75 => {
+                    // `EntityThrowable.onUpdate`: the client traces blocks along the motion and runs `onImpact`.
+                    let next = [0, 1, 2].map(|i| e.pos[i] + vel[i]);
+                    if moving && matches!(object, 61 | 62 | 65) {
+                        let len = vel.iter().map(|v| v * v).sum::<f64>().sqrt();
+                        let hit = [
+                            g.block_dist(e.pos, next),
+                            g.entities.hit_along(e.pos, next, e.age < 5, body),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .min_by(f64::total_cmp);
+                        if let Some(t) = hit {
+                            particles.thrown_impact(
+                                object,
+                                [0, 1, 2].map(|i| e.pos[i] + vel[i] / len * t),
+                            );
+                        }
+                    }
+                    (wet(), false)
+                }
+                63 | 64 | 66 => (wet(), true),
+                50 => (false, true),
+                _ => continue,
+            };
+            if bubbles {
+                particles.bubble_trail(e.pos, vel);
+            }
+            if smoke {
+                particles.smoke_puff(e.pos);
+            }
         }
     }
 
@@ -1182,7 +1240,81 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod tests {
-    use super::{activates, item_used_on, sprint_dust_state};
+    use super::{activates, item_used_on, sprint_dust_state, App};
+    use crate::game::Game;
+    use render::Particles;
+    use world::chunk::Chunk;
+    use world::entities::EntityEvent;
+
+    fn pearl_flying_toward_x(wall: bool) -> (Game, Particles) {
+        let mut g = Game::new();
+        let mut c = Chunk::new(0, 0);
+        if wall {
+            c.set_block(1, 64, 0, 1 << 4);
+        }
+        g.store.insert(c);
+        g.entities.apply(EntityEvent::SpawnObject {
+            id: 7,
+            kind: 65,
+            pos: [16, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        g.entities.apply(EntityEvent::Teleport {
+            id: 7,
+            pos: [48, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            on_ground: false,
+        });
+        g.entities.tick();
+        (g, Particles::new())
+    }
+
+    #[test]
+    fn a_pearl_flying_into_a_block_makes_portal_specks_and_in_open_air_none() {
+        let (g, mut ps) = pearl_flying_toward_x(true);
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 1.0).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
+        let (g, mut ps) = pearl_flying_toward_x(false);
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 0);
+    }
+
+    #[test]
+    fn a_pearl_flying_into_an_entity_makes_portal_specks() {
+        let (mut g, mut ps) = pearl_flying_toward_x(false);
+        g.entities.apply(EntityEvent::SpawnObject {
+            id: 8,
+            kind: 1,
+            pos: [64, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 0.95).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn a_pearl_flying_into_the_local_player_makes_portal_specks() {
+        let (mut g, mut ps) = pearl_flying_toward_x(false);
+        g.player = Some(world::Player::new([1.5, 64.0, 0.5], 0.0));
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
+        assert!(ps
+            .positions()
+            .all(|p| (p[0] - 0.9).abs() < 1e-6 && (p[2] - 0.5).abs() < 1e-6));
+    }
 
     #[test]
     fn sprint_dust_needs_a_solid_block_and_no_water() {

@@ -70,7 +70,7 @@ const SKINS: [&str; 52] = [
 const MOBS_FIRST: usize = 28;
 /// Slots of the eye layer textures; their black counts as transparent (additive blending).
 const EYES: [usize; 2] = [43, 44];
-/// Slot of `slime.png` and the size of its outer gel region (top left, texels): the entity pass has
+/// Slot of `slime.png` and the size of its outer gel region (top left, texels). The entity pass has
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 const SLIME_GEL: (usize, usize) = (32, 16);
@@ -119,6 +119,8 @@ pub enum Skin {
     Enderman,
     SpiderEyes,
     EndermanEyes,
+    /// `textures/entity/armorstand/wood.png` (64x64).
+    ArmorStand,
     /// `textures/entity/slime/slime.png`, the body and the outer gel layer.
     Slime,
     MagmaCube,
@@ -128,8 +130,6 @@ pub enum Skin {
     GhastShooting,
     /// `textures/entity/bat.png` (64x64).
     Bat,
-    /// `textures/entity/armorstand/wood.png` (64x64).
-    ArmorStand,
     /// A downloaded cape in dynamic slot `n`.
     Cape(u8),
     /// An armor texture, by index into the armor part of the slot table.
@@ -304,22 +304,35 @@ impl Skins {
             let Some(img) = source.read(&path).and_then(|b| decode_png(&b)) else {
                 continue;
             };
-            if i == BOBBER_SLOT {
-                s.blit_plain(i as u32, &crop(&img, BOBBER_CELL));
-            } else if (FIRST_SPRITE..ARMOR_FIRST as usize).contains(&i) || i >= MOBS_FIRST {
-                s.blit_plain(i as u32, &img);
-                if EYES.contains(&i) {
-                    s.clear_black(i as u32);
-                }
-                if i == SLIME_SLOT {
-                    s.screen_door(i as u32, SLIME_GEL);
-                }
-            } else {
-                s.blit(i as u32, &img);
-            }
+            s.put(i, &img);
             s.loaded[i] = true;
         }
         s
+    }
+
+    /// Copies one texture into its slot: sprites plain, player-layout skins with their left limbs
+    /// mirrored, and the layers that need it through [`Skins::fixup`].
+    fn put(&mut self, i: usize, img: &Image) {
+        let sprite = (FIRST_SPRITE..ARMOR_FIRST as usize).contains(&i) || i >= MOBS_FIRST;
+        if i == BOBBER_SLOT {
+            self.blit_plain(i as u32, &crop(img, BOBBER_CELL));
+        } else if sprite {
+            self.blit_plain(i as u32, img);
+            self.fixup(i);
+        } else {
+            self.blit(i as u32, img);
+        }
+    }
+
+    /// Eye layers draw additively (black adds nothing), and the slime gel is drawn without blending, so
+    /// every other of its texels is punched out.
+    fn fixup(&mut self, i: usize) {
+        if EYES.contains(&i) {
+            self.clear_black(i as u32);
+        }
+        if i == SLIME_SLOT {
+            self.screen_door(i as u32, SLIME_GEL);
+        }
     }
 
     /// Copies a sprite into the top-left corner of its slot, with no skin-layout fixes. A sprite
@@ -336,14 +349,18 @@ impl Skins {
         }
     }
 
-    /// Makes every other texel of the top left `w` by `h` region of a slot transparent, in a checkerboard,
-    /// so a translucent layer drawn without blending lets what lies behind it show.
+    /// Makes every other texel of the top left `w` by `h` region of a slot transparent, in a
+    /// checkerboard, so a translucent layer drawn without blending lets what lies behind it show.
     fn screen_door(&mut self, slot: u32, (w, h): (usize, usize)) {
-        let base = (slot * SLOT) as usize;
         for y in 0..h {
-            for x in (y % 2..w).step_by(2) {
-                self.rgba[((base + y) * WIDTH as usize + x) * 4 + 3] = 0;
-            }
+            self.door_row((slot * SLOT) as usize + y * WIDTH as usize, y, w);
+        }
+    }
+
+    /// Clears the alpha of every other texel of one row, starting at `y` parity.
+    fn door_row(&mut self, base: usize, y: usize, w: usize) {
+        for x in (y % 2..w).step_by(2) {
+            self.rgba[(base + x) * 4 + 3] = 0;
         }
     }
 
@@ -464,28 +481,37 @@ fn slot(skin: Skin) -> Option<u32> {
 
 /// Slots of the mob textures that come after the elder guardian, in `SKINS` order.
 fn mob_slot(skin: Skin) -> Option<u32> {
-    Some(match skin {
-        Skin::Villager(i) => MOBS_FIRST as u32 + u32::from(i),
-        Skin::IronGolem => 34,
-        Skin::Silverfish => 36,
-        Skin::Chicken => 37,
-        Skin::Sheep => 38,
-        Skin::SheepFur => 39,
-        Skin::Spider => 40,
-        Skin::CaveSpider => 41,
-        Skin::Enderman => 42,
-        Skin::SpiderEyes => 43,
-        Skin::EndermanEyes => 44,
-        Skin::ArmorStand => 45,
-        Skin::Slime => 46,
-        Skin::MagmaCube => 47,
-        Skin::Blaze => 48,
-        Skin::Ghast => 49,
-        Skin::GhastShooting => 50,
-        Skin::Bat => 51,
-        _ => return None,
-    })
+    if let Skin::Villager(i) = skin {
+        return Some(MOBS_FIRST as u32 + u32::from(i));
+    }
+    if skin == Skin::IronGolem {
+        return Some(34);
+    }
+    MOB_TAIL
+        .iter()
+        .position(|&s| s == skin)
+        .map(|i| 36 + i as u32)
 }
+
+/// The mob textures from slot 36 on, in `SKINS` order; the golem at 34 and 35 is the exception.
+const MOB_TAIL: [Skin; 16] = [
+    Skin::Silverfish,
+    Skin::Chicken,
+    Skin::Sheep,
+    Skin::SheepFur,
+    Skin::Spider,
+    Skin::CaveSpider,
+    Skin::Enderman,
+    Skin::SpiderEyes,
+    Skin::EndermanEyes,
+    Skin::ArmorStand,
+    Skin::Slime,
+    Skin::MagmaCube,
+    Skin::Blaze,
+    Skin::Ghast,
+    Skin::GhastShooting,
+    Skin::Bat,
+];
 
 #[cfg(test)]
 mod tests {

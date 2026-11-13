@@ -109,27 +109,34 @@ fn magma_cube() -> Model {
     model(Skin::MagmaCube, parts)
 }
 
+/// One ring of blaze rods: (first rod, rod count, start angle, radius, height base, phase step per
+/// rod, phase scale).
+type Ring = (usize, usize, f32, f32, f32, f32, f32);
+
 /// `ModelBlaze`: the head and twelve rods in three rings that spin and bob.
 fn blaze(d: &EntityDraw) -> Model {
     let age = d.age;
-    // (first rod, rod count, start angle, radius, height base, phase step per rod, phase scale)
-    let rings = [
+    let rings: [Ring; 3] = [
         (0, 4, age * PI * -0.1, 9.0, -2.0, 2.0, 0.25),
         (4, 4, PI / 4.0 + age * PI * 0.03, 7.0, 2.0, 2.0, 0.25),
         (8, 4, 0.471_238_94 + age * PI * -0.05, 5.0, 11.0, 1.5, 0.5),
     ];
     let mut parts =
         vec![Part::new([0.0; 3], [-4.0, -4.0, -4.0], [8.0; 3], (0.0, 0.0)).rot(head_rot(d))];
-    for (first, count, start, radius, base, step, scale) in rings {
-        let mut angle = start;
-        for i in first..first + count {
-            let y = base + ((i as f32 * step + age) * scale).cos();
-            let pivot = [angle.cos() * radius, y, angle.sin() * radius];
-            parts.push(Part::new(pivot, [0.0; 3], [2.0, 8.0, 2.0], (0.0, 16.0)));
-            angle += PI / 2.0;
-        }
+    for ring in rings {
+        rods(&mut parts, ring, age);
     }
     model(Skin::Blaze, parts)
+}
+
+/// Appends the rods of one ring, a quarter turn apart.
+fn rods(parts: &mut Vec<Part>, (first, count, start, radius, base, step, scale): Ring, age: f32) {
+    for i in first..first + count {
+        let angle = start + (i - first) as f32 * PI / 2.0;
+        let y = base + ((i as f32 * step + age) * scale).cos();
+        let pivot = [angle.cos() * radius, y, angle.sin() * radius];
+        parts.push(Part::new(pivot, [0.0; 3], [2.0, 8.0, 2.0], (0.0, 16.0)));
+    }
 }
 
 /// Tentacle lengths of `ModelGhast`, from `new Random(1660).nextInt(7) + 8` nine times.
@@ -168,70 +175,83 @@ fn ghast(d: &EntityDraw) -> Model {
     model(skin, parts)
 }
 
-/// `ModelBat`: head with two ears, body, and two wings that each carry a wing tip. Flying, the wings
-/// flap; roosting, the bat hangs head down with the wings folded.
-fn bat(d: &EntityDraw) -> Model {
-    let age = d.age;
+/// Pivot, rotation and tip rotation of one bat wing.
+struct Wing {
+    pivot: [f32; 3],
+    rot: [f32; 3],
+    tip: [f32; 3],
+}
+
+/// `ModelBat` when it hangs from a roost: head down, wings folded over the back.
+fn roost_pose(d: &EntityDraw) -> ([f32; 3], [f32; 3], [f32; 3], [Wing; 2]) {
     let [pitch, yaw, _] = head_rot(d);
+    let wing = |mirror: f32| Wing {
+        pivot: [-3.0 * mirror, 0.0, 3.0],
+        rot: [-0.157_079_64, -1.256_637_1 * mirror, 0.0],
+        tip: [0.0, -1.727_876_1 * mirror, 0.0],
+    };
+    (
+        [0.0, -2.0, 0.0],
+        [pitch, PI - yaw, PI],
+        [PI, 0.0, 0.0],
+        [wing(1.0), wing(-1.0)],
+    )
+}
+
+/// `ModelBat` in flight: head up, body tipped forward, wings flapping.
+fn flight_pose(d: &EntityDraw) -> ([f32; 3], [f32; 3], [f32; 3], [Wing; 2]) {
+    let [pitch, yaw, _] = head_rot(d);
+    let flap = (d.age * 1.3).cos() * PI * 0.25;
+    let wing = |mirror: f32| Wing {
+        pivot: [0.0; 3],
+        rot: [0.0, flap * mirror, 0.0],
+        tip: [0.0, flap * 0.5 * mirror, 0.0],
+    };
+    (
+        [0.0; 3],
+        [pitch, yaw, 0.0],
+        [PI / 4.0 + (d.age * 0.1).cos() * 0.15, 0.0, 0.0],
+        [wing(1.0), wing(-1.0)],
+    )
+}
+
+/// `ModelBat`: head with two ears, body, and two wings that each carry a wing tip.
+fn bat(d: &EntityDraw) -> Model {
     let at = [0.0; 3];
-    let (head_pivot, head_pose) = if roosting(d) {
-        ([0.0, -2.0, 0.0], [pitch, PI - yaw, PI])
+    let (head_pivot, head_pose, body_rot, [right, left]) = if roosting(d) {
+        roost_pose(d)
     } else {
-        (at, [pitch, yaw, 0.0])
+        flight_pose(d)
     };
-    let body_rot = if roosting(d) {
-        [PI, 0.0, 0.0]
-    } else {
-        [PI / 4.0 + (age * 0.1).cos() * 0.15, 0.0, 0.0]
-    };
-    // Right wing (x, y rotation), its pivot and the y rotation of its tip.
-    let (r_pivot, r_rot, tip_y) = if roosting(d) {
-        (
-            [-3.0, 0.0, 3.0],
-            [-0.157_079_64, -1.256_637_1, 0.0],
-            -1.727_876_1,
-        )
-    } else {
-        let flap = (age * 1.3).cos() * PI * 0.25;
-        (at, [0.0, flap, 0.0], flap * 0.5)
-    };
-    let l_pivot = [-r_pivot[0], r_pivot[1], r_pivot[2]];
-    let l_rot = [r_rot[0], -r_rot[1], 0.0];
     let body = (at, body_rot);
     let head = vec![(head_pivot, head_pose)];
-
+    let ear = |x: f32, mirror: bool| {
+        Part::new(at, [x, -6.0, -2.0], [3.0, 4.0, 1.0], (24.0, 0.0))
+            .mirrored(mirror)
+            .under(head.clone())
+    };
+    let wing = |w: &Wing, x: f32, mirror: bool| {
+        Part::new(w.pivot, [x, 1.0, 1.5], [10.0, 16.0, 1.0], (42.0, 0.0))
+            .rot(w.rot)
+            .mirrored(mirror)
+            .under(vec![body])
+    };
+    let tip = |w: &Wing, pivot: [f32; 3], min: [f32; 3], mirror: bool| {
+        Part::new(pivot, min, [8.0, 12.0, 1.0], (24.0, 16.0))
+            .rot(w.tip)
+            .mirrored(mirror)
+            .under(vec![(w.pivot, w.rot), body])
+    };
     let parts = vec![
         Part::new(head_pivot, [-3.0; 3], [6.0; 3], (0.0, 0.0)).rot(head_pose),
-        Part::new(at, [-4.0, -6.0, -2.0], [3.0, 4.0, 1.0], (24.0, 0.0)).under(head.clone()),
-        Part::new(at, [1.0, -6.0, -2.0], [3.0, 4.0, 1.0], (24.0, 0.0))
-            .mirrored(true)
-            .under(head),
+        ear(-4.0, false),
+        ear(1.0, true),
         Part::new(at, [-3.0, 4.0, -3.0], [6.0, 12.0, 6.0], (0.0, 16.0)).rot(body_rot),
         Part::new(at, [-5.0, 16.0, 0.0], [10.0, 6.0, 1.0], (0.0, 34.0)).rot(body_rot),
-        Part::new(r_pivot, [-12.0, 1.0, 1.5], [10.0, 16.0, 1.0], (42.0, 0.0))
-            .rot(r_rot)
-            .under(vec![body]),
-        Part::new(
-            [-12.0, 1.0, 1.5],
-            [-8.0, 1.0, 0.0],
-            [8.0, 12.0, 1.0],
-            (24.0, 16.0),
-        )
-        .rot([0.0, tip_y, 0.0])
-        .under(vec![(r_pivot, r_rot), body]),
-        Part::new(l_pivot, [2.0, 1.0, 1.5], [10.0, 16.0, 1.0], (42.0, 0.0))
-            .rot(l_rot)
-            .mirrored(true)
-            .under(vec![body]),
-        Part::new(
-            [12.0, 1.0, 1.5],
-            [0.0, 1.0, 0.0],
-            [8.0, 12.0, 1.0],
-            (24.0, 16.0),
-        )
-        .rot([0.0, -tip_y, 0.0])
-        .mirrored(true)
-        .under(vec![(l_pivot, l_rot), body]),
+        wing(&right, -12.0, false),
+        tip(&right, [-12.0, 1.0, 1.5], [-8.0, 1.0, 0.0], false),
+        wing(&left, 2.0, true),
+        tip(&left, [12.0, 1.0, 1.5], [0.0, 1.0, 0.0], true),
     ];
     model(Skin::Bat, parts)
 }
@@ -289,6 +309,15 @@ mod tests {
         assert!((rod.pivot[0] + 9.0).abs() < 1e-4, "{:?}", rod.pivot);
         assert!((rod.pivot[1] + 2.801_089_3).abs() < 1e-4, "{:?}", rod.pivot);
         // `MathHelper.cos` reads a 65536 entry table, so the oracle differs from `f32::cos` by about 1e-4.
+        // Rod 1 of the outer ring is a quarter turn further: (0, -2.9899907, -9) in 1.8.9.
+        let next = &m.parts[2];
+        assert!(next.pivot[0].abs() < 1e-4, "{:?}", next.pivot);
+        assert!(
+            (next.pivot[1] + 2.989_990_7).abs() < 1e-4,
+            "{:?}",
+            next.pivot
+        );
+        assert!((next.pivot[2] + 9.0).abs() < 1e-4, "{:?}", next.pivot);
         // Rod 8 of the inner ring: (2.269867, 11.00441, -4.454859).
         let inner = &m.parts[9];
         assert!(

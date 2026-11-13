@@ -4,8 +4,7 @@
 //! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
-//! are laid out by [`nametags`].
+//! Held items and dropped items are in [`item`]. Name tags are laid out by [`nametags`].
 
 mod armorstand;
 mod arrows;
@@ -914,20 +913,7 @@ impl Xf {
                 0.0
             },
             fall,
-            // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
-            scale: match d.class {
-                Class::Player { .. } => 0.9375,
-                Class::Mob(mobs::CAVE_SPIDER) => 0.7,
-                // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
-                Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
-                Class::Mob(mobs::VILLAGER) => 0.9375,
-                // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
-                Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
-                // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
-                Class::Mob(mobs2::GHAST) => 4.5,
-                Class::Mob(mobs2::BAT) => 0.35,
-                _ => 1.0,
-            },
+            scale: model_scale(d),
             generic,
         }
     }
@@ -961,6 +947,24 @@ impl Xf {
     }
 }
 
+/// `preRenderCallback` scale of each entity's model.
+fn model_scale(d: &EntityDraw) -> f32 {
+    match d.class {
+        // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
+        Class::Player { .. } => 0.9375,
+        Class::Mob(mobs::CAVE_SPIDER) => 0.7,
+        // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
+        Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
+        Class::Mob(mobs::VILLAGER) => 0.9375,
+        // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
+        Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
+        // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
+        Class::Mob(mobs2::GHAST) => 4.5,
+        Class::Mob(mobs2::BAT) => 0.35,
+        _ => 1.0,
+    }
+}
+
 /// Texture and tint of the main layer: the real skin when loaded, else white with a stand-in tint.
 fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
     let own = match (d.class, d.skin) {
@@ -982,15 +986,7 @@ fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
 fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_off: f32) {
     let min = part.min.map(|m| m - grow);
     let size = part.size.map(|s| s + 2.0 * grow);
-    let tf = |p: V3| -> V3 {
-        let mut q = rotate(p, part.rot);
-        q = [0, 1, 2].map(|i| q[i] + part.pivot[i]);
-        for &(pivot, rot) in &part.parents {
-            q = rotate(q, rot);
-            q = [0, 1, 2].map(|i| q[i] + pivot[i]);
-        }
-        xf.world([0, 1, 2].map(|i| (q[i] + part.shift[i]) * part.scale))
-    };
+    let tf = |p: V3| xf.world(scaled(shift(model_point(p, part), part.shift), part.scale));
     add_box(
         out,
         &tf,
@@ -1003,6 +999,24 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
         color,
         skin_dims(),
     );
+}
+
+/// A point of a part in model pixels, carried through the part's own rotation and pivot and then
+/// each parent's, nearest first (`ModelRenderer` nesting).
+fn model_point(p: V3, part: &Part) -> V3 {
+    let mut q = shift(rotate(p, part.rot), part.pivot);
+    for &(pivot, rot) in &part.parents {
+        q = shift(rotate(q, rot), pivot);
+    }
+    q
+}
+
+fn shift(p: V3, by: V3) -> V3 {
+    [p[0] + by[0], p[1] + by[1], p[2] + by[2]]
+}
+
+fn scaled(p: V3, by: f32) -> V3 {
+    [p[0] * by, p[1] * by, p[2] * by]
 }
 
 /// Mask bit of the skin parts byte that shows model part `i` of a player.

@@ -537,6 +537,7 @@ impl App {
                             runs = vec![ferrocraft_net_client::Styled {
                                 format: String::new(),
                                 text,
+                                ..Default::default()
                             }];
                         }
                     }

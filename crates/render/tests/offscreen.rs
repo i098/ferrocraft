@@ -1200,3 +1200,47 @@ fn lava_and_water_animate_with_client_ticks() {
         }
     }
 }
+
+/// A wall of x-axis nether portal blocks over stone, in view of the camera.
+struct PortalWall;
+
+impl ChunkBlocks for PortalWall {
+    fn chunk_x(&self) -> i32 {
+        0
+    }
+    fn chunk_z(&self) -> i32 {
+        0
+    }
+    fn block(&self, x: usize, y: usize, z: usize) -> u16 {
+        match (x, y, z) {
+            (6..=10, 62..=66, 8) => 90 << 4,
+            (_, 0..=60, _) => 1 << 4,
+            _ => 0,
+        }
+    }
+}
+
+/// The portal texture has 32 frames in `portal.png.mcmeta`: it must differ between client ticks.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn portal_animates_with_client_ticks() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    r.upload_chunk(&PortalWall);
+    let cam = Camera {
+        pos: [8.5, 64.0, 4.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        ..Camera::default()
+    };
+    let mut frame = |ticks: u64| {
+        r.set_environment(Environment {
+            ticks,
+            ..Environment::default()
+        });
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let (t0, t1, t40) = (frame(0), frame(1), frame(40));
+    assert!(t0 != t1 || t0 != t40, "portal stayed on frame 0");
+    assert_ne!(t0, t40, "portal differs after 40 ticks");
+}

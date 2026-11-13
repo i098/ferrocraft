@@ -209,3 +209,44 @@ fn zip_png(jar: &Path, name: &str) -> render::Image {
     zip.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
     decode_png(&bytes).unwrap()
 }
+
+/// Chunk (0,0) with a standing sign at (0,64,4) and an optional extra stone block at (9,64,9).
+struct WithSign(bool);
+
+impl ChunkBlocks for WithSign {
+    fn chunk_x(&self) -> i32 {
+        0
+    }
+    fn chunk_z(&self) -> i32 {
+        0
+    }
+    fn block(&self, x: usize, y: usize, z: usize) -> u16 {
+        match (x, y, z) {
+            (0, 64, 4) => 63 << 4 | 8,
+            (9, 64, 9) if self.0 => 1 << 4,
+            _ => Flat(0, 0).block(x, y, z),
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn sign_text_survives_chunk_reupload_after_block_change() {
+    let mut r = scene();
+    r.upload_chunk(&WithSign(false));
+    let bare = frame(&mut r, &cam(0.5, 4.5), "sign_reupload_bare");
+    r.set_sign_text(
+        [0, 64, 4],
+        ["Keep", "this", "text", "please"].map(String::from),
+    );
+    let texted = frame(&mut r, &cam(0.5, 4.5), "sign_reupload_text");
+    assert!(differs(&bare, &texted) > 200, "text draws");
+    // A block change elsewhere in the chunk re-uploads it; vanilla does not resend the sign text.
+    r.upload_chunk(&WithSign(true));
+    let after = frame(&mut r, &cam(0.5, 4.5), "sign_reupload_after");
+    assert!(
+        differs(&bare, &after) > 200,
+        "sign text still drawn after re-upload"
+    );
+    assert!(differs(&texted, &after) < 50, "same frame as before re-upload");
+}

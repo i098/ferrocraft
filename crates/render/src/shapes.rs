@@ -576,8 +576,8 @@ fn wire(meta: u16, nb: &dyn Fn(i32, i32, i32) -> u16, out: &mut Vec<Bx>) {
         }
     };
     let count = joined.iter().filter(|j| **j).count();
-    for side in 0..4 {
-        if joined[side] || (count == 0 && side % 2 == 0) {
+    for (side, &on) in joined.iter().enumerate() {
+        if on || (count == 0 && side % 2 == 0) {
             out.push(arm(side, 0.0, 8.0));
         }
     }

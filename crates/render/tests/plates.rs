@@ -32,7 +32,7 @@ impl Row {
             9 => 8 + x / 2,
             _ => return None,
         };
-        (x % 2 == 0).then(|| STATES[i])
+        x.is_multiple_of(2).then(|| STATES[i])
     }
 }
 

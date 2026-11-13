@@ -211,11 +211,7 @@ impl Items {
 }
 
 /// Item meshes of every draw. `light` gives the `[sky, block]` level at a world position.
-pub fn build(
-    draws: &[EntityDraw],
-    models: &Models,
-    light: impl Fn([f64; 3]) -> [f32; 2],
-) -> Items {
+pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> [f32; 2]) -> Items {
     let mut out = Items::default();
     for d in draws {
         let level = light_level(d, &light, false);
@@ -245,7 +241,11 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let Some(arm) = parts.get(3) else { return };
     let xf = Xf::new(d, false);
     let mut mat = chain(&[
-        translate(arm.pivot[0] / 16.0, arm.pivot[1] / 16.0, arm.pivot[2] / 16.0),
+        translate(
+            arm.pivot[0] / 16.0,
+            arm.pivot[1] / 16.0,
+            arm.pivot[2] / 16.0,
+        ),
         rotate(arm.rot[2].to_degrees(), 2),
         rotate(arm.rot[1].to_degrees(), 1),
         rotate(arm.rot[0].to_degrees(), 0),
@@ -287,7 +287,10 @@ fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level
         rotate(spin, 1),
     ]);
     if !m.gui3d {
-        base = mul(base, translate(0.0, 0.0, -0.046_875 * (copies - 1) as f32 * 0.5));
+        base = mul(
+            base,
+            translate(0.0, 0.0, -0.046_875 * (copies - 1) as f32 * 0.5),
+        );
     }
     let mut random = JavaRandom::new(187);
     let glint = stack.glint.then_some(d.age * 50.0);

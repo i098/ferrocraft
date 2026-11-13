@@ -5,9 +5,9 @@
 //! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
-pub mod item;
 pub(crate) mod fire;
 pub(crate) mod guardian;
+pub mod item;
 mod projectile;
 mod skin;
 
@@ -496,7 +496,6 @@ fn cow(d: &EntityDraw) -> Model {
     }
 }
 
-
 fn wrap(mut d: f32) -> f32 {
     d %= 360.0;
     if d >= 180.0 {
@@ -685,7 +684,12 @@ fn light_level(d: &EntityDraw, light: &impl Fn([f64; 3]) -> [f32; 2], flash: boo
     };
     [
         level[0],
-        level[1] + if flash && hurt_flash(d) { HURT_FLAG } else { 0.0 },
+        level[1]
+            + if flash && hurt_flash(d) {
+                HURT_FLAG
+            } else {
+                0.0
+            },
     ]
 }
 

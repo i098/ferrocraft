@@ -795,7 +795,9 @@ impl Renderer {
     /// Held and dropped items, each mesh with the texture it samples; leaves the world group bound.
     fn draw_items<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         for (tex, m) in &self.item_meshes {
-            let group = tex.as_ref().map_or(&self.world_group, |t| &self.textures[t]);
+            let group = tex
+                .as_ref()
+                .map_or(&self.world_group, |t| &self.textures[t]);
             pass.set_bind_group(0, group, &[]);
             draw_mesh(pass, m);
         }

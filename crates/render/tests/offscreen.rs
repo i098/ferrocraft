@@ -897,7 +897,12 @@ fn held_and_dropped_items_draw_as_models() {
         class: Class::Object(2),
         pos: [x, 66.0, 1.0],
         size: (0.25, 0.25),
-        stack: Some(render::item::Stack { id, damage: 0, count, glint: false }),
+        stack: Some(render::item::Stack {
+            id,
+            damage: 0,
+            count,
+            glint: false,
+        }),
         age: 12.0,
         ..player_in_leather()
     };
@@ -921,6 +926,38 @@ fn held_and_dropped_items_draw_as_models() {
     r.render_to_rgba(&cam, &[]);
     r.set_entities(&draws);
     let image = r.render_to_rgba(&cam, &[]).2;
+    let bare: Vec<EntityDraw> = draws
+        .iter()
+        .map(|d| EntityDraw {
+            held: 0,
+            stack: None,
+            ..d.clone()
+        })
+        .collect();
+    r.set_entities(&bare);
+    let baseline = r.render_to_rgba(&cam, &[]).2;
+    for (i, d) in draws.iter().enumerate() {
+        let (mid, half) = if matches!(d.class, Class::Player { .. }) {
+            (0.9, 45.0)
+        } else {
+            (0.15, 25.0)
+        };
+        let (cx, cy) = project(&cam, [d.pos[0], d.pos[1] + mid, d.pos[2]], 640.0, 360.0);
+        let mut colours = std::collections::HashSet::new();
+        for y in (cy - half).max(0.0) as usize..((cy + half) as usize).min(360) {
+            for x in (cx - half).max(0.0) as usize..((cx + half) as usize).min(640) {
+                let o = (y * 640 + x) * 4;
+                if image[o..o + 3] != baseline[o..o + 3] {
+                    colours.insert([image[o], image[o + 1], image[o + 2]]);
+                }
+            }
+        }
+        assert!(
+            colours.len() >= 8,
+            "item {i} drew {} distinct colours near ({cx:.0}, {cy:.0}); a flat tint cannot be a model",
+            colours.len()
+        );
+    }
     if let Some(dir) = std::env::var_os("ITEMS_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("items.png"), 640, 360, &image).unwrap();

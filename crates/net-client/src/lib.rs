@@ -8,6 +8,7 @@ mod chat;
 mod entity;
 mod events;
 mod link;
+mod pack;
 mod play;
 mod screens;
 mod skin;
@@ -18,7 +19,7 @@ use ferrocraft_protocol::{handshake, login, PROTOCOL_VERSION};
 use link::{Reader, Writer};
 use std::io;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,6 +27,7 @@ pub use auth::Auth;
 pub use chat::{formatted_text, plain_text, styled, Styled};
 pub use events::{PlayerInfo, PlayerListEvent};
 pub use ferrocraft_protocol::play::CombatEventKind;
+pub use pack::PackStatus;
 use screens::DEFAULT_PORT;
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
@@ -67,7 +69,9 @@ pub enum NetEvent {
         flags: u8,
     },
     /// Respawn or dimension change: every loaded chunk is gone.
-    Respawn,
+    Respawn {
+        dimension_changed: bool,
+    },
     /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.
     TimeUpdate {
         world_age: i64,
@@ -252,12 +256,26 @@ pub enum NetEvent {
         pos: [i32; 3],
         stage: i8,
     },
+    /// S44: the world border changed.
+    WorldBorder(world::border::Update),
+    /// S48: the server offers a resource pack. Answer with [`Session::accept_resource_pack`].
+    ResourcePack {
+        url: String,
+        hash: String,
+    },
+    /// A pack from [`Session::accept_resource_pack`] is on disk and verified: apply it, then send
+    /// [`Session::send_pack_status`] with [`PackStatus::Loaded`] (or `Failed` when it did not load).
+    ResourcePackReady {
+        hash: String,
+        path: std::path::PathBuf,
+    },
     /// The server kicked the client or the connection ended. Always the last event.
     Disconnect(String),
 }
 
 pub struct Session {
     events: Receiver<NetEvent>,
+    tx: Sender<NetEvent>,
     writer: Arc<Mutex<Writer>>,
     stream: TcpStream,
 }
@@ -273,6 +291,17 @@ impl Session {
     /// needs `auth`; without it such a server is refused. Returns once the server accepted the
     /// login; `JoinGame` arrives through [`Session::poll`].
     pub fn connect(addr: &str, username: &str, auth: Option<&Auth>) -> io::Result<Session> {
+        Self::connect_with_brand(addr, username, auth, "vanilla")
+    }
+
+    /// Like [`Session::connect`], with the `MC|Brand` value sent after `JoinGame`: the hosted
+    /// `ClientBrandRetriever.getClientModName()` when the mod host runs, `vanilla` otherwise.
+    pub fn connect_with_brand(
+        addr: &str,
+        username: &str,
+        auth: Option<&Auth>,
+        brand: &str,
+    ) -> io::Result<Session> {
         let (host, port) = resolve_target(addr, srv_lookup);
         let sock = (host.as_str(), port)
             .to_socket_addrs()?
@@ -288,11 +317,14 @@ impl Session {
 
         let (tx, events) = mpsc::channel();
         let thread_writer = Arc::clone(&writer);
+        let reader_tx = tx.clone();
+        let brand = brand.to_owned();
         std::thread::Builder::new()
             .name("net-client-reader".into())
-            .spawn(move || play::run(reader, thread_writer, tx))?;
+            .spawn(move || play::run(reader, thread_writer, reader_tx, &brand))?;
         Ok(Session {
             events,
+            tx,
             writer,
             stream,
         })

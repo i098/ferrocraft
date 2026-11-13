@@ -6,7 +6,7 @@ use gui::inventory::ContainerScreen;
 use gui::screens::Pause;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, DebugCombo};
 use std::time::Instant;
-use world::dig::{look_vector, Action as DigAction};
+use world::dig::{self, look_vector, Action as DigAction};
 use world::entities::Kind;
 use world::inventory::ItemStack;
 use world::place::{self, Click, Outcome};
@@ -225,7 +225,11 @@ impl App {
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
         self.send_state();
-        self.send_pose();
+        if self.game.vehicle.is_some() {
+            self.send_riding(input);
+        } else {
+            self.send_pose();
+        }
         self.sound_tick();
     }
 
@@ -494,6 +498,27 @@ impl App {
         }
     }
 
+    /// `EntityPlayerSP.onUpdate` while riding: the look, then `PacketInput` with the steering keys; sneak asks
+    /// the server to dismount. The vehicle's own movement stays with the server.
+    fn send_riding(&mut self, input: world::Input) {
+        let Some(p) = &self.game.player else { return };
+        let (yaw, on_ground) = (p.yaw, p.on_ground);
+        let pitch = self.game.pitch;
+        // `MovementInputFromOptions`: sneaking scales the axes by 0.3.
+        let scale = if input.sneak { 0.3 } else { 1.0 };
+        if let Some(s) = self.link.session() {
+            let r = s.send_look(yaw, pitch, on_ground).and_then(|()| {
+                s.send_steer(
+                    input.strafe * scale,
+                    input.forward * scale,
+                    input.jump,
+                    input.sneak,
+                )
+            });
+            self.send_result(r);
+        }
+    }
+
     /// The entity under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`
     /// (`EntityRenderer.getMouseOver`), which skips the viewer `skip` and its vehicle: a nearer
     /// block hides it.
@@ -510,6 +535,45 @@ impl App {
         self.game
             .entities
             .pick(eye, look_vector(yaw, pitch), reach, skip, vehicle, block)
+    }
+
+    /// `EntityPlayer.attackTargetEntityWithCurrentItem` on the attacking client: the crit particles when the
+    /// crit test holds, the enchant particles when the held item's damage enchantment applies to the target.
+    fn predict_hit_particles(&mut self, target: i32) {
+        let g = &self.game;
+        let (Some(p), Some(e)) = (&g.player, g.entities.get(target)) else {
+            return;
+        };
+        let block = |dy: f64| {
+            let state = g.store.get_block(
+                p.pos[0].floor() as i32,
+                (p.pos[1] + dy).floor() as i32,
+                p.pos[2].floor() as i32,
+            );
+            state >> 4
+        };
+        let attacker = dig::Attacker {
+            fall_distance: self.own_sounds.fall_distance(),
+            on_ground: p.on_ground,
+            // `isOnLadder`: ladder or vine at the feet; a spectator never climbs.
+            on_ladder: g.gamemode != 3 && matches!(block(0.0), 65 | 106),
+            in_water: world::motion_sound::in_water(p.pos, 1.8, |x, y, z| {
+                g.store.get_block(x, y, z)
+            }),
+            blind: g.effects.has(world::effects::id::BLINDNESS),
+            riding: g.vehicle.is_some(),
+        };
+        let living = matches!(
+            e.kind,
+            world::entities::Kind::Player | world::entities::Kind::Mob(_)
+        ) || e.kind == world::entities::Kind::Object(78);
+        let magic = dig::enchant_bonus(g.inv.held_stack(), dig::creature(e.kind)) > 0.0;
+        if attacker.is_critical(living) {
+            self.game.entities.emit_hit(target, false);
+        }
+        if magic {
+            self.game.entities.emit_hit(target, true);
+        }
     }
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
@@ -541,7 +605,10 @@ impl App {
                     self.game.swing.start();
                     self.session_send(|s| s.send_swing())
                 }
-                DigAction::Attack(id) => self.session_send(|s| s.attack_entity(id)),
+                DigAction::Attack(id) => {
+                    self.predict_hit_particles(id);
+                    self.session_send(|s| s.attack_entity(id))
+                }
             };
             self.send_result(sent);
         }

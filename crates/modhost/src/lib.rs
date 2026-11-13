@@ -67,6 +67,8 @@ struct Shared {
     /// A player tick got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
+    /// `ClientBrandRetriever.getClientModName()` from the hello; `None` until the JVM connected.
+    brand: Option<String>,
 }
 
 struct Link {
@@ -129,6 +131,7 @@ impl ModHost {
                     player: None,
                     answer: None,
                     stalled: false,
+                    brand: None,
                 }),
                 view: Condvar::new(),
                 answered: Condvar::new(),
@@ -286,6 +289,13 @@ impl ModHost {
         answer
     }
 
+    /// The brand the hosted `ClientBrandRetriever.getClientModName()` returned (`fml,forge`), once the JVM is
+    /// live. The client sends it as `MC|Brand`; `None` means no mod host answers, so the brand stays `vanilla`.
+    pub fn client_brand(&self) -> Option<String> {
+        let s = self.link.state.lock().unwrap();
+        s.brand.clone().filter(|_| s.phase == Phase::Live)
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -373,10 +383,10 @@ fn connect(
     link: &Link,
     token: &str,
 ) -> io::Result<TcpStream> {
-    let stream = loop {
+    let (stream, brand) = loop {
         match listener.accept() {
             Ok((stream, _)) => match hello(stream, token) {
-                Ok(stream) => break stream,
+                Ok(hello) => break hello,
                 Err(e) => eprintln!("mod host: connection refused: {e}"),
             },
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -395,11 +405,12 @@ fn connect(
         return Err(io::Error::other("stopped"));
     }
     s.phase = Phase::Live;
+    s.brand = Some(brand);
     Ok(stream)
 }
 
-/// Read `'H'` and the token the JVM got through its environment.
-fn hello(mut stream: TcpStream, token: &str) -> io::Result<TcpStream> {
+/// Read `'H'`, the token the JVM got through its environment and the brand (`writeUTF`: u16 length, bytes).
+fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String)> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
@@ -408,8 +419,13 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<TcpStream> {
     if got[0] != b'H' || &got[1..] != token.as_bytes() {
         return Err(io::Error::other("bad hello"));
     }
+    let mut len = [0; 2];
+    stream.read_exact(&mut len)?;
+    let mut brand = vec![0; usize::from(u16::from_be_bytes(len))];
+    stream.read_exact(&mut brand)?;
+    let brand = String::from_utf8(brand).map_err(|_| io::Error::other("bad brand"))?;
     stream.set_read_timeout(None)?;
-    Ok(stream)
+    Ok((stream, brand))
 }
 
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
@@ -573,6 +589,7 @@ mod tests {
                 player: None,
                 answer: None,
                 stalled: false,
+                brand: None,
             }),
             view: Condvar::new(),
             answered: Condvar::new(),
@@ -590,6 +607,8 @@ mod tests {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         s.write_all(b"H").unwrap();
         s.write_all(token.as_bytes()).unwrap();
+        s.write_all(&[0, 9]).unwrap();
+        s.write_all(b"fml,forge").unwrap();
         s
     }
 
@@ -745,7 +764,9 @@ mod tests {
         let (closed, _good) = client.join().unwrap();
         let _ = child.lock().unwrap().kill();
         assert!(stream.is_ok() && closed);
-        assert!(link.state.lock().unwrap().phase == Phase::Live);
+        let s = link.state.lock().unwrap();
+        assert!(s.phase == Phase::Live);
+        assert_eq!(s.brand.as_deref(), Some("fml,forge"));
     }
 
     #[test]

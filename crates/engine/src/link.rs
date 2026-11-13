@@ -14,11 +14,16 @@ pub enum Link {
 }
 
 impl Link {
-    /// Log in to `addr` (`host:port`) as `username` (with `auth` for online-mode servers) without blocking the render loop.
-    pub fn connect(addr: String, username: String, auth: Option<Auth>) -> Link {
+    /// Log in to `addr` (`host:port`) as `username` (with `auth` for online-mode servers, sending `brand` as `MC|Brand`) without blocking the render loop.
+    pub fn connect(addr: String, username: String, auth: Option<Auth>, brand: String) -> Link {
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let _ = tx.send(Session::connect(&addr, &username, auth.as_ref()));
+            let _ = tx.send(Session::connect_with_brand(
+                &addr,
+                &username,
+                auth.as_ref(),
+                &brand,
+            ));
         });
         Link::Connecting(rx)
     }

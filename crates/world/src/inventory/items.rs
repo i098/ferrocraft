@@ -36,6 +36,13 @@ pub fn is_potion_ingredient(id: i16, damage: i16) -> bool {
     ) || (id == 349 && damage == 3)
 }
 
+pub const SADDLE: i16 = 329;
+
+/// `EntityHorse.isArmorItem`: iron, gold and diamond horse armor.
+pub fn is_horse_armor(id: i16) -> bool {
+    matches!(id, 417..=419)
+}
+
 /// `SlotBeacon.isItemValid`: iron, gold, diamond and emerald.
 pub fn is_beacon_payment(id: i16) -> bool {
     matches!(id, 265 | 266 | 264 | 388)

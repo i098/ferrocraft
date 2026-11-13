@@ -50,6 +50,9 @@ pub enum Kind {
     Beacon,
     /// `minecraft:villager`: 0 and 1 payment, 2 result.
     Merchant,
+    /// `EntityHorse`: 0 saddle, 1 armor, then the chest of a donkey or mule; the count is the horse's
+    /// whole inventory.
+    Horse(u8),
 }
 
 impl Kind {
@@ -66,6 +69,7 @@ impl Kind {
             "minecraft:brewing_stand" => Kind::Brewing,
             "minecraft:beacon" => Kind::Beacon,
             "minecraft:villager" => Kind::Merchant,
+            "EntityHorse" if slots >= 2 => Kind::Horse(slots),
             _ => return None,
         })
     }
@@ -83,6 +87,7 @@ impl Kind {
             Kind::Enchanting => 2,
             Kind::Brewing => 4,
             Kind::Beacon => 1,
+            Kind::Horse(n) => usize::from(n),
         }
     }
 
@@ -112,6 +117,8 @@ pub struct Window {
     pub recipes: Vec<merchant::Recipe>,
     /// `InventoryMerchant.currentRecipeIndex`, set by `MC|TrSel`.
     pub recipe_index: usize,
+    /// Horse windows: the horse is a plain horse, the only kind that wears armor (`canWearArmor`).
+    pub horse_armor: bool,
     transaction: i16,
 }
 
@@ -295,6 +302,7 @@ impl Inventory {
             },
             recipes: Vec::new(),
             recipe_index: 0,
+            horse_armor: false,
             transaction: 0,
         });
         true
@@ -397,6 +405,11 @@ impl Inventory {
             (Kind::Brewing, 0..=2) => items::holds_potion(s.id),
             (Kind::Brewing, 3) => items::is_potion_ingredient(s.id, s.damage),
             (Kind::Beacon, 0) => items::is_beacon_payment(s.id),
+            // `ContainerHorseInventory`: the saddle slot takes a saddle while empty.
+            (Kind::Horse(_), 0) => s.id == items::SADDLE && self.slot(0).is_none(),
+            (Kind::Horse(_), 1) => {
+                items::is_horse_armor(s.id) && self.open.as_ref().is_some_and(|w| w.horse_armor)
+            }
             _ => true,
         }
     }
@@ -893,6 +906,7 @@ impl Inventory {
             Kind::Brewing => self.transfer_brewing(i, s),
             Kind::Beacon => self.transfer_beacon(i, s),
             Kind::Merchant => self.transfer_merchant(i, s),
+            Kind::Horse(_) => self.transfer_horse(i, s),
             Kind::Chest(_) | Kind::Dispenser | Kind::Hopper => {
                 let n = self.slot_count();
                 let own = n - PLAYER_PART;
@@ -921,6 +935,22 @@ impl Inventory {
             2 => self.merge(s, 3, 39, true),
             0 | 1 => self.merge(s, 3, 39, false),
             _ => self.merge(s, 0, 2, false),
+        }
+    }
+
+    /// `ContainerHorseInventory.transferStackInSlot`: armor, then the saddle, then the chest.
+    fn transfer_horse(&mut self, i: usize, s: &mut ItemStack) -> bool {
+        let n = self.slot_count();
+        let own = n - PLAYER_PART;
+        if i < own {
+            return self.merge(s, own, n, true);
+        }
+        if self.slot_accepts(1, s) && self.slot(1).is_none() {
+            self.merge(s, 1, 2, false)
+        } else if self.slot_accepts(0, s) {
+            self.merge(s, 0, 1, false)
+        } else {
+            own > 2 && self.merge(s, 2, own, false)
         }
     }
 
@@ -1118,6 +1148,22 @@ mod tests {
         // last window slot is hotbar 8 = window 0 slot 44
         assert_eq!(inv.player[44], stack(1, 64));
         assert_eq!(inv.slot(0), &None);
+    }
+
+    #[test]
+    fn horse_shift_click_saddles_and_armors() {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(4, "EntityHorse", "Horse".into(), 2));
+        inv.player[36] = stack(items::SADDLE, 1);
+        inv.player[37] = stack(418, 1);
+        inv.click(29, 0, 1);
+        assert_eq!(inv.slot(0), &stack(items::SADDLE, 1));
+        // a donkey wears no armor
+        inv.click(30, 0, 1);
+        assert_eq!(inv.slot(1), &None);
+        inv.open.as_mut().unwrap().horse_armor = true;
+        inv.click(30, 0, 1);
+        assert_eq!(inv.slot(1), &stack(418, 1));
     }
 
     #[test]

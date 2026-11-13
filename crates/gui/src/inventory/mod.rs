@@ -765,6 +765,16 @@ impl ContainerScreen {
                 modal(c, lay.texture, l, t, 0, 0, lay.width, rows * 18 + 17);
                 modal(c, lay.texture, l, t + rows * 18 + 17, 0, 126, lay.width, 96);
             }
+            Kind::Horse(n) => {
+                modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
+                // `GuiScreenHorseInventory`: the chest and armor slot backgrounds, then the horse model.
+                if n > 2 {
+                    modal(c, lay.texture, l + 79, t + 17, 0, lay.height, 90, 54);
+                }
+                if inv.open.as_ref().is_some_and(|w| w.horse_armor) {
+                    modal(c, lay.texture, l + 7, t + 35, 0, lay.height + 54, 18, 18);
+                }
+            }
             Kind::Furnace => {
                 modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
                 let p = inv
@@ -797,7 +807,7 @@ impl ContainerScreen {
             }
             _ => modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height),
         }
-        // shortcut: GuiInventory's 3D player model (drawEntityOnScreen) waits for the entity renderer
+        // shortcut: the 3D player and horse models (drawEntityOnScreen) wait for the entity renderer
     }
 
     /// `drawGuiContainerForegroundLayer` of each survival screen.
@@ -820,7 +830,7 @@ impl ContainerScreen {
                 centered(c);
                 inventory(c);
             }
-            Kind::Chest(_) | Kind::Hopper => {
+            Kind::Chest(_) | Kind::Hopper | Kind::Horse(_) => {
                 c.text(title, 8.0, 6.0, LABEL, false);
                 inventory(c);
             }

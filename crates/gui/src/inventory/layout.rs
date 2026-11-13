@@ -92,6 +92,15 @@ pub fn layout(kind: Kind) -> Layout {
             player_part(&mut slots, 36, 137, 195);
             ("textures/gui/container/beacon.png", 219)
         }
+        Kind::Horse(n) => {
+            slots.extend([(8, 18), (8, 36)]);
+            // `ContainerHorseInventory`: 3 rows of the chest's columns, which a donkey or mule has.
+            if n > 2 {
+                grid(&mut slots, 80, 18, i32::from(n - 2) / 3, 3);
+            }
+            player_part(&mut slots, 8, 84, 142);
+            ("textures/gui/container/horse.png", 166)
+        }
         Kind::Merchant => {
             slots.extend([(36, 53), (62, 53), (120, 53)]);
             player_part(&mut slots, 8, 84, 142);

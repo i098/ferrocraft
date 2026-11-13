@@ -79,6 +79,10 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
             _ => None,
         },
         horse: byte(19),
+        horse_flags: match find(meta, 16) {
+            Some(MetaValue::Int(i)) => Some(*i),
+            _ => None,
+        },
         always_name: byte(3),
         skeleton: byte(13),
         rotation: byte(9),
@@ -308,14 +312,20 @@ impl Session {
         )
     }
 
-    /// `C0B` entity action: 0 sneak, 1 unsneak, 3 start sprint, 4 stop sprint.
-    pub fn entity_action(&mut self, entity_id: i32, action: i32) -> io::Result<()> {
+    /// `C0B` entity action: 0 sneak, 1 unsneak, 3 start sprint, 4 stop sprint, 5 horse jump
+    /// (`jump_boost` is the charge in percent), 6 open the horse inventory.
+    pub fn entity_action(
+        &mut self,
+        entity_id: i32,
+        action: i32,
+        jump_boost: i32,
+    ) -> io::Result<()> {
         send(
             &self.writer,
             sb::Packet::from(sb::EntityAction {
                 entity_id: VarInt(entity_id),
                 action_id: VarInt(action),
-                jump_boost: VarInt(0),
+                jump_boost: VarInt(jump_boost),
             }),
         )
     }

@@ -236,6 +236,7 @@ impl App {
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));
         self.equip_tick();
+        self.send_horse_jump();
         self.send_state();
         if self.game.vehicle.is_some() {
             self.send_riding(input);
@@ -413,6 +414,16 @@ impl App {
         }
     }
 
+    /// `EntityPlayerSP.func_110318_g`: the horse jump charge goes out as `EntityAction` 5 on key release.
+    fn send_horse_jump(&mut self) {
+        let Some(boost) = self.game.horse_boost.take() else {
+            return;
+        };
+        let id = self.game.entity_id;
+        let r = self.session_send(|s| s.entity_action(id, 5, boost));
+        self.send_result(r);
+    }
+
     /// Sprint and sneak changes go to the server as `C0B EntityAction`.
     fn send_state(&mut self) {
         if self.game.player.is_none() {
@@ -434,7 +445,7 @@ impl App {
         }
         for a in sends {
             if let Some(s) = self.link.session() {
-                let r = s.entity_action(id, a);
+                let r = s.entity_action(id, a, 0);
                 self.send_result(r);
             }
         }
@@ -1103,7 +1114,15 @@ impl App {
     }
 
     fn open_inventory(&mut self) {
-        if self.container.is_none() && !self.ui.is_open() {
+        if self.container.is_some() || self.ui.is_open() {
+            return;
+        }
+        // `Minecraft.runTick`: on a saddled horse the key asks the server for the horse window (`sendHorseInventory`).
+        if self.game.riding_saddled_horse() {
+            let id = self.game.entity_id;
+            let r = self.session_send(|s| s.entity_action(id, 6, 0));
+            self.send_result(r);
+        } else {
             self.container = Some(ContainerScreen::new(
                 &self.game.inv,
                 self.ui.width,

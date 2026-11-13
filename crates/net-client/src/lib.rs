@@ -164,6 +164,8 @@ pub enum NetEvent {
         kind: String,
         title: String,
         slots: u8,
+        /// Entity id of the horse when `kind` is `EntityHorse`.
+        horse: Option<i32>,
     },
     /// S2E.
     CloseWindow,

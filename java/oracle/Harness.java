@@ -83,7 +83,12 @@ public class Harness {
         final String name = "net/minecraft/flat/TextureUtil";
         byte[] raw;
         try (InputStream in = Harness.class.getResourceAsStream("/" + name + ".class")) {
-            raw = in.readAllBytes();
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            for (int n; (n = in.read(chunk)) > 0; ) {
+                buf.write(chunk, 0, n);
+            }
+            raw = buf.toByteArray();
         }
         ClassWriter out = new ClassWriter(0);
         new ClassReader(raw).accept(new ClassVisitor(Opcodes.ASM9, out) {

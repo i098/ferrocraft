@@ -2,6 +2,7 @@
 //! plus crosses, liquids and box shapes (faces next to an opaque block are culled, including across chunk borders).
 
 use crate::assets::Atlas;
+use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
     cached, double_plant_top, is_opaque_cube, tint_color, uses_neighbor_light, Kind, Look, Tint,
     DOWN, NORTH, UP,
@@ -57,6 +58,9 @@ pub struct Neighborhood<'a> {
     pub origin: (i32, i32),
     pub center: &'a Blocks,
     pub neighbors: [Option<&'a Blocks>; 8],
+    /// Biome ids of the columns (index `z * 16 + x`) of the chunk and its neighbours, row by row over
+    /// `dz` then `dx` in `-1..=1`; a missing column counts as plains.
+    pub biomes: [Option<&'a [u8; 256]>; 9],
 }
 
 /// Chunk offsets `(dx, dz)` of `Neighborhood::neighbors`.
@@ -92,6 +96,15 @@ impl Neighborhood<'_> {
                 y as usize,
                 z.rem_euclid(16) as usize,
             )]
+        })
+    }
+
+    /// Biome id at chunk-local `x`, `z` in `-16..=31`; plains outside the loaded data.
+    pub(crate) fn biome(&self, x: i32, z: i32) -> u8 {
+        let slot = ((z.div_euclid(16) + 1) * 3 + x.div_euclid(16) + 1) as usize;
+        let column = self.biomes.get(slot).copied().flatten();
+        column.map_or(1, |b| {
+            b[(z.rem_euclid(16) * 16 + x.rem_euclid(16)) as usize]
         })
     }
 
@@ -232,12 +245,21 @@ impl Mesher<'_> {
     }
 
     /// Color a texel is multiplied by; flat colors stand in for the texture when no assets are loaded.
-    fn base_color(&self, l: &Look, tint: Tint) -> [f32; 3] {
-        if self.atlas.textured {
-            tint_color(tint)
-        } else {
-            l.color
+    fn base_color(&self, l: &Look, tint: Tint, at: [i32; 3]) -> [f32; 3] {
+        if !self.atlas.textured {
+            return l.color;
         }
+        let biome_tint = match tint {
+            Tint::Grass => BiomeTint::Grass,
+            Tint::Foliage => BiomeTint::Foliage,
+            Tint::Water => BiomeTint::Water,
+            _ => return tint_color(tint),
+        };
+        let (cx, cz) = self.hood.origin;
+        let pos = (cx * 16 + at[0], at[1], cz * 16 + at[2]);
+        blended(&self.atlas.colormaps, biome_tint, pos, |x, z| {
+            self.hood.biome(x - cx * 16, z - cz * 16)
+        })
     }
 
     fn push_quad(&mut self, pass: Pass, v: [Vertex; 4], flip: bool) {
@@ -276,7 +298,7 @@ impl Mesher<'_> {
                 (Kind::Opaque, UP) | (Kind::Cutout, _) => l.tint,
                 _ => Tint::None,
             };
-            let rgb = self.base_color(l, tint);
+            let rgb = self.base_color(l, tint, at);
             let mut verts = [Vertex::zeroed(); 4];
             let mut ao = [1.0f32; 4];
             for (i, c) in CORNERS[f].iter().enumerate() {
@@ -298,8 +320,35 @@ impl Mesher<'_> {
                     light,
                 };
             }
-            self.push_quad(pass, verts, ao[0] + ao[2] > ao[1] + ao[3]);
+            let flip = ao[0] + ao[2] > ao[1] + ao[3];
+            self.push_quad(pass, verts, flip);
+            if state >> 4 == 2 && f >= NORTH && tex == l.tex[f] && self.atlas.textured {
+                self.grass_overlay(l, at, f, verts, flip);
+            }
         }
+    }
+
+    /// `grass_side_overlay` over the side of a grass block, tinted by the biome (vanilla's second model layer).
+    /// It sits a hair outside the side so the depth test keeps it above the untinted texture.
+    fn grass_overlay(
+        &mut self,
+        l: &Look,
+        at: [i32; 3],
+        f: usize,
+        mut verts: [Vertex; 4],
+        flip: bool,
+    ) {
+        let tint = self.base_color(l, Tint::Grass, at);
+        for (v, c) in verts.iter_mut().zip(CORNERS[f]) {
+            // The side is untinted, so its red channel is the face shade times ambient occlusion.
+            let shade = v.color[0];
+            v.color = [tint[0] * shade, tint[1] * shade, tint[2] * shade, 1.0];
+            v.uv = self.atlas.uv("grass_side_overlay", face_uv(f, c));
+            for (p, d) in v.pos.iter_mut().zip(DIRS[f]) {
+                *p += d as f32 * 0.001;
+            }
+        }
+        self.push_quad(Pass::Opaque, verts, flip);
     }
 
     /// Vanilla smooth lighting at one corner of a face: light is the average of the four cells around
@@ -342,7 +391,7 @@ impl Mesher<'_> {
         let lava = l.kind == Kind::Lava;
         let same = |s: u16| matches!(s >> 4, 8 | 9) != lava && matches!(s >> 4, 8..=11);
         let pass = if lava { Pass::Opaque } else { Pass::Blend };
-        let rgb = self.base_color(l, Tint::None);
+        let rgb = self.base_color(l, l.tint, at);
         let h = [
             [
                 self.corner_h(at, &same, 0, 0),
@@ -452,7 +501,7 @@ impl Mesher<'_> {
         if id == 175 && meta & 8 != 0 {
             (tex, tint) = double_plant_top(self.st(at, [0, -1, 0]));
         }
-        let rgb = self.base_color(l, tint);
+        let rgb = self.base_color(l, tint, at);
         let light = self.light_at(at, [0; 3]);
         let (wx, wz) = (
             self.hood.origin.0 * 16 + at[0],
@@ -507,7 +556,7 @@ impl Mesher<'_> {
             color: [0.6; 3],
             tex: b.tex,
         };
-        let rgb = self.base_color(&l, b.tint);
+        let rgb = self.base_color(&l, b.tint, at);
         for f in 0..6 {
             if b.mask >> f & 1 == 0 {
                 continue;
@@ -592,6 +641,7 @@ mod tests {
                 origin: (0, 0),
                 center: c,
                 neighbors,
+                biomes: [None; 9],
             },
             &Atlas::flat(),
         )

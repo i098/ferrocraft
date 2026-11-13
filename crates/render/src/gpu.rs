@@ -7,7 +7,7 @@ use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
-use crate::mesher::{Done, Job, Mesher, SharedBlocks};
+use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks};
 use crate::particles::Quads;
 use crate::post::Post;
 use crate::sky::{
@@ -174,7 +174,7 @@ pub struct Renderer {
     post_on: bool,
     blocks: HashMap<(i32, i32), SharedBlocks>,
     /// Biome ids per chunk column, `z << 4 | x`.
-    biomes: HashMap<(i32, i32), [u8; 256]>,
+    biomes: HashMap<(i32, i32), SharedBiomes>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     mesher: Mesher,
     /// Chunks to remesh on the workers.
@@ -626,8 +626,10 @@ impl Renderer {
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
         self.blocks.insert(key, Arc::new(data));
-        self.biomes
-            .insert(key, std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)));
+        self.biomes.insert(
+            key,
+            Arc::new(std::array::from_fn(|i| chunk.biome(i & 15, i >> 4))),
+        );
         self.mark_around(key);
     }
 
@@ -710,6 +712,10 @@ impl Renderer {
             generation: self.next_generation,
             center: self.blocks[&key].clone(),
             neighbors: AROUND.map(|(dx, dz)| get((cx + dx, cz + dz))),
+            biomes: std::array::from_fn(|i| {
+                let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
+                self.biomes.get(&(cx + dx, cz + dz)).cloned()
+            }),
         }
     }
 

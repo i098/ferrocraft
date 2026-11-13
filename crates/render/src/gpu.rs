@@ -1,6 +1,6 @@
 //! wgpu device, pipelines and frame rendering.
 
-use crate::animation::Animator;
+use crate::animation::{Animation, Animator};
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::biome::{temperature, PLAINS_TEMPERATURE};
 use crate::blockent::{BlockEntities, Tex};
@@ -168,7 +168,10 @@ pub struct Renderer {
     source: Option<AssetSource>,
     atlas: Arc<Atlas>,
     atlas_tex: wgpu::Texture,
+    /// Mip levels below 0 that `atlas_tex` holds (`GameSettings.mipmapLevels`, capped by the atlas; starts at the most it has).
+    mip_levels: u32,
     atlas_clock: Animator,
+    animations: Vec<Animation>,
     /// `Environment.ticks` of the last frame; the difference is the client ticks to animate.
     animated_to: Option<u64>,
     font: Option<Font>,
@@ -274,7 +277,9 @@ impl Renderer {
         format: wgpu::TextureFormat,
         mut source: Option<AssetSource>,
     ) -> Renderer {
-        let atlas = Arc::new(source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets));
+        let mut atlas = source.as_mut().map_or_else(Atlas::flat, Atlas::from_assets);
+        let mut animations = std::mem::take(&mut atlas.animations);
+        let atlas = Arc::new(atlas);
         let font = source.as_mut().and_then(Font::load);
         let env_tex = EnvTexture::load(source.as_mut());
         let entity_skins = source.as_mut().map_or_else(Skins::flat, Skins::from_assets);
@@ -305,7 +310,11 @@ impl Renderer {
         let rain_img = load_png("environment/rain");
         let snow_img = load_png("environment/snow");
         let skin_img = load_png("entity/steve");
-        let atlas_tex = create_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
+        let mip_levels = atlas.max_levels();
+        for animation in &mut animations {
+            animation.set_levels(atlas.tile as usize, mip_levels);
+        }
+        let atlas_tex = create_atlas_texture(&device, &queue, &atlas, mip_levels);
         let atlas_view = atlas_tex.create_view(&Default::default());
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
         let entity_tex = create_texture(
@@ -319,6 +328,8 @@ impl Renderer {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            // `GL_NEAREST_MIPMAP_LINEAR`: nearest texel in a level, a blend of two levels.
+            mipmap_filter: wgpu::FilterMode::Linear,
             // GL_REPEAT: `options_background.png` tiles with texture coordinates past 1.
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
@@ -440,7 +451,9 @@ impl Renderer {
             mesher: Mesher::new(atlas.clone()),
             atlas,
             atlas_tex,
+            mip_levels,
             atlas_clock: Animator::default(),
+            animations,
             animated_to: None,
             font,
             env_tex,
@@ -1086,32 +1099,54 @@ impl Renderer {
     /// `TextureMap.updateAnimations`: one client tick; writes only the cells whose frame changed.
     fn animate_atlas(&mut self) {
         let tile = self.atlas.tile;
-        for (cell, rgba) in self.atlas_clock.tick(&self.atlas.animations) {
+        for (cell, rgba) in self.atlas_clock.tick(&self.animations) {
             let (cx, cy) = (cell % 16, cell / 16);
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.atlas_tex,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: cx * tile,
-                        y: cy * tile,
-                        z: 0,
+            for (level, rgba) in rgba.iter().take(self.mip_levels as usize + 1).enumerate() {
+                let side = tile >> level;
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &self.atlas_tex,
+                        mip_level: level as u32,
+                        origin: wgpu::Origin3d {
+                            x: cx * side,
+                            y: cy * side,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
                     },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &rgba,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(tile * 4),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width: tile,
-                    height: tile,
-                    depth_or_array_layers: 1,
-                },
-            );
+                    rgba,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(side * 4),
+                        rows_per_image: None,
+                    },
+                    wgpu::Extent3d {
+                        width: side,
+                        height: side,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
         }
+    }
+
+    /// `GameSettings.mipmapLevels` (0 to 4): rebuilds the block atlas texture with that many levels below the
+    /// full size. The atlas caps it, so a flat atlas has none.
+    pub fn set_mipmap_levels(&mut self, levels: u32) {
+        let levels = levels.min(self.atlas.max_levels());
+        if levels == self.mip_levels {
+            return;
+        }
+        self.mip_levels = levels;
+        for animation in &mut self.animations {
+            animation.set_levels(self.atlas.tile as usize, levels);
+        }
+        self.atlas_tex = create_atlas_texture(&self.device, &self.queue, &self.atlas, levels);
+        let view = self.atlas_tex.create_view(&Default::default());
+        let group =
+            |globals| bind_group(&self.device, &self.layout_bg, globals, &self.sampler, &view);
+        self.world_group = group(&self.globals);
+        self.hand_atlas_group = group(&self.hand_globals);
     }
 
     /// `PostChain.close`, then `GameRenderer.loadShader` when `name` (a jar path such as
@@ -2459,6 +2494,40 @@ fn create_texture(
         },
         wgpu::util::TextureDataOrder::LayerMajor,
         rgba,
+    )
+}
+
+/// The block atlas with levels 0 to `levels` of its mip chain.
+fn create_atlas_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    atlas: &Atlas,
+    levels: u32,
+) -> wgpu::Texture {
+    let mips = atlas.mips(levels);
+    let data: Vec<u8> = std::iter::once(&atlas.rgba)
+        .chain(&mips)
+        .flatten()
+        .copied()
+        .collect();
+    device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: levels + 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &data,
     )
 }
 

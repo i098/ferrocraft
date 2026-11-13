@@ -3,6 +3,7 @@
 //! steps one client tick and returns only the cells whose pixels changed.
 
 use crate::assets::{resample, Image};
+use crate::mip;
 use serde_json::Value;
 use std::borrow::Cow;
 
@@ -50,10 +51,14 @@ fn parse(bytes: &[u8]) -> Option<Meta> {
     })
 }
 
-/// One animated atlas cell: all frames at tile size and the order and timing they play in.
+/// One animated atlas cell: all frames at tile size, each with its mip levels (`applyMipmaps`), and the order
+/// and timing they play in.
 pub(crate) struct Animation {
     cell: u32,
-    frames: Vec<Vec<u8>>,
+    /// Level 0 of every frame: the tile itself.
+    base: Vec<Vec<u8>>,
+    /// `frames[n][l]` is level `l` of frame `n`; see [`Animation::set_levels`].
+    frames: Vec<Vec<Vec<u8>>>,
     sequence: Vec<(usize, u32)>,
     interpolate: bool,
 }
@@ -67,7 +72,7 @@ impl Animation {
         if count < 2 {
             return None;
         }
-        let frames = (0..count)
+        let base: Vec<Vec<u8>> = (0..count)
             .map(|n| {
                 let rows = &image.rgba[n * side * side * 4..(n + 1) * side * side * 4];
                 let frame = Image {
@@ -85,16 +90,31 @@ impl Animation {
             let time = |t: Option<u32>| t.unwrap_or(meta.default_time);
             meta.frames.iter().map(|&(i, t)| (i, time(t))).collect()
         };
+        let frames = base.iter().map(|f| vec![f.clone()]).collect();
         Some(Animation {
             cell,
+            base,
             frames,
             sequence,
             interpolate: meta.interpolate,
         })
     }
 
-    /// `animatePrismarine`: frame `index` blended towards the next frame in the sequence.
-    fn blend(&self, active: usize, ticks: u32) -> Option<Vec<u8>> {
+    /// `TextureAtlasSprite.applyMipmaps`: builds levels 1..=`levels` of every frame.
+    pub(crate) fn set_levels(&mut self, tile: usize, levels: u32) {
+        self.frames = self
+            .base
+            .iter()
+            .map(|b| {
+                let mut chain = vec![b.clone()];
+                chain.extend(mip::chain(b, tile, levels));
+                chain
+            })
+            .collect();
+    }
+
+    /// `animatePrismarine`: frame `index` blended towards the next frame in the sequence, level by level.
+    fn blend(&self, active: usize, ticks: u32) -> Option<Vec<Vec<u8>>> {
         let (from, time) = self.sequence[active];
         let (to, _) = self.sequence[(active + 1) % self.sequence.len()];
         let (a, b) = (self.frames.get(from)?, self.frames.get(to)?);
@@ -103,18 +123,25 @@ impl Animation {
         }
         let keep = 1.0 - f64::from(ticks) / f64::from(time);
         let mix = |x: u8, y: u8| (f64::from(x) * keep + f64::from(y) * (1.0 - keep)) as u8;
-        let mut out = a.clone();
-        for (o, p) in out
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(b.as_chunks::<4>().0)
-        {
-            for c in 0..3 {
-                o[c] = mix(o[c], p[c]);
-            }
-        }
-        Some(out)
+        Some(
+            a.iter()
+                .zip(b)
+                .map(|(la, lb)| {
+                    let mut out = la.clone();
+                    for (o, p) in out
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(lb.as_chunks::<4>().0)
+                    {
+                        for c in 0..3 {
+                            o[c] = mix(o[c], p[c]);
+                        }
+                    }
+                    out
+                })
+                .collect(),
+        )
     }
 }
 
@@ -125,8 +152,11 @@ pub(crate) struct Animator {
 }
 
 impl Animator {
-    /// Advances every animation one client tick; yields `(cell, tile rgba)` for each cell that changed.
-    pub(crate) fn tick<'a>(&mut self, animations: &'a [Animation]) -> Vec<(u32, Cow<'a, [u8]>)> {
+    /// Advances every animation one client tick; yields `(cell, mip levels of the tile)` for each cell that changed.
+    pub(crate) fn tick<'a>(
+        &mut self,
+        animations: &'a [Animation],
+    ) -> Vec<(u32, Cow<'a, [Vec<u8>]>)> {
         self.state.resize(animations.len(), (0, 0));
         let mut changed = Vec::new();
         for (anim, (active, ticks)) in animations.iter().zip(&mut self.state) {
@@ -167,8 +197,8 @@ mod tests {
         }
     }
 
-    fn red(changed: &[(u32, Cow<[u8]>)]) -> Vec<(u32, u8)> {
-        changed.iter().map(|(c, px)| (*c, px[0])).collect()
+    fn red(changed: &[(u32, Cow<[Vec<u8>]>)]) -> Vec<(u32, u8)> {
+        changed.iter().map(|(c, px)| (*c, px[0][0])).collect()
     }
 
     #[test]
@@ -207,6 +237,16 @@ mod tests {
         assert_eq!(red(&clock.tick(&anims)), [(1, 15)]);
         assert_eq!(red(&clock.tick(&anims)), [(1, 17)]);
         assert_eq!(red(&clock.tick(&anims)), [(1, 20)]);
+    }
+
+    #[test]
+    fn changed_cell_carries_every_mip_level() {
+        let meta = br#"{"animation":{"frametime":1,"interpolate":true}}"#;
+        let mut anim = Animation::new(1, &strip(2), 2, meta).unwrap();
+        anim.set_levels(2, 1);
+        let mut clock = Animator::default();
+        let sizes: Vec<usize> = clock.tick(&[anim])[0].1.iter().map(Vec::len).collect();
+        assert_eq!(sizes, [2 * 2 * 4, 4]);
     }
 
     #[test]

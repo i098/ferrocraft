@@ -1,11 +1,17 @@
 import com.mojang.authlib.GameProfile;
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
 import net.minecraft.flat.Bootstrap;
 import net.minecraft.flat.Block;
 import net.minecraft.flat.Blocks;
@@ -41,6 +47,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *                                 (float bits in hex), toolNotRequired; needs "start"
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
+ *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -65,6 +72,65 @@ public class Harness {
             sb.append(String.format("%02x", b));
         }
         return sb.toString();
+    }
+
+    /**
+     * The real `TextureUtil.generateMipmaps`. Its class initializer needs OpenGL (a dynamic texture) and the
+     * client jar ships without LWJGL, so the class is loaded with a replacement initializer that only creates
+     * `MIPMAP_BUFFER`, the one static the method uses. Everything else is the vanilla bytecode.
+     */
+    static int[][] vanillaMipmaps(int levels, int side, int[] base) throws Exception {
+        final String name = "net/minecraft/flat/TextureUtil";
+        byte[] raw;
+        try (InputStream in = Harness.class.getResourceAsStream("/" + name + ".class")) {
+            raw = in.readAllBytes();
+        }
+        ClassWriter out = new ClassWriter(0);
+        new ClassReader(raw).accept(new ClassVisitor(Opcodes.ASM9, out) {
+            @Override
+            public MethodVisitor visitMethod(int access, String n, String desc, String sig, String[] ex) {
+                if (!n.equals("<clinit>")) {
+                    return super.visitMethod(access, n, desc, sig, ex);
+                }
+                MethodVisitor mv = super.visitMethod(access, n, desc, sig, ex);
+                mv.visitCode();
+                mv.visitInsn(Opcodes.ICONST_4);
+                mv.visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_INT);
+                mv.visitFieldInsn(Opcodes.PUTSTATIC, name, "MIPMAP_BUFFER", "[I");
+                mv.visitInsn(Opcodes.RETURN);
+                mv.visitMaxs(1, 0);
+                mv.visitEnd();
+                return null;
+            }
+        }, 0);
+        byte[] patched = out.toByteArray();
+        Class<?> cls = new ClassLoader(Harness.class.getClassLoader()) {
+            Class<?> define() {
+                return defineClass(name.replace('/', '.'), patched, 0, patched.length);
+            }
+        }.define();
+        java.lang.reflect.Method m = cls.getMethod("generateMipmaps", int.class, int.class, int[][].class);
+        int[][] frame = new int[levels + 1][];
+        frame[0] = base;
+        return (int[][]) m.invoke(null, levels, side, frame);
+    }
+
+    /** The `mip` command: prints one line per mip level of the sprite in `t`. */
+    static void mipLines(String[] t) throws Exception {
+        int levels = Integer.parseInt(t[1]);
+        int side = Integer.parseInt(t[2]);
+        int[] base = new int[side * side];
+        for (int i = 0; i < base.length; i++) {
+            base[i] = (int) Long.parseLong(t[3].substring(8 * i, 8 * i + 8), 16);
+        }
+        int[][] chain = vanillaMipmaps(levels, side, base);
+        for (int l = 1; l <= levels; l++) {
+            StringBuilder sb = new StringBuilder();
+            for (int v : chain[l]) {
+                sb.append(String.format("%08x", v));
+            }
+            System.out.println(sb);
+        }
     }
 
     /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
@@ -290,6 +356,9 @@ public class Harness {
                         + (b.getMaterial().isToolNotRequired() ? 1 : 0));
                     break;
                 }
+                case "mip":
+                    mipLines(t);
+                    break;
                 case "bidi":
                     System.out.println(bidiReorder(t.length > 1 ? t[1] : ""));
                     break;

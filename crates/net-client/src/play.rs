@@ -107,6 +107,9 @@ fn send_brand(writer: &Mutex<Writer>) -> io::Result<()> {
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
+    if let Some(tile) = crate::tile::event(&packet) {
+        return Ok(vec![tile]);
+    }
     Ok(match packet {
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
             x: p.x,

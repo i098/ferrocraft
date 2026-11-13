@@ -2,7 +2,7 @@
 
 use crate::swing::Swing;
 use crate::weather::Weather;
-use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled};
+use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled, TileEvent};
 use std::collections::HashMap;
 use world::chunk::ChunkStore;
 use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
@@ -50,6 +50,8 @@ pub enum Effect {
     },
     /// Health fell to zero or below: the death screen.
     Died,
+    /// Chest, sign, skull or banner data for the renderer.
+    Tile(TileEvent),
 }
 
 /// A 1.8 block state id as a physics block: what the renderer draws as a cube is solid, so no
@@ -448,6 +450,7 @@ impl Game {
                 self.store.set_block(x, y, z, state);
                 return Some(Effect::Upload(x >> 4, z >> 4));
             }
+            NetEvent::Tile(t) => return Some(Effect::Tile(t)),
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
             NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
@@ -1217,5 +1220,38 @@ mod tests {
         g.apply(flags(7, Some(1)));
         g.apply(NetEvent::Respawn);
         assert_eq!(g.entity_flags, 0);
+    }
+
+    /// Chest, sign, skull and banner packets reach the renderer unchanged.
+    #[test]
+    fn tile_events_become_render_effects() {
+        let mut g = Game::new();
+        for tile in [
+            TileEvent::Action {
+                pos: [1, 64, 2],
+                event: 1,
+                value: 1,
+            },
+            TileEvent::Sign {
+                pos: [1, 64, 2],
+                lines: Default::default(),
+            },
+            TileEvent::Skull {
+                pos: [1, 64, 2],
+                kind: 3,
+                rotation: 4,
+                owner: Some(7),
+            },
+            TileEvent::Banner {
+                pos: [1, 64, 2],
+                base: 1,
+                layers: vec![("bs".into(), 4)],
+            },
+        ] {
+            assert_eq!(
+                g.apply(NetEvent::Tile(tile.clone())),
+                Some(Effect::Tile(tile))
+            );
+        }
     }
 }

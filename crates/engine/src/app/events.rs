@@ -4,12 +4,12 @@ use super::{boxed, App, View};
 use crate::game::Effect;
 use crate::game::Game;
 use crate::link::Link;
-use ferrocraft_net_client::{split_address, NetEvent, PlayerListEvent};
+use ferrocraft_net_client::{split_address, NetEvent, PlayerListEvent, TileEvent};
 use gui::inventory::ContainerScreen;
 use gui::screens::{Connecting, Death, Effect as UiEffect};
 use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
-use render::Renderer;
+use render::{Banner, Renderer, Skull};
 use std::collections::HashMap;
 use world::entities::{is_baby, EntityEvent, Kind};
 use world::entity_sound;
@@ -493,6 +493,11 @@ impl App {
                     self.send_result(r);
                 }
             }
+            Effect::Tile(t) => {
+                if let Some(r) = &mut self.renderer {
+                    mirror_tile(r, t);
+                }
+            }
             Effect::Died => {
                 self.container = None;
                 self.game.inv.close_window();
@@ -575,6 +580,30 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
             }
             _ => r.remove_chunk(x, z),
         }
+    }
+}
+
+/// Hands chest, sign, skull and banner data to the renderer.
+fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
+    match tile {
+        TileEvent::Action { pos, event, value } => r.block_action(pos, event, value),
+        TileEvent::Sign { pos, lines } => r.set_sign_text(pos, lines),
+        TileEvent::Skull {
+            pos,
+            kind,
+            rotation,
+            owner,
+        } => {
+            r.set_skull(
+                pos,
+                Skull {
+                    kind,
+                    rotation,
+                    owner,
+                },
+            );
+        }
+        TileEvent::Banner { pos, base, layers } => r.set_banner(pos, Banner { base, layers }),
     }
 }
 

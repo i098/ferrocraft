@@ -11,6 +11,7 @@ mod link;
 mod play;
 mod screens;
 mod skin;
+mod tile;
 
 use ferrocraft_protocol::codec::{Bytes, Position, VarInt};
 use ferrocraft_protocol::play::serverbound as sb;
@@ -31,6 +32,7 @@ pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
 pub use skin::{fetch as fetch_skin, parse_textures, SkinInfo};
+pub use tile::TileEvent;
 pub use world::chunk::Chunk;
 
 /// What the server told the client, in packet order.
@@ -50,6 +52,8 @@ pub enum NetEvent {
         channel: String,
         data: Vec<u8>,
     },
+    /// S24, S33 and S35 for chests, signs, skulls and banners.
+    Tile(TileEvent),
     Chunk(Box<Chunk>),
     UnloadChunk(i32, i32),
     BlockChange {

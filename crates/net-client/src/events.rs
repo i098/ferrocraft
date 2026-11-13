@@ -42,8 +42,21 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
         .or_else(|| window_event(packet))
         .or_else(|| score_event(packet))
         .or_else(|| world_event(packet))
+        .or_else(|| spawn_event(packet))
         .into_iter()
         .collect()
+}
+
+/// S05 SpawnPosition: `World.setSpawnPoint`.
+fn spawn_event(packet: &cb::Packet) -> Option<NetEvent> {
+    match packet {
+        cb::Packet::SpawnPosition(p) => Some(NetEvent::SpawnPosition {
+            x: p.location.x,
+            y: p.location.y,
+            z: p.location.z,
+        }),
+        _ => None,
+    }
 }
 
 /// S42 CombatEvent and the player score in entity metadata.

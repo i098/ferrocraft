@@ -83,6 +83,12 @@ pub enum NetEvent {
         world_age: i64,
         time_of_day: i64,
     },
+    /// Spawn Position (0x05): `World.setSpawnPoint`, the compass target.
+    SpawnPosition {
+        x: i32,
+        y: i32,
+        z: i32,
+    },
     /// Change Game State (0x2B): `reason` 1 starts rain, 2 stops it, 7 sets rain strength, 8 thunder strength.
     GameState {
         reason: u8,

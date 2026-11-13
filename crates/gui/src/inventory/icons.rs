@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::dials::Dials;
 use super::{tooltip, Canvas};
 use serde_json::Value;
 use world::inventory::items;
@@ -56,7 +57,11 @@ pub struct Icons {
     frames: HashMap<String, f32>,
     /// `Minecraft.getSystemTime()`, which moves the enchantment glint.
     pub now_ms: u64,
+    /// The needles of the compass and clock sprites; the engine ticks them.
+    pub dials: Dials,
 }
+const COMPASS: &str = "textures/items/compass.png";
+const CLOCK: &str = "textures/items/clock.png";
 
 const GLINT: &str = "textures/misc/enchanted_item_glint.png";
 const GLINT_COLOR: u32 = 0xFF80_40CC;
@@ -518,6 +523,7 @@ impl Icons {
             models: HashMap::new(),
             frames: HashMap::new(),
             now_ms: 0,
+            dials: Dials::default(),
         };
         for name in items::model_names() {
             if let Some(m) = icons.load(&mut read, name) {
@@ -570,6 +576,16 @@ impl Icons {
         self.frames.get(tex).copied().unwrap_or(1.0)
     }
 
+    /// The strip frame of `tex`: the compass and clock sprites follow `dials`, the rest stay on frame 0.
+    fn dial_frame(&self, tex: &str, k: f32) -> usize {
+        let frames = (1.0 / k).round() as usize;
+        match tex {
+            COMPASS => self.dials.compass_frame(frames),
+            CLOCK => self.dials.clock_frame(frames),
+            _ => 0,
+        }
+    }
+
     /// `renderItemAndEffectIntoGUI` at GUI position `(x, y)` (the slot's top-left).
     pub fn draw(&self, c: &mut dyn Canvas, s: &ItemStack, x: i32, y: i32) {
         let Some(model) = items::model(s.id, s.damage).and_then(|n| self.models.get(n)) else {
@@ -581,14 +597,14 @@ impl Icons {
             Model::Flat(layers) => {
                 for (i, tex) in layers.iter().enumerate() {
                     let k = self.frame_scale(tex);
-                    // shortcut: compass and clock show frame 0; upgrade when the engine passes the world angle and time.
+                    let v = self.dial_frame(tex, k) as f32 * k;
                     c.blit(
                         tex,
                         x,
                         y,
                         16.0,
                         16.0,
-                        [0.0, 0.0, 1.0, k],
+                        [0.0, v, 1.0, v + k],
                         tint_color(s, Some(i)),
                     );
                 }

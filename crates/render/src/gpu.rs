@@ -110,6 +110,14 @@ pub struct Renderer {
     tile_meshes: Vec<(Tex, GpuMesh)>,
     head_meshes: Vec<(Tex, GpuMesh)>,
     glint_mesh: Option<GpuMesh>,
+    /// Item models for held and dropped items, by `(id, damage)`.
+    item_models: entity::item::Models,
+    /// Wood models of item frames, read the first time one is drawn.
+    frames: Option<entity::hanging::Frames>,
+    /// Colour index bytes of each received map, 128x128.
+    maps: HashMap<i32, Vec<u8>>,
+    /// Held and dropped item meshes: the block atlas (`None`) or the sprite texture they sample.
+    item_meshes: Vec<(Option<String>, GpuMesh)>,
     fires: Vec<entity::fire::Fire>,
     on_fire: bool,
     fire_frames: [u32; 2],
@@ -133,6 +141,9 @@ pub struct Renderer {
     /// Lightning bolts `(position, seed)` for the next frames.
     bolts: Vec<([f64; 3], i64)>,
     bolt_pipe: wgpu::RenderPipeline,
+    border_pipe: wgpu::RenderPipeline,
+    /// The world border to draw, if any.
+    border: Option<crate::Border>,
     hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
@@ -355,7 +366,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe, border_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -379,6 +390,10 @@ impl Renderer {
             tile_meshes: Vec::new(),
             head_meshes: Vec::new(),
             glint_mesh: None,
+            item_models: HashMap::new(),
+            frames: None,
+            maps: HashMap::new(),
+            item_meshes: Vec::new(),
             fires: Vec::new(),
             on_fire: false,
             fire_frames: [0; 2],
@@ -395,6 +410,8 @@ impl Renderer {
             crack_pipe,
             cracks: Vec::new(),
             bolt_pipe,
+            border_pipe,
+            border: None,
             hand_glint_pipe,
             bolts: Vec::new(),
             selection: None,
@@ -445,6 +462,11 @@ impl Renderer {
     /// Lightning bolts `(position, seed)` to draw: see [`crate::Bolts::shapes`].
     pub fn set_lightning(&mut self, bolts: Vec<([f64; 3], i64)>) {
         self.bolts = bolts;
+    }
+
+    /// The world border walls for the next frames; `None` draws none.
+    pub fn set_border(&mut self, border: Option<crate::Border>) {
+        self.border = border;
     }
 
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
@@ -534,6 +556,11 @@ impl Renderer {
                 missing_tile()
             })
         };
+        self.insert_texture(tex, &image);
+    }
+
+    /// Uploads `image` as texture `tex`, replacing an earlier one.
+    fn insert_texture(&mut self, tex: &str, image: &Image) {
         let view = upload_texture(
             &self.device,
             &self.queue,
@@ -778,7 +805,11 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
-        let glint = entity::build_glint(draws);
+        let items = self.upload_items(draws);
+        let mut glint = entity::build_glint(draws);
+        let base = glint.vertices.len() as u32;
+        glint.vertices.extend(items.vertices);
+        glint.indices.extend(items.indices.iter().map(|i| i + base));
         if !glint.is_empty() {
             self.load_texture(entity::GLINT_TEXTURE);
         }
@@ -793,6 +824,120 @@ impl Renderer {
                     size: d.size,
                 }),
         );
+    }
+
+    /// Held and dropped items, each mesh with the texture it samples; leaves the world group bound.
+    fn draw_items<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        for (tex, m) in &self.item_meshes {
+            let group = tex
+                .as_ref()
+                .map_or(&self.world_group, |t| &self.textures[t]);
+            pass.set_bind_group(0, group, &[]);
+            draw_mesh(pass, m);
+        }
+        pass.set_bind_group(0, &self.world_group, &[]);
+    }
+
+    /// Meshes the held and dropped items into `item_meshes`; returns their glint layer.
+    fn upload_items(&mut self, draws: &[EntityDraw]) -> MeshData {
+        self.resolve_items(draws);
+        self.load_frames(draws);
+        let frames = self.frames.take().unwrap_or_default();
+        let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        entity::hanging::build(&mut items, draws, &frames, &self.item_models, |p| {
+            self.light_at(p)
+        });
+        self.frames = Some(frames);
+        self.item_meshes.clear();
+        let layers = std::iter::once((None, items.atlas))
+            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
+        for (tex, mesh) in layers {
+            if let Some(tex) = &tex {
+                // A map not yet received has no texture and is not drawn.
+                if tex.starts_with("map/") && !self.textures.contains_key(tex) {
+                    continue;
+                }
+                self.load_texture(tex);
+            }
+            if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
+                self.item_meshes.push((tex, m));
+            }
+        }
+        items.glint
+    }
+
+    /// Reads the item frame models when a frame is first drawn.
+    fn load_frames(&mut self, draws: &[EntityDraw]) {
+        if self.frames.is_some() || !draws.iter().any(entity::hanging::is_frame) {
+            return;
+        }
+        let frames = self.source.as_mut().map(|source| {
+            let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+            entity::hanging::Frames::load(&mut read)
+        });
+        self.frames = Some(frames.unwrap_or_default());
+    }
+
+    /// `MapData.updateMapData` of S34: the `columns` by `rows` colour bytes at `(x, z)`, then
+    /// `MapRenderer.updateTexture`.
+    pub fn map_update(&mut self, id: i32, area: [usize; 4], data: &[u8]) {
+        let [x, z, columns, rows] = area;
+        let colors = self.maps.entry(id).or_insert_with(|| vec![0; 128 * 128]);
+        for i in 0..columns {
+            for j in 0..rows {
+                if let (Some(&c), Some(slot)) = (
+                    data.get(i + j * columns),
+                    colors.get_mut(x + i + (z + j) * 128),
+                ) {
+                    *slot = c;
+                }
+            }
+        }
+        let rgba = colors
+            .iter()
+            .flat_map(|&c| entity::hanging::map_pixel(c))
+            .collect();
+        let image = Image {
+            width: 128,
+            height: 128,
+            rgba,
+        };
+        self.insert_texture(&format!("map/{id}"), &image);
+    }
+
+    /// Forgets every received map, as a new server's map ids start again.
+    pub fn clear_maps(&mut self) {
+        self.maps.clear();
+        self.textures.retain(|k, _| !k.starts_with("map/"));
+    }
+
+    /// Hands over the received map colours, for the renderer that replaces this one.
+    pub fn take_maps(&mut self) -> HashMap<i32, Vec<u8>> {
+        std::mem::take(&mut self.maps)
+    }
+
+    /// Uploads maps taken from an earlier renderer.
+    pub fn restore_maps(&mut self, maps: HashMap<i32, Vec<u8>>) {
+        for (id, colors) in maps {
+            self.map_update(id, [0, 0, 128, 128], &colors);
+        }
+    }
+
+    /// Resolves the model of every held and dropped item that is new.
+    fn resolve_items(&mut self, draws: &[EntityDraw]) {
+        for key in draws
+            .iter()
+            .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))
+        {
+            if self.item_models.contains_key(&key) {
+                continue;
+            }
+            let model = self.source.as_mut().and_then(|source| {
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1)
+            });
+            self.item_models.insert(key, model);
+        }
     }
 
     pub fn set_on_fire(&mut self, on_fire: bool) {
@@ -1290,6 +1435,13 @@ impl Renderer {
         let bolt_mesh = (!self.bolts.is_empty())
             .then(|| crate::lightning::build(&self.bolts, cam.pos))
             .and_then(|d| self.upload_mesh(d, cam.pos.map(|c| c as f32)));
+        let border_mesh = self
+            .border
+            .map(|b| crate::border::quads(&b, cam.pos))
+            .and_then(|v| self.upload_mesh(quad_mesh(v), cam.pos.map(|c| c as f32)));
+        if border_mesh.is_some() {
+            self.load_texture(crate::border::TEXTURE);
+        }
         let (rain, snow) = self.rain_mesh(&env, cam);
         let hand = self.hand_mesh(cam, &globals, sky.sun_brightness);
         let offset = cam.pos.map(|c| c as f32);
@@ -1377,6 +1529,7 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            self.draw_items(&mut pass);
             self.draw_tiles(&mut pass);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
@@ -1428,6 +1581,13 @@ impl Renderer {
                 .values()
                 .filter_map(|m| m.water.as_ref())
                 .for_each(|m| draw_mesh(&mut pass, m));
+            // `renderWorldBorder`: additive, no depth write, no culling, polygon offset (the `fs_crack` pipeline).
+            if let Some(m) = &border_mesh {
+                pass.set_pipeline(&self.border_pipe);
+                pass.set_bind_group(0, &self.textures[crate::border::TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
             if let Some(buf) = &sel_buf {
                 pass.set_bind_group(0, &self.world_group, &[]);
                 pass.set_pipeline(&self.line_pipe);
@@ -1707,7 +1867,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 13] {
+) -> [wgpu::RenderPipeline; 14] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -1956,6 +2116,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let border_pipe = pipe(
+        "vs_world",
+        "fs_crack",
+        stride,
+        &world_attrs,
+        additive,
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -1970,6 +2140,7 @@ fn build_pipelines(
         bolt_pipe,
         fire_pipe,
         hand_glint_pipe,
+        border_pipe,
     ]
 }
 

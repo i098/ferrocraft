@@ -7,6 +7,8 @@ mod assets;
 mod biome;
 mod blockent;
 mod blocks;
+mod border;
+pub use border::Border;
 mod crack;
 mod entity;
 mod gpu;
@@ -29,6 +31,7 @@ pub use sky::{Environment, Fluid};
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use blockent::{Banner, Skull, WornHead};
+pub use entity::{hanging, item};
 pub use entity::{nametags, Class, EntityDraw, NameTag, Thrower};
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

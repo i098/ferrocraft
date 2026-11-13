@@ -1,0 +1,310 @@
+{
+ "version": 1,
+ "cluster_id": 1,
+ "entries": [
+  {
+   "path": "mods/OneConfig-1.8.9-ornithe-1.7.1.jar",
+   "hash": "0f12a866b2d38799d60946e45f8f47ae978c8b8b"
+  },
+  {
+   "path": "mods/evergreenhud-3.9.18+1.8.9.jar",
+   "hash": "54347d27550ed6226f90bcdc009af6de497ce3a4"
+  },
+  {
+   "path": "mods/polysprint-1.3.3+1.8.9.jar",
+   "hash": "a674e851197251865395b23d322183335b8eedb0"
+  },
+  {
+   "path": "mods/vanillahud-3.5.10+1.8.9.jar",
+   "hash": "d0539f0612488a1db712e5f6906770f3f7573bfa"
+  },
+  {
+   "path": "mods/polycrosshair-2.0.9+1.8.9.jar",
+   "hash": "cea5cfecf86534c04ecb35f78ac1b13665a28359"
+  },
+  {
+   "path": "mods/REDACTION-2.1.1+1.8.9.jar",
+   "hash": "c863f1114a3a6460224821645290de3e089cbf3c"
+  },
+  {
+   "path": "mods/chatting-3.2.5+1.8.9.jar",
+   "hash": "4580c125616856e56aa2f43b696d76c84c4971f6"
+  },
+  {
+   "path": "mods/ChatBlock-1.7.2-1.8.9_ornithe.jar",
+   "hash": "bebe2c3c70ea6eeadb4da1be2cb4e142c52963e6"
+  },
+  {
+   "path": "mods/polytime-1.3.3+1.8.9.jar",
+   "hash": "90653af9437bc9ae7c478a3aadabe05c9f620b16"
+  },
+  {
+   "path": "mods/polyweather-1.3.1+1.8.9.jar",
+   "hash": "b61ece3da71c92fe5a1f4a45f3079069a234a85c"
+  },
+  {
+   "path": "mods/freelook-2.3.3+mc1.8.9.jar",
+   "hash": "283a75c439ee263439401da39f8b358696f188f9"
+  },
+  {
+   "path": "mods/behindyouv3-3.5.0+1.8.9.jar",
+   "hash": "ae154af3af313c93d4c3dc59d5bdde5bc850de5e"
+  },
+  {
+   "path": "mods/betternightvision-1.0.5+1.8.9-fabric.jar",
+   "hash": "4e585c417e42cc8ed4dd77f1808825e7d076c5d5"
+  },
+  {
+   "path": "mods/damagetint-3.7.2+1.8.9.jar",
+   "hash": "2b741162c30b1fafd8eb3523ac372c563c6d6e8d"
+  },
+  {
+   "path": "mods/polyhitbox-1.4.0+1.8.9.jar",
+   "hash": "e4a0263176ef3a518ad32045d5d35c506bf26236"
+  },
+  {
+   "path": "mods/polynametag-1.2.5+1.8.9.jar",
+   "hash": "e326dddbb93c515ce05367b63234ce285d95e330"
+  },
+  {
+   "path": "mods/countdown-2.1.4+mc1.8.9.jar",
+   "hash": "b0f126db0f899fcc8fe3723fde8a36f188e9a0c0"
+  },
+  {
+   "path": "mods/glintcolorizer-3.0.2+1.8.9.jar",
+   "hash": "f533d6dc1cf84050e2211ea58659ddf3dc7c564c"
+  },
+  {
+   "path": "mods/overflowanimations-5.1.7+1.8.9-fabric.jar",
+   "hash": "99437199a67fb8c523041159414a29b8a1a35e33"
+  },
+  {
+   "path": "mods/overflowparticles-1.2.5+1.8.9.jar",
+   "hash": "e2e026bcd249df9aed08af20ff887b62d1f45654"
+  },
+  {
+   "path": "mods/polyblur-2.2.9+1.8.9.jar",
+   "hash": "8d38b0b4d51e60eb955e7a3f22235f80aea8ae0c"
+  },
+  {
+   "path": "mods/colorsaturation-1.3.1+1.8.9.jar",
+   "hash": "9954aafe4aa2b5bd4472680e7f3a85b86177607c"
+  },
+  {
+   "path": "mods/Keyyyyyyyy-3.2.0+fabric.jar",
+   "hash": "c4ba44399a9fb1f4e42c9f32bf535230fde5fd45"
+  },
+  {
+   "path": "mods/CrashPatch-2.2.3+1.8.9.jar",
+   "hash": "2afd126588ba6bb40ed92eaaa0bf379add0a3a8c"
+  },
+  {
+   "path": "mods/BetterHurtCam-1.15.3+mc1.8.9-ornithe.jar",
+   "hash": "54784110a28d29189e03514a8558e628800621b3"
+  },
+  {
+   "path": "mods/pylon-0.2.8.jar",
+   "hash": "e55a4b020393888d52f275e6ab298bb429427dbd"
+  },
+  {
+   "path": "mods/yosbr-0.1.1.jar",
+   "hash": "0643830cab952fc96872702e681b863b550c8530"
+  },
+  {
+   "path": "mods/fpsdisplay-3.1.0+1.8.9.jar",
+   "hash": "c8ae95470a2f1eda358e9231eeee0fa183e216e0"
+  },
+  {
+   "path": "mods/ViaVersion-5.12.1-SNAPSHOT.jar",
+   "hash": "c2ad43710d4925f2d0db45c5a29782e76eac772d"
+  },
+  {
+   "path": "mods/ViaFabric-0.4.21+130-legacy.jar",
+   "hash": "1b4c77ae1e502bdbe722e365118c04bb67f7efad"
+  },
+  {
+   "path": "mods/ViaRewind-4.2.0.jar",
+   "hash": "b83bfbe592e74a6b87adc0fd4a1766cb7666516b"
+  },
+  {
+   "path": "mods/mod-loading-screen-1.0.5.jar",
+   "hash": "c378690f841fdeee182aea9704c0a077268b731d"
+  },
+  {
+   "path": "mods/NoExpensive-1.8.9-1.11.0.jar",
+   "hash": "866317d7f6cdcfd520c206592fc22a46b3f50722"
+  },
+  {
+   "path": "mods/OneKeyMiner-1.8.9-1.10.1.jar",
+   "hash": "2af8dcbbc02d7928696cf7607c34b4e67519d810"
+  },
+  {
+   "path": "mods/SpeedRunIGT-14.2+1.8.9.jar",
+   "hash": "73e4f4e69e1ecc24b83af75275b87c488794ffa8"
+  },
+  {
+   "path": "mods/atum-1.1.3+1.8.9.jar",
+   "hash": "bde9047c14ce02a04da2cecde05025d946a2028d"
+  },
+  {
+   "path": "mods/replymod-1.0.0+mc1.8.9+.jar",
+   "hash": "1df299de43a3fe0d5cdf1c904e0ffa9dfbca5284"
+  },
+  {
+   "path": "mods/realmsfix-2.0.8.jar",
+   "hash": "6ccb56e2a31acace8f2c63df4f6f1633b738d713"
+  },
+  {
+   "path": "mods/mineconf-1.8.9-1.1.4.jar",
+   "hash": "7a4eede85ca54f89ac2b2a75e4875f9c8b06a047"
+  },
+  {
+   "path": "mods/thorough-keybindings-1.2.0+1.8.2-1.8.9.jar",
+   "hash": "f51a338cc328cd3d2e2e3be68b5e865ffd8418a2"
+  },
+  {
+   "path": "mods/g1axcrystaloptimizer-1.0.5 mc26.2.x .jar",
+   "hash": "2af2e1c74640ecff4a59da1669fd5cd032172ae9"
+  },
+  {
+   "path": "mods/WaylandFix-1.1.jar",
+   "hash": "d84d8d3e6b0fcad0e8ea4acf51131155a224ae98"
+  },
+  {
+   "path": "mods/WindowsPriorityBoost-1.0.0.jar",
+   "hash": "1d069d8c141083ac762451ca48514fb3868a976c"
+  },
+  {
+   "path": "mods/fconfiglib-1.1.1.jar",
+   "hash": "73358371247e19574c49aff207e8129e1e462d63"
+  },
+  {
+   "path": "mods/fabric-gui-imgui-1.8.9-1.2.0+imgui.1.92.7.1.jar",
+   "hash": "36bbdc6193fb4573fc9b776cae5994e3eba62643"
+  },
+  {
+   "path": "mods/languagefix-1.0.0+1.8.9_to_1.12.2.jar",
+   "hash": "9776f5c6763a54a312d397b2ac88347422f173ec"
+  },
+  {
+   "path": "mods/ViaAprilFools-4.2.3.jar",
+   "hash": "f74860b60b30c5f9a9a1a0fedf6d748842af9aa8"
+  },
+  {
+   "path": "mods/LibertyBans_Release-1.2.0-M1.jar",
+   "hash": "4d857e2ae99b4764cccee111cc39bc5e1034bbb7"
+  },
+  {
+   "path": "mods/legacy-vanillafix-1.0.9+1.8.9.jar",
+   "hash": "e6c8caef5c46228837b883e8d103e82984658f12"
+  },
+  {
+   "path": "mods/hit-tracker-5.4-RELEASE-1.21.4.jar",
+   "hash": "ad4b12fd0e47fa58b7658c379ed522d83dc7bf32"
+  },
+  {
+   "path": "mods/SpASM-0.2.2.jar",
+   "hash": "ad98fd15f3cc9bf09c65a170b12b8d857df322ea"
+  },
+  {
+   "path": "mods/mod-remapping-api-1.30.0.jar",
+   "hash": "fecea75e0bdf5fc7711335a0dca3c981b6b3af26"
+  },
+  {
+   "path": "mods/where-is-my-stuff-1.1.0.jar",
+   "hash": "259c188d6979e06fe7c270348f52ec530586740f"
+  },
+  {
+   "path": "mods/legacy-modmenu-1.1.0.jar",
+   "hash": "85ed4b320211a7592df97a013a27de171be3e870"
+  },
+  {
+   "path": "mods/half-heart-hardcore-1.1.1.jar",
+   "hash": "5246087e10bb1a9ef7c344d7784ec996611a02a6"
+  },
+  {
+   "path": "mods/phosphor-legacy-0.1.5+1.8.9.jar",
+   "hash": "54c259b7a0a5065dcc439b3cf45b82db003a9dc2"
+  },
+  {
+   "path": "mods/constructionwandpolymer-1.0.0.jar",
+   "hash": "c31b9204911ae3a2c963100fe20bb764fa2de4ff"
+  },
+  {
+   "path": "mods/IPAsServerName-1.0.3.jar",
+   "hash": "9c6e100267c3b0ca2e2ee8bb2abf25d2aced09b1"
+  },
+  {
+   "path": "mods/storagebox-1.4.1-1.8.9.jar",
+   "hash": "c72bd2a697353c22d12364ea64582c36461a0568"
+  },
+  {
+   "path": "mods/GriefPrevention3D.jar",
+   "hash": "183adde3ce0433c31891b1d787d659412da0c879"
+  },
+  {
+   "path": "mods/external-0.jar",
+   "hash": "e1b47e90af5ff04cacb8363d4d11210631a11775"
+  },
+  {
+   "path": "mods/external-1.jar",
+   "hash": "62289321b5cb1a3bd205c837cc877b1ecaf2c6ea"
+  },
+  {
+   "path": "mods/external-2.jar",
+   "hash": "cc20004edcc5527023579c0b3468b5fef0aa0cb7"
+  },
+  {
+   "path": "mods/external-3.jar",
+   "hash": "fc17f0c306e7018d69134a8c99a72a94f1265f16"
+  },
+  {
+   "path": "mods/external-4.jar",
+   "hash": "2e59ebb073c3cd27b06dea3252c92adc29ba3393"
+  },
+  {
+   "path": "mods/external-5.jar",
+   "hash": "3ff57e177c1fb8a2582433f6b6116337b93ce3bb"
+  },
+  {
+   "path": "mods/external-6.jar",
+   "hash": "81d2de80d84cdb29cd7f61fee79f7a3d486bbeb0"
+  },
+  {
+   "path": "mods/external-7.jar",
+   "hash": "5ddc30812b8d666d4b3a12b526311cb8d715e48a"
+  },
+  {
+   "path": "mods/external-8.jar",
+   "hash": "ddc861a281214733ca93e55749866a2c29c9f96c"
+  },
+  {
+   "path": "mods/external-9.jar",
+   "hash": "014226ce3edad35c23ebaac035968e28081226ba"
+  },
+  {
+   "path": "mods/external-10.jar",
+   "hash": "0430b9fa66c1b1fd5b4ed9151af79ddcbd8846af"
+  },
+  {
+   "path": "mods/external-11.jar",
+   "hash": "c24ea978b561ffad5e20d25ead147a094478228d"
+  },
+  {
+   "path": "mods/external-12.jar",
+   "hash": "133ff3b5066d027fb70a7090e212b49dce2a0f31"
+  },
+  {
+   "path": "mods/external-13.jar",
+   "hash": "b0c7659f3da9dfcad2afe5af55c30af2511010c7"
+  },
+  {
+   "path": "mods/external-14.jar",
+   "hash": "e42dd2084eadf1d102219440901520fd090d103e"
+  },
+  {
+   "path": "mods/external-15.jar",
+   "hash": "7121d4402ed2232b330a8a5f3424c96332bd891c"
+  }
+ ]
+}

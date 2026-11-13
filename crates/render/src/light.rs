@@ -174,6 +174,7 @@ mod tests {
             origin: (0, 0),
             center: blocks,
             neighbors: [None; 8],
+            biomes: [None; 9],
         }
     }
 
@@ -235,6 +236,7 @@ mod tests {
             origin: (0, 0),
             center: &center,
             neighbors: [None, None, None, None, Some(&east), None, None, None],
+            biomes: [None; 9],
         };
         let l = Light::compute(&hood);
         assert_eq!(l.get(16, 40, 8).1, 13);
@@ -262,6 +264,7 @@ mod tests {
                 Some(&center),
                 Some(&corner),
             ],
+            biomes: [None; 9],
         };
         // Two blocks across x and z plus nothing in y: 14 - 4 = 10.
         assert_eq!(Light::compute(&hood).get(15, 40, 15).1, 10);

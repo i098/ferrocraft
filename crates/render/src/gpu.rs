@@ -8,7 +8,7 @@ use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
-use crate::mesher::{Done, Job, Mesher, SharedBlocks};
+use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks};
 use crate::particles::Quads;
 use crate::post::Post;
 use crate::sky::{
@@ -179,7 +179,7 @@ pub struct Renderer {
     post_on: bool,
     blocks: HashMap<(i32, i32), SharedBlocks>,
     /// Biome ids per chunk column, `z << 4 | x`.
-    biomes: HashMap<(i32, i32), [u8; 256]>,
+    biomes: HashMap<(i32, i32), SharedBiomes>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     mesher: Mesher,
     /// Chunks to remesh on the workers.
@@ -635,8 +635,10 @@ impl Renderer {
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
         self.blocks.insert(key, Arc::new(data));
-        self.biomes
-            .insert(key, std::array::from_fn(|i| chunk.biome(i & 15, i >> 4)));
+        self.biomes.insert(
+            key,
+            Arc::new(std::array::from_fn(|i| chunk.biome(i & 15, i >> 4))),
+        );
         self.mark_around(key);
     }
 
@@ -719,6 +721,10 @@ impl Renderer {
             generation: self.next_generation,
             center: self.blocks[&key].clone(),
             neighbors: AROUND.map(|(dx, dz)| get((cx + dx, cz + dz))),
+            biomes: std::array::from_fn(|i| {
+                let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
+                self.biomes.get(&(cx + dx, cz + dz)).cloned()
+            }),
         }
     }
 
@@ -861,8 +867,12 @@ impl Renderer {
         });
         self.frames = Some(frames);
         self.item_meshes.clear();
-        let layers = std::iter::once((None, items.atlas))
-            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
+        let layers = std::iter::once((None, items.atlas)).chain(
+            items
+                .sprites
+                .into_iter()
+                .map(|((_, path), m)| (Some(path), m)),
+        );
         for (tex, mesh) in layers {
             if let Some(tex) = &tex {
                 // A map not yet received has no texture and is not drawn.
@@ -1216,8 +1226,8 @@ impl Renderer {
     fn resolve_held(&mut self, kind: HeldKind) -> Held {
         let state = match kind {
             HeldKind::Block(state) => state,
-            HeldKind::Item { id, damage } => {
-                if let Some(flat) = self.flat_item(id, damage) {
+            HeldKind::Item { id, damage, dye } => {
+                if let Some(flat) = self.flat_item(id, damage, dye) {
                     return flat;
                 }
                 if !(1..256).contains(&id) {
@@ -1260,20 +1270,28 @@ impl Renderer {
         let source = self.source.as_mut();
         let found = name.zip(source).and_then(|(name, source)| {
             let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-            hand::flat_model(&mut read, name).map(|m| m.0)
+            hand::flat_model(&mut read, name).and_then(|m| m.0.into_iter().next())
         });
         self.item_textures.insert((id, damage), found.clone());
         found
     }
 
-    /// The extruded sprite of a `builtin/generated` item model, with its `layer0` texture uploaded.
-    /// shortcut: only `layer0`, untinted (leather armor, potions, spawn eggs lose color and overlay).
-    fn flat_item(&mut self, id: i16, damage: i16) -> Option<Held> {
+    /// The extruded sprite of a `builtin/generated` item model: every `layerN` texture tinted by
+    /// `ItemColors` (`dye` is the leather `display.color`) and drawn over the previous one.
+    fn flat_item(&mut self, id: i16, damage: i16, dye: Option<i32>) -> Option<Held> {
         let name = world::inventory::items::model(id, damage)?;
         let source = self.source.as_mut()?;
         let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-        let (texture, display) = hand::flat_model(&mut read, name)?;
-        let image = decode_png(&read(&texture)?)?;
+        let (textures, display) = hand::flat_model(&mut read, name)?;
+        let layers: Vec<_> = textures
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let tint = world::inventory::items::tint(id, damage, dye, i);
+                Some((decode_png(&read(t)?)?, tint))
+            })
+            .collect();
+        let image = hand::composite(&layers)?;
         let view = upload_texture(
             &self.device,
             &self.queue,

@@ -32,6 +32,7 @@ pub enum Tint {
     None,
     Grass,
     Foliage,
+    Water,
     Birch,
     Spruce,
     Lily,
@@ -84,9 +85,7 @@ const PLANKS: [&str; 6] = [
     "planks_big_oak",
 ];
 
-/// Grass, foliage and water colors of the plains biome; chunk biome data is not passed to the renderer yet.
-pub const GRASS_COLOR: u32 = 0x91bd59;
-pub const FOLIAGE_COLOR: u32 = 0x77ab2f;
+/// Fixed tints; grass, foliage and water follow the biome (`Mesher::base_color`).
 pub const BIRCH_COLOR: u32 = 0x80a755;
 pub const SPRUCE_COLOR: u32 = 0x619961;
 pub const LILY_COLOR: u32 = 0x208030;
@@ -102,8 +101,7 @@ pub fn rgb(hex: u32) -> [f32; 3] {
 pub fn tint_color(t: Tint) -> [f32; 3] {
     match t {
         Tint::None => [1.0; 3],
-        Tint::Grass => rgb(GRASS_COLOR),
-        Tint::Foliage => rgb(FOLIAGE_COLOR),
+        Tint::Grass | Tint::Foliage | Tint::Water => [1.0; 3],
         Tint::Birch => rgb(BIRCH_COLOR),
         Tint::Spruce => rgb(SPRUCE_COLOR),
         Tint::Lily => rgb(LILY_COLOR),
@@ -312,18 +310,21 @@ fn look_0(id: u16, meta: u16) -> Look {
 fn look_1(id: u16, meta: u16) -> Look {
     match id {
         7 => cube(0x333333, "bedrock"),
-        8 | 9 => mk(
-            Kind::Water,
-            0x2f5bd6,
-            [
-                "water_still",
-                "water_still",
-                "water_flow",
-                "water_flow",
-                "water_flow",
-                "water_flow",
-            ],
-        ),
+        8 | 9 => Look {
+            tint: Tint::Water,
+            ..mk(
+                Kind::Water,
+                0x2f5bd6,
+                [
+                    "water_still",
+                    "water_still",
+                    "water_flow",
+                    "water_flow",
+                    "water_flow",
+                    "water_flow",
+                ],
+            )
+        },
         10 | 11 => mk(
             Kind::Lava,
             0xe8650c,

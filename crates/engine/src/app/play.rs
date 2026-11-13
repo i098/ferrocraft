@@ -152,11 +152,15 @@ impl App {
         }
     }
 
-    fn tick_once(&mut self) {
-        self.chat_tick();
+    fn tick_block_entities(&mut self) {
         if let Some(r) = &mut self.renderer {
             r.tick_block_entities();
         }
+    }
+
+    fn tick_once(&mut self) {
+        self.chat_tick();
+        self.tick_block_entities();
         self.hud.tick();
         if self.game.player.is_some() {
             self.hud.update_held(self.game.inv.held_stack());

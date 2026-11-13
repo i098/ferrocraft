@@ -150,9 +150,13 @@ fn border_update(a: ferrocraft_protocol::play::WorldBorderAction) -> world::bord
 }
 
 fn game_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
-    if let Some(tile) = crate::tile::event(&packet) {
-        return Ok(vec![tile]);
+    match crate::tile::event(&packet) {
+        Some(tile) => Ok(vec![tile]),
+        None => other_events(packet, dimension),
     }
+}
+
+fn other_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>> {
     Ok(match packet {
         cb::Packet::PlayerPositionAndLook(p) => vec![NetEvent::PlayerPosLook {
             x: p.x,

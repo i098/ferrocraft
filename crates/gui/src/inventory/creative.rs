@@ -447,12 +447,12 @@ impl Creative {
             inv.cursor = None;
             return;
         }
-        for j in 0..PLAYER_SLOTS {
+        for (j, slot) in inv.player.iter_mut().enumerate().take(PLAYER_SLOTS) {
             out.push(Request::Creative {
                 slot: j as i16,
                 item: None,
             });
-            inv.player[j] = None;
+            *slot = None;
         }
     }
 
@@ -565,10 +565,10 @@ impl Creative {
             }
         }
         if button & 3 == 2 {
-            for k in 36..45 {
+            for (k, item) in inv.player.iter().enumerate().take(45).skip(36) {
                 out.push(Request::Creative {
                     slot: k as i16,
-                    item: inv.player[k].clone(),
+                    item: item.clone(),
                 });
             }
         } else if let Some(s) = slot {

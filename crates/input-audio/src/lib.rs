@@ -1,5 +1,6 @@
 //! Input state: vanilla 1.8.9 key bindings, mouse look, mouse buttons, wheel, chat entry.
 mod actions;
+mod autocomplete;
 mod keys;
 pub mod sound;
 
@@ -94,6 +95,8 @@ pub struct InputState {
     scroll_px: f64,
     look: (f32, f32),
     chat: Option<String>,
+    autocomplete: autocomplete::Autocomplete,
+    chat_note: Option<String>,
     submit: Option<String>,
     history: Vec<String>,
     history_pos: Option<usize>,
@@ -133,6 +136,8 @@ impl InputState {
             history: Vec::new(),
             history_pos: None,
             history_draft: String::new(),
+            autocomplete: Default::default(),
+            chat_note: None,
             grab_requested: true,
             screen_open: false,
             focused: true,
@@ -336,6 +341,7 @@ impl InputState {
         self.release_all();
         self.history_pos = None;
         self.history_draft.clear();
+        self.autocomplete = Default::default();
         self.chat = Some(initial);
     }
 
@@ -343,7 +349,11 @@ impl InputState {
         let Some(buf) = self.chat.as_mut() else {
             return;
         };
+        // `GuiChat.keyTyped`: Tab completes, every other key ends the wait and the name cycle.
+        let note = self.autocomplete.key(code == KeyCode::Tab, buf);
+        self.chat_note = note.or(self.chat_note.take());
         match code {
+            KeyCode::Tab => {}
             KeyCode::Escape => self.chat = None,
             KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
             KeyCode::Backspace => {
@@ -531,6 +541,22 @@ impl InputState {
 
     pub fn chat_input(&self) -> Option<&str> {
         self.chat.as_deref()
+    }
+
+    /// The text a Tab asked the server to complete (`C14PacketTabComplete`).
+    pub fn take_tab_request(&mut self) -> Option<String> {
+        self.autocomplete.take_request()
+    }
+
+    /// `GuiChat.onAutocompleteResponse`; the returned line is the name list for the chat.
+    pub fn tab_response(&mut self, matches: &[String]) -> Option<String> {
+        let buf = self.chat.as_mut()?;
+        self.autocomplete.response(matches, buf)
+    }
+
+    /// The name list a Tab cycle printed, for the chat.
+    pub fn take_chat_note(&mut self) -> Option<String> {
+        self.chat_note.take()
     }
 
     pub fn take_chat_submit(&mut self) -> Option<String> {

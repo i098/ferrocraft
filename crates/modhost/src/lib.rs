@@ -1,8 +1,10 @@
 //! Rust side of the mod host. See the README of this crate.
 
+pub mod chat;
 pub mod keys;
 pub mod mirror;
 pub mod overrides;
+pub mod provision;
 pub mod wire;
 
 use std::collections::HashMap;
@@ -17,6 +19,7 @@ use std::time::Duration;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
+pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
 pub use mirror::Mirror;
 pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
@@ -69,7 +72,10 @@ struct Shared {
     /// A world values request the game thread waits on, and the JVM's answer.
     world: Option<WorldState>,
     world_answer: Option<Overrides>,
-    /// A player tick or a world values request got no answer in time: no more are asked until the pump has finished the round trip it is in,
+    /// A chat line the receiving thread waits on, and the JVM's verdict.
+    chat: Option<(ChatKind, String)>,
+    chat_answer: Option<ChatVerdict>,
+    /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
     /// `ClientBrandRetriever.getClientModName()` from the hello; `None` until the JVM connected.
@@ -137,6 +143,8 @@ impl ModHost {
                     answer: None,
                     world: None,
                     world_answer: None,
+                    chat: None,
+                    chat_answer: None,
                     stalled: false,
                     brand: None,
                 }),
@@ -320,6 +328,29 @@ impl ModHost {
         answer
     }
 
+    /// Post a received chat line, with `§` format codes, to the mods' `ClientChatReceivedEvent` and return what
+    /// they did with it. `Keep` while the JVM is not live or does not answer in time.
+    pub fn chat(&self, kind: ChatKind, text: &str) -> ChatVerdict {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live || s.stalled || s.chat.is_some() || text.len() > chat::MAX_TEXT {
+            return ChatVerdict::Keep;
+        }
+        s.chat = Some((kind, text.to_owned()));
+        s.chat_answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.chat_answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.chat = None;
+        let answer = s.chat_answer.take();
+        s.stalled = answer.is_none() && s.phase == Phase::Live;
+        answer.unwrap_or(ChatVerdict::Keep)
+    }
+
     /// The brand the hosted `ClientBrandRetriever.getClientModName()` returned (`fml,forge`), once the JVM is
     /// live. The client sends it as `MC|Brand`; `None` means no mod host answers, so the brand stays `vanilla`.
     pub fn client_brand(&self) -> Option<String> {
@@ -464,7 +495,12 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
         let (input, mirror) = {
             let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live && !s.fresh && s.player.is_none() && s.world.is_none() {
+            while s.phase == Phase::Live
+                && !s.fresh
+                && s.player.is_none()
+                && s.world.is_none()
+                && s.chat.is_none()
+            {
                 s = link.view.wait(s).unwrap();
             }
             if s.phase != Phase::Live {
@@ -489,6 +525,18 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                 let mut s = link.state.lock().unwrap();
                 if !s.stalled {
                     s.world_answer = Some(answer);
+                }
+                s.stalled = false;
+                link.answered.notify_all();
+                continue;
+            }
+            if let Some((kind, text)) = s.chat.take() {
+                drop(s);
+                chat::write_line(&mut stream, kind, &text)?;
+                let verdict = chat::read_verdict(&mut stream)?;
+                let mut s = link.state.lock().unwrap();
+                if !s.stalled {
+                    s.chat_answer = Some(verdict);
                 }
                 s.stalled = false;
                 link.answered.notify_all();
@@ -633,6 +681,8 @@ mod tests {
                 answer: None,
                 world: None,
                 world_answer: None,
+                chat: None,
+                chat_answer: None,
                 stalled: false,
                 brand: None,
             }),
@@ -736,6 +786,72 @@ mod tests {
         host.queue(key(true), false);
         assert!(link.state.lock().unwrap().input.events.is_empty());
         let _ = child.lock().unwrap().kill();
+    }
+
+    #[test]
+    fn a_chat_line_goes_to_the_jvm_and_its_verdict_comes_back() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+
+        let verdict = thread::scope(|scope| {
+            let sender = scope.spawn(|| host.chat(ChatKind::Chat, "spam"));
+            let mut request = [0; 10];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, &[b'C', 0, 0, 0, 0, 4, b's', b'p', b'a', b'm']);
+            stream.write_all(&[1]).unwrap();
+            sender.join().unwrap()
+        });
+        assert_eq!(verdict, ChatVerdict::Cancel);
+
+        host.stop();
+        worker.join().unwrap();
+        assert_eq!(host.chat(ChatKind::Chat, "x"), ChatVerdict::Keep);
+    }
+
+    #[test]
+    fn a_chat_line_over_the_java_cap_is_kept_unsent_and_the_next_line_is_still_served() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+
+        // Chat.java throws above 64 KiB, which would end the host: a server line this long must never be sent.
+        let big = "§".repeat(33_000);
+        assert!(big.len() > 1 << 16);
+        assert_eq!(host.chat(ChatKind::Chat, &big), ChatVerdict::Keep);
+
+        let verdict = thread::scope(|scope| {
+            let sender = scope.spawn(|| host.chat(ChatKind::Chat, "ok"));
+            let mut request = [0; 8];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, &[b'C', 0, 0, 0, 0, 2, b'o', b'k']);
+            stream.write_all(&[1]).unwrap();
+            sender.join().unwrap()
+        });
+        assert_eq!(verdict, ChatVerdict::Cancel);
+
+        host.stop();
+        worker.join().unwrap();
     }
 
     #[test]

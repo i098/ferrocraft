@@ -543,6 +543,22 @@ impl InputState {
         self.chat.as_deref()
     }
 
+    /// `GuiChat.setText(text, overwrite)` / `GuiTextField.writeText`: a chat click replaces the field
+    /// or writes at the cursor. Text over 100 UTF-16 units is cut, like the vanilla text field.
+    pub fn set_chat_text(&mut self, text: &str, overwrite: bool) {
+        let Some(buf) = self.chat.as_mut() else {
+            return;
+        };
+        if overwrite {
+            buf.clear();
+        }
+        for c in text.chars().filter(|&c| allowed_char(c)) {
+            if buf.encode_utf16().count() + c.len_utf16() <= CHAT_MAX_CHARS {
+                buf.push(c);
+            }
+        }
+    }
+
     /// The text a Tab asked the server to complete (`C14PacketTabComplete`).
     pub fn take_tab_request(&mut self) -> Option<String> {
         self.autocomplete.take_request()

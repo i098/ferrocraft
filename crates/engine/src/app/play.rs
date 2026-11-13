@@ -1015,6 +1015,7 @@ impl App {
                     self.chat_line(vec![ferrocraft_net_client::Styled {
                         format: String::new(),
                         text: line.into(),
+                        ..Default::default()
                     }]);
                 }
             }
@@ -1062,6 +1063,7 @@ impl App {
         let styled = |format: &str, text: String| ferrocraft_net_client::Styled {
             format: format.into(),
             text,
+            ..Default::default()
         };
         self.chat_line(vec![
             styled("\u{a7}e\u{a7}l", "[Debug]:".into()),

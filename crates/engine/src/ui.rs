@@ -107,9 +107,10 @@ impl Ui {
     }
 
     pub fn event(&mut self, m: &dyn Metrics, ev: Event, shift: bool) -> Vec<Effect> {
-        // Paste must see text copied by other programs.
-        if let Some(text) = self.system.as_mut().and_then(|c| c.get_text().ok()) {
-            self.clipboard = text;
+        if matches!(ev, Event::Key { ctrl: true, .. }) {
+            if let Some(text) = self.system.as_mut().and_then(|c| c.get_text().ok()) {
+                self.clipboard = text;
+            }
         }
         self.run(m, shift, |s, c| s.event(ev, c)).1
     }

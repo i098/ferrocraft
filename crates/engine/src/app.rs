@@ -62,6 +62,9 @@ struct Limbs {
     prev_amount: f32,
 }
 
+/// Item shown in the hand: id, damage, glint and leather `display.color`.
+type HandItem = (i16, i16, bool, Option<i32>);
+
 pub struct App {
     args: Args,
     link: Link,
@@ -121,7 +124,7 @@ pub struct App {
     /// When the last frame was shown, for the `maxFps` limit.
     last_frame: Instant,
     /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
-    equip: (f32, f32, Option<(i16, i16, bool)>),
+    equip: (f32, f32, Option<HandItem>),
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
     /// A server pack offer that arrived before that screen closed; the prompt opens once it has.
@@ -666,6 +669,12 @@ impl App {
                 .as_ref()
                 .is_some_and(world::inventory::glint),
             held_damage: self.game.inv.held_stack().as_ref().map_or(0, |s| s.damage),
+            held_dye: self
+                .game
+                .inv
+                .held_stack()
+                .as_ref()
+                .and_then(|s| s.nbt.as_ref()?.dye()),
             stack: None,
             hover_start: 0.0,
             hang: Default::default(),
@@ -745,12 +754,10 @@ impl App {
         }
         let (quads, textures, effects) = self.overlay(frac, &cam, &draws);
         self.run_effects(effects);
-        let held = self
-            .game
-            .inv
-            .held_stack()
-            .as_ref()
-            .map(|s| (s.id, s.damage, world::inventory::glint(s)));
+        let held = self.game.inv.held_stack().as_ref().map(|s| {
+            let dye = s.nbt.as_ref().and_then(|n| n.dye());
+            (s.id, s.damage, world::inventory::glint(s), dye)
+        });
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);
         let using = self.using(frac as f32);
@@ -805,7 +812,7 @@ impl App {
                 && self.game.player.is_some()
                 && self.game.gamemode != 3)
                 .then(|| Hand {
-                    held: hand_item.map(|(id, damage, _)| HeldKind::Item { id, damage }),
+                    held: hand_item.map(|(id, damage, _, dye)| HeldKind::Item { id, damage, dye }),
                     swing,
                     lowered,
                     using,
@@ -1281,11 +1288,13 @@ fn entity_draw(
         armor_glint: [1, 2, 3, 4].map(|s| e.equipment[s].is_some_and(|i| i.glint)),
         held_glint: e.equipment[0].is_some_and(|i| i.glint),
         held_damage: e.equipment[0].map_or(0, |i| i.damage),
+        held_dye: e.equipment[0].and_then(|i| i.dye),
         stack: e.stack.map(|i| render::item::Stack {
             id: i.id,
             damage: i.damage,
             count: i.count,
             glint: i.glint,
+            dye: i.dye,
         }),
         hover_start: (e.id as f32 * 0.618) % std::f32::consts::TAU,
         hang: render::hanging::Hang {

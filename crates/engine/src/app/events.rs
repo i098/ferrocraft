@@ -4,12 +4,12 @@ use super::{boxed, App, View};
 use crate::game::Effect;
 use crate::game::Game;
 use crate::link::Link;
-use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent};
+use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent, TileEvent};
 use gui::inventory::ContainerScreen;
 use gui::screens::{Connecting, Death, EditSign, Effect as UiEffect};
 use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
-use render::Renderer;
+use render::{Banner, Renderer, Skull};
 use std::collections::HashMap;
 use world::entities::{is_baby, EntityEvent, Kind};
 use world::entity_sound;
@@ -587,6 +587,11 @@ impl App {
                     self.send_result(r);
                 }
             }
+            Effect::Tile(t) => {
+                if let Some(r) = &mut self.renderer {
+                    mirror_tile(r, t);
+                }
+            }
             Effect::Died => {
                 self.container = None;
                 self.game.inv.close_window();
@@ -598,6 +603,31 @@ impl App {
                 self.run_effects(q);
             }
         }
+    }
+
+    /// Prints a received chat line, through the mod host when one is live; a mod that cancels it
+    /// stops the line.
+    fn print_chat(&mut self, mut runs: Vec<ferrocraft_net_client::Styled>) {
+        if let Some(mods) = &self.mods {
+            match mods.chat(
+                ferrocraft_modhost::ChatKind::Chat,
+                &ferrocraft_net_client::formatted_text(&runs),
+            ) {
+                ferrocraft_modhost::ChatVerdict::Keep => {}
+                ferrocraft_modhost::ChatVerdict::Cancel => return,
+                ferrocraft_modhost::ChatVerdict::Replace(text) => {
+                    runs = vec![ferrocraft_net_client::Styled {
+                        text,
+                        ..Default::default()
+                    }];
+                }
+            }
+        }
+        let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+        let open = self.input.chat_input().is_some();
+        self.hud
+            .chat
+            .print(runs, 0, self.hud.update_counter, open, m);
     }
 
     /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.
@@ -669,6 +699,35 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
             }
             _ => r.remove_chunk(x, z),
         }
+    }
+}
+
+/// Hands chest, sign, skull and banner data to the renderer.
+fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
+    match tile {
+        TileEvent::Action {
+            pos,
+            block,
+            event,
+            value,
+        } => r.block_action(pos, block, event, value),
+        TileEvent::Sign { pos, lines } => r.set_sign_text(pos, lines),
+        TileEvent::Skull {
+            pos,
+            kind,
+            rotation,
+            owner,
+        } => {
+            r.set_skull(
+                pos,
+                Skull {
+                    kind,
+                    rotation,
+                    owner,
+                },
+            );
+        }
+        TileEvent::Banner { pos, base, layers } => r.set_banner(pos, Banner { base, layers }),
     }
 }
 

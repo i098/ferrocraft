@@ -749,6 +749,7 @@ impl App {
                 && self.game.burning(),
         );
         r.set_entities(&draws);
+        r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_cracks(self.game.cracks());
         let verts =

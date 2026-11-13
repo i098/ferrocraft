@@ -15,8 +15,13 @@ pub enum HeldKind {
     /// Block state id (`id << 4 | meta`) drawn as a cube.
     Block(u16),
     /// An item stack: `builtin/generated` models (tools, food, torches, saplings...) draw as the
-    /// extruded sprite, other ids below 256 as the block `id << 4 | damage & 15`.
-    Item { id: i16, damage: i16 },
+    /// extruded sprite, other ids below 256 as the block `id << 4 | damage & 15`. `dye` is the
+    /// `display.color` of leather armor.
+    Item {
+        id: i16,
+        damage: i16,
+        dye: Option<i32>,
+    },
 }
 
 /// What the engine tells the renderer about the player's hand for one frame.
@@ -284,12 +289,13 @@ pub(crate) fn display(
 }
 
 /// Reads `models/item/<name>.json` and its parents through `read` (paths below `assets/minecraft/`).
-/// Returns the `layer0` texture path and the `firstperson` display transform when the chain ends
-/// in a `builtin/generated` (or clock/compass) model; `None` for block and entity models.
+/// Returns the `layer0`, `layer1`... texture paths (`ItemModelGenerator` takes at most five) and
+/// the `firstperson` display transform when the chain ends in a `builtin/generated` (or
+/// clock/compass) model; `None` for block and entity models.
 pub fn flat_model(
     read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
     name: &str,
-) -> Option<(String, Mat)> {
+) -> Option<(Vec<String>, Mat)> {
     let mut models = Vec::new();
     let mut next = format!("item/{name}");
     loop {
@@ -306,14 +312,49 @@ pub fn flat_model(
         next = v["parent"].as_str()?.to_string();
         models.push(v);
     }
-    let layer = models
-        .iter()
-        .find_map(|v| v["textures"]["layer0"].as_str())?;
+    let layers: Vec<String> = (0..5)
+        .map_while(|i| {
+            let key = format!("layer{i}");
+            models.iter().find_map(|v| v["textures"][&key].as_str())
+        })
+        .map(|layer| format!("textures/{layer}.png"))
+        .collect();
+    if layers.is_empty() {
+        return None;
+    }
     let display = models
         .iter()
         .find_map(|v| v["display"].get("firstperson"))
         .map_or(ident(), |d| transform(d).0);
-    Some((format!("textures/{layer}.png"), display))
+    Some((layers, display))
+}
+
+/// The layers of a flat item drawn over each other, layer `i` multiplied by the `0xRRGGBB` color
+/// `i`: what the sprite's front face shows when the layers' quads share one plane. Layers of
+/// another size than the first are skipped.
+pub fn composite(layers: &[(Image, u32)]) -> Option<Image> {
+    let (first, _) = layers.first()?;
+    let mut out = Image {
+        width: first.width,
+        height: first.height,
+        rgba: vec![0; first.rgba.len()],
+    };
+    let len = first.rgba.len();
+    for (img, color) in layers.iter().filter(|(i, _)| i.rgba.len() == len) {
+        let tint = [16, 8, 0].map(|s| ((color >> s) & 0xFF) as f32 / 255.0);
+        for (dst, src) in out.rgba.chunks_mut(4).zip(img.rgba.chunks(4)) {
+            let (sa, da) = (f32::from(src[3]) / 255.0, f32::from(dst[3]) / 255.0);
+            let a = sa + da * (1.0 - sa);
+            if a > 0.0 {
+                for c in 0..3 {
+                    let s = f32::from(src[c]) * tint[c];
+                    dst[c] = ((s * sa + f32::from(dst[c]) * da * (1.0 - sa)) / a).round() as u8;
+                }
+                dst[3] = (a * 255.0).round() as u8;
+            }
+        }
+    }
+    Some(out)
 }
 
 impl Flat {
@@ -554,6 +595,20 @@ mod tests {
         assert_eq!(f.normals.len(), 6);
         assert_eq!(f.mesh.vertices.len(), 24);
         assert_eq!(f.mesh.indices.len(), 36);
+    }
+
+    /// A tinted base layer under an opaque overlay pixel: the tint shows only where the overlay is clear.
+    #[test]
+    fn composite_tints_each_layer_and_stacks_them() {
+        let image = |px: [[u8; 4]; 2]| Image {
+            width: 2,
+            height: 1,
+            rgba: px.concat(),
+        };
+        let base = image([[200, 200, 200, 255], [200, 200, 200, 255]]);
+        let overlay = image([[10, 20, 30, 255], [0, 0, 0, 0]]);
+        let out = composite(&[(base, 0xFF_0000), (overlay, 0xFF_FFFF)]).unwrap();
+        assert_eq!(out.rgba, [10, 20, 30, 255, 200, 0, 0, 255]);
     }
 
     /// Eating drives the item toward the mouth: at the start of a use it matches the plain pose,

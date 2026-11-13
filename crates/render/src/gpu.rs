@@ -858,8 +858,12 @@ impl Renderer {
         });
         self.frames = Some(frames);
         self.item_meshes.clear();
-        let layers = std::iter::once((None, items.atlas))
-            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
+        let layers = std::iter::once((None, items.atlas)).chain(
+            items
+                .sprites
+                .into_iter()
+                .map(|((_, path), m)| (Some(path), m)),
+        );
         for (tex, mesh) in layers {
             if let Some(tex) = &tex {
                 // A map not yet received has no texture and is not drawn.
@@ -1176,8 +1180,8 @@ impl Renderer {
     fn resolve_held(&mut self, kind: HeldKind) -> Held {
         let state = match kind {
             HeldKind::Block(state) => state,
-            HeldKind::Item { id, damage } => {
-                if let Some(flat) = self.flat_item(id, damage) {
+            HeldKind::Item { id, damage, dye } => {
+                if let Some(flat) = self.flat_item(id, damage, dye) {
                     return flat;
                 }
                 if !(1..256).contains(&id) {
@@ -1220,20 +1224,28 @@ impl Renderer {
         let source = self.source.as_mut();
         let found = name.zip(source).and_then(|(name, source)| {
             let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-            hand::flat_model(&mut read, name).map(|m| m.0)
+            hand::flat_model(&mut read, name).and_then(|m| m.0.into_iter().next())
         });
         self.item_textures.insert((id, damage), found.clone());
         found
     }
 
-    /// The extruded sprite of a `builtin/generated` item model, with its `layer0` texture uploaded.
-    /// shortcut: only `layer0`, untinted (leather armor, potions, spawn eggs lose color and overlay).
-    fn flat_item(&mut self, id: i16, damage: i16) -> Option<Held> {
+    /// The extruded sprite of a `builtin/generated` item model: every `layerN` texture tinted by
+    /// `ItemColors` (`dye` is the leather `display.color`) and drawn over the previous one.
+    fn flat_item(&mut self, id: i16, damage: i16, dye: Option<i32>) -> Option<Held> {
         let name = world::inventory::items::model(id, damage)?;
         let source = self.source.as_mut()?;
         let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-        let (texture, display) = hand::flat_model(&mut read, name)?;
-        let image = decode_png(&read(&texture)?)?;
+        let (textures, display) = hand::flat_model(&mut read, name)?;
+        let layers: Vec<_> = textures
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let tint = world::inventory::items::tint(id, damage, dye, i);
+                Some((decode_png(&read(t)?)?, tint))
+            })
+            .collect();
+        let image = hand::composite(&layers)?;
         let view = upload_texture(
             &self.device,
             &self.queue,

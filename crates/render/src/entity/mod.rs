@@ -72,6 +72,8 @@ pub struct EntityDraw {
     pub held_glint: bool,
     /// Damage value of the held item, which picks the model of block and variant items.
     pub held_damage: i16,
+    /// `display.color` of held leather armor.
+    pub held_dye: Option<i32>,
     /// Dropped items (object 2): the stack shown.
     pub stack: Option<item::Stack>,
     /// `EntityItem.hoverStart`: phase of the bob and the spin.
@@ -1485,6 +1487,7 @@ mod tests {
             armor_glint: [false; 4],
             held_glint: false,
             held_damage: 0,
+            held_dye: None,
             stack: None,
             hover_start: 0.0,
             hang: Default::default(),

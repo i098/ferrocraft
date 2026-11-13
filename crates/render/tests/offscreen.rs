@@ -178,7 +178,11 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         &mut r,
         0.0,
         Some(Hand {
-            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            held: Some(HeldKind::Item {
+                id: 276,
+                damage: 0,
+                dye: None,
+            }),
             ..bare
         }),
     );
@@ -186,7 +190,11 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         &mut r,
         0.0,
         Some(Hand {
-            held: Some(HeldKind::Item { id: 50, damage: 0 }),
+            held: Some(HeldKind::Item {
+                id: 50,
+                damage: 0,
+                dye: None,
+            }),
             ..bare
         }),
     );
@@ -199,7 +207,11 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         &mut r,
         0.0,
         Some(Hand {
-            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            held: Some(HeldKind::Item {
+                id: 276,
+                damage: 0,
+                dye: None,
+            }),
             glint: true,
             ..bare
         }),
@@ -222,7 +234,11 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         &mut r,
         0.0,
         Some(Hand {
-            held: Some(HeldKind::Item { id: 276, damage: 0 }),
+            held: Some(HeldKind::Item {
+                id: 276,
+                damage: 0,
+                dye: None,
+            }),
             ..bare
         }),
     );
@@ -250,6 +266,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),
@@ -544,6 +561,7 @@ fn burning_entity_and_first_person_fire() {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),
@@ -641,6 +659,7 @@ fn hurt_entity_flashes_red() {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),
@@ -709,6 +728,7 @@ fn player_in_leather() -> EntityDraw {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),
@@ -861,6 +881,7 @@ fn projection_matches_a_drawn_entity() {
         armor_glint: [false; 4],
         held_glint: false,
         held_damage: 0,
+        held_dye: None,
         stack: None,
         hover_start: 0.0,
         hang: Default::default(),
@@ -917,6 +938,7 @@ fn held_and_dropped_items_draw_as_models() {
             damage: 0,
             count,
             glint: false,
+            dye: None,
         }),
         age: 12.0,
         ..player_in_leather()
@@ -1008,6 +1030,7 @@ fn paintings_frames_and_maps_draw() {
             damage,
             count: 1,
             glint: false,
+            dye: None,
         })
     };
     let draws = [
@@ -1078,6 +1101,7 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
             damage,
             count: 1,
             glint: false,
+            dye: None,
         })
     };
     // Timer 80 flashes (80 / 5 is even), timer 8 does not, timer 3 flashes while it pulses.
@@ -1127,4 +1151,99 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
         tints.push(sum);
     }
     assert_ne!(tints[3], tints[4], "red sand must differ from sand");
+}
+
+/// Share of red in the pixels that differ from `base`.
+fn red_share(base: &[u8], frame: &[u8]) -> f64 {
+    let (mut red, mut all) = (0.0, 0.0);
+    for (_, c) in base.chunks(4).zip(frame.chunks(4)).filter(|(a, c)| a != c) {
+        red += f64::from(c[0]);
+        all += f64::from(c[0]) + f64::from(c[1]) + f64::from(c[2]);
+    }
+    red / all.max(1.0)
+}
+
+/// Leather armor, potions and spawn eggs keep their tint and second layer in the hand and as
+/// drops (`ItemColors`, `ItemModelGenerator` layers); `ITEMS_PROOF_DIR` keeps the frames.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn tinted_items_keep_color_and_overlay() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(640, 360, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 67.6, -2.5],
+        yaw: 0.0,
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let proof = std::env::var_os("ITEMS_PROOF_DIR").map(std::path::PathBuf::from);
+    let save = |name: &str, image: &[u8]| {
+        if let Some(dir) = &proof {
+            encode_png(&dir.join(name), 640, 360, image).unwrap();
+        }
+    };
+    let held = |r: &mut Renderer, name: &str, id: i16, damage: i16, dye: Option<i32>| {
+        r.set_hand(Some(Hand {
+            held: Some(HeldKind::Item { id, damage, dye }),
+            swing: 0.0,
+            lowered: 0.0,
+            using: None,
+            glint: false,
+        }));
+        let image = r.render_to_rgba(&cam, &[]).2;
+        save(name, &image);
+        image
+    };
+    r.set_hand(None);
+    let clear = r.render_to_rgba(&cam, &[]).2;
+    let brown = held(&mut r, "hand-cap-brown.png", 298, 0, None);
+    let red = held(&mut r, "hand-cap-red.png", 298, 0, Some(0xFF_0000));
+    let blue = held(&mut r, "hand-cap-blue.png", 298, 0, Some(0x00_00FF));
+    assert!(red_share(&clear, &red) > red_share(&clear, &brown));
+    assert!(red_share(&clear, &brown) > red_share(&clear, &blue));
+    // Splash regeneration: pink liquid layer under the bottle layer; spawn creeper: green egg.
+    let potion = held(&mut r, "hand-potion.png", 373, 16385, None);
+    let egg = held(&mut r, "hand-egg.png", 383, 50, None);
+    assert_ne!(potion, egg);
+
+    r.set_hand(None);
+    let drop = |x: f64, id: i16, damage: i16, dye: Option<i32>| EntityDraw {
+        class: Class::Object(2),
+        pos: [x, 66.0, 1.0],
+        size: (0.25, 0.25),
+        stack: Some(render::item::Stack {
+            id,
+            damage,
+            count: 1,
+            glint: false,
+            dye,
+        }),
+        age: 12.0,
+        ..player_in_leather()
+    };
+    let draws = [
+        drop(5.0, 298, 0, Some(0xFF_0000)),
+        drop(7.0, 299, 0, Some(0x00_00FF)),
+        drop(9.0, 373, 16385, None),
+        drop(11.0, 383, 50, None),
+    ];
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    save("drops.png", &image);
+    let untinted = [
+        drop(5.0, 298, 0, None),
+        drop(7.0, 299, 0, None),
+        drop(9.0, 373, 0, None),
+        drop(11.0, 383, 0, None),
+    ];
+    r.set_entities(&untinted);
+    let plain = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(image, plain, "dye and potion damage must change the drops");
 }

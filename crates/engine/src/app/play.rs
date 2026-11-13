@@ -389,6 +389,7 @@ impl App {
     }
 
     fn chat_tick(&mut self) {
+        self.input.tick_chat();
         if let Some(line) = self.input.take_chat_submit() {
             if let Some(s) = self.link.session() {
                 let r = s.send_chat(&line);
@@ -1057,6 +1058,18 @@ impl App {
         }
     }
 
+    /// `GuiChat.keyTyped` scrolls `getLineCount() - 1` for PageUp and the
+    /// negative for PageDown.
+    fn scroll_chat(&mut self, action: Action) {
+        let open = self.input.chat_input().is_some();
+        let lines = self.hud.chat.settings.line_count(true) - 1;
+        match action {
+            Action::ChatScroll(lines) => self.hud.chat.scroll(lines, open),
+            Action::ChatPage(step) => self.hud.chat.scroll(step * lines, true),
+            _ => {}
+        }
+    }
+
     /// Actions that change only what the client shows.
     fn view_action(&mut self, action: Action) {
         match action {
@@ -1068,10 +1081,7 @@ impl App {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();
             }
-            Action::ChatScroll(step) => {
-                let open = self.input.chat_input().is_some();
-                self.hud.chat.scroll(step * 7, open);
-            }
+            Action::ChatScroll(_) | Action::ChatPage(_) => self.scroll_chat(action),
             Action::Debug(DebugCombo::AdvancedTooltips) => {
                 let on = !self.ui.settings.advanced_item_tooltips;
                 self.ui.settings.advanced_item_tooltips = on;

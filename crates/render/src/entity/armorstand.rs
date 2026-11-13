@@ -334,4 +334,86 @@ mod tests {
             (0.5, [0.0, 24.0, 0.0])
         );
     }
+
+    fn mesh(d: &EntityDraw) -> MeshData {
+        let mut out = MeshData::default();
+        draw(&mut out, d, &Skins::flat());
+        out
+    }
+
+    fn height(m: &MeshData) -> f32 {
+        let ys = m.vertices.iter().map(|v| v.pos[1]);
+        ys.clone().fold(f32::MIN, f32::max) - ys.fold(f32::MAX, f32::min)
+    }
+
+    #[test]
+    fn the_flags_add_and_remove_whole_boxes_of_24_vertices() {
+        let count = |flags| {
+            let mut d = stand();
+            d.look.stand.flags = flags;
+            mesh(&d).vertices.len()
+        };
+        let plain = count(0);
+        // Two sticks, the shoulder stick, two legs, body and head are boxes; the plate is one more.
+        assert_eq!(plain % 24, 0);
+        assert_eq!(count(ARMS), plain + 2 * 24, "two arms");
+        assert_eq!(count(NO_BASE_PLATE), plain - 24, "no plate");
+    }
+
+    #[test]
+    fn a_small_stand_is_about_half_as_tall_and_an_invisible_one_keeps_only_armor() {
+        let mut d = stand();
+        let tall = height(&mesh(&d));
+        // Head top 30 px above the feet in a 16 px block, plus nothing above it.
+        assert!((tall - 1.875).abs() < 0.05, "{tall}");
+        d.look.stand.flags = SMALL;
+        let small = height(&mesh(&d));
+        assert!((0.5..0.65).contains(&(small / tall)), "{small} / {tall}");
+        d.invisible = true;
+        assert!(mesh(&d).vertices.is_empty());
+        d.armor[3] = 310;
+        assert!(!mesh(&d).vertices.is_empty());
+    }
+
+    #[test]
+    fn the_right_arm_hangs_from_the_shoulder_on_the_side_vanilla_puts_it() {
+        let mut d = stand();
+        d.yaw = 0.0;
+        let plain = mesh(&d);
+        // The right arm points straight forward; the left one hangs.
+        d.look.stand = StandLook::default().with_pose([
+            None,
+            None,
+            Some([0.0; 3]),
+            Some([-90.0, 0.0, 0.0]),
+            None,
+            None,
+        ]);
+        d.look.stand.flags = ARMS;
+        let added: Vec<_> = mesh(&d)
+            .vertices
+            .into_iter()
+            .filter(|v| !plain.vertices.iter().any(|p| p.pos == v.pos))
+            .collect();
+        assert_eq!(added.len(), 48);
+        let side = |pos: bool| -> (f32, f32, f32) {
+            let v: Vec<_> = added.iter().filter(|v| (v.pos[0] > 0.0) == pos).collect();
+            assert_eq!(v.len(), 24);
+            let mean = v.iter().map(|v| v.pos[0]).sum::<f32>() / 24.0;
+            let lo = v.iter().map(|v| v.pos[1]).fold(f32::MAX, f32::min);
+            let hi = v.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+            (mean, lo, hi)
+        };
+        // Pivots are x = ±5 px at y = 22 px and the arm box spans 2 px outward, so its centre is ±6 px; entity yaw 0 faces +z, so the
+        // model right arm is at world -x.
+        let (x_r, lo_r, hi_r) = side(false);
+        let (x_l, lo_l, _) = side(true);
+        assert!(
+            (x_r + 6.0 / 16.0).abs() < 0.03 && (x_l - 6.0 / 16.0).abs() < 0.03,
+            "{x_r} {x_l}"
+        );
+        // Raised: spans about 22 px ± 2 around the pivot height; hanging: reaches below 12 px.
+        assert!(lo_r > 20.0 / 16.0 && hi_r < 26.0 / 16.0, "{lo_r} {hi_r}");
+        assert!(lo_l < 13.0 / 16.0, "{lo_l}");
+    }
 }

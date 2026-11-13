@@ -153,19 +153,4 @@ fn armor_stands_draw_their_model_pose_and_equipment() {
         r.render_to_rgba(&cam, &[]).2,
         "armor of an invisible stand"
     );
-
-    // The arms flag adds the arms; the small flag shrinks the picture.
-    let mut no_arms = draws[1].clone();
-    no_arms.look.stand.flags &= !4;
-    r.set_entities(&[no_arms]);
-    let without = r.render_to_rgba(&cam, &[]).2;
-    r.set_entities(&[draws[1].clone()]);
-    assert_ne!(without, r.render_to_rgba(&cam, &[]).2, "arms flag");
-    let mut grown = draws[2].clone();
-    grown.look.stand.flags = 4;
-    grown.child = false;
-    r.set_entities(&[grown]);
-    let tall = r.render_to_rgba(&cam, &[]).2;
-    r.set_entities(&[draws[2].clone()]);
-    assert_ne!(tall, r.render_to_rgba(&cam, &[]).2, "small flag");
 }

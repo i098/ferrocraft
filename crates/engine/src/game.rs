@@ -438,17 +438,7 @@ impl Game {
                 title,
                 slots,
                 horse,
-            } => Some(if self.inv.open_window(id, &kind, title, slots) {
-                if let Some(w) = &mut self.inv.open {
-                    // `canWearArmor`: only a plain horse (type 0) wears armor.
-                    w.horse_armor = horse
-                        .and_then(|h| self.entities.get(h))
-                        .is_some_and(|e| e.meta.horse == Some(0));
-                }
-                Effect::OpenWindow
-            } else {
-                Effect::RejectWindow(id)
-            }),
+            } => Some(self.open_window(id, &kind, title, slots, horse)),
             NetEvent::SignEditorOpen { pos } => Some(Effect::EditSign(pos)),
             NetEvent::PluginMessage { channel, data } if channel == "MC|TrList" => {
                 self.set_trades(&data);
@@ -749,6 +739,26 @@ impl Game {
                 p.vel[2] += push[2];
             }
         }
+    }
+
+    fn open_window(
+        &mut self,
+        id: u8,
+        kind: &str,
+        title: String,
+        slots: u8,
+        horse: Option<i32>,
+    ) -> Effect {
+        if !self.inv.open_window(id, kind, title, slots) {
+            return Effect::RejectWindow(id);
+        }
+        if let Some(w) = &mut self.inv.open {
+            // `canWearArmor`: only a plain horse (type 0) wears armor.
+            w.horse_armor = horse
+                .and_then(|h| self.entities.get(h))
+                .is_some_and(|e| e.meta.horse == Some(0));
+        }
+        Effect::OpenWindow
     }
 
     /// `EntityPlayerSP.isRidingHorse`: the vehicle is a horse with a saddle.

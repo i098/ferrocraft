@@ -765,16 +765,7 @@ impl ContainerScreen {
                 modal(c, lay.texture, l, t, 0, 0, lay.width, rows * 18 + 17);
                 modal(c, lay.texture, l, t + rows * 18 + 17, 0, 126, lay.width, 96);
             }
-            Kind::Horse(n) => {
-                modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
-                // `GuiScreenHorseInventory`: the chest and armor slot backgrounds, then the horse model.
-                if n > 2 {
-                    modal(c, lay.texture, l + 79, t + 17, 0, lay.height, 90, 54);
-                }
-                if inv.open.as_ref().is_some_and(|w| w.horse_armor) {
-                    modal(c, lay.texture, l + 7, t + 35, 0, lay.height + 54, 18, 18);
-                }
-            }
+            Kind::Horse(n) => self.draw_horse_background(c, inv, n, l, t),
             Kind::Furnace => {
                 modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
                 let p = inv
@@ -808,6 +799,18 @@ impl ContainerScreen {
             _ => modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height),
         }
         // shortcut: the 3D player and horse models (drawEntityOnScreen) wait for the entity renderer
+    }
+
+    /// `GuiScreenHorseInventory`: the window, the chest and armor slot backgrounds, then the horse model.
+    fn draw_horse_background(&self, c: &mut dyn Canvas, inv: &Inventory, n: u8, l: i32, t: i32) {
+        let lay = &self.layout;
+        modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height);
+        if n > 2 {
+            modal(c, lay.texture, l + 79, t + 17, 0, lay.height, 90, 54);
+        }
+        if inv.open.as_ref().is_some_and(|w| w.horse_armor) {
+            modal(c, lay.texture, l + 7, t + 35, 0, lay.height + 54, 18, 18);
+        }
     }
 
     /// `drawGuiContainerForegroundLayer` of each survival screen.

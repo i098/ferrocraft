@@ -315,7 +315,10 @@ impl Skins {
     /// where black adds nothing.
     fn clear_black(&mut self, slot: u32) {
         let base = (slot * SLOT) as usize * WIDTH as usize * 4;
-        for px in self.rgba[base..base + (SLOT * WIDTH * 4) as usize].as_chunks_mut::<4>().0 {
+        for px in self.rgba[base..base + (SLOT * WIDTH * 4) as usize]
+            .as_chunks_mut::<4>()
+            .0
+        {
             if px[..3] == [0, 0, 0] {
                 px[3] = 0;
             }

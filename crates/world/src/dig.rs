@@ -832,28 +832,45 @@ pub fn creature(kind: Kind) -> Creature {
 /// `EnchantmentHelper.getModifierForCreature`: sharpness (16) 1.25 per level, smite (17) against the
 /// undead and bane of arthropods (18) against arthropods 2.5 per level.
 pub fn enchant_bonus(held: &crate::inventory::Slot, target: Creature) -> f32 {
-    use crate::inventory::Tag;
-    let Some(nbt) = held.as_ref().and_then(|s| s.nbt.as_ref()) else {
-        return 0.0;
-    };
-    let Some((_, Tag::List(list))) = nbt.root.iter().find(|(k, _)| k == "ench") else {
-        return 0.0;
-    };
-    let short = |c: &[(String, Tag)], key: &str| match c.iter().find(|(k, _)| k == key) {
-        Some((_, Tag::Short(v))) => i32::from(*v),
-        _ => 0,
-    };
-    list.iter()
-        .map(|t| {
-            let Tag::Compound(c) = t else { return 0.0 };
-            let level = short(c, "lvl") as f32;
-            match (short(c, "id"), target) {
-                (16, _) => level * 1.25,
-                (17, Creature::Undead) | (18, Creature::Arthropod) => level * 2.5,
-                _ => 0.0,
-            }
+    enchantments(held)
+        .map(|(id, level)| match (id, target) {
+            (16, _) => level as f32 * 1.25,
+            (17, Creature::Undead) | (18, Creature::Arthropod) => level as f32 * 2.5,
+            _ => 0.0,
         })
         .sum()
+}
+
+/// `(id, lvl)` of each entry of the stack's `ench` tag.
+fn enchantments(stack: &crate::inventory::Slot) -> impl Iterator<Item = (i32, i32)> + '_ {
+    use crate::inventory::Tag;
+    let list = stack.as_ref().and_then(|s| s.nbt.as_ref()).and_then(|nbt| {
+        match nbt.root.iter().find(|(k, _)| k == "ench") {
+            Some((_, Tag::List(list))) => Some(list),
+            _ => None,
+        }
+    });
+    list.into_iter().flatten().filter_map(|t| {
+        let Tag::Compound(c) = t else { return None };
+        let short = |key: &str| match c.iter().find(|(k, _)| k == key) {
+            Some((_, Tag::Short(v))) => i32::from(*v),
+            _ => 0,
+        };
+        Some((short("id"), short("lvl")))
+    })
+}
+
+/// `EnchantmentHelper.getHighestEnchantmentLevel`: the highest level of enchantment `id` on any of `stacks`.
+pub fn highest_enchant_level<'a>(
+    stacks: impl IntoIterator<Item = &'a crate::inventory::Slot>,
+    id: i32,
+) -> i32 {
+    stacks
+        .into_iter()
+        .flat_map(enchantments)
+        .filter(|(i, _)| *i == id)
+        .map(|(_, level)| level)
+        .fold(0, i32::max)
 }
 
 #[cfg(test)]
@@ -1266,5 +1283,8 @@ mod tests {
         assert_eq!(enchant_bonus(&enchanted(18, 1), Creature::Arthropod), 2.5);
         assert_eq!(enchant_bonus(&enchanted(34, 3), Creature::Undead), 0.0);
         assert_eq!(enchant_bonus(&None, Creature::Undead), 0.0);
+        let worn = [enchanted(8, 1), None, enchanted(8, 3), enchanted(16, 5)];
+        assert_eq!(highest_enchant_level(&worn, 8), 3);
+        assert_eq!(highest_enchant_level(&worn, 9), 0);
     }
 }

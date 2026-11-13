@@ -736,6 +736,41 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_line_over_the_java_cap_is_kept_unsent_and_the_next_line_is_still_served() {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+
+        // Chat.java throws above 64 KiB, which would end the host: a server line this long must never be sent.
+        let big = "§".repeat(33_000);
+        assert!(big.len() > 1 << 16);
+        assert_eq!(host.chat(ChatKind::Chat, &big), ChatVerdict::Keep);
+
+        let verdict = thread::scope(|scope| {
+            let sender = scope.spawn(|| host.chat(ChatKind::Chat, "ok"));
+            let mut request = [0; 8];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, &[b'C', 0, 0, 0, 0, 2, b'o', b'k']);
+            stream.write_all(&[1]).unwrap();
+            sender.join().unwrap()
+        });
+        assert_eq!(verdict, ChatVerdict::Cancel);
+
+        host.stop();
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn a_player_tick_without_an_answer_stalls_until_the_late_answer_and_that_answer_is_dropped() {
         let (l, port) = listener();
         let link = link();

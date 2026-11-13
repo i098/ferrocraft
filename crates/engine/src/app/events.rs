@@ -7,6 +7,7 @@ use crate::game_state::Reaction;
 use crate::link::Link;
 use ferrocraft_net_client::{split_address, NetEvent, PackStatus, PlayerListEvent, TileEvent};
 use gui::inventory::ContainerScreen;
+use gui::scoreboard::TeamInfo;
 use gui::screens::{Connecting, Death, EditSign, Effect as UiEffect};
 use gui::tablist::TabEntry;
 use input_audio::sound::blocks::wire_pitch;
@@ -567,9 +568,8 @@ impl App {
                 name,
                 display,
                 mode,
-            } => {
-                sb.set_objective(&name, &display, mode);
-            }
+                hearts,
+            } => sb.set_objective(&name, &display, mode, hearts),
             NetEvent::ScoreUpdate {
                 name,
                 objective,
@@ -582,8 +582,18 @@ impl App {
                 mode,
                 prefix,
                 suffix,
+                visibility,
+                color,
                 members,
-            } => sb.set_team(&name, mode, &prefix, &suffix, &members),
+            } => {
+                let info = TeamInfo {
+                    prefix,
+                    suffix,
+                    visibility,
+                    color,
+                };
+                sb.set_team(&name, mode, &info, &members);
+            }
             other => return Err(other),
         }
         Ok(())
@@ -700,6 +710,7 @@ impl App {
                         ping: p.ping,
                         gamemode: p.gamemode,
                         display: p.display,
+                        ..TabEntry::default()
                     });
                 }
                 return;

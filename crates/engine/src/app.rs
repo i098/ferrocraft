@@ -29,7 +29,7 @@ use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
     AssetSource, Camera, CapeSway, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand,
-    HeldKind, Look, Particles, Renderer, Thrower, UseAction, Using,
+    HeldKind, Look, Particles, Renderer, TeamTag, Thrower, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -573,6 +573,19 @@ impl App {
         }
     }
 
+    /// The scoreboard's say on a remote player's tag: the team-formatted name (`getDisplayName`), the team's
+    /// visibility for this viewer and the below-name line.
+    fn team_tag(&self, e: &Entity, d: &mut EntityDraw) {
+        let (Kind::Player, Some(name), sb) = (e.kind, &e.name, &self.hud.scoreboard) else {
+            return;
+        };
+        d.name = Some(sb.format_name(name));
+        d.team_tag = TeamTag {
+            shown: sb.name_tag_shown(name, &self.args.username),
+            below: sb.below_name(name),
+        };
+    }
+
     /// The local player as a model, for F5 views.
     /// The player who cast a fishing rod, as `FishingBobberRenderer` reads it.
     fn thrower(&self, id: i32, frac: f64) -> Option<Thrower> {
@@ -660,6 +673,7 @@ impl App {
             skin: None,
             eye_height: eye_height(self.input.sneaking()) as f32,
             always_name: false,
+            team_tag: TeamTag::default(),
             pointed: false,
             ridden: false,
             child: false,
@@ -717,6 +731,7 @@ impl App {
             .collect();
         for (e, d) in self.game.entities.iter().zip(&mut draws) {
             d.view = [cam.yaw, cam.pitch];
+            self.team_tag(e, d);
             if e.kind == Kind::Object(90) {
                 d.line = self.thrower(e.owner, frac).map(|t| t.rod_tip());
             }
@@ -979,6 +994,8 @@ impl App {
                     status: Some(&status),
                     hotbar,
                     player_list: self.input.player_list_held(),
+                    now_ms: crate::game::now_ms(),
+                    local_player: &self.args.username,
                     held_item_tooltips: self.ui.settings.held_item_tooltips,
                 },
             );
@@ -1267,6 +1284,7 @@ fn entity_draw(
         burning: e.burning(),
         eye_height: e.eye_height(),
         always_name: e.always_name(),
+        team_tag: TeamTag::default(),
         pointed,
         ridden,
         child: e.is_child(),

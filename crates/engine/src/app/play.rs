@@ -280,6 +280,11 @@ impl App {
     /// Tick particles of arrows, thrown entities, fireballs and primed TNT (`onUpdate` of each class).
     fn projectile_fx(g: &crate::game::Game, particles: &mut render::Particles) {
         let block = |x, y, z| g.store.get_block(x, y, z);
+        let b = g.body();
+        let body = g
+            .player
+            .is_some()
+            .then(|| ([b[0], b[1], b[2]], [b[3], b[4], b[5]]));
         for e in g.entities.iter().filter(|e| !e.is_dead()) {
             let vel = [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]);
             let moving = vel != [0.0; 3];
@@ -298,7 +303,11 @@ impl App {
                 61 | 62 | 65 | 73 | 75 => {
                     // `EntityThrowable.onUpdate`: the client traces blocks along the motion and runs `onImpact`.
                     let next = [0, 1, 2].map(|i| e.pos[i] + vel[i]);
-                    if moving && matches!(object, 61 | 62 | 65) && g.line_blocked(e.pos, next) {
+                    if moving
+                        && matches!(object, 61 | 62 | 65)
+                        && (g.line_blocked(e.pos, next)
+                            || g.entities.hit_along(e.pos, next, e.age < 5, body).is_some())
+                    {
                         particles.thrown_impact(object, e.pos);
                     }
                     (wet(), false)
@@ -1253,6 +1262,30 @@ mod tests {
         let (g, mut ps) = pearl_flying_toward_x(false);
         App::projectile_fx(&g, &mut ps);
         assert_eq!(ps.len(), 0);
+    }
+
+    #[test]
+    fn a_pearl_flying_into_an_entity_makes_portal_specks() {
+        let (mut g, mut ps) = pearl_flying_toward_x(false);
+        g.entities.apply(EntityEvent::SpawnObject {
+            id: 8,
+            kind: 1,
+            pos: [64, 2048, 16],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
+    }
+
+    #[test]
+    fn a_pearl_flying_into_the_local_player_makes_portal_specks() {
+        let (mut g, mut ps) = pearl_flying_toward_x(false);
+        g.player = Some(world::Player::new([1.5, 64.0, 0.5], 0.0));
+        App::projectile_fx(&g, &mut ps);
+        assert_eq!(ps.len(), 32);
     }
 
     #[test]

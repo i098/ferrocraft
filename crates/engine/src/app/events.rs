@@ -531,31 +531,6 @@ impl App {
         Ok(())
     }
 
-    /// A received chat line: the mods' `ClientChatReceivedEvent` first, which may cancel or replace it.
-    fn print_chat(&mut self, mut runs: Vec<ferrocraft_net_client::Styled>) {
-        if let Some(mods) = &self.mods {
-            match mods.chat(
-                ferrocraft_modhost::ChatKind::Chat,
-                &ferrocraft_net_client::formatted_text(&runs),
-            ) {
-                ferrocraft_modhost::ChatVerdict::Keep => {}
-                ferrocraft_modhost::ChatVerdict::Cancel => return,
-                ferrocraft_modhost::ChatVerdict::Replace(text) => {
-                    runs = vec![ferrocraft_net_client::Styled {
-                        format: String::new(),
-                        text,
-                        ..Default::default()
-                    }];
-                }
-            }
-        }
-        let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
-        let open = self.input.chat_input().is_some();
-        self.hud
-            .chat
-            .print(runs, 0, self.hud.update_counter, open, m);
-    }
-
     fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {

@@ -40,6 +40,10 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn fall_distance(&self) -> f32 {
+        self.fall.distance()
+    }
+
     pub(super) fn swimming(&self) -> bool {
         self.water == Some(true)
     }

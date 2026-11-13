@@ -141,6 +141,8 @@ pub struct SizeMeta {
     pub arrow: Option<u8>,
     /// Item frames: metadata index 9, the rotation of the displayed item in eighths of a turn.
     pub rotation: Option<u8>,
+    /// Living entities: metadata index 9, the arrows stuck in the body (`getArrowCountInEntity`).
+    pub arrows: Option<u8>,
 }
 
 impl SizeMeta {
@@ -158,6 +160,7 @@ impl SizeMeta {
         self.skeleton = new.skeleton.or(self.skeleton);
         self.arrow = new.arrow.or(self.arrow);
         self.rotation = new.rotation.or(self.rotation);
+        self.arrows = new.arrows.or(self.arrows);
     }
 }
 

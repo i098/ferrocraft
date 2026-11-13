@@ -30,7 +30,7 @@ mod sky;
 mod weather;
 
 pub use hand::{Hand, HeldKind, UseAction, Using};
-pub use sky::{Environment, Fluid};
+pub use sky::{celestial_angle, Environment, Fluid};
 
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use blockent::{Banner, Skull, WornHead};

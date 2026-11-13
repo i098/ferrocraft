@@ -147,12 +147,23 @@ fn geometry(
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let held = (holds(d) && d.held != 0).then_some((d.held, d.held_damage));
     held.into_iter()
+        .chain(worn_block(d))
         .chain(dropped(d).map(|s| (s.id, s.damage)))
         .chain(super::block::wanted(d))
 }
 
 fn holds(d: &EntityDraw) -> bool {
-    matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51))
+    matches!(
+        d.class,
+        Class::Player { .. } | Class::Mob(54 | 57 | 51) | Class::Object(78)
+    )
+}
+
+/// `WornSkullLayer`: a block worn as a helmet by an armor stand, as its id and damage.
+fn worn_block(d: &EntityDraw) -> Option<(i16, i16)> {
+    let id = d.armor[3];
+    (d.class == Class::Object(78) && (1..256).contains(&id))
+        .then_some((id, d.look.stand.head_damage))
 }
 
 fn dropped(d: &EntityDraw) -> Option<Stack> {
@@ -317,6 +328,11 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
                 held(&mut out, d, m, level);
             }
         }
+        if let Some(key) = worn_block(d) {
+            if let Some(Some(m)) = models.get(&key) {
+                head(&mut out, d, m, level);
+            }
+        }
         if let Some(stack) = dropped(d) {
             if let Some(Some(m)) = models.get(&(stack.id, stack.damage)) {
                 out.dye = stack.dye;
@@ -327,6 +343,46 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
     out.dye = None;
     super::block::build(&mut out, draws, models, &light);
     out
+}
+
+/// `WornSkullLayer` for a block helmet: from the head's pivot and rotation (`ModelPart.transform`),
+/// down a quarter block, turned around and scaled by 0.625; `ItemInHandRenderer.render` doubles a
+/// block model and `RenderItem.renderItem` halves it. The `head` display transform of a block
+/// model is the identity.
+fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
+    let parts = model(d).parts;
+    let Some(head) = parts.first() else { return };
+    let xf = Xf::new(d, false);
+    let stance = if d.child {
+        chain(&[scale(0.7), translate(0.0, 1.0, 0.0)])
+    } else if d.sneaking {
+        translate(0.0, 0.2, 0.0)
+    } else {
+        ident()
+    };
+    let prepare = if m.gui3d { scale(2.0) } else { ident() };
+    let mat = chain(&[
+        stance,
+        translate(
+            head.pivot[0] / 16.0,
+            head.pivot[1] / 16.0,
+            head.pivot[2] / 16.0,
+        ),
+        rotate(head.rot[2].to_degrees(), 2),
+        rotate(head.rot[1].to_degrees(), 1),
+        rotate(head.rot[0].to_degrees(), 0),
+        translate(0.0, -0.25, 0.0),
+        rotate(180.0, 1),
+        scale3([0.625, -0.625, -0.625]),
+        prepare,
+        scale(0.5),
+    ]);
+    let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
+    let normal = |n: V3| {
+        let [x, y, z] = dir(&mat, n);
+        [-x, -y, z]
+    };
+    out.piece(m, &to_world, &normal, level, false, None);
 }
 
 /// Torches, `BlockTorch.getRenderType() == 2`: `ItemInHandLayer` tilts them as held blocks.
@@ -340,7 +396,14 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let parts = model(d).parts;
     let Some(arm) = parts.get(3) else { return };
     let xf = Xf::new(d, false);
+    // A small holder first shrinks and tilts the item (`ItemInHandLayer`, `isBaby`).
+    let child = if d.child && d.class == Class::Object(78) {
+        chain(&[translate(0.0, 0.625, 0.0), rotate(20.0, 0), scale(0.5)])
+    } else {
+        ident()
+    };
     let mut mat = chain(&[
+        child,
         translate(
             arm.pivot[0] / 16.0,
             arm.pivot[1] / 16.0,

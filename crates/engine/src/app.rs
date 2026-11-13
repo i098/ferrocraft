@@ -985,6 +985,7 @@ impl App {
             (self.cursor.0 / factor) as i32,
             (self.cursor.1 / factor) as i32,
         );
+        self.input.set_gui_size(scale.width, scale.height);
         let mut g = gui::Gui::new(scale, r.font(), 0);
         g.set_bidi(self.ui.bidirectional());
         self.draw_screen_effects(&mut g, (w, h), frac as f32);
@@ -1008,7 +1009,7 @@ impl App {
                 &mut g,
                 &gui::Frame {
                     partial_ticks: frac as f32,
-                    chat_input: self.input.chat_input(),
+                    chat_input: self.input.chat_field(),
                     debug: debug
                         .as_deref()
                         .filter(|_| self.show_debug)

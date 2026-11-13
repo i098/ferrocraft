@@ -7,11 +7,44 @@ pub mod sound;
 pub use actions::{scroll_slot, Action, DebugCombo};
 pub use keys::{control_from_lwjgl, lwjgl_from_control, Bind, Control, KeyBindings};
 
+use gui::screens::{Metrics, Mods, TextField};
 use std::collections::VecDeque;
 use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
+
+/// The font widths and the clipboard text a chat key needs.
+type ChatEnv<'a> = (&'a dyn Metrics, &'a mut String);
+
+/// Widths for callers with no font (`on_key`, tests): every char is 6 units wide.
+struct Mono;
+
+impl Metrics for Mono {
+    fn width(&self, s: &str) -> i32 {
+        6 * s.chars().count() as i32
+    }
+}
+
+/// The text before and after the caret.
+fn split_at_caret(field: &TextField) -> (&str, &str) {
+    let at = field
+        .text
+        .char_indices()
+        .nth(field.cursor())
+        .map_or(field.text.len(), |(b, _)| b);
+    field.text.split_at(at)
+}
+
+/// Puts `head + tail` in the field with the caret after `head`; a no-op when `head` is unchanged.
+fn replace_head(field: &mut TextField, head: String, tail: &str, m: &dyn Metrics) {
+    if field.text == format!("{head}{tail}") {
+        return;
+    }
+    let caret = head.chars().count();
+    field.set(&format!("{head}{tail}"), m);
+    field.set_cursor(caret, m);
+}
 
 /// Vanilla look scale: degrees per scaled mouse pixel.
 const DEGREES_PER_PIXEL: f32 = 0.15;
@@ -19,6 +52,8 @@ const DEGREES_PER_PIXEL: f32 = 0.15;
 const CHAT_MAX_CHARS: usize = 100;
 /// Vanilla `GuiNewChat` keeps 100 sent lines.
 const CHAT_HISTORY: usize = 100;
+/// GUI size before the engine reports one: the field only needs a width to scroll.
+const DEFAULT_GUI_SIZE: (i32, i32) = (640, 480);
 /// Trackpads report pixels; one wheel step per this many.
 const PIXELS_PER_STEP: f64 = 40.0;
 
@@ -94,7 +129,10 @@ pub struct InputState {
     was_sneaking: bool,
     scroll_px: f64,
     look: (f32, f32),
-    chat: Option<String>,
+    /// `GuiChat.inputField`.
+    chat: Option<TextField>,
+    gui_size: (i32, i32),
+    shift_down: bool,
     autocomplete: autocomplete::Autocomplete,
     chat_note: Option<String>,
     submit: Option<String>,
@@ -132,6 +170,8 @@ impl InputState {
             scroll_px: 0.0,
             look: (0.0, 0.0),
             chat: None,
+            gui_size: DEFAULT_GUI_SIZE,
+            shift_down: false,
             submit: None,
             history: Vec::new(),
             history_pos: None,
@@ -174,11 +214,23 @@ impl InputState {
     }
 
     pub fn on_window_event(&mut self, event: &WindowEvent) {
+        self.on_window_event_in(event, &Mono, &mut String::new());
+    }
+
+    /// `on_window_event` with what the chat field needs: the font widths that scroll it, and the
+    /// clipboard text for Ctrl+C, Ctrl+X and Ctrl+V (read before and written back after).
+    pub fn on_window_event_in(&mut self, event: &WindowEvent, m: &dyn Metrics, clip: &mut String) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     let text = event.text.as_deref();
-                    self.key_event(code, event.state.is_pressed(), event.repeat, text);
+                    self.key_event(
+                        code,
+                        event.state.is_pressed(),
+                        event.repeat,
+                        text,
+                        (m, clip),
+                    );
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -223,7 +275,9 @@ impl InputState {
             return;
         }
         if self.chat.is_some() {
-            self.actions.push_back(Action::ChatScroll(step));
+            // `GuiChat.handleMouseInput`: 7 lines a step, 1 with Shift held.
+            let lines = if self.shift_down { 1 } else { 7 };
+            self.actions.push_back(Action::ChatScroll(step * lines));
         } else if !self.screen_open {
             self.actions.push_back(Action::HotbarScroll(step));
         }
@@ -231,7 +285,7 @@ impl InputState {
 
     /// Key press/release. `text` is the character text of a press, used in chat mode.
     pub fn on_key(&mut self, code: KeyCode, pressed: bool, text: Option<&str>) {
-        self.key_event(code, pressed, false, text);
+        self.key_event(code, pressed, false, text, (&Mono, &mut String::new()));
     }
 
     /// Vanilla takes the screenshot in any screen, chat included. True when `code` is the
@@ -246,9 +300,17 @@ impl InputState {
         true
     }
 
-    fn key_event(&mut self, code: KeyCode, pressed: bool, repeat: bool, text: Option<&str>) {
+    fn key_event(
+        &mut self,
+        code: KeyCode,
+        pressed: bool,
+        repeat: bool,
+        text: Option<&str>,
+        env: ChatEnv,
+    ) {
         match code {
             KeyCode::ControlLeft | KeyCode::ControlRight => self.ctrl_down = pressed,
+            KeyCode::ShiftLeft | KeyCode::ShiftRight => self.shift_down = pressed,
             KeyCode::F3 if !pressed => self.f3_down = false,
             _ => {}
         }
@@ -256,7 +318,7 @@ impl InputState {
             return;
         }
         if self.chat.is_some() || self.screen_open {
-            self.modal_key(code, pressed, repeat, text);
+            self.modal_key(code, pressed, repeat, text, env);
             return;
         }
         if pressed && !repeat && self.hard_coded_key(code) {
@@ -266,10 +328,17 @@ impl InputState {
     }
 
     /// Key while chat or a GUI screen owns the keyboard.
-    fn modal_key(&mut self, code: KeyCode, pressed: bool, repeat: bool, text: Option<&str>) {
+    fn modal_key(
+        &mut self,
+        code: KeyCode,
+        pressed: bool,
+        repeat: bool,
+        text: Option<&str>,
+        env: ChatEnv,
+    ) {
         if self.chat.is_some() {
             if pressed {
-                self.chat_key(code, text);
+                self.chat_key(code, text, env);
             }
         } else if pressed && !repeat && code == KeyCode::Escape {
             self.actions.push_back(Action::CloseScreen);
@@ -342,38 +411,106 @@ impl InputState {
         self.history_pos = None;
         self.history_draft.clear();
         self.autocomplete = Default::default();
-        self.chat = Some(initial);
+        let mut field = self.new_chat_field();
+        field.set(&initial, &Mono);
+        self.chat = Some(field);
     }
 
-    fn chat_key(&mut self, code: KeyCode, text: Option<&str>) {
-        let Some(buf) = self.chat.as_mut() else {
+    /// `GuiChat.initGui`: a 100-unit field at the bottom, no frame, always focused.
+    fn new_chat_field(&self) -> TextField {
+        let (w, h) = self.gui_size;
+        let mut field = TextField::new(4, h - 12, w - 4, 12);
+        field.max_len = CHAT_MAX_CHARS;
+        field.background = false;
+        field.set_focused(true);
+        field
+    }
+
+    /// The scaled GUI size, which places and sizes the chat field (`GuiChat.initGui`).
+    pub fn set_gui_size(&mut self, w: i32, h: i32) {
+        self.gui_size = (w, h);
+        if let Some(f) = &mut self.chat {
+            (f.x, f.y, f.w) = (4, h - 12, w - 4);
+        }
+    }
+
+    /// The chat field, for drawing; `None` while chat is closed.
+    pub fn chat_field(&self) -> Option<&TextField> {
+        self.chat.as_ref()
+    }
+
+    /// `GuiChat.updateScreen`: the caret blink counter.
+    pub fn tick_chat(&mut self) {
+        if let Some(f) = &mut self.chat {
+            f.tick();
+        }
+    }
+
+    fn chat_key(&mut self, code: KeyCode, text: Option<&str>, (m, clip): ChatEnv) {
+        let Some(field) = self.chat.as_mut() else {
             return;
         };
         // `GuiChat.keyTyped`: Tab completes, every other key ends the wait and the name cycle.
-        let note = self.autocomplete.key(code == KeyCode::Tab, buf);
+        let note = Self::complete(&mut self.autocomplete, field, m, code == KeyCode::Tab);
         self.chat_note = note.or(self.chat_note.take());
         match code {
             KeyCode::Tab => {}
             KeyCode::Escape => self.chat = None,
             KeyCode::Enter | KeyCode::NumpadEnter => self.submit_chat(),
-            KeyCode::Backspace => {
-                buf.pop();
+            KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::PageUp | KeyCode::PageDown => {
+                self.scroll_key(code, m)
             }
-            KeyCode::ArrowUp => self.history_step(-1),
-            KeyCode::ArrowDown => self.history_step(1),
-            _ => {
-                for c in text.unwrap_or("").chars().filter(|&c| allowed_char(c)) {
-                    if buf.encode_utf16().count() + c.len_utf16() <= CHAT_MAX_CHARS {
-                        buf.push(c);
-                    }
-                }
-            }
+            _ => self.field_key(code, text, (m, clip)),
         }
+    }
+
+    /// Sent history on Up and Down, a page of chat lines on PageUp and PageDown.
+    fn scroll_key(&mut self, code: KeyCode, m: &dyn Metrics) {
+        match code {
+            KeyCode::ArrowUp => self.history_step(-1, m),
+            KeyCode::ArrowDown => self.history_step(1, m),
+            KeyCode::PageUp => self.actions.push_back(Action::ChatPage(1)),
+            _ => self.actions.push_back(Action::ChatPage(-1)),
+        }
+    }
+
+    /// The keys `GuiTextField.textboxKeyTyped` handles: caret, selection, delete, clipboard, text.
+    fn field_key(&mut self, code: KeyCode, text: Option<&str>, (m, clip): ChatEnv) {
+        let Some(field) = self.chat.as_mut() else {
+            return;
+        };
+        let mods = Mods {
+            ctrl: self.ctrl_down,
+            shift: self.shift_down,
+        };
+        let lwjgl = lwjgl_from_control(Control::Key(code)).unwrap_or(0);
+        // The key code goes with the first char only; more chars are an IME commit.
+        let mut chars = text.unwrap_or("").chars();
+        let first = chars.next().unwrap_or('\0');
+        field.key(lwjgl, first, mods, m, clip);
+        chars.for_each(|c| {
+            field.key(0, c, Mods::default(), m, clip);
+        });
+    }
+
+    /// Runs `autocomplete` on the text before the caret, as vanilla does, and keeps the rest.
+    fn complete(
+        ac: &mut autocomplete::Autocomplete,
+        field: &mut TextField,
+        m: &dyn Metrics,
+        tab: bool,
+    ) -> Option<String> {
+        let (head, tail) = split_at_caret(field);
+        let mut head = head.to_owned();
+        let tail = tail.to_owned();
+        let note = ac.key(tab, &mut head);
+        replace_head(field, head, &tail, m);
+        note
     }
 
     fn submit_chat(&mut self) {
         // Vanilla 1.8.9 uses Java `String.trim()`, which strips only chars <= U+0020 (keeps NBSP).
-        let line = self.chat.take().unwrap_or_default();
+        let line = self.chat.take().map(|f| f.text).unwrap_or_default();
         let line = line.trim_matches(|c| c <= ' ').to_owned();
         if line.is_empty() {
             return;
@@ -387,23 +524,26 @@ impl InputState {
     }
 
     /// `GuiChat.getSentHistory`: -1 older, +1 newer; past the newest restores the typed draft.
-    fn history_step(&mut self, dir: i32) {
+    fn history_step(&mut self, dir: i32, m: &dyn Metrics) {
         let len = self.history.len();
         let cur = self.history_pos.unwrap_or(len);
         let next = (cur as i32 + dir).clamp(0, len as i32) as usize;
         if next == cur {
             return;
         }
+        let Some(field) = self.chat.as_mut() else {
+            return;
+        };
         if next == len {
             self.history_pos = None;
-            self.chat = Some(std::mem::take(&mut self.history_draft));
+            field.set(&std::mem::take(&mut self.history_draft), m);
             return;
         }
         if self.history_pos.is_none() {
-            self.history_draft = self.chat.clone().unwrap_or_default();
+            self.history_draft = field.text.clone();
         }
         self.history_pos = Some(next);
-        self.chat = Some(self.history[next].clone());
+        field.set(&self.history[next], m);
     }
 
     /// The sent-message part of `GuiNewChat.clearChatMessages` (F3+D).
@@ -540,22 +680,19 @@ impl InputState {
     }
 
     pub fn chat_input(&self) -> Option<&str> {
-        self.chat.as_deref()
+        self.chat.as_ref().map(|f| f.text.as_str())
     }
 
     /// `GuiChat.setText(text, overwrite)` / `GuiTextField.writeText`: a chat click replaces the field
-    /// or writes at the cursor. Text over 100 UTF-16 units is cut, like the vanilla text field.
-    pub fn set_chat_text(&mut self, text: &str, overwrite: bool) {
-        let Some(buf) = self.chat.as_mut() else {
+    /// or writes at the caret. Text over 100 UTF-16 units is cut, like the vanilla text field.
+    pub fn set_chat_text(&mut self, text: &str, overwrite: bool, m: &dyn Metrics) {
+        let Some(field) = self.chat.as_mut() else {
             return;
         };
         if overwrite {
-            buf.clear();
-        }
-        for c in text.chars().filter(|&c| allowed_char(c)) {
-            if buf.encode_utf16().count() + c.len_utf16() <= CHAT_MAX_CHARS {
-                buf.push(c);
-            }
+            field.set(text, m);
+        } else {
+            field.write(text, m);
         }
     }
 
@@ -565,9 +702,14 @@ impl InputState {
     }
 
     /// `GuiChat.onAutocompleteResponse`; the returned line is the name list for the chat.
-    pub fn tab_response(&mut self, matches: &[String]) -> Option<String> {
-        let buf = self.chat.as_mut()?;
-        self.autocomplete.response(matches, buf)
+    pub fn tab_response(&mut self, matches: &[String], m: &dyn Metrics) -> Option<String> {
+        let field = self.chat.as_mut()?;
+        let (head, tail) = split_at_caret(field);
+        let mut head = head.to_owned();
+        let tail = tail.to_owned();
+        let note = self.autocomplete.response(matches, &mut head);
+        replace_head(field, head, &tail, m);
+        note
     }
 
     /// The name list a Tab cycle printed, for the chat.
@@ -584,11 +726,6 @@ impl InputState {
     pub fn wants_cursor_grab(&self) -> bool {
         self.chat.is_none() && !self.screen_open && self.grab_requested && self.focused
     }
-}
-
-/// `ChatAllowedCharacters.isAllowedCharacter`: no `§`, no control chars below space, no DEL.
-pub fn allowed_char(c: char) -> bool {
-    c != '\u{a7}' && c >= ' ' && c != '\u{7f}'
 }
 
 #[cfg(test)]
@@ -887,11 +1024,70 @@ mod tests {
     }
 
     #[test]
+    fn chat_caret_moves_edits_and_pastes() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        typ(&mut s, KeyCode::KeyA, "helo");
+        press(&mut s, KeyCode::ArrowLeft);
+        typ(&mut s, KeyCode::KeyL, "l");
+        assert_eq!(s.chat_input(), Some("hello"));
+        assert_eq!(s.chat_field().map(|f| f.cursor()), Some(4));
+        press(&mut s, KeyCode::Home);
+        press(&mut s, KeyCode::Delete);
+        assert_eq!(s.chat_input(), Some("ello"));
+        // Ctrl+A, Ctrl+C, End, Ctrl+V on a clipboard.
+        let mut clip = String::new();
+        let chord = |s: &mut InputState, k: KeyCode, clip: &mut String| {
+            s.key_event(KeyCode::ControlLeft, true, false, None, (&Mono, clip));
+            s.key_event(k, true, false, None, (&Mono, clip));
+            s.key_event(KeyCode::ControlLeft, false, false, None, (&Mono, clip));
+        };
+        chord(&mut s, KeyCode::KeyA, &mut clip);
+        chord(&mut s, KeyCode::KeyC, &mut clip);
+        assert_eq!(clip, "ello");
+        press(&mut s, KeyCode::End);
+        chord(&mut s, KeyCode::KeyV, &mut clip);
+        assert_eq!(s.chat_input(), Some("elloello"));
+        assert_eq!(s.chat_field().map(|f| f.cursor()), Some(8));
+    }
+
+    #[test]
+    fn chat_paste_stops_at_100_utf16_units() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        let mut clip = "a".repeat(99) + "😀";
+        s.key_event(KeyCode::ControlLeft, true, false, None, (&Mono, &mut clip));
+        s.key_event(KeyCode::KeyV, true, false, None, (&Mono, &mut clip));
+        assert_eq!(s.chat_input().map(|t| t.encode_utf16().count()), Some(99));
+    }
+
+    #[test]
+    fn chat_wheel_scrolls_7_lines_or_1_with_shift() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        s.wheel(1.0);
+        press(&mut s, KeyCode::ShiftLeft);
+        s.wheel(-1.0);
+        assert_eq!(
+            s.take_actions(),
+            [Action::ChatScroll(7), Action::ChatScroll(-1)]
+        );
+    }
+
+    #[test]
+    fn chat_page_keys_queue_a_page_scroll() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyT);
+        press(&mut s, KeyCode::PageUp);
+        press(&mut s, KeyCode::PageDown);
+        assert_eq!(
+            s.take_actions(),
+            [Action::ChatPage(1), Action::ChatPage(-1)]
+        );
+    }
+
+    #[test]
     fn chat_rejects_section_sign_and_del() {
-        assert!(!allowed_char('\u{a7}'));
-        assert!(!allowed_char('\u{7f}'));
-        assert!(!allowed_char('\n'));
-        assert!(allowed_char(' ') && allowed_char('é'));
         let mut s = InputState::default();
         press(&mut s, KeyCode::KeyT);
         typ(&mut s, KeyCode::KeyA, "a\u{a7}b\u{7f}c");

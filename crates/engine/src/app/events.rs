@@ -385,7 +385,7 @@ impl App {
             NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
             NetEvent::TabComplete(names) => {
-                if let Some(line) = self.input.tab_response(names) {
+                if let Some(line) = self.input.tab_response(names, &metrics!(self)) {
                     self.chat_note(&line);
                 }
             }

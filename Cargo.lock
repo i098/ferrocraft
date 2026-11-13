@@ -1605,6 +1605,7 @@ dependencies = [
 name = "input-audio"
 version = "0.1.0"
 dependencies = [
+ "gui",
  "rodio",
  "serde_json",
  "winit",

@@ -90,6 +90,24 @@ impl Ui {
         (r, effects)
     }
 
+    /// Runs `f` on the clipboard text; `read` pulls the system clipboard first (Ctrl chords), and a
+    /// change is written back, as for the screens.
+    pub fn with_clipboard<R>(&mut self, read: bool, f: impl FnOnce(&mut String) -> R) -> R {
+        if read {
+            if let Some(text) = self.system.as_mut().and_then(|c| c.get_text().ok()) {
+                self.clipboard = text;
+            }
+        }
+        let before = self.clipboard.clone();
+        let r = f(&mut self.clipboard);
+        if self.clipboard != before {
+            if let Some(sys) = &mut self.system {
+                let _ = sys.set_text(self.clipboard.clone());
+            }
+        }
+        r
+    }
+
     pub fn open(&mut self, m: &dyn Metrics, screen: Box<dyn Screen>) -> Vec<Effect> {
         self.run(m, false, |s, c| s.open(screen, c)).1
     }

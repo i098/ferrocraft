@@ -10,6 +10,7 @@ macro_rules! metrics {
 
 mod events;
 mod input;
+mod mod_boot;
 mod own_sounds;
 mod pack;
 mod play;
@@ -73,7 +74,7 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     hud: gui::Hud,
-    /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set.
+    /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set or the game dir is a OneClient cluster.
     mods: Option<ferrocraft_modhost::ModHost>,
     /// The resource pack the server sent (S48): on top of the selected packs until the world is left.
     server_pack: Option<std::path::PathBuf>,
@@ -1215,12 +1216,7 @@ impl ApplicationHandler for App {
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
-        if let Some(cfg) = ferrocraft_modhost::Config::from_env() {
-            match ferrocraft_modhost::ModHost::start(&cfg) {
-                Ok(host) => self.mods = Some(host),
-                Err(e) => crate::log::line(&format!("mod host did not start: {e}")),
-            }
-        }
+        self.mods = mod_boot::start(&self.args.game_dir);
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);

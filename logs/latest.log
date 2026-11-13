@@ -1,0 +1,133 @@
+[22:56:58] [main/INFO]: Loading tweak class name net.minecraftforge.fml.common.launcher.FMLTweaker
+[22:56:58] [main/INFO]: Using primary tweak class name net.minecraftforge.fml.common.launcher.FMLTweaker
+[22:56:58] [main/INFO]: Loading tweak class name net.ferrocraft.tweak.HostTweaker
+[22:56:58] [main/INFO]: Calling tweak class net.minecraftforge.fml.common.launcher.FMLTweaker
+[22:56:58] [main/INFO]: Forge Mod Loader version 11.15.1.2318 for Minecraft 1.8.9 loading
+[22:56:58] [main/INFO]: Java is Java HotSpot(TM) 64-Bit Server VM, version 1.8.0_202, running on Linux:amd64:7.0.0-22-generic, installed at /tmp/f2/home2/.ferrocraft/modhost/jvm/jre-legacy
+[22:56:59] [main/WARN]: The coremod zone.rong.mixinbooter.MixinBooterPlugin does not have a MCVersion annotation, it may cause issues with this version of Minecraft
+[22:56:59] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/tmp/f2/home2/.ferrocraft/modhost/mods/!mixinbooter-12.3.jar Service=MixinBooter Env=CLIENT
+[22:56:59] [main/WARN]: Unable to hook 'net.minecraftforge.fml.common.FMLLog#log', the INIT phase will not begin until the DEFAULT transition.
+java.lang.NoSuchFieldException: log
+	at java.lang.Class.getDeclaredField(Class.java:2070) ~[?:1.8.0_202]
+	at zone.rong.mixinbooter.service.InitPhaseTrigger.install(InitPhaseTrigger.java:47) [!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.service.MixinBooterService.getPrimaryContainer(MixinBooterService.java:164) [!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.platform.MixinPlatformManager.init(MixinPlatformManager.java:103) [!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.getPlatform(MixinBootstrap.java:138) [!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.start(MixinBootstrap.java:185) [!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.init(MixinBootstrap.java:148) [!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.MixinBooterPlugin.initialize(MixinBooterPlugin.java:97) [!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.MixinBooterPlugin.<init>(MixinBooterPlugin.java:31) [!mixinbooter-12.3.jar:?]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method) [?:1.8.0_202]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:62) [?:1.8.0_202]
+	at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45) [?:1.8.0_202]
+	at java.lang.reflect.Constructor.newInstance(Constructor.java:423) [?:1.8.0_202]
+	at java.lang.Class.newInstance(Class.java:442) [?:1.8.0_202]
+	at net.minecraftforge.fml.relauncher.CoreModManager.loadCoreMod(CoreModManager.java:577) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.CoreModManager.discoverCoreMods(CoreModManager.java:416) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.CoreModManager.handleLaunch(CoreModManager.java:246) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupHome(FMLLaunchHandler.java:95) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupClient(FMLLaunchHandler.java:72) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.configureForClientLaunch(FMLLaunchHandler.java:34) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.common.launcher.FMLTweaker.injectIntoClassLoader(FMLTweaker.java:119) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraft.launchwrapper.Launch.launch(Launch.java:115) [launchwrapper-1.12.jar:?]
+	at net.minecraft.launchwrapper.Launch.main(Launch.java:28) [launchwrapper-1.12.jar:?]
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: java.lang.NoClassDefFoundError: org/apache/maven/artifact/versioning/InvalidVersionSpecificationException
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at zone.rong.mixinbooter.service.MixinBooterService.resolveSourceId(MixinBooterService.java:156)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getSourceId(AbstractMixinServiceLaunchWrapper.java:215)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:66)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:59)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getPrimaryContainer(AbstractMixinServiceLaunchWrapper.java:179)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at zone.rong.mixinbooter.service.MixinBooterService.getPrimaryContainer(MixinBooterService.java:165)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.platform.MixinPlatformManager.init(MixinPlatformManager.java:103)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.MixinBootstrap.getPlatform(MixinBootstrap.java:138)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.MixinBootstrap.start(MixinBootstrap.java:185)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at org.spongepowered.asm.launch.MixinBootstrap.init(MixinBootstrap.java:148)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at zone.rong.mixinbooter.MixinBooterPlugin.initialize(MixinBooterPlugin.java:97)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at zone.rong.mixinbooter.MixinBooterPlugin.<init>(MixinBooterPlugin.java:31)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:62)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at java.lang.reflect.Constructor.newInstance(Constructor.java:423)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at java.lang.Class.newInstance(Class.java:442)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.CoreModManager.loadCoreMod(CoreModManager.java:577)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.CoreModManager.discoverCoreMods(CoreModManager.java:416)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.CoreModManager.handleLaunch(CoreModManager.java:246)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupHome(FMLLaunchHandler.java:95)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupClient(FMLLaunchHandler.java:72)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.configureForClientLaunch(FMLLaunchHandler.java:34)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraftforge.fml.common.launcher.FMLTweaker.injectIntoClassLoader(FMLTweaker.java:119)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraft.launchwrapper.Launch.launch(Launch.java:115)
+[22:56:59] [main/INFO]: [net.minecraftforge.fml.relauncher.FMLLaunchHandler:setupHome:99]: 	at net.minecraft.launchwrapper.Launch.main(Launch.java:28)
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: Caused by: java.lang.ClassNotFoundException: org.apache.maven.artifact.versioning.InvalidVersionSpecificationException
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: 	at java.net.URLClassLoader.findClass(URLClassLoader.java:382)
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: 	at java.lang.ClassLoader.loadClass(ClassLoader.java:424)
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: 	at sun.misc.Launcher$AppClassLoader.loadClass(Launcher.java:349)
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: 	at java.lang.ClassLoader.loadClass(ClassLoader.java:357)
+[22:56:59] [main/INFO]: [java.lang.Throwable:printStackTrace:634]: 	... 26 more
+[22:56:59] [main/ERROR]: An error occurred trying to configure the minecraft home at /tmp/f2/home2/.ferrocraft/modhost for Forge Mod Loader
+java.lang.NoClassDefFoundError: org/apache/maven/artifact/versioning/InvalidVersionSpecificationException
+	at zone.rong.mixinbooter.service.MixinBooterService.resolveSourceId(MixinBooterService.java:156) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getSourceId(AbstractMixinServiceLaunchWrapper.java:215) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:66) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:59) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getPrimaryContainer(AbstractMixinServiceLaunchWrapper.java:179) ~[!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.service.MixinBooterService.getPrimaryContainer(MixinBooterService.java:165) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.platform.MixinPlatformManager.init(MixinPlatformManager.java:103) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.getPlatform(MixinBootstrap.java:138) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.start(MixinBootstrap.java:185) ~[!mixinbooter-12.3.jar:?]
+	at org.spongepowered.asm.launch.MixinBootstrap.init(MixinBootstrap.java:148) ~[!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.MixinBooterPlugin.initialize(MixinBooterPlugin.java:97) ~[!mixinbooter-12.3.jar:?]
+	at zone.rong.mixinbooter.MixinBooterPlugin.<init>(MixinBooterPlugin.java:31) ~[!mixinbooter-12.3.jar:?]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method) ~[?:1.8.0_202]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:62) ~[?:1.8.0_202]
+	at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45) ~[?:1.8.0_202]
+	at java.lang.reflect.Constructor.newInstance(Constructor.java:423) ~[?:1.8.0_202]
+	at java.lang.Class.newInstance(Class.java:442) ~[?:1.8.0_202]
+	at net.minecraftforge.fml.relauncher.CoreModManager.loadCoreMod(CoreModManager.java:577) ~[forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.CoreModManager.discoverCoreMods(CoreModManager.java:416) ~[forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.CoreModManager.handleLaunch(CoreModManager.java:246) ~[forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupHome(FMLLaunchHandler.java:95) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupClient(FMLLaunchHandler.java:72) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.configureForClientLaunch(FMLLaunchHandler.java:34) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraftforge.fml.common.launcher.FMLTweaker.injectIntoClassLoader(FMLTweaker.java:119) [forge-1.8.9-11.15.1.2318-1.8.9.jar:?]
+	at net.minecraft.launchwrapper.Launch.launch(Launch.java:115) [launchwrapper-1.12.jar:?]
+	at net.minecraft.launchwrapper.Launch.main(Launch.java:28) [launchwrapper-1.12.jar:?]
+Caused by: java.lang.ClassNotFoundException: org.apache.maven.artifact.versioning.InvalidVersionSpecificationException
+	at java.net.URLClassLoader.findClass(URLClassLoader.java:382) ~[?:1.8.0_202]
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:424) ~[?:1.8.0_202]
+	at sun.misc.Launcher$AppClassLoader.loadClass(Launcher.java:349) ~[?:1.8.0_202]
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:357) ~[?:1.8.0_202]
+	... 26 more
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: java.lang.NoClassDefFoundError: org/apache/maven/artifact/versioning/InvalidVersionSpecificationException
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at zone.rong.mixinbooter.service.MixinBooterService.resolveSourceId(MixinBooterService.java:156)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getSourceId(AbstractMixinServiceLaunchWrapper.java:215)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:66)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.platform.container.ContainerHandleURI.<init>(ContainerHandleURI.java:59)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.service.mojang.AbstractMixinServiceLaunchWrapper.getPrimaryContainer(AbstractMixinServiceLaunchWrapper.java:179)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at zone.rong.mixinbooter.service.MixinBooterService.getPrimaryContainer(MixinBooterService.java:165)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.platform.MixinPlatformManager.init(MixinPlatformManager.java:103)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.MixinBootstrap.getPlatform(MixinBootstrap.java:138)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.MixinBootstrap.start(MixinBootstrap.java:185)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at org.spongepowered.asm.launch.MixinBootstrap.init(MixinBootstrap.java:148)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at zone.rong.mixinbooter.MixinBooterPlugin.initialize(MixinBooterPlugin.java:97)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at zone.rong.mixinbooter.MixinBooterPlugin.<init>(MixinBooterPlugin.java:31)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:62)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at java.lang.reflect.Constructor.newInstance(Constructor.java:423)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at java.lang.Class.newInstance(Class.java:442)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.CoreModManager.loadCoreMod(CoreModManager.java:577)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.CoreModManager.discoverCoreMods(CoreModManager.java:416)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.CoreModManager.handleLaunch(CoreModManager.java:246)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupHome(FMLLaunchHandler.java:95)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.setupClient(FMLLaunchHandler.java:72)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.relauncher.FMLLaunchHandler.configureForClientLaunch(FMLLaunchHandler.java:34)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraftforge.fml.common.launcher.FMLTweaker.injectIntoClassLoader(FMLTweaker.java:119)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraft.launchwrapper.Launch.launch(Launch.java:115)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1052]: 	at net.minecraft.launchwrapper.Launch.main(Launch.java:28)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: Caused by: java.lang.ClassNotFoundException: org.apache.maven.artifact.versioning.InvalidVersionSpecificationException
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: 	at java.net.URLClassLoader.findClass(URLClassLoader.java:382)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: 	at java.lang.ClassLoader.loadClass(ClassLoader.java:424)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: 	at sun.misc.Launcher$AppClassLoader.loadClass(Launcher.java:349)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: 	at java.lang.ClassLoader.loadClass(ClassLoader.java:357)
+[22:56:59] [main/INFO]: [java.lang.ThreadGroup:uncaughtException:1061]: 	... 26 more

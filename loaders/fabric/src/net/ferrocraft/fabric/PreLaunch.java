@@ -47,6 +47,12 @@ public final class PreLaunch implements PreLaunchEntrypoint {
         long start = System.currentTimeMillis();
         ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
         if (token != null) pb.environment().put("FERROCRAFT_ACCESS_TOKEN", token);
+        // The mod folder of a OneClient cluster sits in the cluster directory, which holds .oneclient-mods.json.
+        String modsFolder = System.getProperty("fabric.modsFolder");
+        if (modsFolder != null && !modsFolder.isEmpty()) {
+            File parent = new File(modsFolder).getAbsoluteFile().getParentFile();
+            if (parent != null) pb.environment().put("FERROCRAFT_CLUSTER", parent.getPath());
+        }
         int code = pb.start().waitFor();
         // Java reports 128+N when the engine died from signal N; the engine's own exit reasons are in ~/.ferrocraft/engine.log.
         System.out.println("ferrocraft-fabric: engine exited with code " + code + " after " + (System.currentTimeMillis() - start) / 1000 + "s");

@@ -897,6 +897,7 @@ dependencies = [
  "arboard",
  "ferrocraft-modhost",
  "ferrocraft-net-client",
+ "ferrocraft-oneclient",
  "ferrocraft-protocol",
  "gui",
  "input-audio",

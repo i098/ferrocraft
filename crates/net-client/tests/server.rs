@@ -125,3 +125,19 @@ fn online_mode_login_joins_the_local_server() {
     });
     eprintln!("joined online-mode server, {} events", log.len());
 }
+
+#[test]
+#[ignore = "needs the local server from harness/testserver"]
+fn tab_complete_slash_he_returns_help() {
+    let addr = std::env::var("FC_SERVER").unwrap_or_else(|_| "127.0.0.1:25565".into());
+    let mut s = Session::connect(&addr, "Ferro", None).expect("login");
+    let mut log = Vec::new();
+    wait_for(&mut s, &mut log, "join", |l| {
+        l.iter().any(|e| matches!(e, NetEvent::JoinGame { .. }))
+    });
+    s.send_tab_complete("/he").unwrap();
+    wait_for(&mut s, &mut log, "tab complete reply", |l| {
+        l.iter()
+            .any(|e| matches!(e, NetEvent::TabComplete(m) if m.iter().any(|x| x == "/help")))
+    });
+}

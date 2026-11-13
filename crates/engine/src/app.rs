@@ -71,6 +71,8 @@ pub struct App {
     hud: gui::Hud,
     /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set.
     mods: Option<ferrocraft_modhost::ModHost>,
+    /// The resource pack the server sent (S48): on top of the selected packs until the world is left.
+    server_pack: Option<std::path::PathBuf>,
     /// `host:port` of the server last connected to, for the mod host's mirror.
     server: String,
     ui: Ui,
@@ -145,6 +147,7 @@ impl App {
             renderer: None,
             hud: gui::Hud::default(),
             mods: None,
+            server_pack: None,
             server: String::new(),
             ui,
             icons: None,
@@ -248,7 +251,16 @@ impl App {
 
     /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
     pub(super) fn asset_source(&self) -> Option<AssetSource> {
-        let packs = gui::screens::selected_paths(&self.args.game_dir, &self.ui.settings);
+        // `ResourcePackRepository.setServerResourcePack`: the server pack is the top layer.
+        let packs: Vec<_> = self
+            .server_pack
+            .iter()
+            .cloned()
+            .chain(gui::screens::selected_paths(
+                &self.args.game_dir,
+                &self.ui.settings,
+            ))
+            .collect();
         AssetSource::layered(&packs, self.args.assets_dir.as_deref()?)
     }
 
@@ -700,6 +712,17 @@ impl App {
             view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
         });
         r.set_lightning(self.game.bolts.shapes());
+        r.set_border(self.game.player.as_ref().map(|p| {
+            let (border, now) = (&self.game.border, crate::game::now_ms());
+            render::Border {
+                walls: border.bounds(now),
+                viewer: p.pos,
+                range: f64::from(self.ui.settings.render_distance) * 16.0,
+                closest: border.closest_distance(p.pos[0], p.pos[2], now),
+                rgb: border.status().color(),
+                phase_ms: (now % 3000) as u32,
+            }
+        }));
         let hand_item = self.equip.2.or(held);
         r.set_hand(
             (!self.hide_hud
@@ -877,6 +900,10 @@ impl App {
                     reduced_debug: self.reduced_debug(),
                     fancy: self.ui.settings.fancy_graphics,
                     brightness: 1.0,
+                    border_warning: self.game.player.as_ref().map_or(0.0, |p| {
+                        let now = crate::game::now_ms();
+                        self.game.border.warning(p.pos[0], p.pos[2], now)
+                    }),
                     player_view: self.game.gamemode != 3,
                     status: Some(&status),
                     hotbar,

@@ -61,6 +61,11 @@ fn speed(v: [f64; 3], scale: f32) -> f32 {
 pub struct Fall(f32);
 
 impl Fall {
+    /// `Entity.fallDistance`.
+    pub fn distance(&self) -> f32 {
+        self.0
+    }
+
     /// Water, like `checkWaterCollisions`, resets the distance.
     pub fn reset(&mut self) {
         self.0 = 0.0;

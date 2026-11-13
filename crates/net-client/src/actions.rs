@@ -143,9 +143,7 @@ impl Session {
         let [x, y, z] = pos;
         let p = sb::UpdateSign {
             location: Position { x, y, z },
-            lines: lines
-                .clone()
-                .map(|l| serde_json::json!({ "text": l }).to_string()),
+            lines: lines.each_ref().map(|l| sign_line_json(l)),
         };
         send(&self.writer, sb::Packet::from(p))
     }
@@ -158,5 +156,58 @@ impl Session {
             walking_speed: walk_speed,
         };
         send(&self.writer, sb::Packet::from(p))
+    }
+}
+
+/// `IChatComponent.Serializer.componentToJson(new ChatComponentText(line))`: a plain text component is a bare
+/// JSON string, and Gson writes `< > & = '` and the line separators as `\u` escapes.
+fn sign_line_json(line: &str) -> String {
+    let json = serde_json::Value::from(line).to_string();
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        match c {
+            '<' | '>' | '&' | '=' | '\'' | '\u{2028}' | '\u{2029}' => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sign_line_json;
+
+    /// The bytes of `Text.Serializer.toJson(new LiteralText(line))` in the 1.8.9 jar.
+    #[test]
+    fn sign_lines_match_the_vanilla_serializer() {
+        let corpus = [
+            "",
+            "hello",
+            "a\"b\\c",
+            "§cred",
+            "é€😀",
+            "<>&='",
+            "a\tb\nc\u{1}\u{1f}",
+            "\u{2028}\u{2029}",
+        ];
+        let script: String = corpus
+            .iter()
+            .map(|s| {
+                format!(
+                    "signjson {}\n",
+                    s.bytes().map(|b| format!("{b:02x}")).collect::<String>()
+                )
+            })
+            .collect();
+        let lines = oracle::Oracle::get().run(&script).unwrap();
+        assert_eq!(lines.len(), corpus.len());
+        for (s, hex) in corpus.iter().zip(lines) {
+            let want: Vec<u8> = (0..hex.len() / 2)
+                .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
+                .collect();
+            assert_eq!(sign_line_json(s).as_bytes(), &want[..], "line {s:?}");
+        }
     }
 }

@@ -79,6 +79,13 @@ impl App {
         }
     }
 
+    fn open_sign_editor(&mut self, pos: [i32; 3]) {
+        let state = self.game.store.get_block(pos[0], pos[1], pos[2]);
+        let m = metrics!(self);
+        let q = self.ui.open(&m, boxed(EditSign::new(pos, state)));
+        self.run_effects(q);
+    }
+
     fn send_sign(&mut self, pos: [i32; 3], lines: &[String; 4]) {
         if let Some(s) = self.link.session() {
             let r = s.update_sign(pos, lines);
@@ -524,6 +531,31 @@ impl App {
         Ok(())
     }
 
+    /// A received chat line: the mods' `ClientChatReceivedEvent` first, which may cancel or replace it.
+    fn print_chat(&mut self, mut runs: Vec<ferrocraft_net_client::Styled>) {
+        if let Some(mods) = &self.mods {
+            match mods.chat(
+                ferrocraft_modhost::ChatKind::Chat,
+                &ferrocraft_net_client::formatted_text(&runs),
+            ) {
+                ferrocraft_modhost::ChatVerdict::Keep => {}
+                ferrocraft_modhost::ChatVerdict::Cancel => return,
+                ferrocraft_modhost::ChatVerdict::Replace(text) => {
+                    runs = vec![ferrocraft_net_client::Styled {
+                        format: String::new(),
+                        text,
+                        ..Default::default()
+                    }];
+                }
+            }
+        }
+        let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
+        let open = self.input.chat_input().is_some();
+        self.hud
+            .chat
+            .print(runs, 0, self.hud.update_counter, open, m);
+    }
+
     fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {
@@ -533,28 +565,7 @@ impl App {
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
                 dirty.insert((x, z), e);
             }
-            Effect::Chat(mut runs) => {
-                if let Some(mods) = &self.mods {
-                    match mods.chat(
-                        ferrocraft_modhost::ChatKind::Chat,
-                        &ferrocraft_net_client::formatted_text(&runs),
-                    ) {
-                        ferrocraft_modhost::ChatVerdict::Keep => {}
-                        ferrocraft_modhost::ChatVerdict::Cancel => return,
-                        ferrocraft_modhost::ChatVerdict::Replace(text) => {
-                            runs = vec![ferrocraft_net_client::Styled {
-                                format: String::new(),
-                                text,
-                            }];
-                        }
-                    }
-                }
-                let m = gui::Metrics(self.renderer.as_ref().and_then(Renderer::font));
-                let open = self.input.chat_input().is_some();
-                self.hud
-                    .chat
-                    .print(runs, 0, self.hud.update_counter, open, m);
-            }
+            Effect::Chat(runs) => self.print_chat(runs),
             Effect::ActionBar(text) => self.hud.set_action_bar(text),
             Effect::OpenWindow => {
                 self.container = Some(ContainerScreen::new(
@@ -564,12 +575,7 @@ impl App {
                 ));
             }
             Effect::CloseWindow => self.container = None,
-            Effect::EditSign(pos) => {
-                let state = self.game.store.get_block(pos[0], pos[1], pos[2]);
-                let m = metrics!(self);
-                let q = self.ui.open(&m, boxed(EditSign::new(pos, state)));
-                self.run_effects(q);
-            }
+            Effect::EditSign(pos) => self.open_sign_editor(pos),
             Effect::RejectWindow(id) => {
                 self.container = None;
                 let r = self.session_send(|s| s.close_window(id));

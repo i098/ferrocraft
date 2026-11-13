@@ -1230,7 +1230,7 @@ mod tests {
     }
 
     #[test]
-    fn invisible_player_keeps_armor_and_held_item_but_not_the_body() {
+    fn invisible_player_keeps_armor_but_not_the_body() {
         let count = |d: &EntityDraw| {
             build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
                 .vertices
@@ -1239,12 +1239,12 @@ mod tests {
         let mut d = steve();
         d.invisible = true;
         assert_eq!(count(&d), 0);
+        // The held item is a model in `item`, not part of this mesh.
         d.held = 276;
-        let held = count(&d);
-        assert!(held > 0);
+        assert_eq!(count(&d), 0);
         d.armor = [310; 4];
         let worn = count(&d);
-        assert!(worn > held);
+        assert!(worn > 0);
         d.invisible = false;
         assert!(count(&d) > worn);
     }
@@ -1353,8 +1353,9 @@ mod tests {
         d.armor_glint = [true, false, false, false];
         let boots = build_glint(&[d.clone()]).vertices.len();
         assert_eq!(boots, 2 * 2 * 24, "two boot boxes, two passes");
+        // The held item's glint is drawn with its model in `item`, not here.
         d.held_glint = true;
-        assert_eq!(build_glint(&[d]).vertices.len(), boots + 2 * 24);
+        assert_eq!(build_glint(&[d]).vertices.len(), boots);
     }
 
     #[test]

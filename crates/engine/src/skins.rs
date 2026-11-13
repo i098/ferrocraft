@@ -13,8 +13,35 @@ pub struct PlayerSkins {
     ready: HashMap<u128, (Image, bool)>,
     /// Decoded capes, kept like `ready`.
     capes: HashMap<u128, Image>,
+    /// Players whose GUI texture the renderer already has.
+    tab_sent: HashSet<u128>,
     tx: Sender<Download>,
     rx: Receiver<Download>,
+}
+
+/// Name of the GUI texture of a tab list head.
+pub fn tab_texture(uuid: u128) -> String {
+    format!("skin/{uuid:032x}")
+}
+
+/// The skin on a 64x64 canvas (a 64x32 skin fills the top half) with the head base opaque, as
+/// `ImageBufferDownload` makes it.
+fn tab_image(img: &Image) -> Image {
+    let mut rgba = vec![0; 64 * 64 * 4];
+    for y in 0..img.height.min(64) {
+        let w = img.width.min(64);
+        rgba[y * 64 * 4..(y * 64 + w) * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..w * 4]);
+    }
+    for y in 0..16 {
+        for x in 0..32 {
+            rgba[(y * 64 + x) * 4 + 3] = 255;
+        }
+    }
+    Image {
+        width: 64,
+        height: 64,
+        rgba,
+    }
 }
 
 /// What the download thread of one player found.
@@ -34,6 +61,7 @@ impl PlayerSkins {
             requested: HashSet::new(),
             ready: HashMap::new(),
             capes: HashMap::new(),
+            tab_sent: HashSet::new(),
             tx,
             rx,
         }
@@ -60,9 +88,8 @@ impl PlayerSkins {
         });
     }
 
-    /// The skin of a drawn player: `Some` once downloaded. Puts it into the renderer when it is
-    /// new there or when the renderer replaced it for lack of room.
-    pub fn show(&mut self, r: &mut Renderer, uuid: u128, textures: Option<&str>) -> Option<u128> {
+    /// Takes in the downloads that finished.
+    fn poll(&mut self) {
         while let Ok(d) = self.rx.try_recv() {
             if let Some(img) = decode_png(&d.skin) {
                 self.ready.insert(d.uuid, (img, d.slim));
@@ -71,6 +98,12 @@ impl PlayerSkins {
                 self.capes.insert(d.uuid, img);
             }
         }
+    }
+
+    /// The skin of a drawn player: `Some` once downloaded. Puts it into the renderer when it is
+    /// new there or when the renderer replaced it for lack of room.
+    pub fn show(&mut self, r: &mut Renderer, uuid: u128, textures: Option<&str>) -> Option<u128> {
+        self.poll();
         if let Some(t) = textures {
             self.request(uuid, t);
         }
@@ -84,6 +117,31 @@ impl PlayerSkins {
             }
         }
         Some(uuid)
+    }
+
+    /// The skin of a tab list player as a 64x64 GUI texture, once and only after the download
+    /// finished; the download is the one the player model uses.
+    pub fn tab_head(&mut self, uuid: u128, textures: Option<&str>) -> Option<Image> {
+        self.poll();
+        if let Some(t) = textures {
+            self.request(uuid, t);
+        }
+        if self.tab_sent.contains(&uuid) {
+            return None;
+        }
+        let (img, _) = self.ready.get(&uuid)?;
+        self.tab_sent.insert(uuid);
+        Some(tab_image(img))
+    }
+
+    /// Forget the uploaded GUI textures: a new renderer has none.
+    pub fn clear_tab(&mut self) {
+        self.tab_sent.clear();
+    }
+
+    /// Whether the renderer has the GUI texture of the player.
+    pub fn has_tab(&self, uuid: u128) -> bool {
+        self.tab_sent.contains(&uuid)
     }
 
     /// Arm model of a downloaded skin, `None` until it is ready.

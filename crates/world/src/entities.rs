@@ -199,6 +199,8 @@ pub struct Entity {
     pub on_ground: bool,
     pub vel: [f64; 3],
     pub flags: u8,
+    /// Ticks since the `USING_ITEM` flag was first seen (`None` while it is off).
+    pub use_ticks: Option<u32>,
     /// Fixed-point (1/32 block) position the server last sent; relative moves add to it.
     server_pos: [i32; 3],
     target: Target,
@@ -323,6 +325,7 @@ impl Entity {
             on_ground: false,
             vel: [0.0; 3],
             flags: 0,
+            use_ticks: None,
             server_pos: raw,
             target: Target {
                 pos,
@@ -466,6 +469,8 @@ impl Entity {
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
     fn tick(&mut self) {
         self.age += 1;
+        self.use_ticks =
+            (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
         self.prev_pos = self.pos;
         (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
         if self.target.steps > 0 {
@@ -1485,6 +1490,46 @@ mod tests {
         assert_eq!(e.textures.as_deref(), Some("dGV4"));
         assert!(e.sneaking());
         assert_eq!(e.equipment[0].unwrap().id, 276);
+    }
+
+    #[test]
+    fn use_ticks_count_from_flag_and_drive_bow_stage() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPlayer {
+            id: 4,
+            uuid: 9,
+            pos: [0; 3],
+            yaw: 0,
+            pitch: 0,
+            held: 261,
+            flags: Some(flag::USING_ITEM),
+        });
+        let stage = |es: &Entities| {
+            let t = es.get(4).unwrap().use_ticks.unwrap();
+            crate::inventory::items::held_variant(261, 0, t as i32, false)
+        };
+        es.tick();
+        assert_eq!(es.get(4).unwrap().use_ticks, Some(0));
+        assert_eq!(stage(&es), 0);
+        for _ in 0..14 {
+            es.tick();
+        }
+        assert_eq!(es.get(4).unwrap().use_ticks, Some(14));
+        assert_eq!(stage(&es), -2);
+        for _ in 0..4 {
+            es.tick();
+        }
+        assert_eq!(stage(&es), -3);
+        es.apply(EntityEvent::Metadata {
+            id: 4,
+            flags: Some(0),
+            name: None,
+            health: None,
+            stack: None,
+            size: SizeMeta::default(),
+        });
+        es.tick();
+        assert_eq!(es.get(4).unwrap().use_ticks, None);
     }
 
     #[test]

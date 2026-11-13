@@ -300,6 +300,8 @@ pub struct Session {
     tx: Sender<NetEvent>,
     writer: Arc<Mutex<Writer>>,
     stream: TcpStream,
+    /// The login ran the online-mode encryption handshake (`getIsencrypted`).
+    pub encrypted: bool,
 }
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(15);
@@ -334,7 +336,7 @@ impl Session {
         stream.set_read_timeout(Some(LOGIN_TIMEOUT))?;
         let mut reader = Reader::new(stream.try_clone()?);
         let writer = Arc::new(Mutex::new(Writer::new(stream.try_clone()?)));
-        login(&mut reader, &writer, &host, port, username, auth)?;
+        let encrypted = login(&mut reader, &writer, &host, port, username, auth)?;
         stream.set_read_timeout(None)?;
 
         let (tx, events) = mpsc::channel();
@@ -349,6 +351,7 @@ impl Session {
             tx,
             writer,
             stream,
+            encrypted,
         })
     }
 
@@ -445,8 +448,9 @@ fn login(
     port: u16,
     username: &str,
     auth: Option<&Auth>,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     use login::clientbound::Packet as Login;
+    let mut encrypted = false;
     let mut w = writer.lock().map_err(|_| invalid("writer poisoned"))?;
     w.send(&handshake::Serverbound::from(handshake::Handshake {
         protocol_version: VarInt(PROTOCOL_VERSION),
@@ -469,7 +473,7 @@ fn login(
                     .map_err(|_| invalid("writer poisoned"))?
                     .set_compression(c.threshold.0);
             }
-            Login::LoginSuccess(_) => return Ok(()),
+            Login::LoginSuccess(_) => return Ok(encrypted),
             Login::Disconnect(d) => {
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
@@ -492,6 +496,7 @@ fn login(
                 ))?;
                 w.enable_encryption(&h.secret);
                 reader.enable_encryption(&h.secret);
+                encrypted = true;
             }
         }
     }

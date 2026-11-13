@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 
+mod animation;
 mod assets;
 mod biome;
 mod blockent;

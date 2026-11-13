@@ -232,7 +232,7 @@ impl Mesher<'_> {
 
     fn pass_of(state: u16) -> Pass {
         match state >> 4 {
-            8 | 9 | 79 | 95 | 160 | 165 => Pass::Blend,
+            8 | 9 | 79 | 90 | 95 | 160 | 165 => Pass::Blend,
             _ => Pass::Opaque,
         }
     }
@@ -770,5 +770,15 @@ mod tests {
         assert!(pane.opaque.is_empty() && !pane.water.is_empty());
         let ice = mesh(&at(174), [None; 8]);
         assert!(ice.water.is_empty() && !ice.opaque.is_empty());
+    }
+
+    #[test]
+    fn nether_portal_is_a_blended_slab() {
+        let m = mesh(
+            &flat(|x, y, z| if (x, y, z) == (4, 70, 4) { 90 << 4 } else { 0 }),
+            [None; 8],
+        );
+        assert!(m.opaque.is_empty());
+        assert_eq!(m.water.vertices.len(), 8, "two broad faces only");
     }
 }

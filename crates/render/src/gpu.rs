@@ -1,5 +1,6 @@
 //! wgpu device, pipelines and frame rendering.
 
+use crate::animation::Animator;
 use crate::assets::{decode_png, missing_tile, AssetSource, Atlas, Font, Image};
 use crate::biome::{temperature, PLAINS_TEMPERATURE};
 use crate::blockent::{BlockEntities, Tex};
@@ -166,6 +167,10 @@ pub struct Renderer {
     item_textures: HashMap<(i16, i16), Option<String>>,
     source: Option<AssetSource>,
     atlas: Arc<Atlas>,
+    atlas_tex: wgpu::Texture,
+    atlas_clock: Animator,
+    /// `Environment.ticks` of the last frame; the difference is the client ticks to animate.
+    animated_to: Option<u64>,
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
@@ -300,7 +305,8 @@ impl Renderer {
         let rain_img = load_png("environment/rain");
         let snow_img = load_png("environment/snow");
         let skin_img = load_png("entity/steve");
-        let atlas_view = upload_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
+        let atlas_tex = create_texture(&device, &queue, atlas.width, atlas.height, &atlas.rgba);
+        let atlas_view = atlas_tex.create_view(&Default::default());
         let env_view = upload_texture(&device, &queue, ENV_W, ENV_H, &env_tex.rgba);
         let entity_tex = create_texture(
             &device,
@@ -433,6 +439,9 @@ impl Renderer {
             source,
             mesher: Mesher::new(atlas.clone()),
             atlas,
+            atlas_tex,
+            atlas_clock: Animator::default(),
+            animated_to: None,
             font,
             env_tex,
             environment: Environment::default(),
@@ -1065,7 +1074,44 @@ impl Renderer {
 
     /// Time of day, weather and render distance for sky, fog and the light curve.
     pub fn set_environment(&mut self, environment: Environment) {
+        let from = self.animated_to.replace(environment.ticks);
+        // A tick counter that went backwards (new world) animates nothing; one frame never owes more than a second.
+        let steps = from.map_or(0, |t| environment.ticks.saturating_sub(t).min(20));
+        for _ in 0..steps {
+            self.animate_atlas();
+        }
         self.environment = environment;
+    }
+
+    /// `TextureMap.updateAnimations`: one client tick; writes only the cells whose frame changed.
+    fn animate_atlas(&mut self) {
+        let tile = self.atlas.tile;
+        for (cell, rgba) in self.atlas_clock.tick(&self.atlas.animations) {
+            let (cx, cy) = (cell % 16, cell / 16);
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.atlas_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: cx * tile,
+                        y: cy * tile,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(tile * 4),
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width: tile,
+                    height: tile,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
     }
 
     /// `PostChain.close`, then `GameRenderer.loadShader` when `name` (a jar path such as
@@ -1120,7 +1166,7 @@ impl Renderer {
         self.register_image(name, &image);
     }
 
-    fn register_image(&mut self, name: &str, image: &Image) {
+    pub fn register_image(&mut self, name: &str, image: &Image) {
         let view = upload_texture(
             &self.device,
             &self.queue,

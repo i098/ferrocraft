@@ -239,12 +239,32 @@ pub fn tint(id: i16, damage: i16, dye: Option<i32>, layer: usize) -> u32 {
 }
 
 /// `models/item/<name>.json` of a stack (`ItemModelMesher`: damageable items use meta 0).
+///
+/// A negative `damage` is a variant from [`held_variant`], drawn only in a hand.
 pub fn model(id: i16, damage: i16) -> Option<&'static str> {
+    if damage < 0 {
+        // The table rows 261:1..3 and 346:1 are the pulling and cast models.
+        return MODELS.get(&(id, -damage)).copied();
+    }
     let meta = if item(id).max_damage > 0 { 0 } else { damage };
     MODELS
         .get(&(id, meta))
         .or_else(|| MODELS.get(&(id, 0)))
         .copied()
+}
+
+const BOW: i16 = 261;
+const FISHING_ROD: i16 = 346;
+
+/// The `damage` that `model` takes for a held item: `ItemRenderer.renderItemInHand` swaps the
+/// model of a bow in use by its draw time (`useDuration - useTimer`: 18 or more is stage 2, over 13
+/// stage 1, over 0 stage 0) and of a rod while the player has a bobber out. Else `damage`.
+pub fn held_variant(id: i16, damage: i16, drawn: i32, cast: bool) -> i16 {
+    match id {
+        BOW if drawn > 0 => -1 - i16::from(drawn > 13) - i16::from(drawn >= 18),
+        FISHING_ROD if cast => -1,
+        _ => damage,
+    }
 }
 
 /// Every item model name the table uses, for loading them up front.
@@ -287,6 +307,16 @@ mod tests {
         assert_eq!(model(35, 8), Some("silver_wool"));
         assert!(is_fuel(263, 0) && smelts(15, 0) && !smelts(1, 0));
         assert_eq!(tabs().len(), 12);
+        let bow = |drawn| model(BOW, held_variant(BOW, 0, drawn, false));
+        assert_eq!(bow(0), Some("bow"));
+        assert_eq!(bow(1), Some("bow_pulling_0"));
+        assert_eq!(bow(13), Some("bow_pulling_0"));
+        assert_eq!(bow(14), Some("bow_pulling_1"));
+        assert_eq!(bow(17), Some("bow_pulling_1"));
+        assert_eq!(bow(18), Some("bow_pulling_2"));
+        let rod = |cast| model(FISHING_ROD, held_variant(FISHING_ROD, 5, 0, cast));
+        assert_eq!(rod(false), Some("fishing_rod"));
+        assert_eq!(rod(true), Some("fishing_rod_cast"));
         assert_eq!(tabs()[0].entries[0], (1, 0, None));
     }
 

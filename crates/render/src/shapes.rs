@@ -63,6 +63,20 @@ fn boxes_0(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
     let (id, meta) = (state >> 4, state & 15);
     let t = l.tex;
     match id {
+        // Nether portal (`portal_ns`/`portal_ew`): axis Z when meta & 3 == 2, else X; 4 px thick, broad faces only.
+        90 => {
+            let mut b = if meta & 3 == 2 {
+                px([6.0, 0.0, 0.0], [10.0, 16.0, 16.0], t)
+            } else {
+                px([0.0, 0.0, 6.0], [16.0, 16.0, 10.0], t)
+            };
+            b.mask = if meta & 3 == 2 {
+                bit(EAST) | bit(WEST)
+            } else {
+                bit(NORTH) | bit(SOUTH)
+            };
+            out.push(b);
+        }
         44 | 126 | 182 => {
             let (lo, hi) = if meta & 8 != 0 {
                 (8.0, 16.0)

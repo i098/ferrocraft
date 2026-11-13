@@ -1153,6 +1153,122 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
     assert_ne!(tints[3], tints[4], "red sand must differ from sand");
 }
 
+/// Lava (x < 8) and water (x >= 8) pools under open sky.
+struct Pools;
+
+impl ChunkBlocks for Pools {
+    fn chunk_x(&self) -> i32 {
+        0
+    }
+    fn chunk_z(&self) -> i32 {
+        0
+    }
+    fn block(&self, x: usize, y: usize, _z: usize) -> u16 {
+        match y {
+            0..=60 => 1 << 4,
+            61 if x < 8 => 11 << 4,
+            61 => 9 << 4,
+            _ => 0,
+        }
+    }
+}
+
+/// `TextureMap.updateAnimations` runs each client tick: lava and water leave frame 0 as `Environment.ticks` advances.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn lava_and_water_animate_with_client_ticks() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    r.upload_chunk(&Pools);
+    let cam = Camera {
+        pos: [8.0, 66.0, 4.0],
+        yaw: 0.0,
+        pitch: 90.0,
+        ..Camera::default()
+    };
+    let frame = |r: &mut Renderer, ticks: u64| {
+        r.set_environment(Environment {
+            ticks,
+            ..Environment::default()
+        });
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let first = frame(&mut r, 0);
+    let same = frame(&mut r, 0);
+    // water_still and lava_still: frametime 2, so two ticks reach the second frame.
+    let later = frame(&mut r, 2);
+    assert_eq!(first, same, "no tick, no change");
+    let (w, half) = (400usize, 200usize);
+    let side = |img: &[u8], right: bool| -> Vec<u8> {
+        (0..300)
+            .flat_map(|y| {
+                let x0 = if right { half } else { 0 };
+                img[(y * w + x0) * 4..][..half * 4].to_vec()
+            })
+            .collect()
+    };
+    assert_ne!(
+        side(&first, false),
+        side(&later, false),
+        "left half (water, +x) moved"
+    );
+    assert_ne!(
+        side(&first, true),
+        side(&later, true),
+        "right half (lava, -x) moved"
+    );
+    if let Ok(dir) = std::env::var("ANIM_PNG_DIR") {
+        for (name, img) in [("before", &first), ("after", &later)] {
+            let path = std::path::Path::new(&dir).join(format!("{name}.png"));
+            encode_png(&path, 400, 300, img).expect("write png");
+        }
+    }
+}
+
+/// A wall of x-axis nether portal blocks over stone, in view of the camera.
+struct PortalWall;
+
+impl ChunkBlocks for PortalWall {
+    fn chunk_x(&self) -> i32 {
+        0
+    }
+    fn chunk_z(&self) -> i32 {
+        0
+    }
+    fn block(&self, x: usize, y: usize, z: usize) -> u16 {
+        match (x, y, z) {
+            (6..=10, 62..=66, 8) => 90 << 4,
+            (_, 0..=60, _) => 1 << 4,
+            _ => 0,
+        }
+    }
+}
+
+/// The portal texture has 32 frames in `portal.png.mcmeta`: it must differ between client ticks.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn portal_animates_with_client_ticks() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));
+    r.upload_chunk(&PortalWall);
+    let cam = Camera {
+        pos: [8.5, 64.0, 4.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        ..Camera::default()
+    };
+    let mut frame = |ticks: u64| {
+        r.set_environment(Environment {
+            ticks,
+            ..Environment::default()
+        });
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let (t0, t1, t40) = (frame(0), frame(1), frame(40));
+    assert!(t0 != t1 || t0 != t40, "portal stayed on frame 0");
+    assert_ne!(t0, t40, "portal differs after 40 ticks");
+}
+
 /// Share of red in the pixels that differ from `base`.
 fn red_share(base: &[u8], frame: &[u8]) -> f64 {
     let (mut red, mut all) = (0.0, 0.0);
@@ -1246,4 +1362,62 @@ fn tinted_items_keep_color_and_overlay() {
     r.set_entities(&untinted);
     let plain = r.render_to_rgba(&cam, &[]).2;
     assert_ne!(image, plain, "dye and potion damage must change the drops");
+}
+
+#[test]
+fn held_bow_and_rod_change_picture_with_draw_and_cast() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    // `damage` is the variant `held_variant` picks: 0 plain, -1..-3 pull stages, -1 cast rod.
+    let mut frame = |id: i16, damage: i16| {
+        r.set_hand(Some(Hand {
+            held: Some(HeldKind::Item {
+                id,
+                damage,
+                dye: None,
+            }),
+            swing: 0.0,
+            lowered: 0.0,
+            using: None,
+            glint: false,
+        }));
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let bows = [0, -1, -2, -3].map(|d| frame(261, d));
+    let rods = [0, -1].map(|d| frame(346, d));
+    for (i, a) in bows.iter().enumerate() {
+        for b in &bows[i + 1..] {
+            assert_ne!(a, b, "each bow draw stage must show its own picture");
+        }
+    }
+    assert_ne!(rods[0], rods[1], "a cast rod must show the cast picture");
+
+    if let Some(dir) = std::env::var_os("RENDER_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, px) in [
+            ("bow", &bows[0]),
+            ("bow_pulling_0", &bows[1]),
+            ("bow_pulling_1", &bows[2]),
+            ("bow_pulling_2", &bows[3]),
+            ("rod", &rods[0]),
+            ("rod_cast", &rods[1]),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
+        }
+    }
 }

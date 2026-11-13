@@ -620,6 +620,7 @@ fn look_10(id: u16, meta: u16) -> Look {
         87 => cube(0x6f3636, "netherrack"),
         88 => cube(0x54402f, "soul_sand"),
         89 => cube(0xf0d08a, "glowstone"),
+        90 => shape(0x6a1fb5, ["portal"; 6]),
         91 => faced(
             0xc77a1a,
             "pumpkin_top",

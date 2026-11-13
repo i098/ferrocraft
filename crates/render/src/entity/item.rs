@@ -61,25 +61,7 @@ pub fn resolve(
     damage: i16,
 ) -> Option<ItemModel> {
     let name = world::inventory::items::model(id, damage);
-    let flat = name.and_then(|name| {
-        let (texture, _) = hand::flat_model(read, name)?;
-        let image = decode_png(&read(&texture)?)?;
-        Some((texture, hand::Flat::new(&image, ident())))
-    });
-    let (tex, mut mesh, normals) = match flat {
-        Some((texture, flat)) => (ItemTex::Sprite(texture), flat.mesh, Some(flat.normals)),
-        None if (1..256).contains(&id) => {
-            let state = ((id as u16) << 4) | (damage as u16 & 15);
-            (ItemTex::Atlas, hand::held_mesh(state, atlas), None)
-        }
-        None => return None,
-    };
-    if normals.is_some() {
-        // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
-        for v in &mut mesh.vertices {
-            v.pos = v.pos.map(|c| c - 0.5);
-        }
-    }
+    let (tex, mesh, normals) = geometry(read, atlas, name, id, damage)?;
     let mut display = |key| match name {
         Some(name) => hand::display(read, name, key),
         None => (ident(), [1.0; 3]),
@@ -95,6 +77,34 @@ pub fn resolve(
         ground,
         ground_scale,
     })
+}
+
+/// Sprite or block geometry of a stack, with the texture it samples.
+fn geometry(
+    read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    atlas: &Atlas,
+    name: Option<&str>,
+    id: i16,
+    damage: i16,
+) -> Option<(ItemTex, MeshData, Option<Vec<V3>>)> {
+    let flat = name.and_then(|name| {
+        let (texture, _) = hand::flat_model(read, name)?;
+        let image = decode_png(&read(&texture)?)?;
+        Some((texture, hand::Flat::new(&image, ident())))
+    });
+    if let Some((texture, flat)) = flat {
+        let mut mesh = flat.mesh;
+        // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
+        for v in &mut mesh.vertices {
+            v.pos = v.pos.map(|c| c - 0.5);
+        }
+        return Some((ItemTex::Sprite(texture), mesh, Some(flat.normals)));
+    }
+    if !(1..256).contains(&id) {
+        return None;
+    }
+    let state = ((id as u16) << 4) | (damage as u16 & 15);
+    Some((ItemTex::Atlas, hand::held_mesh(state, atlas), None))
 }
 
 /// The stacks `build` needs models for.
@@ -269,13 +279,7 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
 
 /// `ItemEntityRenderer.render`: bob, spin and one to five copies by stack size.
 fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level: [f32; 2]) {
-    let copies = match stack.count {
-        49.. => 5,
-        33..=48 => 4,
-        17..=32 => 3,
-        2..=16 => 2,
-        _ => 1,
-    };
+    let copies = copy_count(stack.count);
     let bob = ((d.age / 10.0 + d.hover_start).sin()) * 0.1 + 0.1;
     let spin = (d.age / 20.0 + d.hover_start).to_degrees();
     let mut base = chain(&[
@@ -288,19 +292,7 @@ fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level
     let mut random = JavaRandom::new(187);
     let glint = stack.glint.then_some(d.age * 50.0);
     for i in 0..copies {
-        let mat = if m.gui3d {
-            let offset = if i > 0 {
-                let mut r = || (random.next_float() * 2.0 - 1.0) * 0.15;
-                translate(r(), r(), r())
-            } else {
-                ident()
-            };
-            chain(&[base, offset, scale(0.5), m.ground, scale(0.5)])
-        } else {
-            let placed = chain(&[base, m.ground, scale(0.5)]);
-            base = mul(base, translate(0.0, 0.0, 0.046_875 * m.ground_scale[2]));
-            placed
-        };
+        let mat = copy_matrix(m, &mut base, &mut random, i);
         let to_world = |p: V3| {
             let [x, y, z] = point(&mat, p);
             [
@@ -311,4 +303,31 @@ fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level
         };
         out.piece(m, &to_world, &|n| dir(&mat, n), level, glint);
     }
+}
+
+/// `ItemEntityRenderer.getModelCount`.
+fn copy_count(count: u8) -> usize {
+    match count {
+        49.. => 5,
+        33..=48 => 4,
+        17..=32 => 3,
+        2..=16 => 2,
+        _ => 1,
+    }
+}
+
+/// Matrix of copy `i`: blocks jitter at random, sprites stack along z.
+fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize) -> Mat {
+    if m.gui3d {
+        let offset = if i > 0 {
+            let mut r = || (random.next_float() * 2.0 - 1.0) * 0.15;
+            translate(r(), r(), r())
+        } else {
+            ident()
+        };
+        return chain(&[*base, offset, scale(0.5), m.ground, scale(0.5)]);
+    }
+    let placed = chain(&[*base, m.ground, scale(0.5)]);
+    *base = mul(*base, translate(0.0, 0.0, 0.046_875 * m.ground_scale[2]));
+    placed
 }

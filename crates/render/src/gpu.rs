@@ -771,23 +771,11 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
-        self.resolve_items(draws);
-        let items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
-        self.item_meshes.clear();
-        let layers = std::iter::once((None, items.atlas))
-            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
-        for (tex, mesh) in layers {
-            if let Some(tex) = &tex {
-                self.load_texture(tex);
-            }
-            if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
-                self.item_meshes.push((tex, m));
-            }
-        }
+        let items = self.upload_items(draws);
         let mut glint = entity::build_glint(draws);
         let base = glint.vertices.len() as u32;
-        glint.vertices.extend(items.glint.vertices);
-        glint.indices.extend(items.glint.indices.iter().map(|i| i + base));
+        glint.vertices.extend(items.vertices);
+        glint.indices.extend(items.indices.iter().map(|i| i + base));
         if !glint.is_empty() {
             self.load_texture(entity::GLINT_TEXTURE);
         }
@@ -802,6 +790,34 @@ impl Renderer {
                     size: d.size,
                 }),
         );
+    }
+
+    /// Held and dropped items, each mesh with the texture it samples; leaves the world group bound.
+    fn draw_items<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        for (tex, m) in &self.item_meshes {
+            let group = tex.as_ref().map_or(&self.world_group, |t| &self.textures[t]);
+            pass.set_bind_group(0, group, &[]);
+            draw_mesh(pass, m);
+        }
+        pass.set_bind_group(0, &self.world_group, &[]);
+    }
+
+    /// Meshes the held and dropped items into `item_meshes`; returns their glint layer.
+    fn upload_items(&mut self, draws: &[EntityDraw]) -> MeshData {
+        self.resolve_items(draws);
+        let items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        self.item_meshes.clear();
+        let layers = std::iter::once((None, items.atlas))
+            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
+        for (tex, mesh) in layers {
+            if let Some(tex) = &tex {
+                self.load_texture(tex);
+            }
+            if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
+                self.item_meshes.push((tex, m));
+            }
+        }
+        items.glint
     }
 
     /// Resolves the model of every held and dropped item that is new.
@@ -1396,12 +1412,7 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
-            for (tex, m) in &self.item_meshes {
-                let group = tex.as_ref().map_or(&self.world_group, |t| &self.textures[t]);
-                pass.set_bind_group(0, group, &[]);
-                draw_mesh(&mut pass, m);
-            }
-            pass.set_bind_group(0, &self.world_group, &[]);
+            self.draw_items(&mut pass);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);

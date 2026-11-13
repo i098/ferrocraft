@@ -134,15 +134,17 @@ mod tests {
     }
 
     #[test]
-    fn first_arrow_matches_java_util_random() {
+    fn placement_matches_java_util_random() {
         let m = crate::entity::model(&steve());
         let angles = [
             ([-0.9027153f32, 0.52511847, -0.7151768], -128.38805f32, 24.510975f32),
+            ([-0.09944248, 0.3280952, 0.8147125], -6.959007, 21.788868),
+            ([0.30618525, 0.088238716, -0.23462808], 127.462746, 12.884638),
         ];
-        for (thin, idx) in [(false, [10]), (true, [5])] {
+        for (thin, idx) in [(false, [10, 5, 3]), (true, [5, 0, 15])] {
             let parts = boxes(&m, thin);
-            let got = place(1234, 1, &parts);
-            assert_eq!(got.len(), 1);
+            let got = place(1234, 3, &parts);
+            assert_eq!(got.len(), 3);
             for (i, s) in got.iter().enumerate() {
                 let (dir, yaw, pitch) = angles[i];
                 assert_eq!(s.part, idx[i], "thin={thin} arrow {i}");

@@ -105,6 +105,10 @@ pub struct Renderer {
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
     glint_mesh: Option<GpuMesh>,
+    /// Item models for held and dropped items, by `(id, damage)`.
+    item_models: entity::item::Models,
+    /// Held and dropped item meshes: the block atlas (`None`) or the sprite texture they sample.
+    item_meshes: Vec<(Option<String>, GpuMesh)>,
     fires: Vec<entity::fire::Fire>,
     on_fire: bool,
     fire_frames: [u32; 2],
@@ -371,6 +375,8 @@ impl Renderer {
             entity_tex,
             entity_mesh: None,
             glint_mesh: None,
+            item_models: HashMap::new(),
+            item_meshes: Vec::new(),
             fires: Vec::new(),
             on_fire: false,
             fire_frames: [0; 2],
@@ -765,7 +771,23 @@ impl Renderer {
         }
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
-        let glint = entity::build_glint(draws);
+        self.resolve_items(draws);
+        let items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        self.item_meshes.clear();
+        let layers = std::iter::once((None, items.atlas))
+            .chain(items.sprites.into_iter().map(|(path, m)| (Some(path), m)));
+        for (tex, mesh) in layers {
+            if let Some(tex) = &tex {
+                self.load_texture(tex);
+            }
+            if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
+                self.item_meshes.push((tex, m));
+            }
+        }
+        let mut glint = entity::build_glint(draws);
+        let base = glint.vertices.len() as u32;
+        glint.vertices.extend(items.glint.vertices);
+        glint.indices.extend(items.glint.indices.iter().map(|i| i + base));
         if !glint.is_empty() {
             self.load_texture(entity::GLINT_TEXTURE);
         }
@@ -780,6 +802,20 @@ impl Renderer {
                     size: d.size,
                 }),
         );
+    }
+
+    /// Resolves the model of every held and dropped item that is new.
+    fn resolve_items(&mut self, draws: &[EntityDraw]) {
+        for key in draws.iter().flat_map(entity::item::wanted) {
+            if self.item_models.contains_key(&key) {
+                continue;
+            }
+            let model = self.source.as_mut().and_then(|source| {
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1)
+            });
+            self.item_models.insert(key, model);
+        }
     }
 
     pub fn set_on_fire(&mut self, on_fire: bool) {
@@ -1360,6 +1396,12 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            for (tex, m) in &self.item_meshes {
+                let group = tex.as_ref().map_or(&self.world_group, |t| &self.textures[t]);
+                pass.set_bind_group(0, group, &[]);
+                draw_mesh(&mut pass, m);
+            }
+            pass.set_bind_group(0, &self.world_group, &[]);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);

@@ -140,6 +140,8 @@ pub const EQUIPMENT_SLOTS: usize = 5;
 pub struct ItemRef {
     pub id: i16,
     pub damage: i16,
+    /// Stack size; a dropped item draws one to five copies of it.
+    pub count: u8,
     /// Leather armor color (`display.color`).
     pub dye: Option<i32>,
     /// `ItemStack.hasEffect`: the enchantment glint.
@@ -749,6 +751,7 @@ impl Entities {
                     e.equipment[0] = Some(ItemRef {
                         id: held,
                         damage: 0,
+                        count: 1,
                         dye: None,
                         glint: false,
                     });

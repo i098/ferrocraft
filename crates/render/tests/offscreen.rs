@@ -249,6 +249,9 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
         name: None,
         skin: None,
         burning: false,
@@ -537,6 +540,9 @@ fn burning_entity_and_first_person_fire() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
         name: None,
         skin: None,
         burning: false,
@@ -628,6 +634,9 @@ fn hurt_entity_flashes_red() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
         name: None,
         skin: None,
         burning: false,
@@ -690,6 +699,9 @@ fn player_in_leather() -> EntityDraw {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
         eye_height: 1.62,
         pitch: 0.0,
         limb_swing: 0.0,
@@ -836,6 +848,9 @@ fn projection_matches_a_drawn_entity() {
         armor_dye: [None; 4],
         armor_glint: [false; 4],
         held_glint: false,
+        held_damage: 0,
+        stack: None,
+        hover_start: 0.0,
         name: None,
         skin: None,
         burning: false,
@@ -856,4 +871,58 @@ fn projection_matches_a_drawn_entity() {
         (cx - ex).abs() < 30.0 && (cy - ey).abs() < 30.0,
         "player drew around ({cx}, {cy}), expected near ({ex:.0}, {ey:.0})"
     );
+}
+
+/// Held items show their sprite or block in the right hand and dropped items bob as models
+/// (`ItemInHandLayer`, `ItemEntityRenderer`); `ITEMS_PROOF_DIR` keeps the frame.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn held_and_dropped_items_draw_as_models() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(640, 360, Some(std::path::Path::new(&jar)));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let player = |x: f64, id: i16| EntityDraw {
+        class: Class::Player { slim: false },
+        pos: [x, 66.0, 3.0],
+        yaw: 180.0 - 50.0,
+        head_yaw: 130.0,
+        held: id,
+        ..player_in_leather()
+    };
+    let drop = |x: f64, id: i16, count: u8| EntityDraw {
+        class: Class::Object(2),
+        pos: [x, 66.0, 1.0],
+        size: (0.25, 0.25),
+        stack: Some(render::item::Stack { id, damage: 0, count, glint: false }),
+        age: 12.0,
+        ..player_in_leather()
+    };
+    let draws = [
+        player(5.0, 276),
+        player(7.0, 261),
+        player(9.0, 1),
+        player(11.0, 346),
+        drop(5.0, 276, 1),
+        drop(7.0, 1, 3),
+        drop(9.0, 322, 1),
+    ];
+    let cam = Camera {
+        pos: [8.0, 67.6, -2.5],
+        yaw: 0.0,
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    // The first frame meshes the chunks; entities read their light after it.
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    if let Some(dir) = std::env::var_os("ITEMS_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("items.png"), 640, 360, &image).unwrap();
+    }
 }

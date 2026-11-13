@@ -11,6 +11,7 @@ fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
         id: s.id,
         damage: s.damage,
+        count: s.count.max(0) as u8,
         dye: s.nbt.as_ref().and_then(|n| n.dye()),
         glint: world::inventory::glint(s),
     })

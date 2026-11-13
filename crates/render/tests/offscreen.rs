@@ -1151,6 +1151,7 @@ impl ChunkBlocks for Pools {
 
 /// `TextureMap.updateAnimations` runs each client tick: lava and water leave frame 0 as `Environment.ticks` advances.
 #[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
 fn lava_and_water_animate_with_client_ticks() {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
     let mut r = Renderer::new_offscreen(400, 300, Some(std::path::Path::new(&jar)));

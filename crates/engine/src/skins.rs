@@ -11,8 +11,18 @@ pub struct PlayerSkins {
     requested: HashSet<u128>,
     /// Decoded skins with their arm model; kept so the renderer can get one back after it replaced it.
     ready: HashMap<u128, (Image, bool)>,
-    tx: Sender<(u128, bool, Vec<u8>)>,
-    rx: Receiver<(u128, bool, Vec<u8>)>,
+    /// Decoded capes, kept like `ready`.
+    capes: HashMap<u128, Image>,
+    tx: Sender<Download>,
+    rx: Receiver<Download>,
+}
+
+/// What the download thread of one player found.
+struct Download {
+    uuid: u128,
+    slim: bool,
+    skin: Vec<u8>,
+    cape: Option<Vec<u8>>,
 }
 
 impl PlayerSkins {
@@ -23,6 +33,7 @@ impl PlayerSkins {
             cache: game_dir.join("assets").join("skins"),
             requested: HashSet::new(),
             ready: HashMap::new(),
+            capes: HashMap::new(),
             tx,
             rx,
         }
@@ -36,8 +47,14 @@ impl PlayerSkins {
         let (tx, cache, textures) = (self.tx.clone(), self.cache.clone(), textures.to_string());
         std::thread::spawn(move || {
             if let Some(info) = parse_textures(&textures) {
-                if let Some(bytes) = fetch_skin(&info.url, &cache) {
-                    let _ = tx.send((uuid, info.slim, bytes));
+                if let Some(skin) = fetch_skin(&info.url, &cache) {
+                    let cape = info.cape.and_then(|u| fetch_skin(&u, &cache));
+                    let _ = tx.send(Download {
+                        uuid,
+                        slim: info.slim,
+                        skin,
+                        cape,
+                    });
                 }
             }
         });
@@ -46,9 +63,12 @@ impl PlayerSkins {
     /// The skin of a drawn player: `Some` once downloaded. Puts it into the renderer when it is
     /// new there or when the renderer replaced it for lack of room.
     pub fn show(&mut self, r: &mut Renderer, uuid: u128, textures: Option<&str>) -> Option<u128> {
-        while let Ok((uuid, slim, bytes)) = self.rx.try_recv() {
-            if let Some(img) = decode_png(&bytes) {
-                self.ready.insert(uuid, (img, slim));
+        while let Ok(d) = self.rx.try_recv() {
+            if let Some(img) = decode_png(&d.skin) {
+                self.ready.insert(d.uuid, (img, d.slim));
+            }
+            if let Some(img) = d.cape.as_deref().and_then(decode_png) {
+                self.capes.insert(d.uuid, img);
             }
         }
         if let Some(t) = textures {
@@ -57,6 +77,11 @@ impl PlayerSkins {
         let (img, _) = self.ready.get(&uuid)?;
         if !r.has_player_skin(uuid) {
             r.set_player_skin(uuid, img);
+        }
+        if let Some(cape) = self.capes.get(&uuid) {
+            if !r.has_player_cape(uuid) {
+                r.set_player_cape(uuid, cape);
+            }
         }
         Some(uuid)
     }

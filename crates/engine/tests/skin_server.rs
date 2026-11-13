@@ -256,6 +256,7 @@ fn textures_property_skins_the_spawned_player() {
         using: None,
         view: [0.0; 2],
         line: None,
+        look: render::Look::default(),
     };
     let at = |e: &world::entities::Entity| e.pos[0];
     r.set_entities(&[draw(at(skinned), Some(SKINNED)), draw(at(plain), None)]);

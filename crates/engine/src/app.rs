@@ -27,8 +27,8 @@ use input_audio::sound::index::AssetIndex;
 use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
-    AssetSource, Camera, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand, HeldKind,
-    Particles, Renderer, Thrower, UseAction, Using,
+    AssetSource, Camera, CapeSway, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand,
+    HeldKind, Look, Particles, Renderer, Thrower, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -659,6 +659,7 @@ impl App {
             using: self.using(f).map(|u| u.action),
             view: [0.0; 2],
             line: None,
+            look: Look::default(),
         })
     }
 
@@ -1264,6 +1265,18 @@ fn entity_draw(
         using: remote_using(e),
         view: [0.0; 2],
         line: None,
+        look: Look {
+            // Metadata 10 of a player is the skin parts byte; a sheep keeps its fleece in byte 16 and a
+            // villager its profession in int 16. A server that never sent the byte shows every part.
+            skin_parts: e.meta.stand.unwrap_or(0x7F),
+            variant: match e.kind {
+                Kind::Mob(91) => e.meta.slime.unwrap_or(0),
+                Kind::Mob(120) => e.meta.guardian.map_or(0, |p| p as u8),
+                _ => 0,
+            },
+            cape: Some(CapeSway::default()),
+            ..Look::default()
+        },
     }
 }
 

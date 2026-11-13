@@ -1,6 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
-//! and `ModelCow`: box geometry, texture layout and limb animation. Mobs without a ported model
-//! draw as a tinted box of their hitbox size.
+//! and `ModelCow` here and from the villager, golem, silverfish, chicken, sheep, spider and
+//! enderman models in [`mobs`]: box geometry, texture layout and limb animation. Mobs without a
+//! ported model draw as a tinted box of their hitbox size.
 //!
 //! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
@@ -9,13 +10,21 @@ pub(crate) mod fire;
 pub(crate) mod guardian;
 pub mod hanging;
 pub mod item;
+mod mobs;
 mod projectile;
 mod skin;
+
+// Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
+const PLAYER_JACKET: usize = 7;
+const PLAYER_RIGHT_SLEEVE: usize = 8;
+const PLAYER_LEFT_SLEEVE: usize = 9;
+const PLAYER_RIGHT_PANTS: usize = 10;
+const PLAYER_LEFT_PANTS: usize = 11;
 
 use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
 pub use projectile::Thrower;
-pub use skin::{Skin, Skins};
+pub use skin::{Skin, Skins, SLOT};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
 /// What to draw; mob and object ids are the 1.8.9 network type ids.
@@ -89,9 +98,71 @@ pub struct EntityDraw {
     pub view: [f32; 2],
     /// Fishing bobber: world point where the line leaves the rod and the vertical eye offset.
     pub line: Option<([f64; 3], f32)>,
+    /// Metadata the models read; see [`Look`].
+    pub look: Look,
+}
+
+/// Per-entity appearance data that comes from metadata and the profile.
+#[derive(Clone, Debug)]
+pub struct Look {
+    /// Players: the skin parts byte (metadata 10): 1 cape, 2 jacket, 4 left sleeve, 8 right sleeve,
+    /// 16 left pants, 32 right pants, 64 hat. A player with no byte shows every part.
+    pub skin_parts: u8,
+    /// Villager: profession (metadata 16), 0 farmer to 4 butcher. Sheep: metadata 16, dye in the low
+    /// four bits and 16 when sheared.
+    pub variant: u8,
+    /// Enderman: id of the carried block (metadata 16), 0 for none.
+    pub carried: u16,
+    /// Enderman: metadata 18, open mouth.
+    pub screaming: bool,
+    /// Players with a cape: how it sways.
+    pub cape: Option<CapeSway>,
+}
+
+impl Default for Look {
+    fn default() -> Look {
+        Look {
+            skin_parts: 0x7F,
+            variant: 0,
+            carried: 0,
+            screaming: false,
+            cape: None,
+        }
+    }
+}
+
+/// Inputs of `LayerCape`, already interpolated for the frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CapeSway {
+    /// `chasingPos - pos` of the player (`EntityPlayer.updateCape` keeps `chasingPos` trailing).
+    pub chase: [f32; 3],
+    /// `renderYawOffset`, degrees.
+    pub body_yaw: f32,
+    /// `cameraYaw`, the walking bob.
+    pub camera_yaw: f32,
+    /// `distanceWalkedModified`.
+    pub walked: f32,
+}
+
+impl CapeSway {
+    /// `LayerCape.doRenderLayer`: the cape pitch about x, and the twist about z and y, in degrees.
+    fn angles(&self, sneaking: bool) -> (f32, f32) {
+        let [dx, dy, dz] = self.chase;
+        let (sin, cos) = self.body_yaw.to_radians().sin_cos();
+        let (s, c) = (sin, -cos);
+        let mut pitch = (dy * 10.0).clamp(-6.0, 32.0);
+        let swing = (dx * s + dz * c) * 100.0;
+        let twist = (dx * c - dz * s) * 100.0;
+        pitch += (self.walked * 6.0).sin() * 32.0 * self.camera_yaw;
+        if sneaking {
+            pitch += 25.0;
+        }
+        (6.0 + swing.max(0.0) / 2.0 + pitch, twist)
+    }
 }
 
 /// A box of a model, in vanilla model pixels (y down).
+#[derive(Clone)]
 struct Part {
     pivot: [f32; 3],
     min: [f32; 3],
@@ -300,7 +371,7 @@ fn biped(
     } else {
         ((32.0, 48.0), (16.0, 48.0))
     };
-    let parts = vec![
+    let mut parts = vec![
         Part::new(head_pivot, [-4.0, -8.0, -4.0], [8.0; 3], (0.0, 0.0))
             .rot([head_rot_x, head_rot_y, 0.0]),
         hat,
@@ -336,6 +407,23 @@ fn biped(
         .rot(l_leg)
         .mirrored(mirrored),
     ];
+    if matches!(d.class, Class::Player { .. }) {
+        // `ModelPlayer`'s second skin layer: same boxes and poses, grown by a quarter pixel.
+        let layer = |base: usize, uv: (f32, f32)| {
+            let mut p = parts[base].clone();
+            p.uv = uv;
+            p.inflate = 0.25;
+            p
+        };
+        let wear = [
+            layer(2, (16.0, 32.0)),
+            layer(3, (40.0, 32.0)),
+            layer(4, (48.0, 48.0)),
+            layer(5, (0.0, 32.0)),
+            layer(6, (0.0, 48.0)),
+        ];
+        parts.extend(wear);
+    }
     Model { skin, tint, parts }
 }
 
@@ -529,6 +617,7 @@ fn model(d: &EntityDraw) -> Model {
         Class::Mob(50) => creeper(d),
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
+        Class::Mob(id) => mobs::build(d, id).unwrap_or_else(|| generic(d)),
         _ => generic(d),
     }
 }
@@ -674,10 +763,14 @@ pub fn build(
     let mut out = MeshData::default();
     for d in draws {
         let start = out.vertices.len();
-        draw_entity(&mut out, d, skins);
+        let bright = draw_entity(&mut out, d, skins);
         let level = light_level(d, &light, true);
-        for v in &mut out.vertices[start..] {
+        let bright = bright.max(start);
+        for v in &mut out.vertices[start..bright] {
             v.light = level;
+        }
+        for v in &mut out.vertices[bright..] {
+            v.light = [1.0, 1.0];
         }
     }
     out
@@ -737,17 +830,27 @@ impl Xf {
         } else {
             0.0
         };
+        // `RenderIronGolem.rotateCorpse` rolls the walking golem about the same axis.
+        let fall = fall
+            + if d.class == Class::Mob(mobs::IRON_GOLEM) {
+                mobs::golem_sway(d)
+            } else {
+                0.0
+            };
         Xf {
             pos: d.pos,
             st,
             ct,
             sneak_drop: if d.sneaking { 0.125 } else { 0.0 },
             fall,
-            // `RenderPlayer.preRenderCallback` scales the player model by 15/16.
-            scale: if matches!(d.class, Class::Player { .. }) {
-                0.9375
-            } else {
-                1.0
+            // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
+            scale: match d.class {
+                Class::Player { .. } => 0.9375,
+                Class::Mob(mobs::CAVE_SPIDER) => 0.7,
+                // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
+                Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
+                Class::Mob(mobs::VILLAGER) => 0.9375,
+                _ => 1.0,
             },
             generic,
         }
@@ -825,37 +928,163 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
     );
 }
 
-fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
+/// Mask bit of the skin parts byte that shows model part `i` of a player.
+fn player_part_bit(i: usize) -> Option<u8> {
+    match i {
+        1 => Some(0x40),
+        PLAYER_JACKET => Some(0x02),
+        PLAYER_RIGHT_SLEEVE => Some(0x08),
+        PLAYER_LEFT_SLEEVE => Some(0x04),
+        PLAYER_RIGHT_PANTS => Some(0x20),
+        PLAYER_LEFT_PANTS => Some(0x10),
+        _ => None,
+    }
+}
+
+/// `LayerCape.shouldCombineTextures`/`doRenderLayer`: drawn when the cape bit is on, the player is
+/// visible and wears no chestplate.
+fn cape_shown(d: &EntityDraw) -> bool {
+    matches!(d.class, Class::Player { .. })
+        && d.look.skin_parts & 0x01 != 0
+        && !d.invisible
+        && d.armor[2] == 0
+}
+
+/// `LayerCape`: the 10x16x1 cape box on the back, tilted by the sway.
+fn emit_cape(out: &mut MeshData, xf: &Xf, d: &EntityDraw, sway: CapeSway, v_off: f32) {
+    let (pitch, twist) = sway.angles(d.sneaking);
+    let half = (twist / 2.0).to_radians();
+    let tf = |p: V3| -> V3 {
+        let q = rotate(p, [0.0, PI, 0.0]);
+        let q = rotate(q, [0.0, -half, 0.0]);
+        let q = rotate(q, [0.0, 0.0, half]);
+        let q = rotate(q, [pitch.to_radians(), 0.0, 0.0]);
+        // `translate(0, 0, 0.125)`, in model pixels.
+        xf.world([q[0], q[1], q[2] + 2.0])
+    };
+    let size = [10.0, 16.0, 1.0];
+    let (min, uv) = ([-5.0, 0.0, -1.0], (0.0, 0.0));
+    add_box(
+        out,
+        &tf,
+        min,
+        size,
+        size,
+        uv,
+        false,
+        v_off,
+        [1.0; 3],
+        skin_dims(),
+    );
+}
+
+/// `LayerHeldBlock`: the carried block as an 8 pixel cube of its flat color in front of the chest.
+fn emit_carried(out: &mut MeshData, xf: &Xf, block: u16, v_off: f32) {
+    let tf = |p: V3| -> V3 {
+        let q = rotate([p[0], p[1] - 1.0, p[2]], [0.0, 45f32.to_radians(), 0.0]);
+        let q = rotate(q, [20f32.to_radians(), 0.0, 0.0]);
+        xf.world([q[0], q[1] + 11.0, q[2] - 12.0])
+    };
+    let color = crate::blocks::look(block << 4).color;
+    let size = [8.0; 3];
+    add_box(
+        out,
+        &tf,
+        [-4.0; 3],
+        size,
+        size,
+        (0.0, 0.0),
+        false,
+        v_off,
+        color,
+        skin_dims(),
+    );
+}
+
+/// Meshes one entity into `out` and returns the index of the first full-bright vertex (the eye
+/// layers), or the vertex count when there are none.
+fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
+    if other_drawer(out, d, skins) {
+        return out.vertices.len();
+    }
+    draw_body(out, d, skins)
+}
+
+/// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
+/// `d` was one of them.
+fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
     if let Class::Object(id) = d.class {
         if projectile::handles(id) {
-            return projectile::build(out, id, d, skins);
+            projectile::build(out, id, d, skins);
+            return true;
         }
         // Dropped items draw through `item::build`, item frames through `hanging::build`.
         if id == 2 || id == 71 {
-            return;
+            return true;
         }
     }
-    if d.class == Class::Painting {
-        return;
-    }
+    d.class == Class::Painting
+}
+
+/// The body model, its armor and layers; returns where the full-bright layers start.
+fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
     let generic = m.skin == Skin::White
         && matches!(d.class, Class::Mob(_) | Class::Object(_) | Class::Orb)
         && m.parts.len() == 1;
     let xf = Xf::new(d, generic);
+    let white = skins.v_offset(Skin::White);
+    let player = matches!(d.class, Class::Player { .. });
+    let shown =
+        |i: usize| !player || player_part_bit(i).is_none_or(|bit| d.look.skin_parts & bit != 0);
+
     // `LivingEntityRenderer.renderModel` skips the body of an invisible entity; layers still draw.
-    for part in m
+    for (i, part) in m
         .parts
         .iter()
-        .filter(|p| !d.invisible && (p.inflate == 0.0 || skin != Skin::White))
+        .enumerate()
+        .filter(|(i, p)| !d.invisible && shown(*i) && (p.inflate == 0.0 || skin != Skin::White))
     {
+        let _ = i;
         emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
     }
     let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
     if holds {
         emit_armor(out, &xf, &m, d, skins);
     }
+    emit_layers(out, &xf, &m, d, skins, white)
+}
+
+/// The held item bar, the cape, the carried block and the model layers; returns where the
+/// full-bright layers start.
+fn emit_layers(
+    out: &mut MeshData,
+    xf: &Xf,
+    m: &Model,
+    d: &EntityDraw,
+    skins: &Skins,
+    white: f32,
+) -> usize {
+    if let (Some(sway), Some(cape)) = (d.look.cape, d.skin.and_then(|k| skins.cape(k))) {
+        if cape_shown(d) {
+            emit_cape(out, xf, d, sway, skins.v_offset(cape));
+        }
+    }
+    if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
+        emit_carried(out, xf, d.look.carried, white);
+    }
+    let mut bright = None;
+    for layer in mobs::layers(d, m).iter().filter(|l| skins.has(l.skin)) {
+        if layer.bright {
+            bright.get_or_insert(out.vertices.len());
+        }
+        let v_off = skins.v_offset(layer.skin);
+        for part in &layer.parts {
+            emit_part(out, xf, part, part.inflate, layer.tint, v_off);
+        }
+    }
+    bright.unwrap_or(out.vertices.len())
 }
 
 /// (slot: boots, leggings, chest, helmet), part indices, grow, texture layer
@@ -920,6 +1149,9 @@ fn armor_pass(
 const LEATHER_DEFAULT: i32 = 0xA0_65_40;
 
 fn fallback_tint(skin: Skin) -> [f32; 3] {
+    if let Some(c) = mob_tint(skin) {
+        return c;
+    }
     match skin {
         Skin::Steve | Skin::Alex => [0.75, 0.6, 0.5],
         Skin::Zombie => [0.35, 0.6, 0.3],
@@ -936,8 +1168,23 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         | Skin::FireCharge
         | Skin::Bobber
         | Skin::SplashPotion => [0.8, 0.8, 0.85],
-        Skin::White | Skin::Player(_) => [1.0; 3],
+        _ => [1.0; 3],
     }
+}
+
+/// Flat color of a mob texture that has no vertex tint of its own.
+fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
+    Some(match skin {
+        Skin::Villager(_) => [0.7, 0.55, 0.45],
+        Skin::IronGolem => [0.75, 0.75, 0.7],
+        Skin::Silverfish => [0.5, 0.5, 0.52],
+        Skin::Chicken => [0.95; 3],
+        Skin::Sheep | Skin::SheepFur => [0.9; 3],
+        Skin::Spider | Skin::CaveSpider => [0.25, 0.22, 0.2],
+        Skin::Enderman => [0.1, 0.08, 0.12],
+        Skin::SpiderEyes | Skin::EndermanEyes => [1.0; 3],
+        _ => return None,
+    })
 }
 
 fn skin_dims() -> [f32; 2] {
@@ -1205,6 +1452,7 @@ mod tests {
             using: None,
             view: [0.0; 2],
             line: None,
+            look: Look::default(),
         }
     }
 
@@ -1239,6 +1487,84 @@ mod tests {
         assert!(back
             .iter()
             .all(|uv| uv[0] >= 16.0 / 64.0 && uv[0] <= 40.0 / 64.0));
+    }
+
+    fn mesh(d: &EntityDraw) -> MeshData {
+        build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
+    }
+
+    fn extent(m: &MeshData, axis: usize) -> f32 {
+        let (lo, hi) = m.vertices.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v.pos[axis]), hi.max(v.pos[axis]))
+        });
+        hi - lo
+    }
+
+    #[test]
+    fn every_ported_mob_draws_at_its_vanilla_height() {
+        // Heights in blocks from the 1.8.9 Model* boxes: (24 - top) / 16 times the render scale.
+        let mobs = [
+            (120u8, 34.0 / 16.0 * 0.9375),
+            (60, 0.5),
+            (93, 0.9375),
+            (91, 1.41),
+        ];
+        let mut bad = Vec::new();
+        for (id, expected) in mobs {
+            let mut d = steve();
+            d.class = Class::Mob(id);
+            let m = mesh(&d);
+            let h = extent(&m, 1);
+            if m.vertices.is_empty() || (h - expected).abs() > 0.05 {
+                bad.push((id, h, expected));
+            }
+        }
+        for id in [99u8, 52, 59, 58] {
+            let mut d = steve();
+            d.class = Class::Mob(id);
+            if mesh(&d).vertices.is_empty() {
+                bad.push((id, 0.0, 0.0));
+            }
+        }
+        assert!(bad.is_empty(), "(id, got, expected): {bad:?}");
+    }
+
+    #[test]
+    fn cave_spider_is_seven_tenths_of_a_spider() {
+        let mut d = steve();
+        d.class = Class::Mob(mobs::SPIDER);
+        let spider = extent(&mesh(&d), 0);
+        d.class = Class::Mob(mobs::CAVE_SPIDER);
+        let cave = extent(&mesh(&d), 0);
+        assert!((cave / spider - 0.7).abs() < 0.01, "{cave} / {spider}");
+    }
+
+    #[test]
+    fn player_skin_layers_and_cape_add_geometry() {
+        let img = |w, h| crate::assets::Image {
+            width: w,
+            height: h,
+            rgba: vec![255; w * h * 4],
+        };
+        let mut skins = Skins::flat();
+        skins.set_player(1, &img(64, 64));
+        let mut d = steve();
+        d.skin = Some(1);
+        let count = |skins: &Skins, d: &EntityDraw| {
+            build(std::slice::from_ref(d), skins, |_| [1.0, 1.0])
+                .vertices
+                .len()
+        };
+        d.look.skin_parts = 0x00;
+        let bare = count(&skins, &d);
+        d.look.skin_parts = 0x7F;
+        // Hat, jacket, two sleeves and two pants legs: six extra boxes of 24 vertices.
+        let layered = count(&skins, &d);
+        assert_eq!(layered, bare + 6 * 24);
+        d.look.cape = Some(CapeSway::default());
+        assert_eq!(count(&skins, &d), layered);
+        skins.set_cape(1, &img(64, 32));
+        assert_eq!(count(&skins, &d), layered + 24);
     }
 
     #[test]

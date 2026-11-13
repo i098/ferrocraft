@@ -3,6 +3,7 @@
 use crate::animation::Animation;
 use crate::biome::Colormaps;
 use crate::blocks::texture_names;
+use crate::mip;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -198,6 +199,52 @@ impl Atlas {
             colormaps: Colormaps::load(source),
         }
     }
+    /// Most mip levels the atlas can hold: the side of a tile halves per level down to 1 px, and the Mipmap Levels
+    /// option stops at 4. A flat atlas has none.
+    pub(crate) fn max_levels(&self) -> u32 {
+        if self.textured {
+            4.min(self.tile.ilog2())
+        } else {
+            0
+        }
+    }
+
+    /// Levels 1..=`levels` of the atlas: every sprite tile gets its own [`mip::chain`] and the levels are stitched
+    /// side by side like level 0.
+    pub(crate) fn mips(&self, levels: u32) -> Vec<Vec<u8>> {
+        let (width, tile) = (self.width as usize, self.tile as usize);
+        let rows = self.height as usize / tile;
+        let mut out: Vec<Vec<u8>> = (1..=levels)
+            .map(|l| vec![0; (width >> l) * ((rows * tile) >> l) * 4])
+            .collect();
+        let last = self.cells.values().copied().max().unwrap_or(0) as usize;
+        for cell in 0..=last {
+            let (ox, oy) = ((cell % COLUMNS) * tile, (cell / COLUMNS) * tile);
+            let sprite = self.tile_at(ox, oy);
+            for (l, level) in mip::chain(&sprite, tile, levels).iter().enumerate() {
+                let shift = l + 1;
+                blit_level(
+                    &mut out[l],
+                    level,
+                    width >> shift,
+                    (ox >> shift, oy >> shift),
+                );
+            }
+        }
+        out
+    }
+
+    /// The RGBA pixels of the tile whose top-left corner is `(ox, oy)`.
+    fn tile_at(&self, ox: usize, oy: usize) -> Vec<u8> {
+        let (width, tile) = (self.width as usize, self.tile as usize);
+        let mut out = Vec::with_capacity(tile * tile * 4);
+        for y in oy..oy + tile {
+            let at = (y * width + ox) * 4;
+            out.extend_from_slice(&self.rgba[at..at + tile * 4]);
+        }
+        out
+    }
+
     /// Atlas coordinates for texture `name` at tile-local `(u, v)` in `0..=1`.
     pub fn uv(&self, name: &str, [u, v]: [f32; 2]) -> [f32; 2] {
         let cell = self.cells.get(name).copied().unwrap_or(0) as usize;
@@ -209,6 +256,16 @@ impl Atlas {
             (cx + u) * self.tile as f32 / self.width as f32,
             (cy + v) * self.tile as f32 / self.height as f32,
         ]
+    }
+}
+
+/// Copies the square `tile` into a mip level `width` px wide at `(ox, oy)`.
+fn blit_level(level: &mut [u8], tile: &[u8], width: usize, (ox, oy): (usize, usize)) {
+    let side = tile.len() / 4;
+    let side = side.isqrt();
+    for (y, row) in tile.chunks_exact(side * 4).enumerate() {
+        let dst = ((oy + y) * width + ox) * 4;
+        level[dst..dst + side * 4].copy_from_slice(row);
     }
 }
 

@@ -54,15 +54,15 @@ impl App {
 
     fn run_effect(&mut self, effect: UiEffect) {
         match effect {
-            UiEffect::Sound(name) => {
-                if let Some(s) = &mut self.sound {
-                    s.play_ui(name);
-                }
-            }
+            UiEffect::Sound(name) => self.play_ui_sound(name),
             UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
             UiEffect::Respawn => self.respawn(),
+            UiEffect::RequestStats => {
+                let r = self.link.session().map(|s| s.request_stats());
+                self.send_result(r.unwrap_or(Ok(())));
+            }
             UiEffect::SignText { pos, lines } => self.send_sign(pos, &lines),
             UiEffect::Quit => self.quit = true,
             UiEffect::SettingsSaved => self.apply_settings(),
@@ -75,6 +75,12 @@ impl App {
                 hash,
                 accepted,
             } => self.answer_server_pack(&url, &hash, accepted),
+        }
+    }
+
+    fn play_ui_sound(&mut self, name: &'static str) {
+        if let Some(sound) = &mut self.sound {
+            sound.play_ui(name);
         }
     }
 
@@ -106,6 +112,7 @@ impl App {
 
     fn connect(&mut self, host: &str, port: u16) {
         self.game = Game::new();
+        self.ui.stats.clear();
         if let Some(r) = &mut self.renderer {
             r.clear_maps();
         }
@@ -170,6 +177,7 @@ impl App {
         self.container = None;
         self.particles.clear();
         self.ui.in_world = false;
+        self.ui.stats.clear();
         self.ui.difficulty = None;
         self.awaiting_terrain = false;
         self.pending_pack = None;
@@ -290,6 +298,10 @@ impl App {
             if let Some(r) = &mut self.renderer {
                 r.map_update(*id, *area, data);
             }
+            return;
+        }
+        if let NetEvent::Statistics(values) = &ev {
+            self.ui.stats_arrived(values);
             return;
         }
         let ev = match self.world_event(ev, dirty) {
@@ -950,6 +962,54 @@ mod tests {
         assert!(!screen_opens(Some(386), "MC|BOpen"), "book and quill");
         assert!(!screen_opens(None, "MC|BOpen"), "empty hand");
         assert!(!screen_opens(Some(387), "MC|Brand"), "other channel");
+    }
+
+    #[test]
+    fn leaving_server_discards_its_statistics() {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.on_event(
+            NetEvent::Statistics(vec![("achievement.mineWood".into(), 1)]),
+            &mut false,
+            &mut Dirty::new(),
+        );
+        assert_eq!(app.ui.stats.read("achievement.mineWood"), 1);
+        app.leave_world();
+        app.on_event(
+            NetEvent::Statistics(vec![("achievement.openInventory".into(), 1)]),
+            &mut false,
+            &mut Dirty::new(),
+        );
+        assert_eq!(app.ui.stats.read("achievement.openInventory"), 1);
+        assert_eq!(app.ui.stats.read("achievement.mineWood"), 0);
+    }
+
+    #[test]
+    fn player_id_is_the_auth_uuid_with_the_username_offline() {
+        for (auth, expected) in [
+            (None, "Ferro"),
+            (
+                Some(ferrocraft_net_client::Auth::new(
+                    "unused".into(),
+                    "01234567-89ab-cdef-0123-456789abcdef",
+                )),
+                "0123456789abcdef0123456789abcdef",
+            ),
+        ] {
+            let app = App::new(Args {
+                username: "Ferro".into(),
+                auth,
+                assets_dir: None,
+                server: None,
+                game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            });
+            assert_eq!(app.ui.player_id, expected);
+        }
     }
 
     #[test]

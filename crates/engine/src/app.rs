@@ -159,7 +159,11 @@ type ViewRay = ([f64; 3], f32, f32, i32, Option<i32>);
 
 impl App {
     pub fn new(args: Args) -> App {
-        let ui = Ui::new(args.game_dir.clone(), Texts::default());
+        let mut ui = Ui::new(args.game_dir.clone(), Texts::default());
+        ui.player_id = args
+            .auth
+            .as_ref()
+            .map_or_else(|| args.username.clone(), |auth| auth.uuid().to_owned());
         let mut app = App {
             skins: PlayerSkins::new(&args.game_dir),
             input: InputState::new(ui.settings.mouse_sensitivity),
@@ -308,6 +312,9 @@ impl App {
         self.sound = None;
         for dir in dirs.into_iter().flatten() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
+                for d in s.dropped() {
+                    crate::log::line(d);
+                }
                 self.sound = Some(s);
                 if let (Some(s), Some(p)) = (&mut self.sound, &self.game.player) {
                     s.set_listener(p.pos);
@@ -1262,7 +1269,7 @@ impl App {
             cs.draw(&mut c, &view, mx, my);
         }
         // A mod screen draws over the menu and takes its input: the menu's own effects are dropped.
-        let effects = self.ui.draw(&m, &mut c, mx, my);
+        let effects = self.ui.draw(&m, &mut c, (mx, my), self.icons.as_ref());
         let effects = if self.mod_screen() {
             Vec::new()
         } else {
@@ -1573,6 +1580,10 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            eat_timer: e.sheep_timer,
+            golem_attack: e.anim.golem_attack,
+            golem_rose: e.anim.golem_rose,
+            partial: p,
             ..Look::default()
         },
     }

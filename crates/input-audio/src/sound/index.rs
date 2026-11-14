@@ -270,7 +270,7 @@ fn key(domain: &str, path: &str) -> String {
 }
 
 pub struct SoundIndex {
-    /// Variants dropped because their `ns:name` file is missing; the caller logs them.
+    /// Variants dropped because their file is missing and they name an explicit `ns:name` or sit in a non-`minecraft` domain; the caller logs them.
     pub dropped: Vec<String>,
     events: HashMap<String, Event>,
     /// Events a `"type": "event"` entry points at, per event; folded into `events` by `merge`.

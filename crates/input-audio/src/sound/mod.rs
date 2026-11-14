@@ -29,7 +29,7 @@ pub struct Sound {
 }
 
 impl Sound {
-    /// Variants of `ns:name` that no pack or asset has; the engine writes them to its log.
+    /// Variants with no pack or asset file, named `ns:name` or in a non-`minecraft` domain; the engine writes them to its log.
     pub fn dropped(&self) -> &[String] {
         &self.index.dropped
     }

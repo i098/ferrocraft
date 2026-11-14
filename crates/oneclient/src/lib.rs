@@ -8,6 +8,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+mod loader;
+pub use loader::{fabric_jars, loader, Loader};
+
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
@@ -106,6 +109,15 @@ impl Http for Modrinth {
 const UA: &str = "ferrocraft/oneclient (github.com/ferrocraft)";
 
 /// `cluster_mods` is the cluster's `.oneclient-mods.json`, or the cluster directory holding it.
+pub(crate) fn manifest_path(cluster_mods: &Path) -> PathBuf {
+    if cluster_mods.is_dir() {
+        cluster_mods.join(MANIFEST)
+    } else {
+        cluster_mods.to_path_buf()
+    }
+}
+
+/// `cluster_mods` is the cluster's `.oneclient-mods.json`, or the cluster directory holding it.
 pub fn resolve(cluster_mods: &Path, out_dir: &Path) -> Result<Resolved, Error> {
     resolve_with(&Modrinth, cluster_mods, out_dir)
 }
@@ -115,11 +127,7 @@ pub fn resolve_with(
     cluster_mods: &Path,
     out_dir: &Path,
 ) -> Result<Resolved, Error> {
-    let manifest = if cluster_mods.is_dir() {
-        cluster_mods.join(MANIFEST)
-    } else {
-        cluster_mods.to_path_buf()
-    };
+    let manifest = manifest_path(cluster_mods);
     let entries = read_manifest(&manifest)?;
     let hashes: Vec<&str> = entries.iter().map(|(_, h)| h.as_str()).collect();
 
@@ -166,7 +174,7 @@ pub fn resolve_with(
     Ok(out)
 }
 
-fn read_manifest(path: &Path) -> Result<Vec<(String, String)>, Error> {
+pub(crate) fn read_manifest(path: &Path) -> Result<Vec<(String, String)>, Error> {
     let v: Value = serde_json::from_slice(&std::fs::read(path)?)
         .map_err(|e| Error::Format(format!("{}: {e}", path.display())))?;
     let entries = v["entries"]
@@ -182,7 +190,7 @@ fn read_manifest(path: &Path) -> Result<Vec<(String, String)>, Error> {
         .collect())
 }
 
-fn file_name(path: &str) -> String {
+pub(crate) fn file_name(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_owned()
 }
 
@@ -261,7 +269,7 @@ fn download(api: &dyn Http, f: &File, out_dir: &Path) -> Result<PathBuf, Error> 
     Ok(dest)
 }
 
-fn sha1_hex(b: &[u8]) -> String {
+pub(crate) fn sha1_hex(b: &[u8]) -> String {
     Sha1::digest(b).iter().map(|x| format!("{x:02x}")).collect()
 }
 

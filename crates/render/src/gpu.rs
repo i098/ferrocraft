@@ -127,6 +127,7 @@ pub struct Renderer {
     /// Item models for held and dropped items, by `(id, damage)`.
     item_models: entity::item::Models,
     dials: hand::DialTurns,
+    frame_compasses: entity::hanging::Compasses,
     /// Wood models of item frames, read the first time one is drawn.
     frames: Option<entity::hanging::Frames>,
     /// Colour index bytes of each received map, 128x128.
@@ -430,6 +431,7 @@ impl Renderer {
             flash_mesh: None,
             item_models: HashMap::new(),
             dials: hand::DialTurns::default(),
+            frame_compasses: HashMap::new(),
             frames: None,
             maps: HashMap::new(),
             item_meshes: Vec::new(),
@@ -912,9 +914,15 @@ impl Renderer {
         self.load_frames(draws);
         let frames = self.frames.take().unwrap_or_default();
         let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
-        entity::hanging::build(&mut items, draws, &frames, &self.item_models, |p| {
-            self.light_at(p)
-        });
+        entity::hanging::build(
+            &mut items,
+            draws,
+            &frames,
+            &self.item_models,
+            &self.frame_compasses,
+            &self.dials,
+            |p| self.light_at(p),
+        );
         self.frames = Some(frames);
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas)).chain(
@@ -1014,6 +1022,19 @@ impl Renderer {
                 entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &self.dials)
             });
             self.item_models.insert(key, model);
+        }
+        for (key, turns) in draws
+            .iter()
+            .filter_map(|d| entity::hanging::compass(d, &self.dials))
+        {
+            if self.frame_compasses.contains_key(&key) {
+                continue;
+            }
+            let model = self.source.as_mut().and_then(|source| {
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &turns)
+            });
+            self.frame_compasses.insert(key, model);
         }
     }
 

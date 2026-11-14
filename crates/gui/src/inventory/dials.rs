@@ -3,7 +3,7 @@
 //! once per client tick (`TextureManager.tick`). The constants come from the 1.8.9 jar's `bmp`
 //! (compass) and `bmo` (clock) classes, read with `javap`.
 
-use render::{celestial_angle, dial_frame as frame, DialTurns};
+use render::{celestial_angle, compass_target, dial_frame as frame, DialTurns};
 use std::f64::consts::PI;
 
 /// The world state a tick reads from: `Minecraft.theWorld` and `thePlayer`.
@@ -45,6 +45,7 @@ impl Needle {
 pub struct Dials {
     compass: Needle,
     clock: Needle,
+    spawn: [i32; 2],
 }
 
 impl Dials {
@@ -57,11 +58,9 @@ impl Dials {
             self.clock.ease(0.0, 1.0);
             return;
         };
-        let dx = f64::from(w.spawn[0]) - w.pos[0];
-        let dz = f64::from(w.spawn[1]) - w.pos[1];
-        let yaw = f64::from(w.yaw) % 360.0;
-        let target = -((yaw - 90.0) * PI / 180.0 - dz.atan2(dx));
-        self.compass.ease(target, 2.0 * PI);
+        self.spawn = w.spawn;
+        self.compass
+            .ease(compass_target(w.spawn, w.pos, f64::from(w.yaw)), 2.0 * PI);
         self.clock
             .ease(f64::from(celestial_angle(w.time, 1.0)), 1.0);
     }
@@ -71,6 +70,7 @@ impl Dials {
         DialTurns {
             compass: self.compass.angle / (2.0 * PI),
             clock: self.clock.angle,
+            spawn: self.spawn,
         }
     }
 

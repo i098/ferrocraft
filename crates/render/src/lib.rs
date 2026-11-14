@@ -30,7 +30,7 @@ mod shapes;
 mod sky;
 mod weather;
 
-pub use hand::{dial_frame, DialTurns, Hand, HeldKind, UseAction, Using};
+pub use hand::{compass_target, dial_frame, DialTurns, Hand, HeldKind, UseAction, Using};
 pub use sky::{celestial_angle, Environment, Fluid};
 
 pub use ambient::{random_display_ticks, Effect as AmbientEffect};

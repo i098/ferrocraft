@@ -240,14 +240,34 @@ pub fn dial_frame(turns: f64, frames: usize) -> usize {
 pub struct DialTurns {
     pub compass: f64,
     pub clock: f64,
+    /// `World.getSpawnPoint`, x and z.
+    pub spawn: [i32; 2],
+}
+
+/// `TextureCompass.updateCompass`: the needle target in radians of a viewer at `pos` looking
+/// along `yaw`.
+pub fn compass_target(spawn: [i32; 2], pos: [f64; 2], yaw: f64) -> f64 {
+    let dx = f64::from(spawn[0]) - pos[0];
+    let dz = f64::from(spawn[1]) - pos[1];
+    -((yaw % 360.0 - 90.0) * std::f64::consts::PI / 180.0 - dz.atan2(dx))
 }
 
 impl DialTurns {
-    const COMPASS: i16 = 345;
+    pub(crate) const COMPASS: i16 = 345;
     const CLOCK: i16 = 347;
 
     pub fn is_dial(id: i16) -> bool {
         matches!(id, Self::COMPASS | Self::CLOCK)
+    }
+
+    /// `RenderItemFrame.renderDisplayItem`: the compass of a frame at `pos` looks along
+    /// `180 + facing * 90` instead of along the player's yaw; the clock is the player's.
+    pub fn framed(&self, pos: [f64; 2], facing: u8) -> DialTurns {
+        let yaw = 180.0 + f64::from(facing) * 90.0;
+        DialTurns {
+            compass: compass_target(self.spawn, pos, yaw) / (2.0 * std::f64::consts::PI),
+            ..*self
+        }
     }
 
     /// The frame item `id` shows in a strip of `frames` sprites; 0 for items that are no dial.
@@ -665,6 +685,7 @@ mod tests {
         let t = DialTurns {
             compass: 0.5,
             clock: 0.25,
+            spawn: [0, 0],
         };
         assert_eq!(
             (t.frame(345, 32), t.frame(347, 64), t.frame(1, 32)),
@@ -684,6 +705,24 @@ mod tests {
         let overlay = image([[10, 20, 30, 255], [0, 0, 0, 0]]);
         let out = composite(&[(base, 0xFF_0000), (overlay, 0xFF_FFFF)]).unwrap();
         assert_eq!(out.rgba, [10, 20, 30, 255, 200, 0, 0, 255]);
+    }
+
+    /// A framed compass looks along the facing of its frame, not along the player. A frame standing
+    /// on the spawn point with the player facing the same way gives `180 + facing * 90`: frame 0
+    /// (yaw 180) puts the needle at 24 of 32, the opposite facing at 8, the two side facings at 16
+    /// and 0. The player's own needle does not move it.
+    #[test]
+    fn framed_compass_follows_the_facing_not_the_player() {
+        let turns = |compass: f64| DialTurns {
+            compass,
+            clock: 0.0,
+            spawn: [0, 0],
+        };
+        let at = |t: DialTurns, facing: u8| dial_frame(t.framed([0.0, 0.0], facing).compass, 32);
+        let t = turns(0.0);
+        assert_eq!((at(t, 0), at(t, 1), at(t, 2), at(t, 3)), (24, 16, 8, 0));
+        let t = turns(0.5);
+        assert_eq!((at(t, 0), at(t, 1), at(t, 2), at(t, 3)), (24, 16, 8, 0));
     }
 
     /// Eating drives the item toward the mouth: at the start of a use it matches the plain pose,

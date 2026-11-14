@@ -78,6 +78,8 @@ struct Shared {
     chat_answer: Option<ChatVerdict>,
     /// The last chat reply said Java keeps the chat: a timed-out line may already be on its screen.
     chat_taken: bool,
+    /// Java was asked once, before the first line, whether it keeps the chat: the first line may time out while Java loads classes.
+    chat_probed: bool,
     /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
@@ -151,6 +153,7 @@ impl ModHost {
                     chat: None,
                     chat_answer: None,
                     chat_taken: false,
+                    chat_probed: false,
                     stalled: false,
                     brand: None,
                     hooks: hooks::Hooks::default(),
@@ -338,6 +341,17 @@ impl ModHost {
     /// Post a received chat line, with `§` format codes, to the mods' `ClientChatReceivedEvent` and return what
     /// they did with it. `Keep` while the JVM is not live or does not answer in time.
     pub fn chat(&self, kind: ChatKind, text: &str) -> ChatVerdict {
+        let probe = {
+            let mut s = self.link.state.lock().unwrap();
+            let first = s.phase == Phase::Live
+                && !s.chat_probed
+                && matches!(kind, ChatKind::Chat | ChatKind::System);
+            s.chat_probed |= first;
+            first
+        };
+        if probe {
+            self.chat(ChatKind::InputClosed, "");
+        }
         let mut s = self.link.state.lock().unwrap();
         if s.phase != Phase::Live || s.stalled || s.chat.is_some() || text.len() > chat::MAX_TEXT {
             return ChatVerdict::Keep;
@@ -727,6 +741,7 @@ mod tests {
                 chat: None,
                 chat_answer: None,
                 chat_taken: false,
+                chat_probed: true,
                 stalled: false,
                 brand: None,
                 hooks: hooks::Hooks::default(),

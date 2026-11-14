@@ -659,9 +659,8 @@ impl App {
                 &ferrocraft_net_client::formatted_text(&runs),
             ) {
                 ferrocraft_modhost::ChatVerdict::Keep => {}
-                ferrocraft_modhost::ChatVerdict::Cancel | ferrocraft_modhost::ChatVerdict::Taken => {
-                    return
-                }
+                ferrocraft_modhost::ChatVerdict::Cancel
+                | ferrocraft_modhost::ChatVerdict::Taken => return,
                 ferrocraft_modhost::ChatVerdict::Replace(text) => {
                     runs = vec![ferrocraft_net_client::Styled {
                         text,

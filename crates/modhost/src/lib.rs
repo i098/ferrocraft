@@ -569,12 +569,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.input.events.clear();
             (input, s.mirror.take(), s.lists.take())
         };
-        if let Some(m) = &mirror {
-            mirror::write(&mut stream, m)?;
-        }
-        if let Some(l) = &lists {
-            hud_lists::write(&mut stream, l)?;
-        }
+        write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
         let mut s = link.state.lock().unwrap();
@@ -699,6 +694,21 @@ fn rasterize(svg: &[u8], (w, h): (u32, u32), white: bool) -> Result<Vec<u8>, Str
         .and_then(|mut wr| wr.write_image_data(&rgba))
         .map_err(|e| e.to_string())?;
     Ok(out)
+}
+
+/// The HUD state of a frame: the mirror, then the lists, each only when it changed hands.
+fn write_hud(
+    stream: &mut TcpStream,
+    mirror: Option<&Mirror>,
+    lists: Option<&HudLists>,
+) -> io::Result<()> {
+    if let Some(m) = mirror {
+        mirror::write(stream, m)?;
+    }
+    if let Some(l) = lists {
+        hud_lists::write(stream, l)?;
+    }
+    Ok(())
 }
 
 #[cfg(all(test, unix))]

@@ -74,7 +74,12 @@ final class HudLists {
         }
         patchLocal();
 
-        // Boss bar: BossStatus is static; statusBarTime 0 hides it.
+        boss(in);
+        title(in);
+    }
+
+    /** BossStatus is static; statusBarTime 0 hides the bar. */
+    private void boss(DataInputStream in) throws IOException {
         Class<?> boss = R.cls("net.minecraft.entity.boss.BossStatus");
         if (in.readUnsignedByte() != 0) {
             R.set(boss, "field_82827_c", string(in)); // bossName
@@ -83,6 +88,9 @@ final class HudLists {
         } else {
             R.set(boss, "field_82826_b", 0);
         }
+    }
+
+    private void title(DataInputStream in) throws IOException {
         R.set(gui, "field_175201_x", string(in)); // displayedTitle
         R.set(gui, "field_175200_y", string(in)); // displayedSubTitle
         R.set(gui, "field_175195_w", in.readInt()); // titlesTimer
@@ -99,6 +107,15 @@ final class HudLists {
     }
 
     private void lists(DataInputStream in) throws IOException {
+        players(in);
+        Object board = R.neu("net.minecraft.scoreboard.Scoreboard");
+        Map<String, Object> objectives = objectives(in, board);
+        slots(in, board, objectives);
+        teams(in, board);
+        R.set(world, "field_96442_D", board); // worldScoreboard
+    }
+
+    private void players(DataInputStream in) throws IOException {
         players.keySet().retainAll(java.util.Collections.singleton(uuid));
         localName = null;
         int n = in.readUnsignedShort();
@@ -122,12 +139,13 @@ final class HudLists {
         Object tab = R.call(gui, "func_175181_h"); // getTabList
         R.call(tab, "func_175244_b", component(string(in))); // setHeader
         R.call(tab, "func_175248_a", component(string(in))); // setFooter
+    }
 
-        Object board = R.neu("net.minecraft.scoreboard.Scoreboard");
+    private Map<String, Object> objectives(DataInputStream in, Object board) throws IOException {
         Map<String, Object> objectives = new HashMap<>();
         Object dummy = R.get(R.cls("net.minecraft.scoreboard.IScoreObjectiveCriteria"), "field_96641_b");
         Object health = R.get(R.cls("net.minecraft.scoreboard.IScoreObjectiveCriteria"), "field_96638_f");
-        n = in.readUnsignedShort();
+        int n = in.readUnsignedShort();
         for (int i = 0; i < n; i++) {
             String name = string(in);
             String display = string(in);
@@ -142,12 +160,19 @@ final class HudLists {
                 R.call(score, "func_96647_c", in.readInt()); // setScorePoints
             }
         }
-        n = in.readUnsignedShort();
+        return objectives;
+    }
+
+    private static void slots(DataInputStream in, Object board, Map<String, Object> objectives) throws IOException {
+        int n = in.readUnsignedShort();
         for (int i = 0; i < n; i++) {
             int slot = in.readUnsignedByte();
             R.call(board, "func_96530_a", slot, objectives.get(string(in))); // setObjectiveInDisplaySlot
         }
-        n = in.readUnsignedShort();
+    }
+
+    private static void teams(DataInputStream in, Object board) throws IOException {
+        int n = in.readUnsignedShort();
         for (int i = 0; i < n; i++) {
             String name = string(in);
             Object team = R.call(board, "func_96527_f", name); // createTeam
@@ -161,7 +186,6 @@ final class HudLists {
             int members = in.readUnsignedShort();
             for (int m = 0; m < members; m++) R.call(board, "func_151392_a", string(in), name); // addPlayerToTeam
         }
-        R.set(world, "field_96442_D", board); // worldScoreboard
     }
 
     /**

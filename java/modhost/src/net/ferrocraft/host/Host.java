@@ -127,22 +127,26 @@ public final class Host {
                 continue;
             }
             if (tag != 'F') return;
-            int w = in.readInt();
-            int h = in.readInt();
-            int scale = in.readInt();
-            boolean unicode = in.readUnsignedByte() != 0;
-            boolean screen = in.readUnsignedByte() != 0;
-            Input.set(w, h, in.readInt(), in.readInt());
-            int n = in.readUnsignedShort();
-            for (int i = 0; i < n; i++) {
-                int kind = in.readUnsignedByte();
-                int arg = in.readInt();
-                Input.event(kind, arg, in.readUnsignedByte(), in.readUnsignedShort());
-            }
-            frame(w, h, scale, unicode, screen);
-            out.write(Sink.take(Minecraft.modScreen(mc) != null));
-            out.flush();
+            frameIn(in, out);
         }
+    }
+
+    private void frameIn(DataInputStream in, DataOutputStream out) throws IOException {
+        int w = in.readInt();
+        int h = in.readInt();
+        int scale = in.readInt();
+        boolean unicode = in.readUnsignedByte() != 0;
+        boolean screen = in.readUnsignedByte() != 0;
+        Input.set(w, h, in.readInt(), in.readInt());
+        int n = in.readUnsignedShort();
+        for (int i = 0; i < n; i++) {
+            int kind = in.readUnsignedByte();
+            int arg = in.readInt();
+            Input.event(kind, arg, in.readUnsignedByte(), in.readUnsignedShort());
+        }
+        frame(w, h, scale, unicode, screen);
+        out.write(Sink.take(Minecraft.modScreen(mc) != null));
+        out.flush();
     }
 
     private void frame(int w, int h, int scale, boolean unicode, boolean screen) {

@@ -103,49 +103,63 @@ fn count(b: &mut Vec<u8>, n: usize, what: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn lists_part(l: &Lists) -> io::Result<Vec<u8>> {
-    let mut b = Vec::new();
-    count(&mut b, l.players.len(), "players")?;
+fn players_part(b: &mut Vec<u8>, l: &Lists) -> io::Result<()> {
+    count(b, l.players.len(), "players")?;
     for p in &l.players {
         b.extend(p.uuid.to_be_bytes());
-        string(&mut b, &p.name)?;
+        string(b, &p.name)?;
         b.extend(p.ping.to_be_bytes());
         b.push(p.gamemode);
         b.push(u8::from(p.local) | u8::from(p.display.is_some()) << 1);
         if let Some(d) = &p.display {
-            string(&mut b, d)?;
+            string(b, d)?;
         }
     }
-    string(&mut b, &l.header)?;
-    string(&mut b, &l.footer)?;
-    count(&mut b, l.objectives.len(), "objectives")?;
+    string(b, &l.header)?;
+    string(b, &l.footer)
+}
+
+fn board_part(b: &mut Vec<u8>, l: &Lists) -> io::Result<()> {
+    count(b, l.objectives.len(), "objectives")?;
     for o in &l.objectives {
-        string(&mut b, &o.name)?;
-        string(&mut b, &o.display)?;
+        string(b, &o.name)?;
+        string(b, &o.display)?;
         b.push(u8::from(o.hearts));
-        count(&mut b, o.scores.len(), "scores")?;
+        count(b, o.scores.len(), "scores")?;
         for (player, value) in &o.scores {
-            string(&mut b, player)?;
+            string(b, player)?;
             b.extend(value.to_be_bytes());
         }
     }
-    count(&mut b, l.slots.len(), "display slots")?;
+    count(b, l.slots.len(), "display slots")?;
     for (slot, objective) in &l.slots {
         b.push(*slot);
-        string(&mut b, objective)?;
+        string(b, objective)?;
     }
-    count(&mut b, l.teams.len(), "teams")?;
+    Ok(())
+}
+
+fn teams_part(b: &mut Vec<u8>, l: &Lists) -> io::Result<()> {
+    count(b, l.teams.len(), "teams")?;
     for t in &l.teams {
-        string(&mut b, &t.name)?;
-        string(&mut b, &t.prefix)?;
-        string(&mut b, &t.suffix)?;
-        string(&mut b, t.visibility)?;
+        string(b, &t.name)?;
+        string(b, &t.prefix)?;
+        string(b, &t.suffix)?;
+        string(b, t.visibility)?;
         b.push(t.color.map_or(-1i8, |c| c as i8) as u8);
-        count(&mut b, t.members.len(), "team members")?;
+        count(b, t.members.len(), "team members")?;
         for m in &t.members {
-            string(&mut b, m)?;
+            string(b, m)?;
         }
     }
+    Ok(())
+}
+
+fn lists_part(l: &Lists) -> io::Result<Vec<u8>> {
+    let mut b = Vec::new();
+    players_part(&mut b, l)?;
+    board_part(&mut b, l)?;
+    teams_part(&mut b, l)?;
     if b.len() > MAX_LISTS {
         return Err(io::Error::other(format!("{} bytes of lists", b.len())));
     }

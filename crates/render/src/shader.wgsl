@@ -99,6 +99,15 @@ fn fs_fire(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb, fog), t.a);
 }
 
+// `Render.renderShadow`: the shadow texture with the vertex alpha, blended, under world fog.
+@fragment
+fn fs_shadow(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    let d = length(i.world - g.eye.xyz);
+    let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
+    return vec4<f32>(mix(g.fog_color.rgb, t.rgb, fog), t.a * i.color.a);
+}
+
 // The hand glint: like fs_sky, drawn with an equal depth test so it follows the item's shape.
 @fragment
 fn fs_glint(i: WorldOut) -> @location(0) vec4<f32> {

@@ -260,13 +260,7 @@ impl SpectatorGui {
     }
 
     /// `selectSlot`: a hotbar key opens the menu, or marks and uses the slot in an open one.
-    pub fn select_slot(
-        &mut self,
-        slot: i32,
-        now_ms: i64,
-        tab: &TabList,
-        sb: &Scoreboard,
-    ) -> Pick {
+    pub fn select_slot(&mut self, slot: i32, now_ms: i64, tab: &TabList, sb: &Scoreboard) -> Pick {
         self.last_select_ms = now_ms;
         let Some(menu) = &mut self.menu else {
             self.menu = Some(Menu::new(tab, sb, now_ms as usize));

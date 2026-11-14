@@ -18,6 +18,10 @@ mod packs;
 mod pause;
 mod sign;
 mod snooper;
+mod stat_format;
+mod stats;
+mod stats_list;
+mod stats_table;
 mod title;
 
 pub use achievements::{Achievements, PlayerStats};
@@ -33,6 +37,7 @@ pub use pack_prompt::PackPrompt;
 pub use packs::{default_description, selected_paths};
 pub use pause::Pause;
 pub use sign::EditSign;
+pub use stats::Stats;
 pub use title::Title;
 
 use std::collections::HashMap;
@@ -69,6 +74,18 @@ pub trait Canvas: Metrics {
     /// `GlStateManager.pushMatrix` + translate, uniform scale, then rotate about Z (degrees).
     fn push(&mut self, translate: [f32; 2], scale: f32, rotate_deg: f32);
     fn pop(&mut self);
+    /// `GuiInventory.drawEntityOnScreen`: the entity standing at (`x`, `y`), `scale` GUI units per
+    /// block, its head toward the cursor offset `mouse`. Wrappers that clip or shift draws, and
+    /// screens with no 3D model, draw none.
+    fn entity(
+        &mut self,
+        _x: f32,
+        _y: f32,
+        _scale: f32,
+        _mouse: [f32; 2],
+        _draw: &render::EntityDraw,
+    ) {
+    }
 }
 
 /// LWJGL `Keyboard` codes, the values `options.txt` stores.

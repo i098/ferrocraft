@@ -1,8 +1,8 @@
 //! `GuiIngameMenu`, the Escape menu.
 
 use super::{
-    centered, default_background, draw_buttons, press, release_all, Achievements, Button, Canvas,
-    Ctx, Effect, Multiplayer, Nav, Options, Screen, Title, WHITE,
+    button, centered, default_background, draw_buttons, press, release_all, Achievements, Button,
+    Canvas, Ctx, Effect, Multiplayer, Nav, Options, Screen, Stats, Title, WHITE,
 };
 
 const OPTIONS: i32 = 0;
@@ -68,14 +68,8 @@ impl Screen for Pause {
                 ctx.tr("gui.stats"),
             ),
         ];
-        // shortcut: Statistics needs #322; LAN needs singleplayer. Keep both buttons disabled until then.
-        for b in self
-            .buttons
-            .iter_mut()
-            .filter(|b| matches!(b.id, LAN | STATS))
-        {
-            b.enabled = false;
-        }
+        // shortcut: LAN needs singleplayer, so the button stays disabled.
+        button(&mut self.buttons, LAN).enabled = false;
     }
 
     fn draw(&mut self, c: &mut dyn Canvas, mx: i32, my: i32, ctx: &mut Ctx) {
@@ -95,6 +89,7 @@ impl Screen for Pause {
                 ))))))
             }
             ACHIEVEMENTS => Some(Nav::Child(Box::new(|me| Box::new(Achievements::new(me))))),
+            STATS => Some(Nav::Child(Box::new(|me| Box::new(Stats::new(me))))),
             BACK => Some(Nav::Game),
             _ => None,
         }

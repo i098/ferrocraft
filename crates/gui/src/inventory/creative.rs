@@ -656,6 +656,7 @@ impl Creative {
         icons: &Icons,
         l: i32,
         t: i32,
+        player: super::PlayerModel,
     ) {
         for i in (0..items::tabs().len()).filter(|&i| i != self.tab) {
             self.draw_tab(c, icons, i, l, t);
@@ -682,7 +683,16 @@ impl Creative {
             );
         }
         self.draw_tab(c, icons, self.tab, l, t);
-        // shortcut: the inventory tab's 3D player model (drawEntityOnScreen) waits for the entity renderer.
+        if let (INVENTORY, Some((p, [mx, my]))) = (self.tab, player) {
+            let (x, y) = (l + 43, t + 45);
+            c.entity(
+                x as f32,
+                y as f32,
+                20.0,
+                [(x - mx) as f32, (y - 30 - my) as f32],
+                p,
+            );
+        }
     }
 
     /// `GuiTextField.drawTextBox` without background, cursor at the end, focused.
@@ -767,6 +777,72 @@ impl Creative {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn model() -> render::EntityDraw {
+        render::EntityDraw {
+            class: render::Class::Player { slim: false },
+            pos: [0.0; 3],
+            yaw: 0.0,
+            head_yaw: 0.0,
+            pitch: 0.0,
+            limb_swing: 0.0,
+            limb_swing_amount: 0.0,
+            swing: 0.0,
+            age: 0.0,
+            sneaking: false,
+            hurt: false,
+            death_time: 0.0,
+            invisible: false,
+            size: (0.6, 1.8),
+            held: 0,
+            armor: [0; 4],
+            armor_dye: [None; 4],
+            armor_glint: [false; 4],
+            held_glint: false,
+            held_damage: 0,
+            held_dye: None,
+            stack: None,
+            hover_start: 0.0,
+            hang: Default::default(),
+            name: None,
+            skin: None,
+            burning: false,
+            eye_height: 1.62,
+            always_name: false,
+            team_tag: Default::default(),
+            pointed: false,
+            ridden: false,
+            child: false,
+            using: None,
+            view: [0.0; 2],
+            line: None,
+            look: render::Look::default(),
+        }
+    }
+
+    /// Vanilla `GuiContainerCreative`: only the inventory tab draws the model, at (43, 45) scale 20
+    /// with the current mouse.
+    #[test]
+    fn player_model_only_on_inventory_tab() {
+        let icons = Icons::new(|_| None);
+        let me = model();
+        let inv = Inventory::default();
+        let placed = |tab: usize, player: Option<&render::EntityDraw>| {
+            let mut cr = Creative::new();
+            cr.select(tab);
+            let mut g = crate::Gui::new(crate::GuiScale::new(854, 480, 0, false), None, 0);
+            let p = player.map(|p| (p, [100, 70]));
+            cr.draw_background(&mut crate::GuiCanvas::new(&mut g), &inv, &icons, 10, 20, p);
+            g.take_entities()
+        };
+        let e = placed(INVENTORY, Some(&me));
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].scale, 20.0 * 2.0);
+        assert_eq!(e[0].origin, [2.0 * 53.0, 2.0 * 65.0]);
+        assert_eq!(e[0].mouse, [53.0 - 100.0, 65.0 - 30.0 - 70.0]);
+        assert!(placed(SEARCH, Some(&me)).is_empty());
+        assert!(placed(INVENTORY, None).is_empty());
+    }
 
     fn stone() -> ItemStack {
         ItemStack {

@@ -6,6 +6,8 @@ struct Globals {
     // x: fog start (negative: exponential fog), y: fog end (or density), z: sun brightness, w: torch flicker factor
     fog: vec4<f32>,
     screen: vec4<f32>,
+    // rgb: tint of a hit entity (`setBrightness`), a: its strength
+    hurt: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var tex: texture_2d<f32>;
@@ -73,7 +75,7 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     var rgb = t.rgb * i.color.rgb * lightmap(i.light.x, block);
     if (hurt) {
         // `setBrightness`: GL_INTERPOLATE of the red constant over the lit texture by 0.3.
-        rgb = mix(rgb, vec3<f32>(1.0, 0.0, 0.0), 0.3);
+        rgb = mix(rgb, g.hurt.rgb, g.hurt.a);
     }
     let d = length(i.world - g.eye.xyz);
     var fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);

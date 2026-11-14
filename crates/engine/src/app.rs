@@ -802,10 +802,20 @@ impl App {
         }
         self.mod_drawn =
             mod_world::Drawn::ask(self.mods.as_ref(), &self.game, &cam, &draws, frac, size);
-        draws.extend(self_model);
+        let mut ids: Vec<i32> = self.game.entities.iter().map(|e| e.id).collect();
+        let (hurt, glint, cancelled) = self.mod_probe(&draws, self_model.as_ref(), cam.pos);
+        if !cancelled.is_empty() {
+            let mut at = 0;
+            draws.retain(|_| {
+                at += 1;
+                !cancelled.contains(&ids[at - 1])
+            });
+            ids.retain(|id| !cancelled.contains(id));
+        }
+        draws.extend(self_model.filter(|_| !cancelled.contains(&self.game.entity_id)));
         // `RenderGlobal`: the spectated entity is not drawn from its own eyes.
         if let (0, Some(id)) = (self.perspective, self.game.camera) {
-            if let Some(i) = self.game.entities.iter().position(|e| e.id == id) {
+            if let Some(i) = ids.iter().position(|&e| e == id) {
                 draws.remove(i);
             }
         }
@@ -888,6 +898,7 @@ impl App {
                 && self.game.gamemode != 3
                 && self.game.burning(),
         );
+        r.set_mod_look(hurt, glint);
         r.set_entities(&draws);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
@@ -902,6 +913,63 @@ impl App {
         if let Some(shot) = r.take_screenshot() {
             self.save_screenshot(shot);
         }
+    }
+
+    /// Slice F8, the render probes: ask the mods once per drawn frame for the hurt tint and the glint color that their
+    /// patches of the entity and item render methods give, and post `RenderLivingEvent` for the living entities.
+    /// `draws` must hold the entities of `self.game.entities` in order. Returns the look for the renderer and the ids of
+    /// the entities that a handler cancelled. Vanilla values and no cancel without mods or when the JVM is late.
+    fn mod_probe(
+        &self,
+        draws: &[EntityDraw],
+        self_model: Option<&EntityDraw>,
+        cam: [f64; 3],
+    ) -> (Option<[f32; 4]>, Option<[f32; 4]>, Vec<i32>) {
+        let Some(mods) = &self.mods else {
+            return Default::default();
+        };
+        let living = |e: &&Entity| matches!(e.kind, Kind::Player | Kind::Mob(_));
+        let targets: Vec<_> = self
+            .game
+            .entities
+            .iter()
+            .zip(draws)
+            .filter(|(e, _)| living(e))
+            .filter(|(e, _)| self.perspective != 0 || self.game.camera != Some(e.id))
+            .map(|(e, d)| (e.id, d))
+            .chain(self_model.map(|d| (self.game.entity_id, d)))
+            .map(|(id, d)| ferrocraft_modhost::probe::Target {
+                id,
+                pos: [d.pos[0] - cam[0], d.pos[1] - cam[1], d.pos[2] - cam[2]],
+            })
+            .collect();
+        let hurt_time = self
+            .game
+            .entities
+            .iter()
+            .filter(living)
+            .map(|e| e.hurt_time)
+            .filter(|&t| t > 0)
+            .max();
+        let hand = self
+            .game
+            .inv
+            .held_stack()
+            .as_ref()
+            .is_some_and(world::inventory::glint);
+        let glint = hand
+            || draws
+                .iter()
+                .any(|d| d.held_glint || d.armor_glint.contains(&true));
+        let frame = ferrocraft_modhost::probe::Frame {
+            hurt_time: hurt_time.map(|t| t.clamp(1, 10) as u8),
+            glint,
+            targets: &targets,
+        };
+        let Some(reply) = mods.probe(&frame) else {
+            return Default::default();
+        };
+        (reply.hurt, reply.glint, reply.cancelled)
     }
 
     /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor, in a world and on

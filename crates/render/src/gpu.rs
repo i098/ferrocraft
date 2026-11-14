@@ -20,6 +20,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
+#[path = "mod_probe.rs"]
+mod mod_probe;
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const CLEAR_COLOR: [f64; 3] = [0.0; 3];
@@ -48,6 +50,8 @@ struct Globals {
     /// Fog start, fog end, sun brightness, torch flicker factor.
     fog: [f32; 4],
     screen: [f32; 4],
+    /// The tint a hit entity is mixed with: red, green, blue, strength.
+    hurt: [f32; 4],
 }
 
 struct GpuMesh {
@@ -179,6 +183,7 @@ pub struct Renderer {
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
+    mod_look: mod_probe::Look,
     /// The loaded `shaders/post` effect and whether it runs (F4, `useShader`).
     post: Option<Post>,
     post_on: bool,
@@ -462,6 +467,7 @@ impl Renderer {
             font,
             env_tex,
             environment: Environment::default(),
+            mod_look: Default::default(),
             post: None,
             post_on: false,
             blocks: HashMap::new(),
@@ -848,6 +854,7 @@ impl Renderer {
         if !glint.is_empty() {
             self.load_texture(entity::GLINT_TEXTURE);
         }
+        self.mod_look.recolor_glint(&mut glint);
         self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
         self.fires.clear();
         self.fires.extend(
@@ -1085,6 +1092,11 @@ impl Renderer {
         if let Some(f) = frame {
             f.present();
         }
+    }
+
+    /// What the mods' render probes changed in the next frames: the hurt tint and the glint color.
+    pub fn set_mod_look(&mut self, hurt: Option<[f32; 4]>, glint: Option<[f32; 4]>) {
+        self.mod_look = mod_probe::Look { hurt, glint };
     }
 
     /// Time of day, weather and render distance for sky, fog and the light curve.
@@ -1397,12 +1409,13 @@ impl Renderer {
         } else {
             1.0
         };
+        let item_glint = self.mod_look.item_glint();
         let glint_vertices: Vec<Vertex> = if glint {
             (0..2)
                 .flat_map(|pass| {
                     draw.vertices.iter().map(move |v| Vertex {
                         uv: entity::glint_uv_item(v.uv.map(|c| c * uv_scale), age * 50.0, pass),
-                        color: entity::ITEM_GLINT_COLOR,
+                        color: item_glint,
                         light: [1.0; 2],
                         ..*v
                     })
@@ -1443,6 +1456,7 @@ impl Renderer {
             fog_color: world.fog_color,
             fog: [1.0e6, 2.0e6, sun_brightness, 1.5],
             screen: world.screen,
+            hurt: world.hurt,
         };
         self.queue
             .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
@@ -1556,7 +1570,8 @@ impl Renderer {
         self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
         let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
-        let globals = Self::globals(cam, &env, &sky, (w, h));
+        let mut globals = Self::globals(cam, &env, &sky, (w, h));
+        globals.hurt = self.mod_look.hurt_tint();
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -1779,6 +1794,7 @@ impl Renderer {
                 None => [sky.fog_start, sky.fog_end, sky.sun_brightness, 1.5],
             },
             screen: [w as f32, h as f32, env.night_vision, 0.0],
+            hurt: mod_probe::VANILLA_HURT,
         }
     }
 

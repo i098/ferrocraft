@@ -29,6 +29,7 @@ public final class Host {
     private final Player player;
     private final Overrides overrides;
     private final Anchor anchor;
+    private final Probe probe;
     private final Chat chat = new Chat();
     private final Events events;
     private final Mirror mirror;
@@ -44,6 +45,7 @@ public final class Host {
         this.anchor = new Anchor(mc);
         this.mirror = new Mirror(mc, R.get(mc, "field_71439_g"));
         this.events = new Events(mc);
+        this.probe = new Probe(mc, events);
         this.lists = new HudLists(mc, R.get(mc, "field_71439_g"));
     }
 
@@ -102,6 +104,10 @@ public final class Host {
             int tag = in.read();
             if (tag == 'P') {
                 player.tick(in, out);
+                continue;
+            }
+            if (tag == 'Q') {
+                probe.answer(in, out);
                 continue;
             }
             if (tag == 'O') {

@@ -121,7 +121,7 @@ public final class ShellTransformer implements IClassTransformer {
             lost.addAll(gone);
         }
         for (String s : here) Host.log("shell: kept " + s);
-        for (String s : gone) Host.log("shell: lost, in a loop or under a condition the shell cannot run: " + s);
+        for (String s : gone) Host.log("shell: lost, in a loop: " + s);
         return parts;
     }
 

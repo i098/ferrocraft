@@ -1002,20 +1002,11 @@ impl Particles {
     }
 
     /// `EntityLivingBase.onDeathUpdate` at tick 20: 20 explosion puffs inside the hitbox.
-    pub fn death_puff(&mut self, pos: [f64; 3], (width, height): (f32, f32)) {
-        let (w, h) = (f64::from(width), f64::from(height));
-        for _ in 0..20 {
-            let m = [0, 1, 2].map(|_| self.gaussian() * 0.02);
-            let at = [
-                pos[0] + self.rand() * w * 2.0 - w,
-                pos[1] + self.rand() * h,
-                pos[2] + self.rand() * w * 2.0 - w,
-            ];
-            self.spawn(Kind::Explode, at, m, 0);
-        }
+    pub fn death_puff(&mut self, pos: [f64; 3], size: (f32, f32)) {
+        self.mood(Kind::Explode, 20, 0.0, pos, size);
     }
 
-    /// `EntityAnimal`/`EntityTameable`/`EntityVillager` status particles: `count` of `kind` in the entity box,
+    /// `EntityAnimal`/`EntityTameable`/`EntityVillager` status particles (also the death puff): `count` of `kind` in the entity box,
     /// `rise` above its feet (0.5 animals and tameables, 1.0 villagers), with gaussian drift of 0.02.
     pub fn mood(&mut self, kind: Kind, count: u32, rise: f64, pos: [f64; 3], (w, h): (f32, f32)) {
         let (w, h) = (f64::from(w), f64::from(h));

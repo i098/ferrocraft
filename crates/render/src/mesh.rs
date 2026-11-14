@@ -8,7 +8,7 @@ use crate::blocks::{
     Kind, Look, Tint, DOWN, NORTH, UP,
 };
 use crate::light::Light;
-use crate::shapes::{boxes, Bx};
+use crate::shapes::{boxes, Bx, BREWING_SPOKES};
 use bytemuck::{Pod, Zeroable};
 
 pub const HEIGHT: usize = 256;
@@ -225,6 +225,9 @@ impl Mesher<'_> {
                 let list = boxes(state, &nb);
                 for b in &list {
                     self.boxed(at, b, Self::pass_of(state));
+                }
+                if state >> 4 == 117 {
+                    self.brewing_spokes(at, state & 7);
                 }
             }
         }
@@ -546,6 +549,40 @@ impl Mesher<'_> {
                 }
                 self.push_quad(Pass::Opaque, verts, false);
             }
+        }
+    }
+
+    /// The three crossed planes of a brewing stand; a set bottle bit shows the bottle half of the texture.
+    fn brewing_spokes(&mut self, at: [i32; 3], bottles: u16) {
+        let tex = "brewing_stand";
+        let light = self.light_at(at, [0; 3]);
+        for (tip, i) in BREWING_SPOKES {
+            let (u_centre, u_tip) = if bottles >> i & 1 == 1 {
+                (0.0, 0.5)
+            } else {
+                (1.0, 0.5)
+            };
+            let ends = [([8.0, 8.0], u_centre), (tip, u_tip)];
+            let corner = |(xz, u): ([f32; 2], f32), y: f32| Vertex {
+                pos: [
+                    at[0] as f32 + xz[0] / 16.0,
+                    at[1] as f32 + y,
+                    at[2] as f32 + xz[1] / 16.0,
+                ],
+                uv: self.atlas.uv(tex, [u, 1.0 - y]),
+                color: [1.0, 1.0, 1.0, 1.0],
+                light,
+            };
+            let quad = [
+                corner(ends[0], 0.0),
+                corner(ends[1], 0.0),
+                corner(ends[1], 1.0),
+                corner(ends[0], 1.0),
+            ];
+            let mut back = quad;
+            back.reverse();
+            self.push_quad(Pass::Opaque, quad, false);
+            self.push_quad(Pass::Opaque, back, false);
         }
     }
 

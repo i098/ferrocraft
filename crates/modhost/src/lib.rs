@@ -1,6 +1,7 @@
 //! Rust side of the mod host. See the README of this crate.
 
 pub mod chat;
+pub mod hooks;
 pub mod keys;
 pub mod mirror;
 pub mod overrides;
@@ -80,6 +81,8 @@ struct Shared {
     stalled: bool,
     /// `ClientBrandRetriever.getClientModName()` from the hello; `None` until the JVM connected.
     brand: Option<String>,
+    /// The vanilla methods that a mod changed, from the hello; empty until the JVM connected.
+    hooks: hooks::Hooks,
 }
 
 struct Link {
@@ -147,6 +150,7 @@ impl ModHost {
                     chat_answer: None,
                     stalled: false,
                     brand: None,
+                    hooks: hooks::Hooks::default(),
                 }),
                 view: Condvar::new(),
                 answered: Condvar::new(),
@@ -358,6 +362,15 @@ impl ModHost {
         s.brand.clone().filter(|_| s.phase == Phase::Live)
     }
 
+    /// The vanilla methods that a mod changed, once the JVM is live; empty before that and with no mod.
+    pub fn hooks(&self) -> hooks::Hooks {
+        let s = self.link.state.lock().unwrap();
+        match s.phase {
+            Phase::Live => s.hooks.clone(),
+            _ => hooks::Hooks::default(),
+        }
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -445,7 +458,7 @@ fn connect(
     link: &Link,
     token: &str,
 ) -> io::Result<TcpStream> {
-    let (stream, brand) = loop {
+    let (stream, brand, hooks) = loop {
         match listener.accept() {
             Ok((stream, _)) => match hello(stream, token) {
                 Ok(hello) => break hello,
@@ -468,11 +481,12 @@ fn connect(
     }
     s.phase = Phase::Live;
     s.brand = Some(brand);
+    s.hooks = hooks;
     Ok(stream)
 }
 
-/// Read `'H'`, the token the JVM got through its environment and the brand (`writeUTF`: u16 length, bytes).
-fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String)> {
+/// Read `'H'`, the token the JVM got through its environment, the brand (`writeUTF`: u16 length, bytes) and the hook table.
+fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String, hooks::Hooks)> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
@@ -486,8 +500,9 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String)> 
     let mut brand = vec![0; usize::from(u16::from_be_bytes(len))];
     stream.read_exact(&mut brand)?;
     let brand = String::from_utf8(brand).map_err(|_| io::Error::other("bad brand"))?;
+    let hooks = hooks::Hooks::read(&mut stream)?;
     stream.set_read_timeout(None)?;
-    Ok((stream, brand))
+    Ok((stream, brand, hooks))
 }
 
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
@@ -701,6 +716,7 @@ mod tests {
                 chat_answer: None,
                 stalled: false,
                 brand: None,
+                hooks: hooks::Hooks::default(),
             }),
             view: Condvar::new(),
             answered: Condvar::new(),
@@ -720,6 +736,15 @@ mod tests {
         s.write_all(token.as_bytes()).unwrap();
         s.write_all(&[0, 9]).unwrap();
         s.write_all(b"fml,forge").unwrap();
+        s.write_all(&[0, 0, 0, 1]).unwrap();
+        for part in [
+            "net/minecraft/client/gui/GuiIngame",
+            "func_175180_a",
+            "(F)V",
+        ] {
+            s.write_all(&(part.len() as u16).to_be_bytes()).unwrap();
+            s.write_all(part.as_bytes()).unwrap();
+        }
         s
     }
 
@@ -989,6 +1014,11 @@ mod tests {
         let s = link.state.lock().unwrap();
         assert!(s.phase == Phase::Live);
         assert_eq!(s.brand.as_deref(), Some("fml,forge"));
+        assert!(s.hooks.changed(
+            "net/minecraft/client/gui/GuiIngame",
+            "func_175180_a",
+            "(F)V"
+        ));
     }
 
     #[test]

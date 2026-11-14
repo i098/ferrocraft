@@ -26,6 +26,10 @@ impl JavaRandom {
         }
     }
 
+    pub fn next_boolean(&mut self) -> bool {
+        self.next(1) != 0
+    }
+
     pub fn next_long(&mut self) -> i64 {
         (i64::from(self.next(32)) << 32).wrapping_add(i64::from(self.next(32)))
     }

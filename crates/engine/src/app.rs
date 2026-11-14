@@ -46,6 +46,8 @@ const TICK: Duration = Duration::from_millis(50);
 const MAX_TICKS_PER_FRAME: u32 = 10;
 /// `EntityRenderer.thirdPersonDistance`.
 const THIRD_PERSON_DISTANCE: f64 = 4.0;
+/// `Item.getItemFromBlock(Blocks.pumpkin)`: worn on the head it draws the blur overlay.
+const PUMPKIN: i16 = 86;
 
 /// Quads, textures they registered and effects they raised.
 type Overlay = (
@@ -457,6 +459,11 @@ impl App {
             zoom *= 60.0 / 70.0;
         }
         cam.fov_deg *= zoom;
+        let portal = self.hud.portal.lerp(frac as f32);
+        if portal > 0.0 {
+            let nausea = self.game.effects.has(Fx::NAUSEA);
+            cam.nausea = gui::overlay::wobble(portal, nausea, self.game.ticks as i32, frac as f32);
+        }
         cam.hand_fov_deg *= zoom;
         if self.ui.settings.view_bobbing && self.game.player.is_some() {
             cam.bob = self.view_bob.offsets(frac as f32);
@@ -1081,6 +1088,11 @@ impl App {
                     now_ms: crate::game::now_ms(),
                     local_player: &self.args.username,
                     held_item_tooltips: self.ui.settings.held_item_tooltips,
+                    helmet_pumpkin: self.perspective == 0
+                        && self.game.inv.player[5]
+                            .as_ref()
+                            .is_some_and(|s| s.id == PUMPKIN),
+                    nausea: self.game.effects.has(Fx::NAUSEA),
                 },
             );
         }

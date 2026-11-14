@@ -1009,12 +1009,38 @@ fn look_19(id: u16, meta: u16) -> Look {
                 "comparator_off"
             }; 6],
         ),
+        _ => look_decor(id),
+    }
+}
+
+/// Hopper, cauldron, anvil, brewing stand and dragon egg, whose models `shapes.rs` builds from several textures.
+fn look_decor(id: u16) -> Look {
+    match id {
+        117 => shape(0xb0a080, ["brewing_stand"; 6]),
+        118 => shape(0x3c3c3c, ["cauldron_side"; 6]),
+        122 => shape(0x0c0910, ["dragon_egg"; 6]),
+        145 => shape(0x404040, ["anvil_base"; 6]),
+        154 => shape(0x4a4a4a, ["hopper_outside"; 6]),
         _ => mk(Kind::Skip, 0, ["stone"; 6]),
     }
 }
 
-/// Textures that only `shapes.rs` boxes use, so no `look` lists them.
-const SHAPE_TEXTURES: [&str; 14] = [
+/// Textures the `shapes.rs` boxes need besides the ones each `look` names; `names` dedups the overlap.
+const SHAPE_TEXTURES: [&str; 28] = [
+    "hopper_outside",
+    "hopper_top",
+    "hopper_inside",
+    "cauldron_top",
+    "cauldron_bottom",
+    "cauldron_side",
+    "cauldron_inner",
+    "water_still",
+    "anvil_base",
+    "anvil_top_damaged_0",
+    "anvil_top_damaged_1",
+    "anvil_top_damaged_2",
+    "brewing_stand",
+    "brewing_stand_base",
     "cobblestone",
     "lever",
     "planks_oak",

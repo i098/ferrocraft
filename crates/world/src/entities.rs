@@ -1916,4 +1916,45 @@ mod tests {
         entity.meta.slime = Some(1);
         assert!(entity.burning());
     }
+
+    /// Packet path of #270: a mob spawn, then ground flags from move packets, drive the squish the
+    /// renderer reads. A zombie (54) must never squish.
+    #[test]
+    fn ground_flags_from_move_packets_squish_slimes_and_magma_cubes() {
+        for (kind, squishes) in [(55u8, true), (62, true), (54, false)] {
+            let mut es = Entities::default();
+            es.apply(EntityEvent::SpawnMob {
+                id: 1,
+                kind,
+                pos: [0, 64 * 32, 0],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: SizeMeta::default(),
+            });
+            let mv = |es: &mut Entities, on_ground| {
+                es.apply(EntityEvent::Move {
+                    id: 1,
+                    delta: [0; 3],
+                    look: None,
+                    on_ground,
+                });
+                es.tick();
+            };
+            mv(&mut es, false);
+            mv(&mut es, false);
+            mv(&mut es, true);
+            mv(&mut es, true);
+            let landed = es.get(1).unwrap().squish.factor(1.0);
+            assert_eq!(landed < 0.0, squishes, "kind {kind}: {landed}");
+            for _ in 0..80 {
+                mv(&mut es, true);
+            }
+            assert!(es.get(1).unwrap().squish.factor(1.0).abs() < 1e-3);
+        }
+    }
 }

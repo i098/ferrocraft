@@ -31,9 +31,9 @@ public final class ShellTest implements Opcodes {
         cls.getMethod("func_71411_J").invoke(o);
         @SuppressWarnings("unchecked")
         List<String> log = (List<String>) cls.getField("log").get(null);
-        check(log.toString().equals("[head, body, nul, tail]"), "the shell runs the handlers in order, and no vanilla code: " + log);
-        check(ShellTransformer.kept().size() == 4, "four handler calls kept: " + ShellTransformer.kept());
-        check(ShellTransformer.lost().size() == 1 && ShellTransformer.lost().get(0).contains("loop"), "the handler in the loop is lost: " + ShellTransformer.lost());
+        check(log.toString().equals("[head, body, nul, tail, head]"), "the shell runs the unconditional handlers in order, one handler at head and return twice, and no vanilla code: " + log);
+        check(ShellTransformer.kept().size() == 5, "five handler call sites kept: " + ShellTransformer.kept());
+        check(ShellTransformer.lost().size() == 2 && ShellTransformer.lost().toString().contains("cond") && ShellTransformer.lost().toString().contains("loop"), "the handlers in the if and in the loop are lost: " + ShellTransformer.lost());
         System.out.println("ShellTest passed");
     }
 
@@ -88,7 +88,7 @@ public final class ShellTest implements Opcodes {
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();
-        for (String h : new String[] {"head", "body", "nul", "loop", "tail"}) {
+        for (String h : new String[] {"head", "body", "nul", "cond", "loop", "tail"}) {
             m = cw.visitMethod(ACC_PRIVATE, "handler$" + h, "(L" + CI + ";)V", null, null);
             m.visitAnnotation(MERGED, false).visitEnd();
             record(m, h);
@@ -105,6 +105,12 @@ public final class ShellTest implements Opcodes {
         m.visitVarInsn(ALOAD, 0);
         m.visitInsn(ACONST_NULL);
         m.visitMethodInsn(INVOKESPECIAL, FAKE, "handler$nul", "(L" + CI + ";)V", false);
+        Label skip = new Label();
+        m.visitInsn(ICONST_1);
+        m.visitJumpInsn(IFEQ, skip);
+        block(m, "cond", false);
+        m.visitLabel(skip);
+        m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
         Label again = new Label();
         m.visitLabel(again);
         m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
@@ -113,6 +119,7 @@ public final class ShellTest implements Opcodes {
         m.visitInsn(ICONST_0);
         m.visitJumpInsn(IFNE, again);
         block(m, "tail", false);
+        block(m, "head", false);
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();

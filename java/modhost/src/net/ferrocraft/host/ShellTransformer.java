@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,8 +49,8 @@ public final class ShellTransformer implements IClassTransformer {
         }
     }
 
-    private static final Set<String> kept = new LinkedHashSet<>();
-    private static final Set<String> lost = new LinkedHashSet<>();
+    private static final List<String> kept = new ArrayList<>();
+    private static final List<String> lost = new ArrayList<>();
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] bytes) {
@@ -59,14 +58,14 @@ public final class ShellTransformer implements IClassTransformer {
         return shell(bytes);
     }
 
-    /** Handler calls kept in a shell, as {@code method: handler}. */
+    /** Handler calls kept in a shell, as {@code Class.method: handler}. */
     public static List<String> kept() {
         synchronized (kept) {
             return new ArrayList<>(kept);
         }
     }
 
-    /** Handler calls that the vanilla body of a shell held and that are gone, as {@code method: handler}. */
+    /** Handler calls that the vanilla body of a shell held and that are gone, as {@code Class.method: handler}. */
     public static List<String> lost() {
         synchronized (kept) {
             return new ArrayList<>(lost);
@@ -92,46 +91,12 @@ public final class ShellTransformer implements IClassTransformer {
     private static void shell(ClassNode cls, MethodNode m, Set<String> merged) {
         InsnList old = m.instructions;
         List<AbstractInsnNode> keep = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
         Map<LabelNode, Integer> frames = new HashMap<>();
-        for (AbstractInsnNode n = old.getFirst(); n != null; ) {
-            Block b = n.getOpcode() == Opcodes.NEW && ((TypeInsnNode) n).desc.equals(CALLBACK) ? block(n, cls, merged) : nullBlock(n, cls, merged);
-            if (b == null) {
-                n = n.getNext();
-                continue;
-            }
-            // shortcut: a block in a forward branch is kept as if it always ran, upgrade when a mod hook there must stay conditional.
-            if (inLoop(old, n)) {
-                n = b.end.getNext();
-                continue;
-            }
-            if (seen.add(b.handler)) {
-                for (AbstractInsnNode k = n; ; k = k.getNext()) {
-                    // The frames of the vanilla body do not fit the shell; the cancel check gets its own below.
-                    if (!(k instanceof FrameNode)) keep.add(k);
-                    if (k == b.end) break;
-                }
-                if (b.cancelLabel != null) frames.put(b.cancelLabel, b.ci);
-            }
-            n = b.end.getNext();
-        }
-        Set<AbstractInsnNode> keptSet = new HashSet<>(keep);
+        collect(old, cls, merged, keep, frames);
         List<String> gone = new ArrayList<>();
         List<String> here = new ArrayList<>();
-        for (AbstractInsnNode n = old.getFirst(); n != null; n = n.getNext()) {
-            if (!(n instanceof MethodInsnNode)) continue;
-            MethodInsnNode call = (MethodInsnNode) n;
-            if (!call.owner.equals(cls.name) || !merged.contains(call.name + call.desc)) continue;
-            (keptSet.contains(n) ? here : gone).add(m.name + ": " + call.name + call.desc);
-        }
-        InsnList shell = new InsnList();
-        for (AbstractInsnNode n : keep) {
-            old.remove(n);
-            shell.add(n);
-            if (n instanceof LabelNode && frames.containsKey(n)) shell.add(frame(cls.name, frames.get(n)));
-        }
-        shell.add(new InsnNode(Opcodes.RETURN));
-        m.instructions = shell;
+        sortCalls(old, cls, m.name, merged, new HashSet<>(keep), here, gone);
+        m.instructions = build(old, keep, frames, cls.name);
         m.tryCatchBlocks.clear();
         m.localVariables = null;
         synchronized (ShellTransformer.kept) {
@@ -142,19 +107,70 @@ public final class ShellTransformer implements IClassTransformer {
         for (String s : gone) Host.log("shell: lost, inside the body: " + s);
     }
 
+    /** Splits the handler calls of the vanilla body into those the shell keeps and those it loses. */
+    private static void sortCalls(InsnList old, ClassNode cls, String method, Set<String> merged, Set<AbstractInsnNode> keptSet, List<String> here, List<String> gone) {
+        for (AbstractInsnNode n = old.getFirst(); n != null; n = n.getNext()) {
+            if (!isHandlerCall(n, cls, merged)) continue;
+            MethodInsnNode call = (MethodInsnNode) n;
+            (keptSet.contains(n) ? here : gone).add(cls.name + "." + method + ": " + call.name + call.desc);
+        }
+    }
+
+    private static boolean isHandlerCall(AbstractInsnNode n, ClassNode cls, Set<String> merged) {
+        if (!(n instanceof MethodInsnNode)) return false;
+        MethodInsnNode c = (MethodInsnNode) n;
+        return c.owner.equals(cls.name) && merged.contains(c.name + c.desc);
+    }
+
+    /** Picks the instructions of the blocks that no branch encloses; the cancel-check frame labels go to {@code frames}. */
+    private static void collect(InsnList old, ClassNode cls, Set<String> merged, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames) {
+        for (AbstractInsnNode n = old.getFirst(); n != null; ) {
+            Block b = blockAt(n, cls, merged);
+            if (b == null) {
+                n = n.getNext();
+                continue;
+            }
+            if (!inBranch(old, n, b.end)) keepBlock(n, b, keep, frames);
+            n = b.end.getNext();
+        }
+    }
+
+    private static Block blockAt(AbstractInsnNode n, ClassNode cls, Set<String> merged) {
+        boolean callbackNew = n.getOpcode() == Opcodes.NEW && ((TypeInsnNode) n).desc.equals(CALLBACK);
+        return callbackNew ? block(n, cls, merged) : nullBlock(n, cls, merged);
+    }
+
+    private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames) {
+        for (AbstractInsnNode k = start; ; k = k.getNext()) {
+            // The frames of the vanilla body do not fit the shell; the cancel check gets its own below.
+            if (!(k instanceof FrameNode)) keep.add(k);
+            if (k == b.end) break;
+        }
+        if (b.cancelLabel != null) frames.put(b.cancelLabel, b.ci);
+    }
+
+    private static InsnList build(InsnList old, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames, String owner) {
+        InsnList shell = new InsnList();
+        for (AbstractInsnNode n : keep) {
+            old.remove(n);
+            shell.add(n);
+            if (n instanceof LabelNode && frames.containsKey(n)) shell.add(frame(owner, frames.get(n)));
+        }
+        shell.add(new InsnNode(Opcodes.RETURN));
+        return shell;
+    }
+
     /**
      * One injector block: from the {@code new CallbackInfo} to the end of the cancel check (or of the handler call), inclusive.
      * {@code ci} is the local of the CallbackInfo; {@code cancelLabel} is the label that ends the cancel check, or null.
      */
     private static final class Block {
         final AbstractInsnNode end;
-        final String handler;
         final int ci;
         final LabelNode cancelLabel;
 
-        Block(AbstractInsnNode end, String handler, int ci, LabelNode cancelLabel) {
+        Block(AbstractInsnNode end, int ci, LabelNode cancelLabel) {
             this.end = end;
-            this.handler = handler;
             this.ci = ci;
             this.cancelLabel = cancelLabel;
         }
@@ -169,13 +185,20 @@ public final class ShellTransformer implements IClassTransformer {
         return new FrameNode(Opcodes.F_NEW, locals.length, locals, 0, new Object[0]);
     }
 
-    /** True when a backward jump encloses {@code n}: the block runs once per event of a loop the host drives itself (key and mouse events). */
-    private static boolean inLoop(InsnList list, AbstractInsnNode n) {
-        int at = list.indexOf(n);
-        for (AbstractInsnNode k = n.getNext(); k != null; k = k.getNext()) {
-            if (k instanceof JumpInsnNode && list.indexOf(((JumpInsnNode) k).label) <= at) return true;
+    /** True when a jump from outside the block {@code first..last} passes over it (an if) or back to before it (a loop). */
+    private static boolean inBranch(InsnList list, AbstractInsnNode first, AbstractInsnNode last) {
+        int from = list.indexOf(first);
+        int to = list.indexOf(last);
+        for (AbstractInsnNode k = list.getFirst(); k != null; k = k.getNext()) {
+            if (k instanceof JumpInsnNode && crosses(list, (JumpInsnNode) k, from, to)) return true;
         }
         return false;
+    }
+
+    private static boolean crosses(InsnList list, JumpInsnNode j, int from, int to) {
+        int at = list.indexOf(j);
+        int target = list.indexOf(j.label);
+        return at < from && target > to || at > to && target <= from;
     }
 
     /**
@@ -189,7 +212,7 @@ public final class ShellTransformer implements IClassTransformer {
         if (a == null || a.getOpcode() != Opcodes.ACONST_NULL || !(c instanceof MethodInsnNode)) return null;
         MethodInsnNode call = (MethodInsnNode) c;
         if (!call.owner.equals(cls.name) || !merged.contains(call.name + call.desc) || !call.desc.equals("(L" + CALLBACK + ";)V")) return null;
-        return new Block(call, call.name + call.desc, -1, null);
+        return new Block(call, -1, null);
     }
 
     /**
@@ -203,29 +226,33 @@ public final class ShellTransformer implements IClassTransformer {
         for (AbstractInsnNode n = start.getNext(); n != null && steps < MAX_BLOCK; n = n.getNext(), steps++) {
             if (n instanceof JumpInsnNode || n.getOpcode() == Opcodes.RETURN) return null;
             if (n.getOpcode() == Opcodes.ASTORE && ci < 0) ci = ((VarInsnNode) n).var;
-            else if (n instanceof VarInsnNode && ((VarInsnNode) n).var != 0 && ((VarInsnNode) n).var != ci) return null;
-            if (n instanceof MethodInsnNode) {
-                MethodInsnNode c = (MethodInsnNode) n;
-                if (c.owner.equals(cls.name) && merged.contains(c.name + c.desc)) {
-                    call = c;
-                    break;
-                }
+            else if (readsOther(n, ci)) return null;
+            if (isHandlerCall(n, cls, merged)) {
+                call = (MethodInsnNode) n;
+                break;
             }
         }
         if (call == null || ci < 0) return null;
-        // Mixin's cancel check: aload ci; invokevirtual isCancelled; ifeq L; return; L:
+        JumpInsnNode cancel = cancelJump(call, ci);
+        if (cancel == null) return new Block(call, ci, null);
+        if (nextReal(cancel).getNext() != cancel.label) return null;
+        return new Block(cancel.label, ci, cancel.label);
+    }
+
+    private static boolean readsOther(AbstractInsnNode n, int ci) {
+        return n instanceof VarInsnNode && ((VarInsnNode) n).var != 0 && ((VarInsnNode) n).var != ci;
+    }
+
+    /** Mixin's cancel check after the call: {@code aload ci; invokevirtual isCancelled; ifeq L; return; L:}. Its {@code ifeq}, or null. */
+    private static JumpInsnNode cancelJump(MethodInsnNode call, int ci) {
         AbstractInsnNode a = nextReal(call);
         AbstractInsnNode b = a == null ? null : nextReal(a);
         AbstractInsnNode c = b == null ? null : nextReal(b);
         AbstractInsnNode d = c == null ? null : nextReal(c);
-        if (a == null || a.getOpcode() != Opcodes.ALOAD || ((VarInsnNode) a).var != ci || !(b instanceof MethodInsnNode)
-                || !((MethodInsnNode) b).owner.equals(CALLBACK) || !((MethodInsnNode) b).name.equals("isCancelled")
-                || !(c instanceof JumpInsnNode) || c.getOpcode() != Opcodes.IFEQ || d == null || d.getOpcode() != Opcodes.RETURN) {
-            return new Block(call, call.name + call.desc, ci, null);
-        }
-        LabelNode after = ((JumpInsnNode) c).label;
-        if (d.getNext() != after) return null;
-        return new Block(after, call.name + call.desc, ci, after);
+        boolean load = a != null && a.getOpcode() == Opcodes.ALOAD && ((VarInsnNode) a).var == ci;
+        boolean test = b instanceof MethodInsnNode && ((MethodInsnNode) b).owner.equals(CALLBACK) && ((MethodInsnNode) b).name.equals("isCancelled");
+        boolean skip = c instanceof JumpInsnNode && c.getOpcode() == Opcodes.IFEQ && d != null && d.getOpcode() == Opcodes.RETURN;
+        return load && test && skip ? (JumpInsnNode) c : null;
     }
 
     private static AbstractInsnNode nextReal(AbstractInsnNode n) {

@@ -601,6 +601,30 @@ impl Entity {
         }
     }
 
+    /// The particles `handleStatusUpdate` starts for `status` on this mob type.
+    fn status_fx(&self, status: i8) -> Option<Fx> {
+        let Kind::Mob(kind) = self.kind else {
+            return None;
+        };
+        let (pos, size) = (self.pos, self.size());
+        // Pig, sheep, cow, chicken, wolf, mooshroom, ocelot, horse, rabbit extend `EntityAnimal`;
+        // wolf and ocelot extend `EntityTameable`; horse sends taming particles itself.
+        let animal = matches!(kind, 90..=93 | 95 | 96 | 98 | 100 | 101);
+        let taming = matches!(kind, 95 | 98 | 100);
+        let mood = match (status, kind) {
+            (20, _) => return Some(Fx::Death { pos, size }),
+            (18, _) if animal => Mood::Hearts,
+            (7, _) if taming => Mood::Hearts,
+            (6, _) if taming => Mood::Smoke,
+            (12, 120) => Mood::VillagerHearts,
+            (13, 120) => Mood::Angry,
+            (14, 120) => Mood::Happy,
+            (15, 66) => return Some(Fx::Witch { pos, size }),
+            _ => return None,
+        };
+        Some(Fx::Mood { mood, pos, size })
+    }
+
     /// Arm swing progress in `0.0..1.0`, interpolated between ticks (`getSwingProgress`).
     pub fn swing_progress(&self, partial: f32) -> f32 {
         if !self.swinging {
@@ -800,6 +824,35 @@ pub enum Fx {
     },
     /// `EntityLivingBase.onDeathUpdate` at tick 20: the 20-particle puff.
     Death { pos: [f64; 3], size: (f32, f32) },
+    /// A `handleStatusUpdate` particle shower in the entity's box (see `Mood`).
+    Mood {
+        mood: Mood,
+        pos: [f64; 3],
+        size: (f32, f32),
+    },
+    /// `EntityWitch.handleStatusUpdate(15)`: witch magic specks around the head; `size` is `(width, height)`.
+    Witch { pos: [f64; 3], size: (f32, f32) },
+}
+
+/// The particle of a mob mood status: `EntityAnimal` 18, `EntityTameable` 6 and 7, `EntityVillager` 12 to 14.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mood {
+    Hearts,
+    Smoke,
+    VillagerHearts,
+    Angry,
+    Happy,
+}
+
+impl Mood {
+    /// Animals and tameables spawn 7 particles from half a block above the feet;
+    /// villagers spawn 5 from one block above.
+    pub fn count_and_rise(self) -> (u32, f64) {
+        match self {
+            Mood::Hearts | Mood::Smoke => (7, 0.5),
+            Mood::VillagerHearts | Mood::Angry | Mood::Happy => (5, 1.0),
+        }
+    }
 }
 
 impl Entities {
@@ -1055,7 +1108,14 @@ impl Entities {
                 }
                 self.with(id, |e| e.animate(animation))
             }
-            E::Status { id, status } => self.with(id, |e| e.set_status(status)),
+            E::Status { id, status } => {
+                if let Some(e) = self.map.get(&id) {
+                    if let Some(fx) = e.status_fx(status) {
+                        self.fx.push(fx);
+                    }
+                }
+                self.with(id, |e| e.set_status(status))
+            }
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
@@ -1415,6 +1475,62 @@ mod tests {
         }
         es.tick();
         assert!(es.get(3).is_none());
+    }
+
+    #[test]
+    fn mood_statuses_pick_the_vanilla_particle_for_the_mob_type() {
+        let mob = |kind| {
+            let mut es = Entities::default();
+            es.apply(EntityEvent::SpawnMob {
+                id: 1,
+                kind,
+                pos: [0; 3],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: SizeMeta::default(),
+            });
+            es
+        };
+        let moods = |kind, status| {
+            let mut es = mob(kind);
+            es.apply(EntityEvent::Status { id: 1, status });
+            es.take_fx()
+                .into_iter()
+                .map(|f| match f {
+                    Fx::Mood { mood, .. } => Some(mood),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(moods(120, 12), [Some(Mood::VillagerHearts)]);
+        assert_eq!(moods(120, 13), [Some(Mood::Angry)]);
+        assert_eq!(moods(120, 14), [Some(Mood::Happy)]);
+        assert_eq!(moods(95, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(95, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(100, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(100, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(98, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(98, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(91, 18), [Some(Mood::Hearts)]);
+        let mut zombie = mob(54);
+        zombie.apply(EntityEvent::Status { id: 1, status: 20 });
+        match zombie.take_fx().as_slice() {
+            [Fx::Death { pos, size }] => {
+                assert_eq!(*pos, [0.0; 3]);
+                assert_eq!(*size, (0.6, 1.95));
+            }
+            other => panic!("expected one Death fx, got {}", other.len()),
+        }
+        assert!(moods(54, 12).is_empty(), "zombie is no villager");
+        assert!(moods(120, 18).is_empty(), "villager is no animal");
+        let mut witch = mob(66);
+        witch.apply(EntityEvent::Status { id: 1, status: 15 });
+        assert!(matches!(witch.take_fx().as_slice(), [Fx::Witch { .. }]));
     }
 
     #[test]

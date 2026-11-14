@@ -53,46 +53,55 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         Ok(l) => l,
         Err(e) => return fail(&e),
     };
-    // Ornithe keeps the Forge twin route until the Fabric host loads Ornithe jars (slice B7).
-    let Some(fabric) = fabric_host(loader) else {
+    let Some(host) = host_for(loader) else {
         log::line(&format!(
             "cluster {}: loader {loader:?} has no mod host",
             cluster.display()
         ));
         return None;
     };
-    stage(cluster, loader, fabric)?;
-    let cfg = if fabric {
-        Config::provision_fabric().map_err(|e| e.to_string())
-    } else {
-        Config::provision().map_err(|e| e.to_string())
+    stage(cluster, loader, host)?;
+    let cfg = match host {
+        Host::Forge => Config::provision().map_err(|e| e.to_string()),
+        Host::Fabric => Config::provision_fabric().map_err(|e| e.to_string()),
+        Host::Ornithe => Config::provision_ornithe().map_err(|e| e.to_string()),
     };
     cfg.map_err(|e| fail::<Config>(&e)).ok()
 }
 
-/// `Some(true)` for the Fabric host, `Some(false)` for the Forge host, `None` when no host loads the loader.
-fn fabric_host(loader: oneclient::Loader) -> Option<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Host {
+    Forge,
+    Fabric,
+    /// The Fabric host with the Ornithe profile: Ornithe mods are Fabric-family mods.
+    Ornithe,
+}
+
+/// The host that loads the loader, `None` when no host does.
+fn host_for(loader: oneclient::Loader) -> Option<Host> {
     match loader {
+        oneclient::Loader::Forge => Some(Host::Forge),
+        oneclient::Loader::Fabric => Some(Host::Fabric),
+        oneclient::Loader::Ornithe => Some(Host::Ornithe),
         oneclient::Loader::Other => None,
-        l => Some(l == oneclient::Loader::Fabric),
     }
 }
 
 /// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
-fn stage(cluster: &Path, loader: oneclient::Loader, fabric: bool) -> Option<()> {
-    let main = if fabric {
-        provision_fabric::main_dir().map_err(|e| e.to_string())
-    } else {
-        provision::main_dir().map_err(|e| e.to_string())
+fn stage(cluster: &Path, loader: oneclient::Loader, host: Host) -> Option<()> {
+    let main = match host {
+        Host::Forge => provision::main_dir().map_err(|e| e.to_string()),
+        Host::Fabric => provision_fabric::main_dir().map_err(|e| e.to_string()),
+        Host::Ornithe => provision_fabric::ornithe_dir().map_err(|e| e.to_string()),
     };
     let mods = match main {
         Ok(main) => main.join("mods"),
         Err(e) => return fail(&e),
     };
-    let resolved = if fabric {
-        oneclient::fabric_jars(cluster, &mods)
-    } else {
+    let resolved = if host == Host::Forge {
         oneclient::resolve(cluster, &mods)
+    } else {
+        oneclient::fabric_jars(cluster, &mods)
     };
     let r = match resolved {
         Ok(r) => r,
@@ -174,10 +183,10 @@ mod tests {
     #[test]
     fn each_loader_gets_its_host_or_none() {
         use oneclient::Loader::*;
-        assert_eq!(fabric_host(Forge), Some(false));
-        assert_eq!(fabric_host(Fabric), Some(true));
-        assert_eq!(fabric_host(Ornithe), Some(false));
-        assert_eq!(fabric_host(Other), None);
+        assert_eq!(host_for(Forge), Some(Host::Forge));
+        assert_eq!(host_for(Fabric), Some(Host::Fabric));
+        assert_eq!(host_for(Ornithe), Some(Host::Ornithe));
+        assert_eq!(host_for(Other), None);
     }
 
     #[test]

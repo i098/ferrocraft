@@ -120,6 +120,8 @@ pub struct Renderer {
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
     tile_meshes: Vec<(Tex, GpuMesh)>,
+    /// Beacon beams: inner, then outer (`beacon.rs`).
+    beam_meshes: [Option<GpuMesh>; 2],
     head_meshes: Vec<(Tex, GpuMesh)>,
     glint_mesh: Option<GpuMesh>,
     /// The additive white flash of primed TNT.
@@ -164,6 +166,9 @@ pub struct Renderer {
     /// Lightning bolts `(position, seed)` for the next frames.
     bolts: Vec<([f64; 3], i64)>,
     bolt_pipe: wgpu::RenderPipeline,
+    /// Inner beacon beam: opaque, unlit, no culling. `beam_glow_pipe` is the outer beam, blended without depth writes.
+    beam_pipe: wgpu::RenderPipeline,
+    beam_glow_pipe: wgpu::RenderPipeline,
     border_pipe: wgpu::RenderPipeline,
     /// The world border to draw, if any.
     border: Option<crate::Border>,
@@ -409,7 +414,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -431,6 +436,7 @@ impl Renderer {
             entity_mesh: None,
             block_entities: BlockEntities::default(),
             tile_meshes: Vec::new(),
+            beam_meshes: [None, None],
             head_meshes: Vec::new(),
             glint_mesh: None,
             flash_mesh: None,
@@ -460,6 +466,8 @@ impl Renderer {
             crack_pipe,
             cracks: Vec::new(),
             bolt_pipe,
+            beam_pipe,
+            beam_glow_pipe,
             border_pipe,
             border: None,
             hand_glint_pipe,
@@ -1782,6 +1790,7 @@ impl Renderer {
             }
             self.draw_items(&mut pass);
             self.draw_tiles(&mut pass);
+            self.draw_beams(&mut pass);
             if let Some(m) = &self.glint_mesh {
                 pass.set_pipeline(&self.hand_glint_pipe);
                 pass.set_bind_group(0, &self.textures[entity::GLINT_TEXTURE], &[]);
@@ -2137,7 +2146,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 15] {
+) -> [wgpu::RenderPipeline; 17] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2406,6 +2415,27 @@ fn build_pipelines(
         true,
         false,
     );
+    // `TileEntityBeaconRenderer`: unlit and unfogged; the inner beam is opaque, the outer one blended.
+    let beam_pipe = pipe(
+        "vs_world",
+        "fs_beam",
+        stride,
+        &world_attrs,
+        None,
+        true,
+        true,
+        false,
+    );
+    let beam_glow_pipe = pipe(
+        "vs_world",
+        "fs_beam",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -2422,6 +2452,8 @@ fn build_pipelines(
         shadow_pipe,
         hand_glint_pipe,
         border_pipe,
+        beam_pipe,
+        beam_glow_pipe,
     ]
 }
 

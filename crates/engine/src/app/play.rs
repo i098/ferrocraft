@@ -309,9 +309,7 @@ impl App {
         self.ambient_effects();
         self.potion_particles();
         self.entity_fx();
-        Self::projectile_fx(&self.game, &mut self.particles);
-        self.particles
-            .tick(|x, y, z| self.game.store.get_block(x, y, z));
+        self.tick_particles();
         self.equip_tick();
         self.send_horse_jump();
         self.send_state();
@@ -321,6 +319,25 @@ impl App {
             self.send_pose();
         }
         self.sound_tick();
+    }
+
+    fn tick_particles(&mut self) {
+        Self::projectile_fx(&self.game, &mut self.particles);
+        if let Some(p) = &self.game.player {
+            self.particles.set_viewer(p.pos);
+        }
+        self.particles
+            .tick(|x, y, z| self.game.store.get_block(x, y, z));
+        self.firework_sounds();
+    }
+
+    /// `World.playSound` of the fireworks that blew up or twinkled this tick.
+    fn firework_sounds(&mut self) {
+        for s in self.particles.take_sounds() {
+            if let Some(snd) = &mut self.sound {
+                snd.play(s.name, Some(s.pos), s.volume, s.pitch);
+            }
+        }
     }
 
     /// Crit bursts, death puffs and the sprint dust of every sprinting entity not in water.
@@ -344,6 +361,11 @@ impl App {
                     self.particles.mood(kind, count, rise, pos, size)
                 }
                 world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
+                world::entities::Fx::Firework {
+                    pos,
+                    vel,
+                    explosions,
+                } => self.particles.firework(pos, vel, explosions),
             }
         }
         let g = &self.game;
@@ -411,6 +433,11 @@ impl App {
                     (wet(), false)
                 }
                 63 | 64 | 66 => (wet(), true),
+                // `EntityFireworkRocket.onUpdate`: a spark from the tail every tick.
+                76 => {
+                    particles.firework_trail(e.pos, vel);
+                    (false, false)
+                }
                 50 => (false, true),
                 _ => continue,
             };

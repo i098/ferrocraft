@@ -1177,6 +1177,14 @@ impl App {
             Action::ToggleHud => self.hide_hud = !self.hide_hud,
             Action::ToggleShader => self.renderer.iter_mut().for_each(|r| r.toggle_post()),
             Action::TogglePerspective => self.toggle_perspective(),
+            Action::Debug(DebugCombo::Hitboxes) => {
+                self.show_hitboxes = !self.show_hitboxes;
+                self.debug_chat(if self.show_hitboxes {
+                    "Hitboxes: shown"
+                } else {
+                    "Hitboxes: hidden"
+                });
+            }
             Action::Debug(DebugCombo::ClearChat) => {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();
@@ -1198,6 +1206,7 @@ impl App {
                 self.debug_chat("Key bindings:");
                 for line in [
                     "F3 + A = Reload chunks",
+                    "F3 + B = Show hitboxes",
                     "F3 + D = Clear chat",
                     "F3 + H = Advanced tooltips",
                     "F3 + P = Pause on lost focus",

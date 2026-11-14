@@ -101,6 +101,8 @@ pub struct App {
     /// Left-click presses since the last tick that did not hit an entity.
     attack_presses: u32,
     show_debug: bool,
+    /// F3+B: vanilla shows the hitboxes of entities.
+    show_hitboxes: bool,
     hide_hud: bool,
     /// F5: 0 first person, 1 behind the player, 2 in front of the player.
     perspective: u8,
@@ -181,6 +183,7 @@ impl App {
             grabbed: false,
             attack_presses: 0,
             show_debug: false,
+            show_hitboxes: false,
             hide_hud: false,
             perspective: 0,
             shader_index: render::SHADERS.len(),
@@ -800,8 +803,15 @@ impl App {
             self.team_tag(e, d);
             self.held_and_line(e, d, frac);
         }
-        self.mod_drawn =
-            mod_world::Drawn::ask(self.mods.as_ref(), &self.game, &cam, &draws, frac, size);
+        self.mod_drawn = mod_world::Drawn::ask(
+            self.mods.as_ref(),
+            &self.game,
+            &cam,
+            &draws,
+            frac,
+            size,
+            self.show_hitboxes,
+        );
         let mut ids: Vec<i32> = self.game.entities.iter().map(|e| e.id).collect();
         let (hurt, glint, cancelled) = self.mod_probe(&draws, self_model.as_ref(), cam.pos);
         if !cancelled.is_empty() {
@@ -902,6 +912,7 @@ impl App {
         r.set_entities(&draws);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
+        r.set_lines(self.mod_drawn.hitbox_lines());
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles

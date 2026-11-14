@@ -5,7 +5,8 @@
 
 use crate::game::Game;
 use ferrocraft_modhost::anchor::{
-    Class as SubjectClass, Op, Request, Subject, World, MAX_SUBJECTS, ROLE_COUNTDOWN, ROLE_LABEL,
+    Class as SubjectClass, Op, Request, Subject, World, MAX_SUBJECTS, ROLE_COUNTDOWN, ROLE_HITBOX,
+    ROLE_LABEL,
 };
 use ferrocraft_modhost::hooks::Hooks;
 use ferrocraft_modhost::ModHost;
@@ -19,6 +20,7 @@ const TNT_FUSE: i32 = 80;
 const TNT_OBJECT: i8 = 50;
 
 const RENDER: &str = "net/minecraft/client/renderer/entity/Render";
+const RENDER_MANAGER: &str = "net/minecraft/client/renderer/entity/RenderManager";
 const RENDER_TNT: &str = "net/minecraft/client/renderer/entity/RenderTNTPrimed";
 const ENTITY_DESC: &str = "(Lnet/minecraft/entity/Entity;";
 
@@ -32,8 +34,8 @@ pub(super) struct Drawn {
     pub labels_owned: bool,
 }
 
-/// The roles that a mod changed in the hook table.
-fn roles(h: &Hooks) -> u8 {
+/// The roles that a mod changed in the hook table. The hitbox role needs F3+B on as well.
+fn roles(h: &Hooks, hitboxes: bool) -> u8 {
     let label = h.changed(
         RENDER,
         "func_147906_a",
@@ -45,10 +47,33 @@ fn roles(h: &Hooks) -> u8 {
     ]
     .iter()
     .any(|d| h.changed(RENDER_TNT, "func_76986_a", d));
-    u8::from(label) * ROLE_LABEL + u8::from(countdown) * ROLE_COUNTDOWN
+    let hitbox = hitboxes
+        && h.changed(
+            RENDER_MANAGER,
+            "func_85094_b",
+            &format!("{ENTITY_DESC}DDDFF)V"),
+        );
+    u8::from(label) * ROLE_LABEL
+        + u8::from(countdown) * ROLE_COUNTDOWN
+        + u8::from(hitbox) * ROLE_HITBOX
 }
 
 impl Drawn {
+    /// The hitbox lines in world space, one `(from, to, argb)` per segment.
+    pub(super) fn hitbox_lines(&self) -> Vec<([f64; 3], [f64; 3], u32)> {
+        let at = |feet: &[f64; 3], p: [f32; 3]| [0, 1, 2].map(|i| feet[i] + f64::from(p[i]));
+        self.world
+            .lines
+            .iter()
+            .filter_map(|l| Some((self.feet.get(&l.id)?, l)))
+            .flat_map(|(feet, l)| {
+                l.segments
+                    .iter()
+                    .map(move |s| (at(feet, s.from), at(feet, s.to), s.argb))
+            })
+            .collect()
+    }
+
     /// Ask the mods what they draw for the entities in `draws`, which pair with `game.entities`.
     pub(super) fn ask(
         mods: Option<&ModHost>,
@@ -57,11 +82,12 @@ impl Drawn {
         draws: &[EntityDraw],
         frac: f64,
         (w, h): (u32, u32),
+        hitboxes: bool,
     ) -> Drawn {
         let Some(mods) = mods.filter(|_| w > 0 && h > 0) else {
             return Drawn::default();
         };
-        let owned = roles(&mods.hooks());
+        let owned = roles(&mods.hooks(), hitboxes);
         if owned == 0 {
             return Drawn::default();
         }
@@ -113,6 +139,10 @@ fn subject(
     }
     let tnt = matches!(d.class, Class::Object(TNT_OBJECT));
     let mut roles = u8::from(tnt) * (owned & ROLE_COUNTDOWN);
+    // `RenderManager.doRenderEntity`: vanilla draws the box of an entity that is not invisible.
+    if owned & ROLE_HITBOX != 0 && !d.invisible {
+        roles |= ROLE_HITBOX;
+    }
     let mut label = String::new();
     if owned & ROLE_LABEL != 0 {
         let tags = render::nametags(

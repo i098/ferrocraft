@@ -6,6 +6,8 @@
 pub enum DebugCombo {
     /// F3+A: reload chunks (`RenderGlobal.loadRenderers`).
     ReloadChunks,
+    /// F3+B: hitboxes of entities (`RenderManager.setDebugBoundingBox`).
+    Hitboxes,
     /// F3+D: clear chat.
     ClearChat,
     /// F3+H: advanced item tooltips.

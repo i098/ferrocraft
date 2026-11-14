@@ -23,7 +23,7 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 /**
- * Draws in the world: name tags and the TNT countdown. Rust sends the entities in view; this
+ * Draws in the world: name tags, the TNT countdown and hitbox lines. Rust sends the entities in view; this
  * runs the real vanilla methods that mods changed with Mixin ({@code Render.renderLivingLabel},
  * {@code RenderTNTPrimed.doRender}) on stand-in entities, with the
  * entity at the origin, and records what they draw: the text of {@link Sink#text} and the vertices of
@@ -38,6 +38,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 public final class Anchor {
     private static final int LABEL = 1;
     private static final int COUNTDOWN = 2;
+    private static final int HITBOX = 4;
     private static final String RENDER_TNT = "net.minecraft.client.renderer.entity.RenderTNTPrimed";
     /** The stand-in vanilla class of each wire class (player, other, primed TNT). */
     private static final String[] ENTITY = {"net.minecraft.client.entity.EntityOtherPlayerMP", "net.minecraft.entity.passive.EntityPig", "net.minecraft.entity.item.EntityTNTPrimed"};
@@ -126,6 +127,14 @@ public final class Anchor {
         float[] v = VERTS.get(VERTS.size() - 1);
         v[3] = argb(color);
         int n = VERTS.size();
+        if (role == HITBOX) {
+            // GL_LINES pairs the vertices; GL_LINE_STRIP joins each one to the one before.
+            if ((mode == 1 && n % 2 == 0) || (mode == 3 && n >= 2)) {
+                float[] a = VERTS.get(n - 2);
+                ops.add(new Object[] {'H', new float[] {a[0], a[1], a[2], v[0], v[1], v[2], v[3]}});
+            }
+            return;
+        }
         if (mode != 7 || n % 4 != 0) return;
         float[] f = new float[9];
         for (int i = 0; i < 4; i++) {
@@ -248,6 +257,7 @@ public final class Anchor {
             }
             if ((roles & LABEL) != 0) count += draw(w, id, LABEL, e, label, partial, yaw);
             if ((roles & COUNTDOWN) != 0) count += draw(w, id, COUNTDOWN, e, null, partial, yaw);
+            if ((roles & HITBOX) != 0) count += draw(w, id, HITBOX, e, null, partial, yaw);
         }
         entities.keySet().retainAll(seen);
         out.writeInt(count);
@@ -268,7 +278,8 @@ public final class Anchor {
         Sink.identity();
         try {
             if (render == null) render = R.neu(RENDER_TNT, manager);
-            if (what == LABEL) R.call(render, "func_147906_a", e, label, 0.0, 0.0, 0.0, 64); // Render.renderLivingLabel
+            if (what == HITBOX) R.call(manager, "func_85094_b", e, 0.0, 0.0, 0.0, yaw, partial); // RenderManager.renderDebugBoundingBox
+            else if (what == LABEL) R.call(render, "func_147906_a", e, label, 0.0, 0.0, 0.0, 64); // Render.renderLivingLabel
             else R.call(render, "func_76986_a", e, 0.0, 0.0, 0.0, yaw, partial); // RenderTNTPrimed.doRender
         } catch (RuntimeException x) {
             failed("role " + what, x);
@@ -281,6 +292,19 @@ public final class Anchor {
             o = ops;
         }
         int count = 0;
+        if (what == HITBOX) {
+            int n = Math.min(o.size(), 256);
+            if (n == 0) return 0;
+            w.writeByte('H');
+            w.writeInt(id);
+            w.writeShort(n);
+            for (int i = 0; i < n; i++) {
+                float[] f = (float[]) o.get(i)[1];
+                for (int k = 0; k < 6; k++) w.writeFloat(f[k]);
+                w.writeInt(Float.floatToRawIntBits(f[6]));
+            }
+            return 1;
+        }
         if (!o.isEmpty()) {
             w.writeByte('L');
             w.writeInt(id);

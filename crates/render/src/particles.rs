@@ -882,24 +882,12 @@ impl Particles {
 
     /// `Starter.tick`; false when it is done.
     fn tick_starter(&mut self, s: &mut Starter) -> bool {
-        let far = if self.far_away(s.pos) { "_far" } else { "" };
+        let far = self.far_away(s.pos);
         let rand = self.rand() as f32;
         if s.age == 0 && !s.explosions.is_empty() {
-            let large = s.explosions.len() >= 3 || s.explosions.iter().any(|e| e.shape == 1);
-            let name = match (large, far) {
-                (true, "") => "fireworks.largeBlast",
-                (true, _) => "fireworks.largeBlast_far",
-                (false, "") => "fireworks.blast",
-                (false, _) => "fireworks.blast_far",
-            };
-            self.sounds.push(FireworkSound {
-                name,
-                pos: s.pos,
-                volume: 20.0,
-                pitch: 0.95 + rand * 0.1,
-            });
+            self.blast_sound(s, far, rand);
         }
-        if s.age % 2 == 0 && s.age / 2 < s.explosions.len() {
+        if s.age.is_multiple_of(2) && s.age / 2 < s.explosions.len() {
             self.explode(s, s.age / 2);
         }
         s.age += 1;
@@ -907,10 +895,10 @@ impl Particles {
             return true;
         }
         if s.flicker {
-            let name = if far.is_empty() {
-                "fireworks.twinkle"
-            } else {
+            let name = if far {
                 "fireworks.twinkle_far"
+            } else {
+                "fireworks.twinkle"
             };
             self.sounds.push(FireworkSound {
                 name,
@@ -920,6 +908,22 @@ impl Particles {
             });
         }
         false
+    }
+
+    fn blast_sound(&mut self, s: &Starter, far: bool, rand: f32) {
+        let large = s.explosions.len() >= 3 || s.explosions.iter().any(|e| e.shape == 1);
+        let name = match (large, far) {
+            (true, false) => "fireworks.largeBlast",
+            (true, true) => "fireworks.largeBlast_far",
+            (false, false) => "fireworks.blast",
+            (false, true) => "fireworks.blast_far",
+        };
+        self.sounds.push(FireworkSound {
+            name,
+            pos: s.pos,
+            volume: 20.0,
+            pitch: 0.95 + rand * 0.1,
+        });
     }
 
     /// One explosion of a `Starter`: its shape of sparks and the flash.
@@ -1388,7 +1392,7 @@ impl Particles {
 
     /// The tail of `Spark.tick`: a trailing spark every other tick of the first half of its life.
     fn spark_trail(&mut self, p: &Particle) {
-        if !p.trail || p.age >= p.max_age / 2 || (p.age + p.max_age) % 2 != 0 {
+        if !p.trail || p.age >= p.max_age / 2 || !(p.age + p.max_age).is_multiple_of(2) {
             return;
         }
         let mut t = self.spark(p.pos, [0.0; 3]);
@@ -1607,7 +1611,7 @@ const CREEPER: [[f64; 2]; 12] = [
 
 /// `Spark.render`: a flickering spark skips every other third of the second part of its life.
 fn hidden_flicker(p: &Particle) -> bool {
-    p.flicker && p.age >= p.max_age / 3 && (p.age + p.max_age) / 3 % 2 != 0
+    p.flicker && p.age >= p.max_age / 3 && !((p.age + p.max_age) / 3).is_multiple_of(2)
 }
 
 /// Particle size at draw time: smoke, redstone and crit grow in over the first 1/32 of their life,

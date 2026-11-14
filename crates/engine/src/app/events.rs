@@ -304,8 +304,7 @@ impl App {
         }
     }
 
-    /// `handleStatusUpdate` hurt (2) and death (3) sounds, `handleCollectItem` pickup sounds.
-    /// Plays at the entity before `Game` applies the event; the own player is not in `entities`.
+    /// Entity launch, hurt, death and pickup sounds, before `Game` applies the event.
     fn entity_sound(&mut self, ev: &NetEvent) {
         let NetEvent::Entity(ev) = ev else { return };
         // `EntityFireworkRocket.onUpdate` at age 0: the launch sound, 3.0 loud, at the rocket.
@@ -320,6 +319,11 @@ impl App {
             }
             return;
         }
+        self.entity_status_sound(ev);
+    }
+
+    /// The own player is not in `entities`.
+    fn entity_status_sound(&mut self, ev: &EntityEvent) {
         let (id, status) = match ev {
             EntityEvent::Status {
                 id,

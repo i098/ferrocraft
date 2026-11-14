@@ -617,13 +617,6 @@ impl Entity {
 
     /// The particles `handleStatusUpdate` starts for `status` on this mob type.
     fn status_fx(&self, status: i8) -> Option<Fx> {
-        if self.kind == Kind::Object(76) && status == 17 {
-            return Some(Fx::Firework {
-                pos: self.pos,
-                vel: [0, 1, 2].map(|i| self.pos[i] - self.prev_pos[i]),
-                explosions: self.explosions.clone(),
-            });
-        }
         let Kind::Mob(kind) = self.kind else {
             return None;
         };
@@ -1141,6 +1134,7 @@ impl Entities {
                 self.with(id, |e| e.animate(animation))
             }
             E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
+            E::Status { id, status: 17 } => self.firework_explode(id),
             E::Status { id, status } => {
                 if let Some(e) = self.map.get(&id) {
                     if let Some(fx) = e.status_fx(status) {
@@ -1167,6 +1161,16 @@ impl Entities {
                 self.names.remove(&uuid);
             }
             _ => {}
+        }
+    }
+
+    fn firework_explode(&mut self, id: i32) {
+        if let Some(e) = self.map.get(&id).filter(|e| e.kind == Kind::Object(76)) {
+            self.fx.push(Fx::Firework {
+                pos: e.pos,
+                vel: [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]),
+                explosions: e.explosions.clone(),
+            });
         }
     }
 

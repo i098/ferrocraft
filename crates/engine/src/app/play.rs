@@ -309,13 +309,7 @@ impl App {
         self.ambient_effects();
         self.potion_particles();
         self.entity_fx();
-        Self::projectile_fx(&self.game, &mut self.particles);
-        if let Some(p) = &self.game.player {
-            self.particles.set_viewer(p.pos);
-        }
-        self.particles
-            .tick(|x, y, z| self.game.store.get_block(x, y, z));
-        self.firework_sounds();
+        self.tick_particles();
         self.equip_tick();
         self.send_horse_jump();
         self.send_state();
@@ -325,6 +319,16 @@ impl App {
             self.send_pose();
         }
         self.sound_tick();
+    }
+
+    fn tick_particles(&mut self) {
+        Self::projectile_fx(&self.game, &mut self.particles);
+        if let Some(p) = &self.game.player {
+            self.particles.set_viewer(p.pos);
+        }
+        self.particles
+            .tick(|x, y, z| self.game.store.get_block(x, y, z));
+        self.firework_sounds();
     }
 
     /// `World.playSound` of the fireworks that blew up or twinkled this tick.

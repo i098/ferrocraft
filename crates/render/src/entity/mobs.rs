@@ -369,6 +369,7 @@ fn sheep_wool(d: &EntityDraw) -> Layer {
         leg.inflate = 0.5;
         parts.push(leg);
     }
+    super::baby::apply(&mut parts, d);
     Layer {
         skin: Skin::SheepFur,
         tint: fleece(d),

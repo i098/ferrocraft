@@ -9,6 +9,7 @@
 
 mod armorstand;
 mod arrows;
+mod baby;
 mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
@@ -650,6 +651,12 @@ fn wrap(mut d: f32) -> f32 {
 }
 
 fn model(d: &EntityDraw) -> Model {
+    let mut m = adult_model(d);
+    baby::apply(&mut m.parts, d);
+    m
+}
+
+fn adult_model(d: &EntityDraw) -> Model {
     match d.class {
         Class::Player { slim } => {
             let (skin, arm) = if slim {

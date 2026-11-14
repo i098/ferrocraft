@@ -6,7 +6,7 @@
 #   (default $TMPDIR/ferro-modhost-accept/mods, filled by java/modhost-accept/run.sh) and a built engine FC_ENGINE
 #   (default $CARGO_TARGET_DIR or ./target, debug/ferrocraft-engine).
 # Env (optional): FC_OUT (output folder, default $TMPDIR/ferrocraft-modproof), FC_DISPLAY (:131), FC_PORT (25591),
-#   FC_BOOT_SECS (seconds to wait for the engine window, 90), FC_LOAD_SECS (seconds for the mods to load, 60), XDOTOOL (xdotool command), FC_DIFF_PX (pixels that
+#   FC_BOOT_SECS (seconds to wait for the engine window, 90), FC_LOAD_SECS (most seconds to wait for the host line "mods loaded", 180), FC_GUI_SECS (most seconds to wait for the OneConfig screen after Right Shift, 45), FC_SETTLE_SECS (seconds after it for the OneConfig start and the chunk load, 15), XDOTOOL (xdotool command), FC_DIFF_PX (pixels that
 #   must change for a step to pass, 3000).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -77,7 +77,10 @@ done
 geo=$("$XDO" getwindowgeometry "$win" | awk '/Geometry/ {print $2}')
 [ "$geo" = 800x600 ] || echo "warning: window is $geo, steps assume 800x600" >&2
 # The mods load and the world shows: wait for the OneConfig welcome toast and the chunk load.
-sleep "${FC_LOAD_SECS:-60}"
+# A fixed sleep failed on a loaded host: the mods were still loading when Right Shift came (changed_px 930, issue #307).
+for _ in $(seq "${FC_LOAD_SECS:-180}"); do grep -q 'ferro-host\] mods loaded' "$OUT/engine.log" && break; sleep 1; done
+grep -q 'ferro-host\] mods loaded' "$OUT/engine.log" || { echo "mods did not load (see $OUT/engine.log)" >&2; exit 1; }
+sleep "${FC_SETTLE_SECS:-15}"
 "$XDO" windowfocus "$win"; "$XDO" mousemove 400 300; sleep 1
 
 shot() { ffmpeg -nostdin -loglevel error -y -f x11grab -video_size "$geo" -i "$DISP" -frames:v 1 "$1"; }
@@ -121,7 +124,10 @@ while IFS='|' read -r id term note; do
   case $id in '#'*|'') continue;; esac
   [ -n "${FC_ONLY:-}" ] && case " $FC_ONLY " in *" $id "*) ;; *) continue;; esac
   n=$((n+1)); nn=$(printf %02d "$n")
-  tap Shift_R; sleep 2
+  tap Shift_R
+  # The host still applies mixins for a while after "mods loaded": the screen opens late on a loaded host, so wait for it.
+  for _ in $(seq "${FC_GUI_SECS:-45}"); do shot "$OUT/shots/probe.png"; [ "$(panel_dark "$OUT/shots/probe.png")" = 1 ] && break; sleep 1; done
+  rm -f "$OUT/shots/probe.png"; sleep 2
   grid=$OUT/shots/$nn-$id-grid.png; page=$OUT/shots/$nn-$id.png
   if [ -z "$term" ]; then
     shot "$page"; cp "$page" "$grid"

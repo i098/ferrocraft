@@ -54,11 +54,7 @@ impl App {
 
     fn run_effect(&mut self, effect: UiEffect) {
         match effect {
-            UiEffect::Sound(name) => {
-                if let Some(s) = &mut self.sound {
-                    s.play_ui(name);
-                }
-            }
+            UiEffect::Sound(name) => self.play_ui_sound(name),
             UiEffect::Connect { host, port } => self.connect(&host, port),
             UiEffect::CancelConnect => self.link = Link::Offline,
             UiEffect::Disconnect => self.leave_world(),
@@ -79,6 +75,12 @@ impl App {
                 hash,
                 accepted,
             } => self.answer_server_pack(&url, &hash, accepted),
+        }
+    }
+
+    fn play_ui_sound(&mut self, name: &'static str) {
+        if let Some(sound) = &mut self.sound {
+            sound.play_ui(name);
         }
     }
 
@@ -968,6 +970,29 @@ mod tests {
         );
         assert_eq!(app.ui.stats.read("achievement.openInventory"), 1);
         assert_eq!(app.ui.stats.read("achievement.mineWood"), 0);
+    }
+
+    #[test]
+    fn player_id_is_the_auth_uuid_with_the_username_offline() {
+        for (auth, expected) in [
+            (None, "Ferro"),
+            (
+                Some(ferrocraft_net_client::Auth::new(
+                    "unused".into(),
+                    "01234567-89ab-cdef-0123-456789abcdef",
+                )),
+                "0123456789abcdef0123456789abcdef",
+            ),
+        ] {
+            let app = App::new(Args {
+                username: "Ferro".into(),
+                auth,
+                assets_dir: None,
+                server: None,
+                game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            });
+            assert_eq!(app.ui.player_id, expected);
+        }
     }
 
     #[test]

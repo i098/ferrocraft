@@ -160,7 +160,10 @@ type ViewRay = ([f64; 3], f32, f32, i32, Option<i32>);
 impl App {
     pub fn new(args: Args) -> App {
         let mut ui = Ui::new(args.game_dir.clone(), Texts::default());
-        ui.player_id = args.username.clone();
+        ui.player_id = args
+            .auth
+            .as_ref()
+            .map_or_else(|| args.username.clone(), |auth| auth.uuid().to_owned());
         let mut app = App {
             skins: PlayerSkins::new(&args.game_dir),
             input: InputState::new(ui.settings.mouse_sensitivity),

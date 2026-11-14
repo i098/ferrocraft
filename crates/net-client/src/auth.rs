@@ -25,6 +25,10 @@ impl Auth {
             uuid: uuid.replace('-', ""),
         }
     }
+
+    pub fn uuid(&self) -> &str {
+        &self.uuid
+    }
 }
 
 // The token must never reach a log, so `Debug` hides it.

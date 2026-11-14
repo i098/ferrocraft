@@ -16,6 +16,8 @@ use std::f32::consts::FRAC_PI_2;
 mod beacon;
 use beacon::Beacon;
 pub use beacon::{Beams, BEAM_TEXTURE};
+mod portal;
+pub use portal::{PORTAL_TEXTURE, SKY_TEXTURE};
 
 pub const CHEST: u16 = 54;
 pub const SIGN_STANDING: u16 = 63;
@@ -28,6 +30,7 @@ pub const BANNER_WALL: u16 = 177;
 pub const ENCHANTING_TABLE: u16 = 116;
 pub const BEACON: u16 = 138;
 const MOB_SPAWNER: u16 = 52;
+pub const END_PORTAL: u16 = 119;
 
 /// Block ids that carry a block entity drawn here.
 pub fn is_tile(id: u16) -> bool {
@@ -44,6 +47,7 @@ pub fn is_tile(id: u16) -> bool {
             | ENCHANTING_TABLE
             | BEACON
             | MOB_SPAWNER
+            | END_PORTAL
     )
 }
 
@@ -313,8 +317,8 @@ impl BlockEntities {
                 let book = self.books.get(&pos).copied().unwrap_or_default();
                 book_block(out, &book, at, view.partial);
             }
-            // The beam is built by `beams`.
-            BEACON => {}
+            // The beam is built by `beams`, the star field by `portals`.
+            BEACON | END_PORTAL => {}
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
                 banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);

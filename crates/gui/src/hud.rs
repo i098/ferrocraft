@@ -145,11 +145,7 @@ impl Hud {
             overlay::draw_portal(gui, portal, self.update_counter);
         }
         let spectator = f.status.is_some_and(|s| s.spectator);
-        if spectator {
-            self.spectator.draw_hotbar(gui, f.now_ms);
-        } else if f.player_view {
-            self.draw_hotbar(gui, f);
-        }
+        self.draw_bar(gui, f, spectator);
         gui.set_color(0xFFFF_FFFF);
         if (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
@@ -161,11 +157,7 @@ impl Hud {
         if let Some(s) = f.status {
             self.draw_status(gui, s);
         }
-        if f.held_item_tooltips && !spectator {
-            self.draw_selected_item(gui, survival);
-        } else if spectator {
-            self.spectator.draw_tooltip(gui, f.now_ms);
-        }
+        self.draw_bar_tooltip(gui, f, spectator, survival);
         if let Some((left, right)) = f.debug {
             debug::draw(gui, left, right);
         }
@@ -189,6 +181,24 @@ impl Hud {
             chat::draw_input(gui, field);
         }
         gui.set_color(0xFFFF_FFFF);
+    }
+
+    /// The hotbar, or the spectator menu in its place.
+    fn draw_bar(&mut self, gui: &mut Gui, f: &Frame, spectator: bool) {
+        if spectator {
+            self.spectator.draw_hotbar(gui, f.now_ms);
+        } else if f.player_view {
+            self.draw_hotbar(gui, f);
+        }
+    }
+
+    /// The held item name, or the spectator menu tooltip in its place.
+    fn draw_bar_tooltip(&mut self, gui: &mut Gui, f: &Frame, spectator: bool, survival: bool) {
+        if spectator {
+            self.spectator.draw_tooltip(gui, f.now_ms);
+        } else if f.held_item_tooltips {
+            self.draw_selected_item(gui, survival);
+        }
     }
 
     fn draw_hotbar(&self, gui: &mut Gui, f: &Frame) {

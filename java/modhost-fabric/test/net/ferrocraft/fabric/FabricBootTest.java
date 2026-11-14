@@ -48,10 +48,17 @@ public final class FabricBootTest {
             long end = System.currentTimeMillis() + HELLO_MILLIS;
             try {
                 while (hello == null && System.currentTimeMillis() < end && p.isAlive()) {
-                    try (Socket s = server.accept()) {
-                        hello = readHello(s, token);
+                    Socket s;
+                    try {
+                        s = server.accept();
                     } catch (java.net.SocketTimeoutException e) {
-                        // keep waiting for the JVM
+                        continue;
+                    }
+                    try (Socket c = s) {
+                        hello = readHello(c, token);
+                    } catch (IOException e) {
+                        log.add("hello failed: " + e.getMessage());
+                        break;
                     }
                 }
             } finally {

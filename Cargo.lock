@@ -897,6 +897,7 @@ dependencies = [
  "arboard",
  "ferrocraft-modhost",
  "ferrocraft-net-client",
+ "ferrocraft-oneclient",
  "ferrocraft-protocol",
  "gui",
  "input-audio",
@@ -920,6 +921,8 @@ dependencies = [
  "png",
  "portablemc",
  "resvg",
+ "sha1 0.10.7",
+ "ureq",
  "winit",
 ]
 

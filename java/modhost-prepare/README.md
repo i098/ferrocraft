@@ -18,6 +18,10 @@ The patch step is Forge's own `ClassPatchManager`, called with `Side.CLIENT`, th
 
 `java/modhost/test.sh` with `FERRO_PREPARE_OUT=<out-dir>` boots the mods on these two jars. The Minecraft classes then load from `ferro-mc-1.8.9.jar`, which `ModBootTest` prints.
 
+## Fabric name table
+
+`run.sh names <out-dir>` (any JDK 8 or newer in `FERRO_JAVA_HOME`, and `curl`) packs `NameTable` with mapping-io 0.9.2 (sha1 checked) into `<out-dir>/ferro-names.jar`. `Config::provision_fabric` (`crates/modhost/src/provision_fabric.rs`) runs it on Java 8 with the MCP 1.8.9 SRG zip and the Legacy Fabric intermediary jar. It writes `~/.ferrocraft/modhost-fabric/names.tiny`, a Tiny v2 file from Forge (MCP) names to intermediary names, for example `field_71439_g` to `field_10310`.
+
 ## Limits
 
 - The bodies are the real vanilla ones. The stand-in bodies (T0 to T3) are not written yet.

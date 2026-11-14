@@ -86,6 +86,18 @@ impl Item {
         }
     }
 
+    /// The `u` of the item's 16 x 16 icon in `spectator_widgets.png`; faces have none.
+    fn icon_u(&self) -> Option<i32> {
+        match self {
+            Item::Players(_) => Some(0),
+            Item::Teams(_) => Some(16),
+            Item::Close => Some(128),
+            Item::Page { back: true, .. } => Some(144),
+            Item::Page { .. } => Some(160),
+            _ => None,
+        }
+    }
+
     /// `getDisplayName`.
     fn name(&self) -> &str {
         match self {
@@ -387,38 +399,26 @@ fn draw_slot(gui: &mut Gui, (x, y): (f32, f32), alpha: f32, item: &Item, key: &s
 
 /// `SpectatorMenuItem.render(brightness, alpha)` at the slot corner.
 fn draw_item(gui: &mut Gui, (x, y): (f32, f32), item: &Item, b: f32, a: u32) {
-    let icon_u = match item {
-        Item::Players(_) => Some(0),
-        Item::Teams(_) => Some(16),
-        Item::Close => Some(128),
-        Item::Page { back: true, .. } => Some(144),
-        Item::Page { .. } => Some(160),
-        _ => None,
-    };
-    if let Some(u) = icon_u {
-        let rect = (u, 0, 16, 16);
-        sprite(
-            gui,
-            SPECTATOR_WIDGETS,
-            x,
-            y,
-            rect,
-            tint(b, a as f32 / 255.0),
-        );
+    if let Some(u) = item.icon_u() {
+        let tint = tint(b, a as f32 / 255.0);
+        sprite(gui, SPECTATOR_WIDGETS, x, y, (u, 0, 16, 16), tint);
     }
     match item {
-        Item::Empty | Item::Players(_) | Item::Teams(_) | Item::Close | Item::Page { .. } => {}
         Item::Player(e) => draw_face(gui, (x, y), e, 1.0, a),
-        Item::Team(t) => {
-            if let Some(rgb) = t.color {
-                let [r, g, bl] = [16, 8, 0].map(|s| ((rgb >> s & 0xFF) as f32 * b) as u32);
-                let (x0, y0) = (x as i32 + 1, y as i32 + 1);
-                gui.fill(x0, y0, x0 + 14, y0 + 14, a << 24 | r << 16 | g << 8 | bl);
-            }
-            if let Some(e) = &t.head {
-                draw_face(gui, (x, y), e, b, a);
-            }
-        }
+        Item::Team(t) => draw_team(gui, (x, y), t, b, a),
+        _ => {}
+    }
+}
+
+/// `TeamMenuItem.render`: the prefix color as a square, and the face of one member on it.
+fn draw_team(gui: &mut Gui, (x, y): (f32, f32), t: &TeamItem, b: f32, a: u32) {
+    if let Some(rgb) = t.color {
+        let [r, g, bl] = [16, 8, 0].map(|s| ((rgb >> s & 0xFF) as f32 * b) as u32);
+        let (x0, y0) = (x as i32 + 1, y as i32 + 1);
+        gui.fill(x0, y0, x0 + 14, y0 + 14, a << 24 | r << 16 | g << 8 | bl);
+    }
+    if let Some(e) = &t.head {
+        draw_face(gui, (x, y), e, b, a);
     }
 }
 
@@ -547,6 +547,19 @@ mod tests {
         assert_eq!(selected(&g), -1);
         g.scroll(1, 4);
         assert_eq!(g.middle_click(5, &t, &sb), Pick::Spectate(9));
+    }
+
+    #[test]
+    fn the_open_bar_draws_the_bar_the_cursor_and_four_icons() {
+        let mut g = open(&tab(&[("a", 1, 0)]));
+        g.scroll(1, 1000);
+        let mut gui = Gui::new(GuiScale::new(854, 480, 2, false), None, 1);
+        g.draw_hotbar(&mut gui, 1000);
+        let quads = gui.into_quads();
+        let from = |tex: &str| quads.iter().filter(|q| &*q.tex == tex).count();
+        assert_eq!(from(WIDGETS), 2);
+        // Players, teams, the disabled next page arrow and close.
+        assert_eq!(from(SPECTATOR_WIDGETS), 4);
     }
 
     #[test]

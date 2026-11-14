@@ -1192,6 +1192,9 @@ impl App {
     }
 
     fn game_action(&mut self, action: Action) {
+        if self.spectator_action(action) {
+            return;
+        }
         match action {
             Action::Attack => self.attack_presses += 1,
             Action::Use => {
@@ -1199,13 +1202,6 @@ impl App {
                     self.use_item();
                 }
             }
-            Action::PickBlock if self.game.gamemode == 3 => {
-                self.spectator_menu(|g, now, tab, sb| g.middle_click(now, tab, sb));
-            }
-            Action::Hotbar(n) if self.game.gamemode == 3 => {
-                self.spectator_menu(|g, now, tab, sb| g.select_slot(i32::from(n), now, tab, sb));
-            }
-            Action::HotbarScroll(step) if self.game.gamemode == 3 => self.spectator_scroll(step),
             Action::PickBlock => self.pick_block(),
             Action::Hotbar(n) => self.select_slot(n),
             Action::HotbarScroll(step) => self.select_slot(scroll_slot(self.game.inv.held, step)),
@@ -1347,6 +1343,24 @@ impl App {
             let q = self.ui.open(&m, boxed(Pause::default()));
             self.run_effects(q);
         }
+    }
+
+    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar.
+    fn spectator_action(&mut self, action: Action) -> bool {
+        if self.game.gamemode != 3 {
+            return false;
+        }
+        match action {
+            Action::PickBlock => {
+                self.spectator_menu(|g, now, tab, sb| g.middle_click(now, tab, sb))
+            }
+            Action::Hotbar(n) => {
+                self.spectator_menu(|g, now, tab, sb| g.select_slot(i32::from(n), now, tab, sb));
+            }
+            Action::HotbarScroll(step) => self.spectator_scroll(step),
+            _ => return false,
+        }
+        true
     }
 
     /// `SpectatorGui` input: the menu reads the tab list and the teams as they are when it opens, and a

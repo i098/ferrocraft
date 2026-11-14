@@ -75,28 +75,23 @@ fn box_edges(lo: [f64; 3], hi: [f64; 3], argb: u32) -> impl Iterator<Item = Segm
 }
 
 /// `RenderManager.renderDebugBoundingBox` for an entity of `size` standing at `pos` (the white box, the red
-/// eye-height box of a living entity, and the blue look line of length 2 from the eyes).
+/// eye-height box of a living entity, and the blue look line of length 2 from the eyes). `(lo, hi)` is
+/// `getEntityBoundingBox`; the red box takes its width from it.
 fn vanilla_hitbox(
     pos: [f64; 3],
-    (width, height): (f32, f32),
+    (lo, hi): ([f64; 3], [f64; 3]),
     eye: f32,
     living: bool,
     look: [f64; 3],
 ) -> Vec<Segment> {
-    let half = f64::from(width / 2.0);
     let [x, y, z] = pos;
-    let mut lines: Vec<Segment> = box_edges(
-        [x - half, y, z - half],
-        [x + half, y + f64::from(height), z + half],
-        WHITE,
-    )
-    .collect();
+    let mut lines: Vec<Segment> = box_edges(lo, hi, WHITE).collect();
     let eyes = y + f64::from(eye);
     if living {
         let t = f64::from(0.01f32);
         lines.extend(box_edges(
-            [x - half, eyes - t, z - half],
-            [x + half, eyes + t, z + half],
+            [lo[0], eyes - t, lo[2]],
+            [hi[0], eyes + t, hi[2]],
             RED,
         ));
     }
@@ -122,8 +117,10 @@ fn draw_hitbox(game: &Game, id: Option<i32>, d: &EntityDraw) -> Vec<Segment> {
     let (eye, living) = match id.map(|id| game.entities.get(id)) {
         None => (1.62 - if d.sneaking { 0.08 } else { 0.0 }, true),
         Some(None) => return Vec::new(),
+        // `Entity.getEyeHeight` is 0 for a hanging entity; its box comes from its facing, not its size.
         Some(Some(e)) if matches!(e.kind, Kind::Painting | Kind::Object(71 | 77)) => {
-            return Vec::new()
+            let look = look_of(false, d.yaw, d.head_yaw, d.pitch);
+            return vanilla_hitbox(e.pos, e.bounds(), 0.0, false, look);
         }
         Some(Some(e)) => (
             e.eye_height(),
@@ -131,7 +128,13 @@ fn draw_hitbox(game: &Game, id: Option<i32>, d: &EntityDraw) -> Vec<Segment> {
         ),
     };
     let look = look_of(living, d.yaw, d.head_yaw, d.pitch);
-    vanilla_hitbox(d.pos, d.size, eye, living, look)
+    let half = f64::from(d.size.0 / 2.0);
+    let [x, y, z] = d.pos;
+    let bounds = (
+        [x - half, y, z - half],
+        [x + half, y + f64::from(d.size.1), z + half],
+    );
+    vanilla_hitbox(d.pos, bounds, eye, living, look)
 }
 
 /// `EntityLivingBase.getLook` aims by the head yaw; `Entity.getLook` by the body yaw.
@@ -397,7 +400,13 @@ mod tests {
             [(look[0], look[0]), (look[1], look[1]), (look[2], look[2])],
             [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0)],
         );
-        let lines = vanilla_hitbox([1.0, 64.0, 2.0], (0.6, 1.8), 1.62, true, look);
+        let lines = vanilla_hitbox(
+            [1.0, 64.0, 2.0],
+            ([0.7, 64.0, 1.7], [1.3, 65.8, 2.3]),
+            1.62,
+            true,
+            look,
+        );
         assert_eq!(lines.len(), 12 + 12 + 1);
         assert_span(span(&lines, WHITE), [(0.7, 1.3), (64.0, 65.8), (1.7, 2.3)]);
         assert_span(span(&lines, RED), [(0.7, 1.3), (65.61, 65.63), (1.7, 2.3)]);
@@ -465,7 +474,13 @@ mod tests {
 
     #[test]
     fn a_non_living_entity_has_no_red_box() {
-        let lines = vanilla_hitbox([0.0; 3], (0.25, 0.25), 0.2, false, [0.0, 0.0, 1.0]);
+        let lines = vanilla_hitbox(
+            [0.0; 3],
+            ([-0.125, 0.0, -0.125], [0.125, 0.25, 0.125]),
+            0.2,
+            false,
+            [0.0, 0.0, 1.0],
+        );
         assert_eq!(lines.len(), 13);
         assert!(lines.iter().all(|l| l.2 != RED));
     }

@@ -228,8 +228,67 @@ pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
     }
 }
 
+/// `TextureCompass` and `TextureClock` turn the needle once per client tick; the frame of the
+/// vertical sprite strip is `(int)((turns + 1.0) * frames) % frames`.
+pub fn dial_frame(turns: f64, frames: usize) -> usize {
+    let n = frames as i64;
+    ((((turns + 1.0) * frames as f64) as i64 % n + n) % n) as usize
+}
+
+/// The needle positions of the compass and the clock, in turns (see `gui::inventory::dials::Dials`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DialTurns {
+    pub compass: f64,
+    pub clock: f64,
+    /// `World.getSpawnPoint`, x and z.
+    pub spawn: [i32; 2],
+}
+
+/// `TextureCompass.updateCompass`: the needle target in radians of a viewer at `pos` looking
+/// along `yaw`.
+pub fn compass_target(spawn: [i32; 2], pos: [f64; 2], yaw: f64) -> f64 {
+    let dx = f64::from(spawn[0]) - pos[0];
+    let dz = f64::from(spawn[1]) - pos[1];
+    -((yaw % 360.0 - 90.0) * std::f64::consts::PI / 180.0 - dz.atan2(dx))
+}
+
+impl DialTurns {
+    pub(crate) const COMPASS: i16 = 345;
+    const CLOCK: i16 = 347;
+
+    pub fn is_dial(id: i16) -> bool {
+        matches!(id, Self::COMPASS | Self::CLOCK)
+    }
+
+    /// `RenderItemFrame.renderDisplayItem`: the compass of a frame at `pos` looks along
+    /// `180 + facing * 90` instead of along the player's yaw; the clock is the player's.
+    pub fn framed(&self, pos: [f64; 2], facing: u8) -> DialTurns {
+        let yaw = 180.0 + f64::from(facing) * 90.0;
+        DialTurns {
+            compass: compass_target(self.spawn, pos, yaw) / (2.0 * std::f64::consts::PI),
+            ..*self
+        }
+    }
+
+    /// The frame item `id` shows in a strip of `frames` sprites; 0 for items that are no dial.
+    pub fn frame(&self, id: i16, frames: usize) -> usize {
+        match id {
+            Self::COMPASS => dial_frame(self.compass, frames),
+            Self::CLOCK => dial_frame(self.clock, frames),
+            _ => 0,
+        }
+    }
+}
+
+/// The number of square sprites stacked in `img`.
+pub fn strip_frames(img: &Image) -> usize {
+    (img.height / img.width.max(1)).max(1)
+}
+
 /// A flat item: the extruded sprite with one normal per quad, and its `firstperson` display transform.
 pub struct Flat {
+    /// The strip frame the mesh was built from.
+    pub(crate) frame: usize,
     pub(crate) mesh: MeshData,
     pub(crate) normals: Vec<[f32; 3]>,
     display: Mat,
@@ -359,17 +418,18 @@ pub fn composite(layers: &[(Image, u32)]) -> Option<Image> {
 
 impl Flat {
     /// `ItemModelGenerator`: front and back faces 1/16 apart plus a side face on every opaque
-    /// pixel edge that borders a transparent pixel, in `0..1` model units. Animated strips use frame 0.
-    pub fn new(img: &Image, display: Mat) -> Flat {
+    /// pixel edge that borders a transparent pixel, in `0..1` model units. Animated strips show `frame`.
+    pub fn new(img: &Image, display: Mat, frame: usize) -> Flat {
         let (w, th) = (img.width, img.height);
         let h = w.min(th);
+        let row0 = (frame % strip_frames(img)) * h;
         let opaque = |x: isize, y: isize| {
             (0..w as isize).contains(&x)
                 && (0..h as isize).contains(&y)
-                && img.rgba[(y as usize * w + x as usize) * 4 + 3] != 0
+                && img.rgba[((row0 as isize + y) as usize * w + x as usize) * 4 + 3] != 0
         };
         let (z0, z1) = (7.5 / 16.0, 8.5 / 16.0);
-        let vmax = h as f32 / th as f32;
+        let (vmin, vmax) = (row0 as f32 / th as f32, (row0 + h) as f32 / th as f32);
         let mut mesh = MeshData::default();
         let mut normals = Vec::new();
         let mut quad = |corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], normal: [f32; 3]| {
@@ -385,7 +445,7 @@ impl Flat {
             mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
             normals.push(normal);
         };
-        let full = [[0.0, 0.0], [1.0, 0.0], [1.0, vmax], [0.0, vmax]];
+        let full = [[0.0, vmin], [1.0, vmin], [1.0, vmax], [0.0, vmax]];
         for (z, n) in [(z1, 1.0), (z0, -1.0)] {
             let c = [[0.0, 1.0, z], [1.0, 1.0, z], [1.0, 0.0, z], [0.0, 0.0, z]];
             quad(c, full, [0.0, 0.0, n]);
@@ -396,7 +456,10 @@ impl Flat {
                 if !opaque(x, y) {
                     continue;
                 }
-                let uv = [[(x as f32 + 0.5) / fw, (y as f32 + 0.5) / th as f32]; 4];
+                let uv = [[
+                    (x as f32 + 0.5) / fw,
+                    (row0 as f32 + y as f32 + 0.5) / th as f32,
+                ]; 4];
                 let (x0, x1) = (x as f32 / fw, (x + 1) as f32 / fw);
                 let (y1, y0) = (1.0 - y as f32 / fh, 1.0 - (y + 1) as f32 / fh);
                 if !opaque(x - 1, y) {
@@ -418,6 +481,7 @@ impl Flat {
             }
         }
         Flat {
+            frame,
             mesh,
             normals,
             display,
@@ -591,10 +655,42 @@ mod tests {
                 rgba,
             },
             ident(),
+            0,
         );
         assert_eq!(f.normals.len(), 6);
         assert_eq!(f.mesh.vertices.len(), 24);
         assert_eq!(f.mesh.indices.len(), 36);
+    }
+
+    /// A 1x2 strip: frame 0 is clear, frame 1 has one opaque pixel; the frame picks the pixels and the uv rows.
+    #[test]
+    fn flat_sprite_follows_the_strip_frame() {
+        let img = Image {
+            width: 1,
+            height: 2,
+            rgba: vec![0, 0, 0, 0, 1, 1, 1, 255],
+        };
+        assert_eq!(Flat::new(&img, ident(), 0).normals.len(), 2);
+        let f = Flat::new(&img, ident(), 1);
+        assert_eq!(f.normals.len(), 6);
+        assert_eq!(f.mesh.vertices[0].uv[1], 0.5);
+    }
+
+    /// Compass frames of 1.8.9: a needle at 0 turns shows frame 0, half a turn frame 16 of 32.
+    #[test]
+    fn dial_frame_wraps_like_the_texture_classes() {
+        assert_eq!(dial_frame(0.0, 32), 0);
+        assert_eq!(dial_frame(0.5, 32), 16);
+        assert_eq!(dial_frame(-0.25, 32), 24);
+        let t = DialTurns {
+            compass: 0.5,
+            clock: 0.25,
+            spawn: [0, 0],
+        };
+        assert_eq!(
+            (t.frame(345, 32), t.frame(347, 64), t.frame(1, 32)),
+            (16, 16, 0)
+        );
     }
 
     /// A tinted base layer under an opaque overlay pixel: the tint shows only where the overlay is clear.
@@ -609,6 +705,24 @@ mod tests {
         let overlay = image([[10, 20, 30, 255], [0, 0, 0, 0]]);
         let out = composite(&[(base, 0xFF_0000), (overlay, 0xFF_FFFF)]).unwrap();
         assert_eq!(out.rgba, [10, 20, 30, 255, 200, 0, 0, 255]);
+    }
+
+    /// A framed compass looks along the facing of its frame, not along the player. A frame standing
+    /// on the spawn point with the player facing the same way gives `180 + facing * 90`: frame 0
+    /// (yaw 180) puts the needle at 24 of 32, the opposite facing at 8, the two side facings at 16
+    /// and 0. The player's own needle does not move it.
+    #[test]
+    fn framed_compass_follows_the_facing_not_the_player() {
+        let turns = |compass: f64| DialTurns {
+            compass,
+            clock: 0.0,
+            spawn: [0, 0],
+        };
+        let at = |t: DialTurns, facing: u8| dial_frame(t.framed([0.0, 0.0], facing).compass, 32);
+        let t = turns(0.0);
+        assert_eq!((at(t, 0), at(t, 1), at(t, 2), at(t, 3)), (24, 16, 8, 0));
+        let t = turns(0.5);
+        assert_eq!((at(t, 0), at(t, 1), at(t, 2), at(t, 3)), (24, 16, 8, 0));
     }
 
     /// Eating drives the item toward the mouth: at the start of a use it matches the plain pose,

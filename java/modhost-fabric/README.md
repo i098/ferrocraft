@@ -2,7 +2,7 @@
 
 Owner: fc-mod-knot
 
-Java 8 side of the mod host for Fabric (Legacy Fabric 1.8.9 on Knot). The Forge host is `java/modhost`; this folder adds only what Knot needs. The host classes of `java/modhost` are the same.
+Java side of the mod host for Fabric (Legacy Fabric 1.8.9 on Knot, Java 8; Ornithe, Java 25). The Forge host is `java/modhost`; this folder adds only what Knot needs. The host classes of `java/modhost` are the same.
 
 ## How it runs
 
@@ -27,7 +27,7 @@ Start `Config::provision_fabric()` with the jar, `ferro-names.jar` (`java/modhos
 
 ## Test
 
-`test.sh` boots the host as the engine does (`FabricBootTest` is the peer, in place of the engine) with the Legacy Fabric mods of `java/modhost-accept/mods-fabric.txt` and prints PASS or FAIL for the entrypoint of each mod, for `mods loaded`, for Mixin errors and for the hello. A JVM that stops before the hello is a FAIL. It needs `FERRO_JAVA_HOME`, `FERRO_LIB` and `FABRIC_LOADER_JAR` as `build.sh` does, and `FERRO_FABRIC_CONFIG`: a file of three lines made from the `Config` of `Config::provision_fabric` (its `java`, its `game_dir`, its class path, which already holds the client jar, the legacyfabric jar under `versions/`). The ignored test `cargo test -p ferrocraft-modhost provision_fabric -- --ignored` writes that file when `FERRO_FABRIC_CONFIG_OUT` is set (also set `HOME` to a clean dir, `FERROCRAFT_MODHOST_JAR` and `FERROCRAFT_NAMES_JAR`).
+`test.sh` boots the host as the engine does (`FabricBootTest` is the peer, in place of the engine) with the Legacy Fabric mods of `java/modhost-accept/mods-fabric.txt`, or with the Ornithe mods of `java/modhost-accept/mods-ornithe.txt` when `FERRO_MODS_LIST` names it, and prints PASS or FAIL for the entrypoint of each mod, for `mods loaded`, for Mixin errors and for the hello. A JVM that stops before the hello is a FAIL. It needs `FERRO_JAVA_HOME`, `FERRO_LIB` and `FABRIC_LOADER_JAR` as `build.sh` does, and `FERRO_FABRIC_CONFIG`: a file of three lines made from the `Config` of `Config::provision_fabric` (its `java`, its `game_dir`, its class path, which already holds the client jar, the legacyfabric jar under `versions/`). The ignored test `cargo test -p ferrocraft-modhost provision_fabric -- --ignored` writes that file when `FERRO_FABRIC_CONFIG_OUT` is set (also set `HOME` to a clean dir, `FERROCRAFT_MODHOST_JAR` and `FERROCRAFT_NAMES_JAR`).
 
 ## Limits
 
@@ -36,4 +36,4 @@ Start `Config::provision_fabric()` with the jar, `ferro-names.jar` (`java/modhos
 - `BridgeTransformer` rules for Minecraft classes compare SRG method names and MCP descriptors. The class bytes of Knot have intermediary names, so those rules (`Gui.drawRect`, `FontRenderer` and the other draws, the player and entity patches) do not match yet, and a Fabric mod's draw call reaches no `Sink`. The LWJGL and OneConfig patches match, because their names are the same.
 - `HookIndex.settle` finds no Mixin config list on Fabric (Fabric's Mixin has no `Config.getAllConfigs`): the hook table holds only the classes that were loaded when the hello was sent. It lists the changed methods under their intermediary names.
 - `FabricGlue.newIngameGui` makes the vanilla `GuiIngame`. The HUD handover of the Forge host (`OverlayFilter`) has no Fabric part.
-- Legacy Fabric Loader 0.19.5 only: 0.20.1 cannot patch 1.8.9. Ornithe is not started.
+- Legacy Fabric Loader 0.19.5 only for the Legacy Fabric profile: 0.20.1 cannot patch 1.8.9 there. The Ornithe profile (`Config::provision_ornithe`: Java 25, Fabric Loader 0.20.1, gen2 names, the library upgrades of Ornithe's meta API) starts the public OneClient 1.8.9 bundles of `java/modhost-accept/mods-ornithe.txt` (`FERRO_MODS_LIST=... test.sh`). `pylon` is on the deny list: `ferro-pylon-stand-in.jar` replaces it, and the host jar holds stand-ins for LWJGL 2 `Display` and for `legacy-lwjgl3`, because the host owns the window and the input. Not tested live: drawing, input and the window of those mods.

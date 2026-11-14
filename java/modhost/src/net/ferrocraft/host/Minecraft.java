@@ -21,6 +21,7 @@ final class Minecraft {
         Object mc = R.alloc("net.minecraft.client.Minecraft");
         R.set(mcClass, "field_71432_P", mc); // theMinecraft
         R.set(mc, "field_71412_D", gameDir); // mcDataDir
+        R.set(mc, "field_152351_aB", new java.util.ArrayDeque<Object>()); // scheduledTasks: Minecraft.addScheduledTask locks it
 
         Object settings = R.neu("net.minecraft.client.settings.GameSettings");
         R.set(settings, "field_74354_ai", new File(gameDir, "options.txt")); // optionsFile
@@ -100,6 +101,16 @@ final class Minecraft {
         if (open && screen == null) screen = R.alloc("net.minecraft.client.gui.GuiIngameMenu");
         R.set(mc, "field_71462_r", open ? screen : null);
         R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a"); // unPressAllKeys
+    }
+
+    /**
+     * Rust owns the F3 screen and the tab key. Forge posts the DEBUG and PLAYER_LIST events only when
+     * GameSettings.showDebugInfo and keyBindPlayerList.pressed say so, so set them from Rust's state.
+     */
+    static void setOverlayKeys(Object mc, boolean debug, boolean playerList) {
+        Object settings = R.get(mc, "field_71474_y"); // gameSettings
+        R.set(settings, "field_74330_P", debug); // showDebugInfo
+        R.set(R.get(settings, "field_151445_Q"), "field_74513_e", playerList); // keyBindPlayerList.pressed
     }
 
     /** The screen a mod opened, or null: the stand-in for Rust's screens does not count. */

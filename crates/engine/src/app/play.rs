@@ -154,8 +154,16 @@ impl App {
     }
 
     fn tick_block_entities(&mut self) {
+        let others = self.game.entities.iter().filter(|e| e.kind == Kind::Player);
+        let players: Vec<[f64; 3]> = self
+            .game
+            .player
+            .iter()
+            .map(|p| p.pos)
+            .chain(others.map(|e| e.pos))
+            .collect();
         if let Some(r) = &mut self.renderer {
-            r.tick_block_entities();
+            r.tick_block_entities(&players);
         }
     }
 
@@ -217,6 +225,9 @@ impl App {
                 yaw: p.yaw,
                 time: self.game.world_time,
             }));
+        if let Some(r) = &mut self.renderer {
+            r.set_dials(icons.dials.turns());
+        }
     }
 
     fn tick_once(&mut self) {
@@ -337,6 +348,19 @@ impl App {
                     self.particles.hit_burst(magic, pos, size)
                 }
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
+                world::entities::Fx::Mood { mood, pos, size } => {
+                    use render::ParticleKind as K;
+                    use world::entities::Mood;
+                    let kind = match mood {
+                        Mood::Hearts | Mood::VillagerHearts => K::Heart,
+                        Mood::Smoke => K::Smoke,
+                        Mood::Angry => K::AngryVillager,
+                        Mood::Happy => K::HappyVillager,
+                    };
+                    let (count, rise) = mood.count_and_rise();
+                    self.particles.mood(kind, count, rise, pos, size)
+                }
+                world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
                 world::entities::Fx::Firework {
                     pos,
                     vel,

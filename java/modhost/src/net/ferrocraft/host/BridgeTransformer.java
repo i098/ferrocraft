@@ -9,6 +9,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -129,6 +130,11 @@ public class BridgeTransformer implements IClassTransformer {
         if (!isStatic(m) || m.name.equals("<clinit>")) return null;
         InsnList l = new InsnList();
         switch (m.name + m.desc) {
+            case "glGetString(I)Ljava/lang/String;":
+                // Mods that probe the driver parse the vendor: a name, where there is no context.
+                l.add(new LdcInsnNode("ferrocraft"));
+                l.add(new InsnNode(Opcodes.ARETURN));
+                return l;
             case "glPushMatrix()V":
                 call(l, SINK, "push", "()V");
                 break;
@@ -228,6 +234,7 @@ public class BridgeTransformer implements IClassTransformer {
             case "getY()I":
                 return forward(m, INPUT, "mouseY", "()I");
             case "isCreated()Z":
+            case "isInsideWindow()Z":
                 return constant(true);
             case "next()Z":
                 return forward(m, INPUT, "nextMouse", "()Z");

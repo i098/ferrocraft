@@ -421,6 +421,47 @@ mod tests {
         assert_ne!(look_of(true, 90.0, 0.0, -30.0), look);
     }
 
+    /// A mod that changed the method and drew nothing for entity 1 hides its box; entity 2 keeps the vanilla one.
+    #[test]
+    fn a_mod_record_without_segments_hides_only_that_entity() {
+        let mut game = Game::new();
+        for id in [1, 2] {
+            game.entities.apply(world::entities::EntityEvent::SpawnMob {
+                id,
+                kind: 54,
+                pos: [0, 2048, 0],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: Default::default(),
+            });
+        }
+        let draws: Vec<EntityDraw> = [1, 2]
+            .map(|id| {
+                crate::app::entity_draw(
+                    game.entities.get(id).unwrap(),
+                    1.0,
+                    None,
+                    None,
+                    false,
+                    false,
+                )
+            })
+            .into();
+        let mut drawn = Drawn::default();
+        drawn.world.lines.push(ferrocraft_modhost::anchor::Lines {
+            id: 1,
+            segments: Vec::new(),
+        });
+        let lines = drawn.hitbox_lines(&game, &[1, 2], &draws, true);
+        assert_eq!(lines.len(), 12 + 12 + 1);
+        assert!(drawn.hitbox_lines(&game, &[1, 2], &draws, false).is_empty());
+    }
+
     #[test]
     fn a_non_living_entity_has_no_red_box() {
         let lines = vanilla_hitbox([0.0; 3], (0.25, 0.25), 0.2, false, [0.0, 0.0, 1.0]);

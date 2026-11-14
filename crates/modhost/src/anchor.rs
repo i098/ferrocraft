@@ -381,6 +381,22 @@ mod tests {
     }
 
     #[test]
+    fn reads_an_empty_hitbox_record() {
+        let mut b = 1u32.to_be_bytes().to_vec();
+        b.push(b'H');
+        b.extend(9i32.to_be_bytes());
+        b.extend(0u16.to_be_bytes());
+        let w = read_world(&mut b.as_slice()).unwrap();
+        assert_eq!(
+            w.lines,
+            vec![Lines {
+                id: 9,
+                segments: Vec::new()
+            }]
+        );
+    }
+
+    #[test]
     fn rejects_a_huge_count_and_an_unknown_item() {
         assert!(read_world(&mut u32::MAX.to_be_bytes().as_slice()).is_err());
         let mut b = 1u32.to_be_bytes().to_vec();

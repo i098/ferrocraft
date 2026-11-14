@@ -276,12 +276,14 @@ public final class Anchor {
         }
         Sink.push();
         Sink.identity();
+        boolean threw = false;
         try {
             if (render == null) render = R.neu(RENDER_TNT, manager);
             if (what == HITBOX) R.call(manager, "func_85094_b", e, 0.0, 0.0, 0.0, yaw, partial); // RenderManager.renderDebugBoundingBox
             else if (what == LABEL) R.call(render, "func_147906_a", e, label, 0.0, 0.0, 0.0, 64); // Render.renderLivingLabel
             else R.call(render, "func_76986_a", e, 0.0, 0.0, 0.0, yaw, partial); // RenderTNTPrimed.doRender
         } catch (RuntimeException x) {
+            threw = true;
             failed("role " + what, x);
         } finally {
             Sink.pop();
@@ -294,7 +296,7 @@ public final class Anchor {
         int count = 0;
         if (what == HITBOX) {
             int n = Math.min(o.size(), 256);
-            if (n == 0) return 0;
+            if (n == 0 && threw) return 0;
             w.writeByte('H');
             w.writeInt(id);
             w.writeShort(n);

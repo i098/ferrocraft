@@ -1015,6 +1015,33 @@ impl Particles {
         }
     }
 
+    /// `EntityAnimal`/`EntityTameable`/`EntityVillager` status particles: `count` of `kind` in the entity box,
+    /// `rise` above its feet (0.5 animals and tameables, 1.0 villagers), with gaussian drift of 0.02.
+    pub fn mood(&mut self, kind: Kind, count: u32, rise: f64, pos: [f64; 3], (w, h): (f32, f32)) {
+        let (w, h) = (f64::from(w), f64::from(h));
+        for _ in 0..count {
+            let m = [0, 1, 2].map(|_| self.gaussian() * 0.02);
+            let at = [
+                pos[0] + self.rand() * w * 2.0 - w,
+                pos[1] + rise + self.rand() * h,
+                pos[2] + self.rand() * w * 2.0 - w,
+            ];
+            self.spawn(kind, at, m, 0);
+        }
+    }
+
+    /// `EntityWitch.handleStatusUpdate(15)`: 10 to 44 witch specks, gaussian 0.13 around a point half a block above the head.
+    pub fn witch_magic(&mut self, pos: [f64; 3], (_, h): (f32, f32)) {
+        for _ in 0..(self.rand() * 35.0) as u32 + 10 {
+            let at = [
+                pos[0] + self.gaussian() * 0.13,
+                pos[1] + f64::from(h) + 0.5 + self.gaussian() * 0.13,
+                pos[2] + self.gaussian() * 0.13,
+            ];
+            self.spawn(Kind::WitchMagic, at, [0.0; 3], 0);
+        }
+    }
+
     /// `Entity.doSprintingEffect`: one shard of the block `state` under a sprinting entity,
     /// thrown against its motion `vel`.
     pub fn sprint_dust(&mut self, pos: [f64; 3], vel: [f64; 3], width: f32, state: u16) {

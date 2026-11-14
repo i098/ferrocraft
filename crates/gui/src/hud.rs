@@ -5,6 +5,7 @@ use crate::canvas::GuiCanvas;
 use crate::chat::{self, Chat};
 use crate::debug;
 use crate::inventory::{icons::Icons, tooltip};
+use crate::overlay::{self, Portal};
 use crate::scoreboard::Scoreboard;
 use crate::screens::TextField;
 use crate::status::{self, Status, StatusState};
@@ -29,6 +30,7 @@ pub struct Hud {
     pub scoreboard: Scoreboard,
     pub title: TitleState,
     pub boss: BossStatus,
+    pub portal: Portal,
     record: String,
     record_up_for: i32,
     /// `1 - prevVignetteBrightness`, so the derived default starts the vignette at 1.
@@ -76,6 +78,10 @@ pub struct Frame<'a> {
     pub local_player: &'a str,
     /// `gameSettings.heldItemTooltips`.
     pub held_item_tooltips: bool,
+    /// `perspective == 0` and a pumpkin on the head: the blur overlay.
+    pub helmet_pumpkin: bool,
+    /// The Nausea effect is active: it replaces the portal swirl.
+    pub nausea: bool,
 }
 
 impl Hud {
@@ -123,6 +129,13 @@ impl Hud {
         gui.set_blend(Blend::Alpha);
         if f.fancy {
             self.draw_vignette(gui, f.brightness, f.border_warning);
+        }
+        if f.helmet_pumpkin {
+            overlay::draw_pumpkin(gui);
+        }
+        let portal = self.portal.lerp(f.partial_ticks);
+        if !f.nausea && portal > 0.0 {
+            overlay::draw_portal(gui, portal, self.update_counter);
         }
         if f.player_view {
             self.draw_hotbar(gui, f);

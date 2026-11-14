@@ -87,9 +87,9 @@ impl Gate {
             && (hooks.changed(RENDER_ITEM, "func_180451_a", &format!("({MODEL})V"))
                 || hooks.changed(RENDER_ITEM, "func_175035_a", &format!("({MODEL}I)V")));
         let events = !frame.targets.is_empty() && (self.listening || self.recheck());
-        let want = u8::from(hurt) * WANT_HURT
-            | u8::from(glint) * WANT_GLINT
-            | u8::from(events) * WANT_EVENTS;
+        let want = (u8::from(hurt) * WANT_HURT)
+            | (u8::from(glint) * WANT_GLINT)
+            | (u8::from(events) * WANT_EVENTS);
         (want != 0).then(|| Request {
             want,
             hurt_time: frame.hurt_time.unwrap_or(0),

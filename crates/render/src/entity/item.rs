@@ -10,7 +10,7 @@ use super::{
     glint_uv_item, light_level, model, Class, EntityDraw, Xf, ITEM_GLINT_COLOR, ITEM_UV_SCALE, V3,
 };
 use crate::assets::{decode_png, Atlas};
-use crate::hand::{self, chain, ident, mul, rotate, scale, scale3, translate, Mat};
+use crate::hand::{self, chain, ident, mul, rotate, scale, scale3, translate, DialTurns, Mat};
 use crate::jrandom::JavaRandom;
 use crate::mesh::{MeshData, Vertex};
 use std::collections::{BTreeMap, HashMap};
@@ -56,9 +56,17 @@ pub struct ItemModel {
     ground: Mat,
     fixed: Mat,
     ground_scale: V3,
+    /// `(frames, frame)` of a compass or clock strip.
+    dial: Option<(usize, usize)>,
 }
 
 impl ItemModel {
+    /// True when the model shows another strip frame than `turns` ask for.
+    pub fn stale(&self, turns: &DialTurns) -> bool {
+        self.dial
+            .is_some_and(|(frames, frame)| turns.frame(self.id, frames) != frame)
+    }
+
     pub(super) fn gui3d(&self) -> bool {
         self.gui3d
     }
@@ -78,9 +86,11 @@ pub fn resolve(
     atlas: &Atlas,
     id: i16,
     damage: i16,
+    turns: &DialTurns,
 ) -> Option<ItemModel> {
     let name = world::inventory::items::model(id, damage);
-    let layers = geometry(read, atlas, name, id, damage)?;
+    let mut dial = None;
+    let layers = geometry(read, atlas, name, id, damage, turns, &mut dial)?;
     let mut display = |key| match name {
         Some(name) => hand::display(read, name, key),
         None => (ident(), [1.0; 3]),
@@ -97,6 +107,7 @@ pub fn resolve(
         ground,
         fixed,
         ground_scale,
+        dial,
     })
 }
 
@@ -107,6 +118,8 @@ fn geometry(
     name: Option<&str>,
     id: i16,
     damage: i16,
+    turns: &DialTurns,
+    dial: &mut Option<(usize, usize)>,
 ) -> Option<Vec<Layer>> {
     let sprites = name.and_then(|name| {
         let (textures, _) = hand::flat_model(read, name)?;
@@ -114,7 +127,12 @@ fn geometry(
             .into_iter()
             .filter_map(|texture| {
                 let image = decode_png(&read(&texture)?)?;
-                let flat = hand::Flat::new(&image, ident());
+                let frames = hand::strip_frames(&image);
+                let frame = turns.frame(id, frames);
+                if frames > 1 && DialTurns::is_dial(id) {
+                    *dial = Some((frames, frame));
+                }
+                let flat = hand::Flat::new(&image, ident(), frame);
                 let mut mesh = flat.mesh;
                 // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
                 for v in &mut mesh.vertices {

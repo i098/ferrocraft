@@ -67,11 +67,18 @@ struct ChunkMesh {
     light: Option<crate::light::Light>,
 }
 
+/// What a held compass or clock needs to pick another strip frame.
+struct Strip {
+    id: i16,
+    image: Image,
+    display: hand::Mat,
+}
+
 /// The resolved model of the held item.
 enum Held {
     Block(MeshData),
     /// Extruded sprite and its item texture, bound with the hand globals.
-    Flat(hand::Flat, wgpu::BindGroup),
+    Flat(Box<hand::Flat>, wgpu::BindGroup, Strip),
     /// No model (unknown item, entity models such as skulls): nothing is drawn.
     Nothing,
 }
@@ -119,6 +126,8 @@ pub struct Renderer {
     flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
     item_models: entity::item::Models,
+    dials: hand::DialTurns,
+    frame_compasses: entity::hanging::Compasses,
     /// Wood models of item frames, read the first time one is drawn.
     frames: Option<entity::hanging::Frames>,
     /// Colour index bytes of each received map, 128x128.
@@ -129,6 +138,11 @@ pub struct Renderer {
     on_fire: bool,
     fire_frames: [u32; 2],
     fire_pipe: wgpu::RenderPipeline,
+    shadow_pipe: wgpu::RenderPipeline,
+    /// `GameSettings.entityShadows`.
+    entity_shadows: bool,
+    shadows: Vec<entity::shadow::Caster>,
+    shadow_view: Option<[f64; 3]>,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     /// `TRANSLUCENT` chunk layer: blended like `water_pipe`, but back faces culled as vanilla does.
@@ -395,7 +409,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe, border_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -421,6 +435,8 @@ impl Renderer {
             glint_mesh: None,
             flash_mesh: None,
             item_models: HashMap::new(),
+            dials: hand::DialTurns::default(),
+            frame_compasses: HashMap::new(),
             frames: None,
             maps: HashMap::new(),
             item_meshes: Vec::new(),
@@ -428,6 +444,10 @@ impl Renderer {
             on_fire: false,
             fire_frames: [0; 2],
             fire_pipe,
+            shadow_pipe,
+            entity_shadows: true,
+            shadows: Vec::new(),
+            shadow_view: None,
             opaque_pipe,
             water_pipe,
             translucent_pipe,
@@ -622,11 +642,19 @@ impl Renderer {
             image.height as u32,
             &image.rgba,
         );
+        // `shadow.png.mcmeta` requests blur and clamp instead of the atlas sampler.
+        let shadow_sampler = (tex == entity::shadow::TEXTURE).then(|| {
+            self.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })
+        });
         let group = bind_group(
             &self.device,
             &self.layout_bg,
             &self.globals,
-            &self.sampler,
+            shadow_sampler.as_ref().unwrap_or(&self.sampler),
             &view,
         );
         if tex == entity::GLINT_TEXTURE {
@@ -875,6 +903,9 @@ impl Renderer {
         }
         self.mod_look.recolor_glint(&mut glint);
         self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
+        self.shadows.clear();
+        self.shadows
+            .extend(draws.iter().filter_map(entity::shadow::caster));
         self.fires.clear();
         self.fires.extend(
             draws
@@ -903,9 +934,15 @@ impl Renderer {
         self.load_frames(draws);
         let frames = self.frames.take().unwrap_or_default();
         let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
-        entity::hanging::build(&mut items, draws, &frames, &self.item_models, |p| {
-            self.light_at(p)
-        });
+        entity::hanging::build(
+            &mut items,
+            draws,
+            &frames,
+            &self.item_models,
+            &self.frame_compasses,
+            &self.dials,
+            |p| self.light_at(p),
+        );
         self.frames = Some(frames);
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas)).chain(
@@ -993,14 +1030,31 @@ impl Renderer {
             .iter()
             .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))
         {
-            if self.item_models.contains_key(&key) {
+            let fresh = self
+                .item_models
+                .get(&key)
+                .is_some_and(|m| m.as_ref().is_none_or(|m| !m.stale(&self.dials)));
+            if fresh {
                 continue;
             }
             let model = self.source.as_mut().and_then(|source| {
                 let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-                entity::item::resolve(&mut read, &self.atlas, key.0, key.1)
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &self.dials)
             });
             self.item_models.insert(key, model);
+        }
+        for (key, turns) in draws
+            .iter()
+            .filter_map(|d| entity::hanging::compass(d, &self.dials))
+        {
+            if self.frame_compasses.contains_key(&key) {
+                continue;
+            }
+            let model = self.source.as_mut().and_then(|source| {
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &turns)
+            });
+            self.frame_compasses.insert(key, model);
         }
     }
 
@@ -1211,6 +1265,12 @@ impl Renderer {
     }
 
     /// First-person hand for the next frames; `None` hides it (F1, third person).
+    /// `TextureManager.tick`: the needle positions of the compass and the clock, for the hand and
+    /// for dropped items.
+    pub fn set_dials(&mut self, dials: hand::DialTurns) {
+        self.dials = dials;
+    }
+
     pub fn set_hand(&mut self, hand: Option<Hand>) {
         self.hand = hand;
     }
@@ -1286,9 +1346,15 @@ impl Renderer {
             let held = self.resolve_held(kind);
             self.held = Some((kind, held));
         }
+        if let Some((_, Held::Flat(flat, _, strip))) = &mut self.held {
+            let frame = self.dials.frame(strip.id, hand::strip_frames(&strip.image));
+            if frame != flat.frame {
+                **flat = hand::Flat::new(&strip.image, strip.display, frame);
+            }
+        }
         match &self.held.as_ref()?.1 {
             Held::Block(mesh) => Some((hand::block(&hand, mesh), HandTex::Atlas)),
-            Held::Flat(flat, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
+            Held::Flat(flat, _, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
             Held::Nothing => None,
         }
     }
@@ -1376,13 +1442,18 @@ impl Renderer {
             &self.sampler,
             &view,
         );
-        Some(Held::Flat(hand::Flat::new(&image, display), group))
+        let flat = Box::new(hand::Flat::new(
+            &image,
+            display,
+            self.dials.frame(id, hand::strip_frames(&image)),
+        ));
+        Some(Held::Flat(flat, group, Strip { id, image, display }))
     }
 
     fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
         match (tex, &self.hand_skin, &self.held) {
             (HandTex::Skin, Some((group, _)), _) => group,
-            (HandTex::Item, _, Some((_, Held::Flat(_, group)))) => group,
+            (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,
             _ => &self.hand_atlas_group,
         }
     }
@@ -1588,6 +1659,7 @@ impl Renderer {
         let env = self.environment;
         self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
+        let shadow = self.prepare_shadows(cam);
         let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
         let mut globals = Self::globals(cam, &env, &sky, (w, h));
         globals.hurt = self.mod_look.hurt_tint();
@@ -1723,6 +1795,11 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &shadow {
+                pass.set_pipeline(&self.shadow_pipe);
+                pass.set_bind_group(0, &self.textures[entity::shadow::TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
             }
             self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.
@@ -2060,7 +2137,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 14] {
+) -> [wgpu::RenderPipeline; 15] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2309,6 +2386,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let shadow_pipe = pipe(
+        "vs_world",
+        "fs_shadow",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     let border_pipe = pipe(
         "vs_world",
         "fs_crack",
@@ -2332,6 +2419,7 @@ fn build_pipelines(
         crack_pipe,
         bolt_pipe,
         fire_pipe,
+        shadow_pipe,
         hand_glint_pipe,
         border_pipe,
     ]
@@ -2372,6 +2460,7 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
 }
 
 mod block_entities;
+mod shadow;
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {
     pass.set_vertex_buffer(0, m.vertices.slice(..));

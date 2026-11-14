@@ -161,6 +161,14 @@ impl App {
         self.sound.as_mut().map_or(0.0, |s| s.roll())
     }
 
+    /// `EntityPlayerSP.onLivingUpdate`: `portal.trigger` at 0.25 volume, without attenuation.
+    pub(super) fn play_portal_trigger(&mut self) {
+        let pitch = self.roll() * 0.4 + 0.8;
+        if let Some(s) = &mut self.sound {
+            s.play("portal.trigger", None, 0.25, pitch);
+        }
+    }
+
     fn play_own(&mut self, event: &str, at: [f64; 3], volume: f32, pitch: f32) {
         if let Some(s) = &mut self.sound {
             s.play(event, Some(at), volume, pitch);

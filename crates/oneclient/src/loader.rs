@@ -42,8 +42,8 @@ pub fn loader(cluster: &Path) -> Result<Loader, Error> {
     }
 }
 
-/// Copy the jars of a Fabric cluster into `out_dir`, each checked against its manifest sha1.
-/// The deny list does not apply here: it names Modrinth slugs, and slice B7 adds `pylon` for Ornithe.
+/// Copy the jars of a Fabric or Ornithe cluster into `out_dir`, each checked against its manifest sha1.
+/// The deny list does not apply here: it names Modrinth slugs. The Fabric host's provisioning replaces `pylon` with a stand-in.
 pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
     let manifest = manifest_path(cluster);
     let dir = manifest.parent().unwrap_or(Path::new("."));

@@ -134,7 +134,6 @@ public final class ShellTest implements Opcodes {
         m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
         Label again = new Label();
         m.visitLabel(again);
-        m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
         vanilla(m);
         block(m, "loop", false);
         m.visitInsn(ICONST_0);

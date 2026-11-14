@@ -18,6 +18,10 @@ mod packs;
 mod pause;
 mod sign;
 mod snooper;
+mod stat_format;
+mod stats;
+mod stats_list;
+mod stats_table;
 mod title;
 
 pub use achievements::{Achievements, PlayerStats};
@@ -33,6 +37,7 @@ pub use pack_prompt::PackPrompt;
 pub use packs::{default_description, selected_paths};
 pub use pause::Pause;
 pub use sign::EditSign;
+pub use stats::Stats;
 pub use title::Title;
 
 use std::collections::HashMap;

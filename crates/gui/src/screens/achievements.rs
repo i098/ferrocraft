@@ -168,6 +168,16 @@ const BACKGROUND: &str = "textures/gui/achievement/achievement_background.png";
 const PROGRESS: [&str; 7] = [
     "oooooo", "Oooooo", "oOoooo", "ooOooo", "oooOoo", "ooooOo", "oooooO",
 ];
+
+/// The wait screen of `GuiAchievements` and `GuiStats` until `S37PacketStatistics` arrives.
+pub(super) fn draw_downloading(c: &mut dyn Canvas, ctx: &Ctx) {
+    default_background(c, ctx);
+    let (cx, cy) = (ctx.width / 2, ctx.height / 2);
+    centered(c, &ctx.tr("multiplayer.downloadingStats"), cx, cy, WHITE);
+    let stage = PROGRESS[(ctx.now_ms / 150 % PROGRESS.len() as u64) as usize];
+    centered(c, stage, cx, cy + 9 * 2, WHITE);
+}
+
 const DONE: i32 = 1;
 const WIDTH: i32 = 256;
 const HEIGHT: i32 = 202;
@@ -773,11 +783,7 @@ impl Screen for Achievements {
 
     fn draw(&mut self, c: &mut dyn Canvas, mx: i32, my: i32, ctx: &mut Ctx) {
         if self.downloading {
-            default_background(c, ctx);
-            let (cx, cy) = (ctx.width / 2, ctx.height / 2);
-            centered(c, &ctx.tr("multiplayer.downloadingStats"), cx, cy, WHITE);
-            let stage = PROGRESS[(ctx.now_ms / 150 % PROGRESS.len() as u64) as usize];
-            centered(c, stage, cx, cy + 9 * 2, WHITE);
+            draw_downloading(c, ctx);
             return;
         }
         self.update_view(mx, my, ctx);

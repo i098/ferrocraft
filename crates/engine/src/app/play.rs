@@ -1177,20 +1177,21 @@ impl App {
             Action::ToggleHud => self.hide_hud = !self.hide_hud,
             Action::ToggleShader => self.renderer.iter_mut().for_each(|r| r.toggle_post()),
             Action::TogglePerspective => self.toggle_perspective(),
-            Action::Debug(DebugCombo::Hitboxes) => {
-                self.show_hitboxes = !self.show_hitboxes;
-                self.debug_chat(if self.show_hitboxes {
-                    "Hitboxes: shown"
-                } else {
-                    "Hitboxes: hidden"
-                });
-            }
-            Action::Debug(DebugCombo::ClearChat) => {
+            Action::Debug(combo) => self.debug_combo(combo),
+            Action::ChatScroll(_) | Action::ChatPage(_) => self.scroll_chat(action),
+            _ => {}
+        }
+    }
+
+    /// The F3 key combinations.
+    fn debug_combo(&mut self, combo: DebugCombo) {
+        match combo {
+            DebugCombo::Hitboxes => self.toggle_hitboxes(),
+            DebugCombo::ClearChat => {
                 self.hud.chat.clear();
                 self.input.clear_chat_history();
             }
-            Action::ChatScroll(_) | Action::ChatPage(_) => self.scroll_chat(action),
-            Action::Debug(DebugCombo::AdvancedTooltips) => {
+            DebugCombo::AdvancedTooltips => {
                 let on = !self.ui.settings.advanced_item_tooltips;
                 self.ui.settings.advanced_item_tooltips = on;
                 if let Err(e) = self.ui.settings.save() {
@@ -1202,7 +1203,7 @@ impl App {
                     "Advanced tooltips: hidden"
                 });
             }
-            Action::Debug(DebugCombo::Help) => {
+            DebugCombo::Help => {
                 self.debug_chat("Key bindings:");
                 for line in [
                     "F3 + A = Reload chunks",
@@ -1219,7 +1220,7 @@ impl App {
                     }]);
                 }
             }
-            Action::Debug(DebugCombo::ReloadChunks) => {
+            DebugCombo::ReloadChunks => {
                 self.reload_chunks();
                 self.debug_chat("Reloading all chunks");
             }
@@ -1256,6 +1257,13 @@ impl App {
         self.hud
             .chat
             .print(runs, 0, self.hud.update_counter, open, m);
+    }
+
+    /// F3+B: `RenderManager.setDebugBoundingBox`.
+    fn toggle_hitboxes(&mut self) {
+        self.show_hitboxes = !self.show_hitboxes;
+        let state = ["hidden", "shown"][usize::from(self.show_hitboxes)];
+        self.debug_chat(&format!("Hitboxes: {state}"));
     }
 
     /// `Minecraft.debugFeedbackTranslated`: a `[Debug]:` line in the chat.

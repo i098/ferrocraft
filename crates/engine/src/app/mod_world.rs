@@ -11,7 +11,8 @@ use ferrocraft_modhost::anchor::{
 use ferrocraft_modhost::hooks::Hooks;
 use ferrocraft_modhost::ModHost;
 use render::{Camera, Class, EntityDraw};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use world::entities::Kind;
 
 /// Vanilla's range for a name tag, and what this module uses for the other roles.
 const RANGE: f64 = 64.0;
@@ -58,9 +59,105 @@ fn roles(h: &Hooks, hitboxes: bool) -> u8 {
         + u8::from(hitbox) * ROLE_HITBOX
 }
 
+type Segment = ([f64; 3], [f64; 3], u32);
+
+const WHITE: u32 = 0xffff_ffff;
+const RED: u32 = 0xffff_0000;
+const BLUE: u32 = 0xff00_00ff;
+
+/// The 12 edges of the box `lo..hi`, as `RenderGlobal.drawOutlinedBoundingBox` strokes them.
+fn box_edges(lo: [f64; 3], hi: [f64; 3], argb: u32) -> impl Iterator<Item = Segment> {
+    let corner = move |c: usize| [0, 1, 2].map(|i| if c >> i & 1 == 0 { lo[i] } else { hi[i] });
+    (0..8usize).flat_map(move |a| {
+        (0..3).filter_map(move |i| (a >> i & 1 == 0).then(|| (corner(a), corner(a | 1 << i), argb)))
+    })
+}
+
+/// `RenderManager.renderDebugBoundingBox` for an entity of `size` standing at `pos` (the white box, the red
+/// eye-height box of a living entity, and the blue look line of length 2 from the eyes).
+fn vanilla_hitbox(
+    pos: [f64; 3],
+    (width, height): (f32, f32),
+    eye: f32,
+    living: bool,
+    look: [f64; 3],
+) -> Vec<Segment> {
+    let half = f64::from(width / 2.0);
+    let [x, y, z] = pos;
+    let mut lines: Vec<Segment> = box_edges(
+        [x - half, y, z - half],
+        [x + half, y + f64::from(height), z + half],
+        WHITE,
+    )
+    .collect();
+    let eyes = y + f64::from(eye);
+    if living {
+        let t = f64::from(0.01f32);
+        lines.extend(box_edges(
+            [x - half, eyes - t, z - half],
+            [x + half, eyes + t, z + half],
+            RED,
+        ));
+    }
+    lines.push((
+        [x, eyes, z],
+        [x + look[0] * 2.0, eyes + look[1] * 2.0, z + look[2] * 2.0],
+        BLUE,
+    ));
+    lines
+}
+
+/// `Entity.getVectorForRotation`, which `getLook` uses at the head yaw of a living entity.
+fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
+    let rad = 0.017_453_292_f32;
+    let (yaw_rad, pitch_rad) = (-yaw * rad - std::f32::consts::PI, -pitch * rad);
+    let (c, s) = (yaw_rad.cos(), yaw_rad.sin());
+    let (cp, sp) = (-pitch_rad.cos(), pitch_rad.sin());
+    [f64::from(s * cp), f64::from(sp), f64::from(c * cp)]
+}
+
+/// The vanilla lines of one draw. A draw past `ids` is the self model of the local player (1.62 high, 1.54 sneaking).
+fn draw_hitbox(game: &Game, id: Option<i32>, d: &EntityDraw) -> Vec<Segment> {
+    let (eye, living) = match id.map(|id| game.entities.get(id)) {
+        None => (1.62 - if d.sneaking { 0.08 } else { 0.0 }, true),
+        Some(None) => return Vec::new(),
+        Some(Some(e)) => (
+            e.eye_height(),
+            matches!(e.kind, Kind::Player | Kind::Mob(_) | Kind::Object(78)),
+        ),
+    };
+    let yaw = if living { d.head_yaw } else { d.yaw };
+    vanilla_hitbox(d.pos, d.size, eye, living, look_vector(yaw, d.pitch))
+}
+
 impl Drawn {
+    /// What F3+B draws: for every entity in view that is not invisible, the lines of the mods when a mod changed
+    /// the vanilla method and answered for it, else the vanilla ones.
+    pub(super) fn hitbox_lines(
+        &self,
+        game: &Game,
+        ids: &[i32],
+        draws: &[EntityDraw],
+        shown: bool,
+    ) -> Vec<Segment> {
+        if !shown {
+            return Vec::new();
+        }
+        let modded: HashSet<i32> = self.world.lines.iter().map(|l| l.id).collect();
+        let vanilla = draws.iter().enumerate().flat_map(|(i, d)| {
+            let id = ids.get(i).copied();
+            let skip = d.invisible || id.is_some_and(|id| modded.contains(&id));
+            if skip {
+                Vec::new()
+            } else {
+                draw_hitbox(game, id, d)
+            }
+        });
+        self.mod_lines().into_iter().chain(vanilla).collect()
+    }
+
     /// The hitbox lines in world space, one `(from, to, argb)` per segment.
-    pub(super) fn hitbox_lines(&self) -> Vec<([f64; 3], [f64; 3], u32)> {
+    fn mod_lines(&self) -> Vec<Segment> {
         let at = |feet: &[f64; 3], p: [f32; 3]| [0, 1, 2].map(|i| feet[i] + f64::from(p[i]));
         self.world
             .lines
@@ -252,5 +349,61 @@ pub(super) fn draw_labels(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn near(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    fn span(lines: &[Segment], argb: u32) -> [(f64, f64); 3] {
+        let pts: Vec<[f64; 3]> = lines
+            .iter()
+            .filter(|l| l.2 == argb)
+            .flat_map(|l| [l.0, l.1])
+            .collect();
+        [0, 1, 2].map(|i| {
+            let lo = pts.iter().map(|p| p[i]).fold(f64::MAX, f64::min);
+            let hi = pts.iter().map(|p| p[i]).fold(f64::MIN, f64::max);
+            (lo, hi)
+        })
+    }
+
+    fn assert_span(got: [(f64, f64); 3], want: [(f64, f64); 3]) {
+        for (g, w) in got.iter().zip(want) {
+            assert!(near(g.0, w.0) && near(g.1, w.1), "{got:?} != {want:?}");
+        }
+    }
+
+    /// Oracle: the arithmetic of 1.8.9 `RenderManager.renderDebugBoundingBox` for a player at (1, 64, 2):
+    /// width 0.6, height 1.8, eye height 1.62, looking down +z (yaw 0, pitch 0).
+    #[test]
+    fn a_player_gets_white_and_red_boxes_and_a_blue_look_line() {
+        let look = look_vector(0.0, 0.0);
+        assert_span(
+            [(look[0], look[0]), (look[1], look[1]), (look[2], look[2])],
+            [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0)],
+        );
+        let lines = vanilla_hitbox([1.0, 64.0, 2.0], (0.6, 1.8), 1.62, true, look);
+        assert_eq!(lines.len(), 12 + 12 + 1);
+        assert_span(span(&lines, WHITE), [(0.7, 1.3), (64.0, 65.8), (1.7, 2.3)]);
+        assert_span(span(&lines, RED), [(0.7, 1.3), (65.61, 65.63), (1.7, 2.3)]);
+        let blue = lines.last().unwrap();
+        assert_eq!(blue.2, BLUE);
+        assert_span(
+            [(blue.0[1], blue.1[1]), (blue.0[2], blue.1[2]), (0.0, 0.0)],
+            [(65.62, 65.62), (2.0, 4.0), (0.0, 0.0)],
+        );
+    }
+
+    #[test]
+    fn a_non_living_entity_has_no_red_box() {
+        let lines = vanilla_hitbox([0.0; 3], (0.25, 0.25), 0.2, false, [0.0, 0.0, 1.0]);
+        assert_eq!(lines.len(), 13);
+        assert!(lines.iter().all(|l| l.2 != RED));
     }
 }

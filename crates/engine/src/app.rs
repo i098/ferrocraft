@@ -827,6 +827,7 @@ impl App {
         if let (0, Some(id)) = (self.perspective, self.game.camera) {
             if let Some(i) = ids.iter().position(|&e| e == id) {
                 draws.remove(i);
+                ids.remove(i);
             }
         }
         self.tab_heads();
@@ -912,7 +913,10 @@ impl App {
         r.set_entities(&draws);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
-        r.set_lines(self.mod_drawn.hitbox_lines());
+        r.set_lines(
+            self.mod_drawn
+                .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes),
+        );
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles

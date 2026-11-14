@@ -17,7 +17,7 @@ if [ "${1:-}" = names ]; then
     [ "$(sha1sum "$out/mapping-io.jar" | cut -d' ' -f1)" = "$sha" ] || { echo "mapping-io sha1 differs" >&2; exit 1; }
     rm -rf "$out/names-cls" && mkdir "$out/names-cls"
     ( cd "$out/names-cls" && "$J/jar" xf ../mapping-io.jar && rm -rf META-INF )
-    "$J/javac" -nowarn --release 8 -Xlint:-options -cp "$out/mapping-io.jar" -d "$out/names-cls" "$here/src/net/ferrocraft/prepare/NameTable.java"
+    "$J/javac" -nowarn -source 8 -target 8 -Xlint:-options -cp "$out/mapping-io.jar" -d "$out/names-cls" "$here/src/net/ferrocraft/prepare/NameTable.java"
     "$J/jar" cf "$out/ferro-names.jar" -C "$out/names-cls" .
     rm -rf "$out/names-cls" "$out/mapping-io.jar"
     exit 0
@@ -30,7 +30,7 @@ mkdir -p "$2"
 out=$(cd "$2" && pwd)
 rm -rf "$out/cls" && mkdir "$out/cls"
 "$J/javac" -nowarn -source 8 -target 8 -Xlint:-options -cp "$L/forge.jar:$L/lzma-0.0.1.jar:$L/lw.jar" \
-    -d "$out/cls" $(find "$here/src" -name '*.java')
+    -d "$out/cls" $(find "$here/src" -name '*.java' ! -name NameTable.java)
 # Forge's patch reader needs its own libraries (log4j, guava, asm, launchwrapper, lzma): the whole FERRO_LIB.
 # It logs to ./logs, so run it inside the output folder.
 cp="$out/cls:$(ls "$L"/*.jar | tr '\n' ':')"

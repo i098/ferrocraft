@@ -12,19 +12,38 @@ fn blocks(pos: [i32; 3]) -> [f64; 3] {
     pos.map(|v| f64::from(v) / 32.0)
 }
 
+fn own(id: i32) -> ModEvent {
+    ModEvent::EntityJoin {
+        id,
+        kind: Spawn::Own,
+        pos: [0.0; 3],
+    }
+}
+
+/// What an entity event tells the mods: a spawn packet is a join, a destroy packet removes the entities.
+fn entity_events(ev: &EntityEvent) -> Vec<ModEvent> {
+    let (id, kind, pos) = match ev {
+        EntityEvent::Destroy(ids) => return ids.iter().map(|id| ModEvent::Remove(*id)).collect(),
+        EntityEvent::SpawnPlayer { id, uuid, pos, .. } => (*id, Spawn::Player(*uuid), blocks(*pos)),
+        EntityEvent::SpawnMob { id, kind, pos, .. } => (*id, Spawn::Mob(*kind), blocks(*pos)),
+        EntityEvent::SpawnObject { id, kind, pos, .. } => (*id, Spawn::Object(*kind), blocks(*pos)),
+        EntityEvent::SpawnExperienceOrb { id, pos } => (*id, Spawn::Orb, blocks(*pos)),
+        EntityEvent::SpawnPainting { id, pos, .. } => (*id, Spawn::Painting, pos.map(f64::from)),
+        _ => return Vec::new(),
+    };
+    vec![ModEvent::EntityJoin { id, kind, pos }]
+}
+
 impl App {
     /// A server event, before the game applies it: the join and a dimension change load a world, and each spawn packet
     /// puts an entity in it.
     pub(super) fn mod_net_event(&self, ev: &NetEvent) {
         let Some(mods) = &self.mods else { return };
-        let own = |id| ModEvent::EntityJoin {
-            id,
-            kind: Spawn::Own,
-            pos: self.game.player.as_ref().map_or([0.0; 3], |p| p.pos),
-        };
-        let join = |id, kind, pos| ModEvent::EntityJoin { id, kind, pos };
         match ev {
             NetEvent::JoinGame { entity_id, .. } => {
+                if self.ui.in_world {
+                    mods.post_event(ModEvent::WorldUnload);
+                }
                 for e in [ModEvent::Connect, ModEvent::WorldLoad, own(*entity_id)] {
                     mods.post_event(e);
                 }
@@ -41,25 +60,9 @@ impl App {
                 }
             }
             NetEvent::Entity(ev) => {
-                let e = match ev {
-                    EntityEvent::SpawnPlayer { id, uuid, pos, .. } => {
-                        join(*id, Spawn::Player(*uuid), blocks(*pos))
-                    }
-                    EntityEvent::SpawnMob { id, kind, pos, .. } => {
-                        join(*id, Spawn::Mob(*kind), blocks(*pos))
-                    }
-                    EntityEvent::SpawnObject { id, kind, pos, .. } => {
-                        join(*id, Spawn::Object(*kind), blocks(*pos))
-                    }
-                    EntityEvent::SpawnExperienceOrb { id, pos } => {
-                        join(*id, Spawn::Orb, blocks(*pos))
-                    }
-                    EntityEvent::SpawnPainting { id, pos, .. } => {
-                        join(*id, Spawn::Painting, pos.map(f64::from))
-                    }
-                    _ => return,
-                };
-                mods.post_event(e);
+                for e in entity_events(ev) {
+                    mods.post_event(e);
+                }
             }
             _ => {}
         }

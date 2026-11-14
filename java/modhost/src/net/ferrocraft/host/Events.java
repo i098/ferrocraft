@@ -82,6 +82,9 @@ final class Events {
             case 'a':
                 attack(in.readInt());
                 break;
+            case 'r':
+                entities.remove(in.readInt());
+                break;
             default:
                 throw new IOException("unknown event code " + code);
         }
@@ -107,6 +110,12 @@ final class Events {
             Host.log("no stand-in entity for kind " + kind + " type " + type + ": " + e);
         }
         if (entity == null) return;
+        if (kind != 0) place(entity, id, x, y, z);
+        entities.put(id, entity);
+        post(forgeBus, "net.minecraftforge.event.entity.EntityJoinWorldEvent", entity, world());
+    }
+
+    private void place(Object entity, int id, double x, double y, double z) {
         R.set(entity, "field_145783_c", id); // entityId
         R.set(entity, "field_70170_p", world()); // worldObj
         try {
@@ -116,8 +125,6 @@ final class Events {
             R.set(entity, "field_70163_u", y);
             R.set(entity, "field_70161_v", z);
         }
-        entities.put(id, entity);
-        post(forgeBus, "net.minecraftforge.event.entity.EntityJoinWorldEvent", entity, world());
     }
 
     private Object create(int kind, int type, long hi, long lo) {

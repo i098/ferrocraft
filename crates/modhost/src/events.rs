@@ -9,6 +9,7 @@
 //! | `'u'` | `WorldEvent.Unload` | none |
 //! | `'j'` | `EntityJoinWorldEvent` | i32 entity id, u8 kind, i32 type, u64 uuid high, u64 uuid low, three f64 position |
 //! | `'a'` | `AttackEntityEvent` | i32 id of the attacked entity |
+//! | `'r'` | none, the entity left the world | i32 entity id |
 //!
 //! Kind: 0 the local player, 1 another player, 2 mob (type is the entity type id), 3 object (type is the spawn
 //! object id), 4 experience orb, 5 painting. The uuid is set for kind 1 only.
@@ -40,6 +41,8 @@ pub enum Event {
     },
     /// The local player attacks this entity.
     Attack(i32),
+    /// The server destroyed this entity.
+    Remove(i32),
 }
 
 pub fn write(w: &mut impl Write, e: &Event) -> io::Result<()> {
@@ -69,6 +72,10 @@ pub fn write(w: &mut impl Write, e: &Event) -> io::Result<()> {
         }
         Event::Attack(id) => {
             b.push(b'a');
+            b.extend(id.to_be_bytes());
+        }
+        Event::Remove(id) => {
+            b.push(b'r');
             b.extend(id.to_be_bytes());
         }
     }
@@ -101,6 +108,7 @@ mod tests {
         let mut out = Vec::new();
         write(&mut out, &Event::WorldUnload).unwrap();
         write(&mut out, &Event::Attack(-3)).unwrap();
-        assert_eq!(out, [b'E', b'u', b'E', b'a', 0xff, 0xff, 0xff, 0xfd]);
+        write(&mut out, &Event::Remove(-3)).unwrap();
+        assert_eq!(out, [b'E', b'u', b'E', b'a', 0xff, 0xff, 0xff, 0xfd, b'E', b'r', 0xff, 0xff, 0xff, 0xfd]);
     }
 }

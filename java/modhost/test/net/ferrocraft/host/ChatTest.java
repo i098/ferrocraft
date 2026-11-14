@@ -24,6 +24,7 @@ import net.minecraftforge.fml.common.network.FMLNetworkEvent;
 public final class ChatTest {
     private final List<String> seen = new ArrayList<>();
     private Object world;
+    private Object player;
 
     private ChatTest() {}
 
@@ -52,6 +53,8 @@ public final class ChatTest {
             check(same(send(chat, "buy spam now"), new byte[] {3}), "Java takes a cancelled line too");
             check(((java.util.List<?>) drawn).size() == 1, "a cancelled line is not in GuiNewChat");
             check(same(send(chat, 3, ""), new byte[] {3}), "the input state answers 3 when Java keeps the chat");
+            test.player = R.get(mc, "field_71439_g");
+            R.set(test.player, "field_145783_c", 1); // the mirror owns the player's id
             test.eventsReachTheHandlers(new Events(mc));
             System.out.println("ChatTest passed");
             code = 0;
@@ -65,11 +68,15 @@ public final class ChatTest {
         seen.clear();
         post(events, 'c');
         post(events, 'l');
+        Object x = R.get(player, "field_70165_t"); // posX
         join(events, 0, 0, 1);
+        check(x.equals(R.get(player, "field_70165_t")), "the own join leaves the mirror's position alone");
         join(events, 2, 50, 7); // a creeper
         join(events, 1, 0, 9); // another player
         join(events, 3, 50, 11); // lit TNT
         post(events, 'a', 7);
+        post(events, 'r', 7);
+        post(events, 'a', 7); // removed: no event
         post(events, 'a', 99); // never joined: no event
         post(events, 'u');
         post(events, 'd');

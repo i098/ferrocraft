@@ -23,8 +23,7 @@ public final class Host {
     private static final int MAX_TICKS = 10;
 
     private final Object mc;
-    private final Object forgeBus;
-    private final Object fml;
+    private final Glue glue;
     private long lastTick = System.nanoTime();
     private final Player player;
     private final Overrides overrides;
@@ -37,8 +36,7 @@ public final class Host {
 
     private Host(Object mc) {
         this.mc = mc;
-        this.forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
-        this.fml = R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance");
+        this.glue = glue();
         this.player = new Player(mc, R.get(mc, "field_71439_g"), R.get(mc, "field_71474_y"));
         this.overrides = new Overrides(mc);
         this.anchor = new Anchor(mc);
@@ -58,14 +56,13 @@ public final class Host {
         halt(0);
     }
 
-    /** Registers a Forge event handler; without an active mod container Forge logs an error and uses the Minecraft one. */
-    private static void registerAs(Object handler) {
-        R.call(R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS"), "register", handler);
+    private static Glue glue() {
+        return Glue.current();
     }
 
-    /** FML's security manager traps every exit except the one from its own handler. */
+    /** The loader's exit: FML's security manager traps every other one. */
     static void halt(int code) {
-        R.call(R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance"), "exitJava", code, true);
+        glue().halt(code);
     }
 
     private static void start() throws Exception {
@@ -75,7 +72,7 @@ public final class Host {
         Minecraft.loadMods(mc);
         log("mods loaded");
         HookIndex.settle();
-        registerAs(new OverlayFilter());
+        glue().registerOverlayFilter();
         R.set(mc, "field_71428_T", R.neu("net.minecraft.util.Timer", 20f)); // timer: the hooks of mods read it
         R.call(mc, "func_71384_a"); // Minecraft.startGame, a shell: the hooks that mods put in it (OneConfig starts here)
 
@@ -163,7 +160,7 @@ public final class Host {
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
             R.call(mc, "func_71407_l$head"); // Minecraft.runTick is a shell: the hooks that mods put at its head and its return are two parts
-            R.call(fml, "onPreClientTick");
+            glue.preClientTick();
             Object modScreen = Minecraft.modScreen(mc);
             if (modScreen != null) {
                 R.call(modScreen, "func_146269_k"); // GuiScreen.handleInput
@@ -172,7 +169,7 @@ public final class Host {
                 pollMouse();
                 pollKeyboard();
             }
-            R.call(fml, "onPostClientTick");
+            glue.postClientTick();
             R.call(mc, "func_71407_l$tail"); // the return hooks of Minecraft.runTick, after the tick
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
@@ -191,10 +188,9 @@ public final class Host {
                 if (!down) keyBind(button, false);
                 continue;
             }
-            if (Boolean.TRUE.equals(R.call(R.cls("net.minecraftforge.client.ForgeHooksClient"), "postMouseEvent"))) continue;
+            if (glue.mouseEventCancelled()) continue;
             keyBind(button, down);
-            R.call(fml, "fireMouseInput");
-            postOneConfig("MouseInputEvent", Input.eventButton(), down);
+            glue.mouseInput(Input.eventButton(), down);
         }
     }
 
@@ -208,8 +204,7 @@ public final class Host {
                 continue;
             }
             keyBind(key, down);
-            R.call(fml, "fireKeyInput");
-            postOneConfig("KeyInputEvent", key, down);
+            glue.keyInput(key, down);
         }
     }
 
@@ -220,30 +215,16 @@ public final class Host {
         if (down) R.call(keyBinding, "func_74507_a", code);
     }
 
-    /**
-     * OneConfig's own input events, which its mixin posts from runTick. The constructor is filled by
-     * parameter type: an int is the key or button, a boolean the state.
-     */
-    private static void postOneConfig(String event, int code, boolean down) {
-        String cls = "cc.polyfrost.oneconfig.events.event." + event;
-        Class<?>[] types = R.cls(cls).getDeclaredConstructors()[0].getParameterTypes();
-        Object[] args = new Object[types.length];
-        for (int i = 0; i < types.length; i++) {
-            args[i] = types[i] == int.class ? (Object) code : types[i] == boolean.class ? (Object) down : null;
-        }
-        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu(cls, args));
-    }
-
     /** GuiIngameForge.renderGameOverlay, which posts the overlay events and runs mixins hooked into it. */
     private void renderOverlay(float partial) {
         R.set(R.get(mc, "field_71428_T"), "field_74281_c", partial); // Timer.renderPartialTicks, read by the hooks of mods
         R.call(mc, "func_71411_J$head"); // Minecraft.runGameLoop is a shell: the hooks that mods put at its head and its return are two parts
-        R.call(fml, "onRenderTickStart", partial);
+        glue.renderTickStart(partial);
         chat.renderOverlay(mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(mc, "func_71411_J$tail"); // the return hooks of Minecraft.runGameLoop, after the frame
-        R.call(fml, "onRenderTickEnd", partial);
+        glue.renderTickEnd(partial);
     }
 
     /** Called in place of Minecraft.displayGuiScreen, see {@link BridgeTransformer}. */

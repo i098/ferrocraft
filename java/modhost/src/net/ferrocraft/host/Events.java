@@ -49,8 +49,8 @@ final class Events {
     }
 
     private final Object mc;
-    private final Object forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
-    private final Object fmlBus = R.call(R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance"), "bus");
+    private final Object forgeBus = Glue.forgeBus();
+    private final Object fmlBus = Glue.fmlBus();
     /** The connection object of the FML events: it holds no channel, because Rust owns the socket. */
     private final Object manager = R.neu("net.minecraft.network.NetworkManager", R.get(R.cls("net.minecraft.network.EnumPacketDirection"), "CLIENTBOUND"));
     /** The entities that joined the world, by id, until it unloads. */
@@ -167,6 +167,7 @@ final class Events {
 
     /** A failing mod handler is logged and must not stop the host. */
     private static void post(Object bus, String event, Object... args) {
+        if (bus == null) return; // no event bus on this loader
         try {
             R.call(bus, "post", R.neu(event, args));
         } catch (RuntimeException e) {

@@ -25,10 +25,15 @@ The jar is `target/modhost-fabric/ferro-host-fabric.jar` (`FERROCRAFT_MODHOST_JA
 
 Start `Config::provision_fabric()` with the jar, `ferro-names.jar` (`java/modhost-prepare/run.sh names <dir>`) and Legacy Fabric API in `<HOME>/.ferrocraft/modhost-fabric/mods`; the JVM output shows `[ferro-agent] swap Main`, `[ferro-host] entrypoint main: <mod id>` for each mod and `[ferro-host] mods loaded`.
 
+## Test
+
+`test.sh` boots the host as the engine does (`FabricBootTest` is the peer, in place of the engine) with the Legacy Fabric mods of `java/modhost-accept/mods-fabric.txt` and prints PASS or FAIL for the entrypoint of each mod, for `mods loaded`, for Mixin errors and for the hello. A JVM that stops before the hello is a FAIL. It needs `FERRO_JAVA_HOME`, `FERRO_LIB` and `FABRIC_LOADER_JAR` as `build.sh` does, and `FERRO_FABRIC_CONFIG`: a file of three lines made from the `Config` of `Config::provision_fabric` (its `java`, its `game_dir`, its class path, which already holds the client jar, the legacyfabric jar under `versions/`). The ignored test `cargo test -p ferrocraft-modhost provision_fabric -- --ignored` writes that file when `FERRO_FABRIC_CONFIG_OUT` is set (also set `HOME` to a clean dir, `FERROCRAFT_MODHOST_JAR` and `FERROCRAFT_NAMES_JAR`).
+
 ## Limits
 
-- The JVM stops after `mods loaded` and never says hello: `startGame` runs a Legacy Fabric API handler that reads a field of the dropped vanilla body (`addItemModels`, the item renderer), and `Host`'s `Chat` and event bus still load Forge classes. The next slices make them loader-neutral.
+- `FabricGlue.loadMods` does what Knot's entrypoint patch does in `Minecraft.<init>` (`prepareModInit`, which sets the game instance) and builds the item renderer that `startGame` builds, because the shell drops both. The renderer holds an empty model manager.
+- `Chat`, `Events` and `Probe` post to Forge's event buses through `Glue.forgeBus()` and `Glue.fmlBus()`. Both are null on Fabric: the host keeps each chat line and posts no event.
 - `BridgeTransformer` rules for Minecraft classes compare SRG method names and MCP descriptors. The class bytes of Knot have intermediary names, so those rules (`Gui.drawRect`, `FontRenderer` and the other draws, the player and entity patches) do not match yet, and a Fabric mod's draw call reaches no `Sink`. The LWJGL and OneConfig patches match, because their names are the same.
-- `HookIndex` lists the changed methods under their intermediary names.
+- `HookIndex.settle` finds no Mixin config list on Fabric (Fabric's Mixin has no `Config.getAllConfigs`): the hook table holds only the classes that were loaded when the hello was sent. It lists the changed methods under their intermediary names.
 - `FabricGlue.newIngameGui` makes the vanilla `GuiIngame`. The HUD handover of the Forge host (`OverlayFilter`) has no Fabric part.
 - Legacy Fabric Loader 0.19.5 only: 0.20.1 cannot patch 1.8.9. Ornithe is not started.

@@ -24,6 +24,16 @@ interface Glue {
         }
     }
 
+    /** Forge's event bus, or null on a loader without one (Fabric): what the host would post to it, it skips there. */
+    static Object forgeBus() {
+        return current() == ForgeGlue.INSTANCE ? R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS") : null;
+    }
+
+    /** FML's event bus, or null as {@link #forgeBus}. */
+    static Object fmlBus() {
+        return current() == ForgeGlue.INSTANCE ? R.call(R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance"), "bus") : null;
+    }
+
     /** Ends the JVM; the loader may trap every other exit. */
     void halt(int code);
 

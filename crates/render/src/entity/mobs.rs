@@ -3,8 +3,7 @@
 //! `ModelSpider` and `ModelEnderman` (box layout, texture offsets and `setRotationAngles`), plus the
 //! sheep wool and the spider and enderman eye layers.
 //!
-//! Not ported: the eat-grass head, the chicken flap (the draw has no on-ground state), the golem
-//! attack and rose arms, and villager head shake.
+//! Not ported: the chicken flap (the draw has no on-ground state) and villager head shake.
 
 use super::{cos, quad_legs, wrap, EntityDraw, Model, Part, Skin};
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -108,8 +107,18 @@ fn iron_golem(d: &EntityDraw) -> Model {
     let hr = head_rot(d);
     let wave = triangle(d.limb_swing, 13.0);
     let amount = d.limb_swing_amount;
+    let (timer, rose) = (d.look.golem_attack, d.look.golem_rose);
+    let swing = triangle(timer as f32 - d.look.partial, 10.0);
+    let (right_arm, left_arm) = if timer > 0 {
+        let x = -2.0 + 1.5 * swing;
+        (x, x)
+    } else if rose > 0 {
+        (-0.8 + 0.025 * triangle(rose as f32, 70.0), 0.0)
+    } else {
+        let arm = 1.5 * wave;
+        ((-0.2 + arm) * amount, (-0.2 - arm) * amount)
+    };
     let leg = 1.5 * wave * amount;
-    let arm = 1.5 * wave;
     let at = [0.0, -7.0, 0.0];
     let mut belt = Part::new(at, [-4.5, 10.0, -3.0], [9.0, 5.0, 6.0], (0.0, 70.0));
     belt.inflate = 0.5;
@@ -130,16 +139,9 @@ fn iron_golem(d: &EntityDraw) -> Model {
         .rot(hr),
         Part::new(at, [-9.0, -2.0, -6.0], [18.0, 12.0, 11.0], (0.0, 40.0)),
         belt,
-        Part::new(at, [-13.0, -2.5, -3.0], [4.0, 30.0, 6.0], (60.0, 21.0)).rot([
-            (-0.2 + arm) * amount,
-            0.0,
-            0.0,
-        ]),
-        Part::new(at, [9.0, -2.5, -3.0], [4.0, 30.0, 6.0], (60.0, 58.0)).rot([
-            (-0.2 - arm) * amount,
-            0.0,
-            0.0,
-        ]),
+        Part::new(at, [-13.0, -2.5, -3.0], [4.0, 30.0, 6.0], (60.0, 21.0))
+            .rot([right_arm, 0.0, 0.0]),
+        Part::new(at, [9.0, -2.5, -3.0], [4.0, 30.0, 6.0], (60.0, 58.0)).rot([left_arm, 0.0, 0.0]),
         Part::new(
             [-4.0, 11.0, 0.0],
             [-3.5, -3.0, -3.0],
@@ -287,14 +289,9 @@ fn chicken(d: &EntityDraw) -> Model {
 
 /// `ModelSheep2`: the shorn body; the wool is a [`Layer`].
 fn sheep(d: &EntityDraw) -> Model {
+    let (head_origin, head_angles) = super::sheep::head(d);
     let mut parts = vec![
-        Part::new(
-            [0.0, 6.0, -8.0],
-            [-3.0, -4.0, -6.0],
-            [6.0, 6.0, 8.0],
-            (0.0, 0.0),
-        )
-        .rot(head_rot(d)),
+        Part::new(head_origin, [-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], (0.0, 0.0)).rot(head_angles),
         Part::new(
             [0.0, 5.0, 2.0],
             [-4.0, -10.0, -7.0],
@@ -348,13 +345,9 @@ fn fleece(d: &EntityDraw) -> [f32; 3] {
 
 /// `ModelSheep1`, drawn over the sheep unless it is sheared or invisible.
 fn sheep_wool(d: &EntityDraw) -> Layer {
-    let mut head = Part::new(
-        [0.0, 6.0, -8.0],
-        [-3.0, -4.0, -4.0],
-        [6.0, 6.0, 6.0],
-        (0.0, 0.0),
-    )
-    .rot(head_rot(d));
+    let (head_origin, head_angles) = super::sheep::head(d);
+    let mut head =
+        Part::new(head_origin, [-3.0, -4.0, -4.0], [6.0, 6.0, 6.0], (0.0, 0.0)).rot(head_angles);
     head.inflate = 0.6;
     let mut body = Part::new(
         [0.0, 5.0, 2.0],

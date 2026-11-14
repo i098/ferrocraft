@@ -312,6 +312,9 @@ impl App {
         self.sound = None;
         for dir in dirs.into_iter().flatten() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
+                for d in s.dropped() {
+                    crate::log::line(d);
+                }
                 self.sound = Some(s);
                 if let (Some(s), Some(p)) = (&mut self.sound, &self.game.player) {
                     s.set_listener(p.pos);
@@ -1560,6 +1563,10 @@ fn entity_draw(
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
             squish: e.squish.factor(p),
+            eat_timer: e.sheep_timer,
+            golem_attack: e.anim.golem_attack,
+            golem_rose: e.anim.golem_rose,
+            partial: p,
             ..Look::default()
         },
     }

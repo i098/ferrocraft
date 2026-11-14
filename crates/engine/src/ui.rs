@@ -22,7 +22,6 @@ pub struct Ui {
     /// `S37PacketStatistics` values of this server session.
     pub stats: PlayerStats,
     /// `Session.getPlayerID`.
-    // shortcut: the username stands in for the session uuid, which only seeds the achievement background.
     pub player_id: String,
     game_dir: PathBuf,
     started: Instant,

@@ -1033,20 +1033,94 @@ mod tests {
         let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
         let mut c = crate::GuiCanvas::new(&mut g);
         s.draw(&mut c, 0, 0, &mut ctx);
-        let waiting = g.into_quads().len();
+        let _ = g.into_quads();
         s.stats_ready();
         let mut g2 = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
         let mut c2 = crate::GuiCanvas::new(&mut g2);
         s.draw(&mut c2, 214, 100, &mut ctx);
         let quads = g2.into_quads();
+        // Vanilla GuiAchievements, first frame: the view starts at (0*24 - 141/2 - 12, 0*24 - 141/2)
+        // = (-82, -70), the tree origin is ((427-256)/2 + 16, (240-202)/2 + 17) = (101, 36) GUI
+        // pixels, and the GUI scale is 2. A tile at (column, row) sits at (column*24 + 82, row*24 + 70)
+        // in the tree, its frame 2 px up and left; links run through its center, 11 px in.
+        let at = |x: i32, y: i32| (((101 + x) * 2) as f32, ((36 + y) * 2) as f32);
+        let rect = |q: &render::Quad| {
+            let xs = q.pos.map(|p| p[0]);
+            let ys = q.pos.map(|p| p[1]);
+            let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
+            let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
+            (min(xs), min(ys), max(xs), max(ys))
+        };
+        let find = |tex: &str, x: i32, y: i32, w: i32, h: i32, color: u32| {
+            let (x0, y0) = at(x, y);
+            let want = (x0, y0, x0 + (w * 2) as f32, y0 + (h * 2) as f32);
+            quads
+                .iter()
+                .filter(|q| q.tex == tex && rect(q) == want)
+                .map(|q| q.color[0])
+                .collect::<Vec<_>>()
+                .contains(&color)
+        };
+        let frame = |x, y, tint| find(BACKGROUND, x, y, 26, 26, tint);
+        // Unlocked frames are 0.75 gray: openInventory, mineWood, buildWorkBench, buildPickaxe.
+        assert!(frame(80, 68, 0xFFBF_BFBF), "openInventory");
+        assert!(frame(128, 92, 0xFFBF_BFBF), "mineWood");
+        assert!(frame(176, 44, 0xFFBF_BFBF), "buildWorkBench");
+        assert!(frame(176, 116, 0xFFBF_BFBF), "buildPickaxe");
+        // buildHoe can be unlocked now: full white.
+        assert!(frame(128, -4, 0xFFFF_FFFF), "buildHoe");
+        // makeBread has one locked parent: 0.3 gray (76.5 rounds either way).
         assert!(
-            quads.len() > waiting,
-            "the tree draws more than the wait text"
+            frame(56, -4, 0xFF4C_4C4C) || frame(56, -4, 0xFF4D_4D4D),
+            "makeBread"
         );
-        let frames = quads.iter().filter(|q| q.tex == BACKGROUND).count();
+        // onARail has two locked parents: 0.3 gray, in the challenge frame.
         assert!(
-            frames > ACHIEVEMENTS.len() / 4,
-            "frames and arrows are drawn"
+            frame(128, 140, 0xFF4C_4C4C) || frame(128, 140, 0xFF4D_4D4D),
+            "onARail"
+        );
+        // Tiles below row 155, beyond column 224 or above row -24 are culled.
+        let frames: Vec<_> = quads.iter().filter(|q| q.tex == BACKGROUND).collect();
+        let culled = [(154, 166), (226, 46), (226, 118), (82, -50)];
+        for (x, y) in culled {
+            let (x0, y0) = at(x - 2, y - 2);
+            assert!(
+                !frames
+                    .iter()
+                    .any(|q| rect(q) == (x0, y0, x0 + 52.0, y0 + 52.0)),
+                "frame at {x},{y} is outside the view"
+            );
+        }
+        // mineWood hangs right of and below openInventory: its link is the line at x 93..=141,
+        // y 105 in the unlocked 0xFFA0A0A0, and the arrow points left (u 114) at (123, 100).
+        assert!(find("", 93, 105, 49, 1, 0xFFA0_A0A0), "unlocked link");
+        assert!(
+            find(BACKGROUND, 123, 100, 7, 11, 0xFFA0_A0A0),
+            "arrow points at the parent"
+        );
+        let arrow = quads
+            .iter()
+            .find(|q| {
+                q.tex == BACKGROUND
+                    && rect(q)
+                        == (
+                            at(123, 100).0,
+                            at(123, 100).1,
+                            at(123, 100).0 + 14.0,
+                            at(123, 100).1 + 22.0,
+                        )
+            })
+            .unwrap();
+        assert_eq!(
+            arrow.uv.iter().map(|p| p[0]).fold(f32::MAX, f32::min),
+            114.0 / 256.0
+        );
+        // buildHoe can be unlocked, so its link to buildWorkBench is green.
+        assert!(
+            quads
+                .iter()
+                .any(|q| q.tex.is_empty() && q.color[0] == 0xFF00_FF00),
+            "unlockable link"
         );
         if let (Some(_), Some(dir)) = (jar, std::env::var_os("ACH_DIR")) {
             let (w, h, rgba) = r.render_to_rgba(&render::Camera::default(), &quads);

@@ -15,8 +15,9 @@ import java.util.Set;
  * 'G' gradient: 4 f32, i32 top, i32 bottom. 'T' text: f32 x y, i32 argb, u8 shadow, f32 tx ty scale,
  * u32 byte length, UTF-8 bytes. 'D' define: u32 length and UTF-8 name, u32 length and bytes of a PNG or SVG file;
  * sent once per name. 'I' image: the name as in 'D', 4 f32, i32 argb, u8 recolor (an SVG takes the color of argb).
- * 'C' clip: u8 on, then 4 f32 when on; later commands are cut to it. Rect, gradient, image and clip coordinates
- * already include the GL matrix. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame.
+ * 'C' clip: u8 on, then 4 f32 when on; later commands are cut to it. 'S' shape: u8 kind; kind 0 a rounded rect: 4 f32
+ * box, 4 f32 radii (top left, top right, bottom right, bottom left), i32 argb; kind 1 a line: 4 f32 (x0 y0 x1 y1), f32 width,
+ * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
     private static final int MODELVIEW = 5888;
@@ -78,6 +79,39 @@ public final class Sink {
         try {
             out.writeByte('R');
             quad(m, x0, y0, x1, y1);
+            out.writeInt(argb);
+            count++;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** A rectangle with the corner radii tl, tr, br, bl; the radii are scaled by the matrix like the box. */
+    public static synchronized void roundRect(float x0, float y0, float x1, float y1, float[] radii, int argb) {
+        float[] m = STACK[top];
+        try {
+            out.writeByte('S');
+            out.writeByte(0);
+            quad(m, x0, y0, x1, y1);
+            for (float r : radii) out.writeFloat(r * m[0]);
+            out.writeInt(argb);
+            count++;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** A line of {@code width} from one point to the other, at any angle. */
+    public static synchronized void line(float x0, float y0, float x1, float y1, float width, int argb) {
+        float[] m = STACK[top];
+        try {
+            out.writeByte('S');
+            out.writeByte(1);
+            out.writeFloat(m[0] * x0 + m[1]);
+            out.writeFloat(m[0] * y0 + m[2]);
+            out.writeFloat(m[0] * x1 + m[1]);
+            out.writeFloat(m[0] * y1 + m[2]);
+            out.writeFloat(width * m[0]);
             out.writeInt(argb);
             count++;
         } catch (IOException e) {

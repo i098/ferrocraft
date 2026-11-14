@@ -248,7 +248,7 @@ public final class Host {
     private void renderOverlay(float partial) {
         postRender("START", partial);
         R.call(fml, "onRenderTickStart", partial);
-        Minecraft.renderOverlay(mc, partial);
+        chat.renderOverlay(mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(fml, "onRenderTickEnd", partial);

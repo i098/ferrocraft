@@ -16,7 +16,8 @@
 //! then the commands of `Sink.java`: `'R'` rect, `'G'` gradient, `'T'` text, `'D'` define (a resource
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
 //! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
-//! `'C'` clip (u8 on, then four f32 corners when on).
+//! `'C'` clip (u8 on, then four f32 corners when on), `'S'` shape (u8 kind: 0 a rounded rect with four f32 corners, four
+//! f32 radii and i32 ARGB; 1 a line with four f32 end coordinates, f32 width and i32 ARGB).
 //! `'H'` HUD owner (u32 bit set): the vanilla HUD elements that Java owns this frame, see `hud.rs`; Rust does not draw them.
 //! `'O'` world values, once per frame: see `overrides.rs`.
 //! Rust to Java, also `'P'` (player tick) and `'C'` (a received chat line, see `chat.rs`).
@@ -86,6 +87,18 @@ pub enum DrawCmd {
         argb: u32,
         /// An SVG is painted in the color of `argb` instead of its own.
         recolor: bool,
+    },
+    /// A rectangle with rounded corners; `radii` run top left, top right, bottom right, bottom left.
+    Round {
+        rect: [f32; 4],
+        radii: [f32; 4],
+        argb: u32,
+    },
+    /// A line of `width` from `(x0, y0)` to `(x1, y1)`, at any angle.
+    Line {
+        rect: [f32; 4],
+        width: f32,
+        argb: u32,
     },
     /// Cut the commands after this one to the rectangle; `None` lifts the cut.
     Clip(Option<[f32; 4]>),
@@ -224,6 +237,19 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
             None
         })),
         b'H' => Ok(DrawCmd::Hud(u32_(r)?)),
+        b'S' => match u8_(r)? {
+            0 => Ok(DrawCmd::Round {
+                rect: rect(r)?,
+                radii: rect(r)?,
+                argb: u32_(r)?,
+            }),
+            1 => Ok(DrawCmd::Line {
+                rect: rect(r)?,
+                width: f32_(r)?,
+                argb: u32_(r)?,
+            }),
+            k => Err(io::Error::other(format!("unknown shape kind {k}"))),
+        },
         t => Err(io::Error::other(format!("unknown command tag {t}"))),
     }
 }
@@ -342,6 +368,42 @@ mod tests {
                 DrawCmd::Clip(None),
                 DrawCmd::Clip(Some([1.0, 2.0, 3.0, 4.0])),
                 DrawCmd::Hud(0b10),
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_shapes() {
+        let mut b = vec![0];
+        b.extend(3u32.to_be_bytes());
+        b.extend([b'S', 0]);
+        for v in [1.0f32, 2.0, 21.0, 22.0, 4.0, 4.0, 0.0, 0.0] {
+            b.extend(v.to_be_bytes());
+        }
+        b.extend(0x80ff0000u32.to_be_bytes());
+        b.extend([b'S', 1]);
+        for v in [0.0f32, 0.0, 10.0, 5.0, 2.0] {
+            b.extend(v.to_be_bytes());
+        }
+        b.extend(0xff00ff00u32.to_be_bytes());
+        b.extend([b'S', 9]);
+        assert!(read_frame(&mut b.as_slice()).is_err());
+        b.truncate(b.len() - 2);
+        b[1..5].copy_from_slice(&2u32.to_be_bytes());
+        let (_, cmds) = read_frame(&mut b.as_slice()).unwrap();
+        assert_eq!(
+            cmds,
+            vec![
+                DrawCmd::Round {
+                    rect: [1.0, 2.0, 21.0, 22.0],
+                    radii: [4.0, 4.0, 0.0, 0.0],
+                    argb: 0x80ff0000
+                },
+                DrawCmd::Line {
+                    rect: [0.0, 0.0, 10.0, 5.0],
+                    width: 2.0,
+                    argb: 0xff00ff00
+                },
             ]
         );
     }

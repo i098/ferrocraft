@@ -1,5 +1,6 @@
 //! `java.util.Random`: the 48-bit LCG that vanilla seeds per star field, rain column and lightning bolt.
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JavaRandom(i64);
 
 impl JavaRandom {

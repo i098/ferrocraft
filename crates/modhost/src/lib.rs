@@ -9,6 +9,7 @@ pub mod hud_lists;
 pub mod keys;
 pub mod mirror;
 pub mod overrides;
+pub mod probe;
 pub mod provision;
 pub mod provision_fabric;
 pub mod wire;
@@ -89,6 +90,10 @@ struct Shared {
     chat_answer: Option<ChatVerdict>,
     /// The last chat reply said Java keeps the chat: a timed-out line may already be on its screen.
     chat_taken: bool,
+    /// A render probe the game thread waits on, and the JVM's answer.
+    probe: Option<probe::Request>,
+    probe_answer: Option<probe::Answer>,
+    probe_gate: probe::Gate,
     /// World and entity events for the next frame, oldest first.
     events: Vec<events::Event>,
     /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
@@ -168,6 +173,9 @@ impl ModHost {
                     chat: None,
                     chat_answer: None,
                     chat_taken: false,
+                    probe: None,
+                    probe_answer: None,
+                    probe_gate: probe::Gate::default(),
                     events: Vec::new(),
                     stalled: false,
                     brand: None,
@@ -407,6 +415,37 @@ impl ModHost {
         answer
     }
 
+    /// The render probes of one frame (`probe.rs`): the hurt tint, the item glint color and the entities that a render
+    /// handler cancelled. `None` while the JVM is not live, when no mod changed what the frame draws, or when the JVM does not
+    /// answer in time: the renderer then uses the vanilla values. A late answer stalls like one of `player_tick`.
+    pub fn probe(&self, frame: &probe::Frame) -> Option<probe::Reply> {
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Live || s.stalled {
+            return None;
+        }
+        let Shared {
+            probe_gate, hooks, ..
+        } = &mut *s;
+        let request = probe_gate.request(hooks, frame)?;
+        s.probe = Some(request);
+        s.probe_answer = None;
+        self.link.view.notify_one();
+        let (mut s, _) = self
+            .link
+            .answered
+            .wait_timeout_while(s, PLAYER_TICK_WAIT, |s| {
+                s.probe_answer.is_none() && s.phase == Phase::Live
+            })
+            .unwrap();
+        s.probe = None;
+        let answer = s.probe_answer.take();
+        s.stalled = answer.is_none() && s.phase == Phase::Live;
+        if let Some(listening) = answer.as_ref().and_then(|a| a.listening) {
+            s.probe_gate.learn(listening);
+        }
+        answer.map(|a| a.reply)
+    }
+
     /// Post a received chat line, with `§` format codes, to the mods' `ClientChatReceivedEvent` and return what
     /// they did with it. `Keep` while the JVM is not live or does not answer in time.
     pub fn chat(&self, kind: ChatKind, text: &str) -> ChatVerdict {
@@ -608,6 +647,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                 && s.world.is_none()
                 && s.anchor.request.is_none()
                 && s.chat.is_none()
+                && s.probe.is_none()
             {
                 s = link.view.wait(s).unwrap();
             }
@@ -644,6 +684,17 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                     |st| anchor::write_request(st, &a),
                     anchor::read_world,
                     |s, w| s.anchor.answer = Some(w),
+                )?;
+                continue;
+            }
+            if let Some(q) = s.probe.take() {
+                drop(s);
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| probe::write_request(st, &q),
+                    |st| probe::read_reply(st, &q),
+                    |s, a| s.probe_answer = Some(a),
                 )?;
                 continue;
             }
@@ -934,6 +985,9 @@ mod tests {
                 world: None,
                 world_answer: None,
                 anchor: anchor::Slot::default(),
+                probe: None,
+                probe_answer: None,
+                probe_gate: probe::Gate::default(),
                 chat: None,
                 chat_answer: None,
                 chat_taken: false,

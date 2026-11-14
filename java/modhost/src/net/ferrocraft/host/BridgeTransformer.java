@@ -74,6 +74,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::glPlatformMethod);
             case "net/minecraft/entity/Entity":
                 return patch(bytes, BridgeTransformer::entityMethod);
+            case "net/minecraft/client/renderer/entity/RenderItem":
+                return patch(bytes, BridgeTransformer::renderItemMethod);
             case "net/minecraft/client/entity/AbstractClientPlayer":
                 return patch(bytes, BridgeTransformer::playerMethod);
             case "net/minecraft/client/renderer/EntityRenderer":
@@ -366,6 +368,16 @@ public class BridgeTransformer implements IClassTransformer {
         loads(l, m, 0);
         call(l, owner, name, desc);
         l.add(new InsnNode(Type.getReturnType(m.desc).getOpcode(Opcodes.IRETURN)));
+        return l;
+    }
+
+    /** RenderItem.renderModel(IBakedModel, int) draws the glint passes; the host has no GL, so it only reports the color to {@link Probe}. */
+    private static InsnList renderItemMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_175035_a(Lnet/minecraft/client/resources/model/IBakedModel;I)V")) return null;
+        InsnList l = new InsnList();
+        l.add(new VarInsnNode(Opcodes.ILOAD, 2));
+        call(l, "net/ferrocraft/host/Probe", "glint", "(I)V");
+        l.add(new InsnNode(Opcodes.RETURN));
         return l;
     }
 

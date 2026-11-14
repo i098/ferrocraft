@@ -73,6 +73,15 @@ const EYES: [usize; 2] = [43, 44];
 /// Slot of `slime.png` and the size of its outer gel region (top left, texels): the entity pass has
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
+/// Skins of the slots from [`SLIME_SLOT`] on, in order.
+const SLIME_SLOT_SKINS: [Skin; 6] = [
+    Skin::Slime,
+    Skin::MagmaCube,
+    Skin::Blaze,
+    Skin::Ghast,
+    Skin::GhastShooting,
+    Skin::Bat,
+];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
 const ARMOR_FIRST: u8 = 15;
@@ -477,13 +486,12 @@ fn mob_slot(skin: Skin) -> Option<u32> {
         Skin::SpiderEyes => 43,
         Skin::EndermanEyes => 44,
         Skin::ArmorStand => 45,
-        Skin::Slime => 46,
-        Skin::MagmaCube => 47,
-        Skin::Blaze => 48,
-        Skin::Ghast => 49,
-        Skin::GhastShooting => 50,
-        Skin::Bat => 51,
-        _ => return None,
+        _ => {
+            return SLIME_SLOT_SKINS
+                .iter()
+                .position(|&s| s == skin)
+                .map(|i| (SLIME_SLOT + i) as u32)
+        }
     })
 }
 

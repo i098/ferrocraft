@@ -13,7 +13,7 @@ import net.minecraft.launchwrapper.Launch;
  * Boots Forge's FML around Minecraft state that Rust owns, then answers one frame message at a time.
  *
  * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF, then the hook table of {@link HookIndex}.
- * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
+ * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen, u8 overlays (bit 0: F3 is on, bit 1: the player list key is held),
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
  * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'E' is a world or entity event, see {@link Events}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'L' is the HUD lists (tab list, scoreboard, boss bar, title, action bar), see {@link HudLists}, which follows the mirror. 'O' asks for the world values mods change, see {@link Overrides}. 'A' asks for the name tags and TNT countdown that mods draw in the world, see {@link Anchor}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
@@ -142,6 +142,7 @@ public final class Host {
         int scale = in.readInt();
         boolean unicode = in.readUnsignedByte() != 0;
         boolean screen = in.readUnsignedByte() != 0;
+        int overlays = in.readUnsignedByte();
         Input.set(w, h, in.readInt(), in.readInt());
         int n = in.readUnsignedShort();
         for (int i = 0; i < n; i++) {
@@ -149,17 +150,18 @@ public final class Host {
             int arg = in.readInt();
             Input.event(kind, arg, in.readUnsignedByte(), in.readUnsignedShort());
         }
-        frame(w, h, scale, unicode, screen);
+        frame(w, h, scale, unicode, screen, overlays);
         out.write(Sink.take(Minecraft.modScreen(mc) != null));
         out.flush();
     }
 
-    private void frame(int w, int h, int scale, boolean unicode, boolean screen) {
+    private void frame(int w, int h, int scale, boolean unicode, boolean screen, int overlays) {
         Minecraft.resize(mc, w, h, scale, unicode);
         if (screen != screenOpen) {
             screenOpen = screen;
             Minecraft.setScreen(mc, screen);
         }
+        Minecraft.setOverlayKeys(mc, (overlays & 1) != 0, (overlays & 2) != 0);
         long t = System.nanoTime();
         int ticks = (int) Math.min(MAX_TICKS, (t - lastTick) / TICK_NANOS);
         lastTick += ticks * TICK_NANOS;

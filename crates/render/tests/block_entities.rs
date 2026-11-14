@@ -83,7 +83,7 @@ fn chests_single_double_and_ender_open_and_closed() {
         r.block_action([x, 64, 4], id, 1, 1);
     }
     for _ in 0..5 {
-        r.tick_block_entities();
+        r.tick_block_entities(&[]);
     }
     let open = frame(&mut r, &cam(3.5, 4.5), "chests_half_open");
     assert!(differs(&closed, &open) > 300, "the lids lift");
@@ -92,7 +92,7 @@ fn chests_single_double_and_ender_open_and_closed() {
         r.block_action([x, 64, 4], id, 1, 0);
     }
     for _ in 0..12 {
-        r.tick_block_entities();
+        r.tick_block_entities(&[]);
     }
     // Two renders of one unchanged scene already differ by up to 3 per channel (GPU rounding), so compare with that slack.
     let again = frame(&mut r, &cam(3.5, 4.5), "chests_closed_again");
@@ -252,4 +252,24 @@ fn sign_text_survives_chunk_reupload_after_block_change() {
         differs(&texted, &after) < 50,
         "same frame as before re-upload"
     );
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn enchanting_table_book_floats_and_opens_near_a_player() {
+    let mut r = scene();
+    let c = cam(0.5, 4.5);
+    let empty = frame(&mut r, &c, "table_none");
+    r.set_block(0, 64, 4, 116 << 4);
+    let closed = frame(&mut r, &c, "table_closed");
+    assert!(
+        differs(&empty, &closed) > 500,
+        "the table and its closed book draw"
+    );
+    // A player 2 blocks away opens the book over 10 ticks.
+    for _ in 0..10 {
+        r.tick_block_entities(&[[0.5, 65.0, 6.5]]);
+    }
+    let open = frame(&mut r, &c, "table_open");
+    assert!(differs(&closed, &open) > 100, "the book opens");
 }

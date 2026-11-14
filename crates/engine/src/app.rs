@@ -1214,6 +1214,7 @@ impl App {
             mods.set_lists(self.mod_lists());
         }
         if let Some(mods) = &self.mods {
+            mods.set_overlays(self.show_debug, self.input.player_list_held());
             mods.set_view(
                 w as i32,
                 h as i32,

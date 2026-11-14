@@ -50,6 +50,10 @@ pub struct Input {
     pub unicode: bool,
     /// A menu, the container or chat is open.
     pub screen: bool,
+    /// F3 is on: Java sets `GameSettings.showDebugInfo`.
+    pub debug: bool,
+    /// The player list key is held: Java presses `keyBindPlayerList`.
+    pub player_list: bool,
     pub mouse: (i32, i32),
     /// Transitions since the previous frame, each with whether a screen was open when it arrived.
     pub events: Vec<(Event, bool)>,
@@ -122,6 +126,7 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     }
     b.push(u8::from(i.unicode));
     b.push(u8::from(i.screen));
+    b.push(u8::from(i.debug) | u8::from(i.player_list) << 1);
     b.extend(i.mouse.0.to_be_bytes());
     b.extend(i.mouse.1.to_be_bytes());
     let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
@@ -427,6 +432,8 @@ mod tests {
             gui_scale: 2,
             unicode: true,
             screen: true,
+            debug: true,
+            player_list: false,
             mouse: (5, 6),
             events: vec![
                 (
@@ -453,7 +460,7 @@ mod tests {
         for v in [854i32, 480, 2] {
             want.extend(v.to_be_bytes());
         }
-        want.extend([1, 1]);
+        want.extend([1, 1, 1]);
         want.extend(5i32.to_be_bytes());
         want.extend(6i32.to_be_bytes());
         want.extend([0, 3]);

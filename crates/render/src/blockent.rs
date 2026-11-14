@@ -411,7 +411,9 @@ impl Book {
         if let Some((dx, dz)) = near {
             self.t_rot = dz.atan2(dx) as f32;
             self.book_spread += 0.1;
-            let rng = self.rng.get_or_insert_with(|| crate::jrandom::JavaRandom::new(0));
+            let rng = self
+                .rng
+                .get_or_insert_with(|| crate::jrandom::JavaRandom::new(0));
             if self.book_spread < 0.5 || rng.next_int(40) == 0 {
                 let before = self.flip_t;
                 while before == self.flip_t {
@@ -474,18 +476,44 @@ fn book_block(out: &mut Batches, book: &Book, at: Mat, partial: f32) {
         .rotate_y(-yaw * 180.0 / PI)
         .rotate_z(80.0);
     let (y, page_x) = book_angles(ticks, flip_l, flip_r, spread);
-    let target = out.mesh(Tex::Named("textures/entity/enchanting_table_book.png".into()));
+    let target = out.mesh(Tex::Named(
+        "textures/entity/enchanting_table_book.png".into(),
+    ));
     let tex = [64.0, 32.0];
     let part = |min: V3, size: V3, uv, pivot: V3, rot_y: f32| {
         Cube::new(min, size, uv).at(pivot, [0.0, rot_y, 0.0])
     };
     let page = [page_x, 0.0, 0.0];
     for cube in [
-        part([-6.0, -5.0, 0.0], [6.0, 10.0, 0.0], (0.0, 0.0), [0.0, 0.0, -1.0], y[0]),
-        part([0.0, -5.0, 0.0], [6.0, 10.0, 0.0], (16.0, 0.0), [0.0, 0.0, 1.0], y[1]),
-        part([-1.0, -5.0, 0.0], [2.0, 10.0, 0.0], (12.0, 0.0), [0.0; 3], PI / 2.0),
+        part(
+            [-6.0, -5.0, 0.0],
+            [6.0, 10.0, 0.0],
+            (0.0, 0.0),
+            [0.0, 0.0, -1.0],
+            y[0],
+        ),
+        part(
+            [0.0, -5.0, 0.0],
+            [6.0, 10.0, 0.0],
+            (16.0, 0.0),
+            [0.0, 0.0, 1.0],
+            y[1],
+        ),
+        part(
+            [-1.0, -5.0, 0.0],
+            [2.0, 10.0, 0.0],
+            (12.0, 0.0),
+            [0.0; 3],
+            PI / 2.0,
+        ),
         part([0.0, -4.0, -0.99], [5.0, 8.0, 1.0], (0.0, 10.0), page, y[2]),
-        part([0.0, -4.0, -0.01], [5.0, 8.0, 1.0], (12.0, 10.0), page, y[3]),
+        part(
+            [0.0, -4.0, -0.01],
+            [5.0, 8.0, 1.0],
+            (12.0, 10.0),
+            page,
+            y[3],
+        ),
         part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[4]),
         part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[5]),
     ] {

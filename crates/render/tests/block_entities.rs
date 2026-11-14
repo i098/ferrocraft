@@ -262,7 +262,10 @@ fn enchanting_table_book_floats_and_opens_near_a_player() {
     let empty = frame(&mut r, &c, "table_none");
     r.set_block(0, 64, 4, 116 << 4);
     let closed = frame(&mut r, &c, "table_closed");
-    assert!(differs(&empty, &closed) > 500, "the table and its closed book draw");
+    assert!(
+        differs(&empty, &closed) > 500,
+        "the table and its closed book draw"
+    );
     // A player 2 blocks away opens the book over 10 ticks.
     for _ in 0..10 {
         r.tick_block_entities(&[[0.5, 65.0, 6.5]]);

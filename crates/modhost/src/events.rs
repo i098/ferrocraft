@@ -45,6 +45,11 @@ pub enum Event {
     Remove(i32),
 }
 
+/// Write the events of one frame in order.
+pub fn write_all(w: &mut impl Write, events: &[Event]) -> io::Result<()> {
+    events.iter().try_for_each(|e| write(w, e))
+}
+
 pub fn write(w: &mut impl Write, e: &Event) -> io::Result<()> {
     let mut b = vec![b'E'];
     match *e {

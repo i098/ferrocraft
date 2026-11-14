@@ -1,7 +1,7 @@
 //! The renderer side of `blockent.rs`: server data in, per-frame meshes out.
 
 use super::*;
-use crate::blockent::{banner_image, Banner, Skull, View, WornHead};
+use crate::blockent::{banner_image, Banner, Beams, Skull, View, WornHead, BEAM_TEXTURE};
 
 impl Renderer {
     /// `S24 BlockAction` (`event` 1 and `value` = viewers) opens or closes the lid of a chest.
@@ -68,6 +68,42 @@ impl Renderer {
                     self.light_at(p)
                 });
         self.tile_meshes = self.upload_batches(batches);
+        let blocks = &self.blocks;
+        let beams = self.block_entities.beams(&view, |x, y, z| {
+            let at = blocks.get(&(x.div_euclid(16), z.div_euclid(16)));
+            let in_world = (0..HEIGHT as i32).contains(&y);
+            at.filter(|_| in_world).map_or(0, |data| {
+                data[index(
+                    x.rem_euclid(16) as usize,
+                    y as usize,
+                    z.rem_euclid(16) as usize,
+                )]
+            })
+        });
+        self.set_beams(beams);
+    }
+
+    fn set_beams(&mut self, beams: Beams) {
+        if !beams.inner.is_empty() {
+            self.load_texture(BEAM_TEXTURE);
+        }
+        self.beam_meshes = [beams.inner, beams.outer].map(|m| self.upload_mesh(m, [0.0; 3]));
+    }
+
+    /// Draws the beacon beams (`TileEntityBeaconRenderer`) and restores the opaque pipeline.
+    pub(super) fn draw_beams<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        let [Some(inner), outer] = &self.beam_meshes else {
+            return;
+        };
+        pass.set_bind_group(0, &self.textures[BEAM_TEXTURE], &[]);
+        pass.set_pipeline(&self.beam_pipe);
+        draw_mesh(pass, inner);
+        if let Some(outer) = outer {
+            pass.set_pipeline(&self.beam_glow_pipe);
+            draw_mesh(pass, outer);
+        }
+        pass.set_pipeline(&self.opaque_pipe);
+        pass.set_bind_group(0, &self.world_group, &[]);
     }
 
     /// Skulls on the heads of mobs and players for the next frames (`LayerCustomHead`).

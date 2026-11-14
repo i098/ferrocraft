@@ -781,6 +781,7 @@ fn look_13(id: u16, meta: u16) -> Look {
         123 => cube(0x6a4a2a, "redstone_lamp_off"),
         124 => cube(0xf0d08a, "redstone_lamp_on"),
         129 => cube(0x7f9a86, "emerald_ore"),
+        138 => cutout(0x76ddd4, "beacon"),
         130 => shape(0x1a1a2a, ["obsidian"; 6]),
         133 => cube(0x2fc15a, "emerald_block"),
         137 => cube(0xc08040, "command_block"),

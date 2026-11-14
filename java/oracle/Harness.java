@@ -138,6 +138,93 @@ public class Harness {
         }
     }
 
+    /** Copies the alpha arithmetic of `renderShadowOnBlock` into `target`, with its inputs as arguments. */
+    static class ShadowAlphaCopier extends MethodVisitor {
+        final MethodVisitor target;
+        boolean copying;
+        boolean extracted;
+
+        ShadowAlphaCopier(MethodVisitor target) {
+            super(Opcodes.ASM9);
+            this.target = target;
+        }
+
+        @Override
+        public void visitVarInsn(int opcode, int var) {
+            if (opcode == Opcodes.FLOAD && var == 9) copying = true;
+            if (!copying) return;
+            if (opcode == Opcodes.DSTORE && var == 19) {
+                target.visitInsn(Opcodes.DRETURN);
+                copying = false;
+                extracted = true;
+            } else if (opcode == Opcodes.FLOAD && var == 9) {
+                target.visitVarInsn(Opcodes.FLOAD, 0);
+            } else if (opcode == Opcodes.DLOAD && var == 4) {
+                target.visitVarInsn(Opcodes.DLOAD, 1);
+            } else if (opcode == Opcodes.DLOAD && var == 13) {
+                target.visitInsn(Opcodes.DCONST_0);
+            }
+        }
+
+        @Override
+        public void visitInsn(int opcode) {
+            if (copying) target.visitInsn(opcode);
+        }
+
+        @Override
+        public void visitLdcInsn(Object value) {
+            if (copying) target.visitLdcInsn(value);
+        }
+
+        @Override
+        public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
+            if (!copying) return;
+            if (name.equals("getY")) target.visitVarInsn(Opcodes.ILOAD, 3);
+            else if (name.equals("getBrightness")) target.visitVarInsn(Opcodes.FLOAD, 4);
+            else if (!name.equals("getWorld")) throw new IllegalStateException(name);
+        }
+    }
+
+    /** Runs the real shadow alpha bytecode, with the world brightness supplied as an argument. */
+    static java.lang.reflect.Method shadowAlphaMethod;
+    static double shadowAlpha(float alpha, double y, int blockY, float brightness) throws Exception {
+        if (shadowAlphaMethod == null) {
+            ClassWriter output = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            output.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC, "ShadowAlpha", null, "java/lang/Object", null);
+            MethodVisitor target = output.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "eval", "(FDIF)D", null, null);
+            target.visitCode();
+            ShadowAlphaCopier copier = new ShadowAlphaCopier(target);
+            try (InputStream input = Harness.class.getResourceAsStream("/net/minecraft/flat/EntityRenderer.class")) {
+                new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
+                        return name.equals("renderShadowOnBlock") ? copier : null;
+                    }
+                }, 0);
+            }
+            if (!copier.extracted) throw new IllegalStateException("shadow alpha bytecode not found");
+            target.visitMaxs(0, 0);
+            target.visitEnd();
+            output.visitEnd();
+            byte[] bytes = output.toByteArray();
+            Class<?> type = new ClassLoader(Harness.class.getClassLoader()) {
+                Class<?> load() { return defineClass("ShadowAlpha", bytes, 0, bytes.length); }
+            }.load();
+            shadowAlphaMethod = type.getMethod("eval", float.class, double.class, int.class, float.class);
+        }
+        return (Double) shadowAlphaMethod.invoke(null, alpha, y, blockY, brightness);
+    }
+
+    /** `shadow <alpha> <y> <blockY> <light>`: the shadow alpha with the brightness table entry of `light`. */
+    static void shadowCommand(String[] t) throws Exception {
+        java.lang.reflect.Method init = Dimension.class.getDeclaredMethod("initBrightnessTable");
+        init.setAccessible(true);
+        init.invoke(world.dimension);
+        System.out.println(shadowAlpha(Float.parseFloat(t[1]), Double.parseDouble(t[2]),
+            Integer.parseInt(t[3]), world.dimension.getBrightnessTable()[Integer.parseInt(t[4])]));
+    }
+
     /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
     static String bidiReorder(String hexText) throws Exception {
         String text = fromHex(hexText);
@@ -361,6 +448,9 @@ public class Harness {
                         + (b.getMaterial().isToolNotRequired() ? 1 : 0));
                     break;
                 }
+                case "shadow":
+                    shadowCommand(t);
+                    break;
                 case "mip":
                     mipLines(t);
                     break;

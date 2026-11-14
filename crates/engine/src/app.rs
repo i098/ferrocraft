@@ -349,6 +349,7 @@ impl App {
         };
         let (fullscreen, vsync, unicode) = (s.fullscreen, s.vsync, self.ui.unicode());
         let mipmap_levels = s.mipmap_levels.max(0) as u32;
+        let entity_shadows = s.entity_shadows;
         let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
         let unicode = self
             .renderer
@@ -367,6 +368,7 @@ impl App {
         if let Some(r) = &mut self.renderer {
             r.set_vsync(vsync);
             r.set_mipmap_levels(mipmap_levels);
+            r.set_entity_shadows(entity_shadows);
         }
         self.send_client_settings();
     }
@@ -768,6 +770,13 @@ impl App {
         let frac = self.tick_frac();
         let cam = self.camera(frac);
         let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
+        let shadow_view = spectated.map(|e| e.lerp_pos(frac)).or_else(|| {
+            self.game.player.as_ref().map(|p| {
+                std::array::from_fn(|i| {
+                    self.game.prev_pos[i] + (p.pos[i] - self.game.prev_pos[i]) * frac
+                })
+            })
+        });
         // `RenderPlayer.doRender`: the user player draws only as `renderViewEntity`.
         let self_model = (self.perspective != 0 && spectated.is_none())
             .then(|| self.self_draw(frac))
@@ -923,6 +932,7 @@ impl App {
         );
         r.set_mod_look(hurt, glint);
         r.set_entities(&draws);
+        r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_lines(

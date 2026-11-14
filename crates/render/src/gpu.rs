@@ -138,6 +138,11 @@ pub struct Renderer {
     on_fire: bool,
     fire_frames: [u32; 2],
     fire_pipe: wgpu::RenderPipeline,
+    shadow_pipe: wgpu::RenderPipeline,
+    /// `GameSettings.entityShadows`.
+    entity_shadows: bool,
+    shadows: Vec<entity::shadow::Caster>,
+    shadow_view: Option<[f64; 3]>,
     opaque_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     /// `TRANSLUCENT` chunk layer: blended like `water_pipe`, but back faces culled as vanilla does.
@@ -404,7 +409,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, hand_glint_pipe, border_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -439,6 +444,10 @@ impl Renderer {
             on_fire: false,
             fire_frames: [0; 2],
             fire_pipe,
+            shadow_pipe,
+            entity_shadows: true,
+            shadows: Vec::new(),
+            shadow_view: None,
             opaque_pipe,
             water_pipe,
             translucent_pipe,
@@ -633,11 +642,19 @@ impl Renderer {
             image.height as u32,
             &image.rgba,
         );
+        // `shadow.png.mcmeta` requests blur and clamp instead of the atlas sampler.
+        let shadow_sampler = (tex == entity::shadow::TEXTURE).then(|| {
+            self.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })
+        });
         let group = bind_group(
             &self.device,
             &self.layout_bg,
             &self.globals,
-            &self.sampler,
+            shadow_sampler.as_ref().unwrap_or(&self.sampler),
             &view,
         );
         if tex == entity::GLINT_TEXTURE {
@@ -886,6 +903,9 @@ impl Renderer {
         }
         self.mod_look.recolor_glint(&mut glint);
         self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
+        self.shadows.clear();
+        self.shadows
+            .extend(draws.iter().filter_map(entity::shadow::caster));
         self.fires.clear();
         self.fires.extend(
             draws
@@ -1639,6 +1659,7 @@ impl Renderer {
         let env = self.environment;
         self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
+        let shadow = self.prepare_shadows(cam);
         let sky = env.sky_state(self.sky_temperature(cam), look_vector(cam));
         let mut globals = Self::globals(cam, &env, &sky, (w, h));
         globals.hurt = self.mod_look.hurt_tint();
@@ -1774,6 +1795,11 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &shadow {
+                pass.set_pipeline(&self.shadow_pipe);
+                pass.set_bind_group(0, &self.textures[entity::shadow::TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
             }
             self.draw_fire_world(&mut pass, &fire);
             // `renderMiningProgress` follows the entities.
@@ -2111,7 +2137,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 14] {
+) -> [wgpu::RenderPipeline; 15] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2360,6 +2386,16 @@ fn build_pipelines(
         true,
         false,
     );
+    let shadow_pipe = pipe(
+        "vs_world",
+        "fs_shadow",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     let border_pipe = pipe(
         "vs_world",
         "fs_crack",
@@ -2383,6 +2419,7 @@ fn build_pipelines(
         crack_pipe,
         bolt_pipe,
         fire_pipe,
+        shadow_pipe,
         hand_glint_pipe,
         border_pipe,
     ]
@@ -2423,6 +2460,7 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
 }
 
 mod block_entities;
+mod shadow;
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {
     pass.set_vertex_buffer(0, m.vertices.slice(..));

@@ -24,6 +24,9 @@ Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick a
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
+Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
+`set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.
+`set_shadow_view` supplies the view entity's feet, so the F5 camera offset does not change the distance fade.
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.
 The engine disables that overlay in third-person views and spectator mode.

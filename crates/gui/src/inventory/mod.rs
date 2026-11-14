@@ -17,6 +17,7 @@ pub use crate::screens::{Canvas, Metrics};
 use creative::Creative;
 use icons::Icons;
 use layout::{layout, Layout, LABEL};
+use render::EntityDraw;
 use world::effects::{self, Effects};
 use world::inventory::{self as inv, Click, Inventory, ItemStack, Kind, Slot, OUTSIDE};
 
@@ -85,6 +86,8 @@ pub struct ContainerScreen {
     layout: Layout,
     /// `theSlot`: the slot under the mouse at the last draw.
     hovered: Option<usize>,
+    /// `GuiInventory.oldMouseX/Y`: the cursor of the frame before, which the player model follows.
+    old_mouse: [i32; 2],
     split: Option<Split>,
     ignore_up: bool,
     double_click: bool,
@@ -103,7 +106,12 @@ pub struct InventoryView<'a> {
     pub icons: &'a Icons,
     pub advanced_tooltips: bool,
     pub effects: &'a Effects,
+    /// The local player, for the model in the inventory screens.
+    pub player: Option<&'a EntityDraw>,
 }
+
+/// The local player and the cursor position its model turns toward.
+pub(super) type PlayerModel<'a> = Option<(&'a EntityDraw, [i32; 2])>;
 
 /// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
 fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
@@ -157,6 +165,7 @@ impl ContainerScreen {
             height,
             layout: layout(inv.kind()),
             hovered: None,
+            old_mouse: [0; 2],
             split: None,
             ignore_up: false,
             double_click: false,
@@ -595,6 +604,7 @@ impl ContainerScreen {
             icons,
             advanced_tooltips,
             effects,
+            player,
         } = *view;
         // `checkStatusEffects`: only the player's own inventory and the creative screen list effects.
         self.effects_shown = !effects.is_empty() && inv.open.is_none();
@@ -604,9 +614,10 @@ impl ContainerScreen {
             cr.update_scroll(inv, my - t);
         }
         dim_world(c, self.width, self.height);
+        let old = std::mem::replace(&mut self.old_mouse, [mx, my]);
         match &self.creative {
-            Some(cr) => cr.draw_background(c, inv, icons, l, t),
-            None => self.draw_background(c, inv, l, t),
+            Some(cr) => cr.draw_background(c, inv, icons, l, t, player.map(|p| (p, [mx, my]))),
+            None => self.draw_background(c, inv, l, t, player.map(|p| (p, old))),
         }
         self.extras.draw_back(c, inv, l, t, mx, my);
         self.hovered = self.slot_at(mx, my);
@@ -758,7 +769,14 @@ impl ContainerScreen {
     }
 
     /// `drawGuiContainerBackgroundLayer` of each survival screen.
-    fn draw_background(&self, c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32) {
+    fn draw_background(
+        &self,
+        c: &mut dyn Canvas,
+        inv: &Inventory,
+        l: i32,
+        t: i32,
+        player: PlayerModel,
+    ) {
         let lay = &self.layout;
         match inv.kind() {
             Kind::Chest(rows) => {
@@ -799,7 +817,16 @@ impl ContainerScreen {
             }
             _ => modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height),
         }
-        // shortcut: the 3D player and horse models (drawEntityOnScreen) wait for the entity renderer
+        if let (Kind::Player, Some((p, [mx, my]))) = (inv.kind(), player) {
+            let (x, y) = (l + 51, t + 75);
+            c.entity(
+                x as f32,
+                y as f32,
+                30.0,
+                [(x - mx) as f32, (y - 50 - my) as f32],
+                p,
+            );
+        }
     }
 
     /// `GuiScreenHorseInventory`: the window, the chest and armor slot backgrounds, then the horse model.

@@ -2,7 +2,7 @@
 
 use crate::screens::{Canvas, Metrics};
 use crate::toolkit::Gui;
-use render::Blend;
+use render::{Blend, EntityDraw};
 
 pub struct GuiCanvas<'a, 'f> {
     pub gui: &'a mut Gui<'f>,
@@ -65,6 +65,10 @@ impl Canvas for GuiCanvas<'_, '_> {
         self.gui.translate(translate[0], translate[1]);
         self.gui.scale(scale, scale);
         self.gui.rotate(rotate_deg);
+    }
+
+    fn entity(&mut self, x: f32, y: f32, scale: f32, mouse: [f32; 2], draw: &EntityDraw) {
+        self.gui.entity(x, y, scale, mouse, draw);
     }
 
     fn pop(&mut self) {

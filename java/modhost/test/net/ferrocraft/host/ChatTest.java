@@ -6,19 +6,37 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.EntityJoinWorldEvent;
+import net.minecraftforge.event.entity.player.AttackEntityEvent;
+import net.minecraftforge.event.world.WorldEvent;
+import net.minecraftforge.fml.common.FMLCommonHandler;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.fml.common.network.FMLNetworkEvent;
 
-/** Posts chat lines through {@link Chat} to a Forge handler that cancels "spam" and rewrites "hello". */
+/**
+ * Posts chat lines through {@link Chat} to a Forge handler that cancels "spam" and rewrites "hello", then sends one of
+ * each world and entity message through {@link Events}: every Forge handler must get its event exactly once, in order.
+ */
 public final class ChatTest {
+    private final List<String> seen = new ArrayList<>();
+    private final List<Object> joined = new ArrayList<>();
+    private Object world;
+    private Object player;
+
     private ChatTest() {}
 
     public static void run() {
         int code = 1;
         try {
             Object mc = Minecraft.create(net.minecraft.launchwrapper.Launch.minecraftHome);
-            MinecraftForge.EVENT_BUS.register(new ChatTest());
+            ChatTest test = new ChatTest();
+            test.world = R.get(mc, "field_71441_e");
+            MinecraftForge.EVENT_BUS.register(test);
+            FMLCommonHandler.instance().bus().register(test);
             Chat chat = new Chat();
             check(same(send(chat, "just chatting"), new byte[] {0}), "an untouched line is kept");
             check(same(send(chat, "buy spam now"), new byte[] {1}), "a cancelled line is cancelled");
@@ -36,6 +54,9 @@ public final class ChatTest {
             check(same(send(chat, "buy spam now"), new byte[] {3}), "Java takes a cancelled line too");
             check(((java.util.List<?>) drawn).size() == 1, "a cancelled line is not in GuiNewChat");
             check(same(send(chat, 3, ""), new byte[] {3}), "the input state answers 3 when Java keeps the chat");
+            test.player = R.get(mc, "field_71439_g");
+            R.set(test.player, "field_145783_c", 1); // the mirror owns the player's id
+            test.eventsReachTheHandlers(new Events(mc));
             System.out.println("ChatTest passed");
             code = 0;
         } catch (Throwable t) {
@@ -44,12 +65,74 @@ public final class ChatTest {
         Host.halt(code);
     }
 
+    private void eventsReachTheHandlers(Events events) throws IOException {
+        seen.clear();
+        post(events, 'c');
+        post(events, 'l');
+        Object x = R.get(player, "field_70165_t"); // posX
+        join(events, 0, 0, 1);
+        check(x.equals(R.get(player, "field_70165_t")), "the own join leaves the mirror's position alone");
+        join(events, 2, 50, 7); // a creeper
+        join(events, 1, 0, 9); // another player
+        join(events, 3, 50, 11); // lit TNT
+        join(events, 2, 54, 13); // a zombie
+        join(events, 3, 2, 15); // a dropped item
+        post(events, 'a', 7);
+        post(events, 'r', 7);
+        post(events, 'a', 7); // removed: no event
+        post(events, 'a', 99); // never joined: no event
+        post(events, 'u');
+        post(events, 'd');
+        R.set(world, "field_72986_A", R.alloc("net.minecraft.world.storage.WorldInfo")); // the live host's Overrides sets it; Entity.toString reads the world name
+        // A mod reads the name and the text of the entity it gets; a stand-in without a data watcher threw a NullPointerException.
+        for (Object entity : joined) {
+            check(R.call(entity, "func_70005_c_") != null, "getName works"); // getName
+            check(String.valueOf(entity).contains("/" + R.call(entity, "func_145782_y") + ","), "toString shows the id");
+        }
+        String want = "connect,load,join 1,join 7,join 9,join 11,join 13,join 15,attack 7,unload,disconnect";
+        check(String.join(",", seen).equals(want), "each event once and in order, got " + seen);
+    }
+
     @SubscribeEvent
     public void onChat(ClientChatReceivedEvent e) {
         // The Minecraft jar keeps Notch names, so the message is read by SRG name.
         String text = (String) R.call(R.get(e, "message"), "func_150260_c"); // getUnformattedText
         if (text.contains("spam")) e.setCanceled(true);
         else if (text.contains("hello")) R.set(e, "message", R.neu("net.minecraft.util.ChatComponentText", "bye"));
+    }
+
+    @SubscribeEvent
+    public void onConnect(FMLNetworkEvent.ClientConnectedToServerEvent e) {
+        seen.add("connect");
+    }
+
+    @SubscribeEvent
+    public void onDisconnect(FMLNetworkEvent.ClientDisconnectionFromServerEvent e) {
+        seen.add("disconnect");
+    }
+
+    @SubscribeEvent
+    public void onLoad(WorldEvent.Load e) {
+        check(R.get(e, "world") == world, "load carries the world");
+        seen.add("load");
+    }
+
+    @SubscribeEvent
+    public void onUnload(WorldEvent.Unload e) {
+        seen.add("unload");
+    }
+
+    @SubscribeEvent
+    public void onJoin(EntityJoinWorldEvent e) {
+        check(R.get(e, "world") == world, "join carries the world");
+        Object entity = R.get(e, "entity");
+        if (entity != player) joined.add(entity); // the player is the test's own, not a stand-in
+        seen.add("join " + R.call(entity, "func_145782_y")); // getEntityId
+    }
+
+    @SubscribeEvent
+    public void onAttack(AttackEntityEvent e) {
+        seen.add("attack " + R.call(R.get(e, "target"), "func_145782_y"));
     }
 
     private static byte[] send(Chat chat, String text) throws IOException {
@@ -66,6 +149,28 @@ public final class ChatTest {
         ByteArrayOutputStream reply = new ByteArrayOutputStream();
         chat.line(new DataInputStream(new ByteArrayInputStream(request.toByteArray())), new DataOutputStream(reply));
         return reply.toByteArray();
+    }
+
+    /** A message of events.rs without a payload, or with one entity id. */
+    private static void post(Events events, char code, int... id) throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        DataOutputStream w = new DataOutputStream(b);
+        w.writeByte(code);
+        for (int i : id) w.writeInt(i);
+        events.apply(new DataInputStream(new ByteArrayInputStream(b.toByteArray())));
+    }
+
+    private static void join(Events events, int kind, int type, int id) throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        DataOutputStream w = new DataOutputStream(b);
+        w.writeByte('j');
+        w.writeInt(id);
+        w.writeByte(kind);
+        w.writeInt(type);
+        w.writeLong(1);
+        w.writeLong(2);
+        for (double v : new double[] {1.5, 64, -2}) w.writeDouble(v);
+        events.apply(new DataInputStream(new ByteArrayInputStream(b.toByteArray())));
     }
 
     private static boolean same(byte[] a, byte[] b) {

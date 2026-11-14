@@ -11,6 +11,7 @@ macro_rules! metrics {
 mod events;
 mod input;
 mod mod_boot;
+mod mod_events;
 mod mod_lists;
 mod own_sounds;
 mod pack;

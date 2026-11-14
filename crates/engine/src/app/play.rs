@@ -788,6 +788,7 @@ impl App {
                 }
                 DigAction::Attack(id) => {
                     self.predict_hit_particles(id);
+                    self.mod_attack(id);
                     self.session_send(|s| s.attack_entity(id))
                 }
             };

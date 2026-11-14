@@ -1404,7 +1404,18 @@ mod tests {
         assert_eq!(moods(95, 6), [Some(Mood::Smoke)]);
         assert_eq!(moods(100, 7), [Some(Mood::Hearts)]);
         assert_eq!(moods(100, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(98, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(98, 6), [Some(Mood::Smoke)]);
         assert_eq!(moods(91, 18), [Some(Mood::Hearts)]);
+        let mut zombie = mob(54);
+        zombie.apply(EntityEvent::Status { id: 1, status: 20 });
+        match zombie.take_fx().as_slice() {
+            [Fx::Death { pos, size }] => {
+                assert_eq!(*pos, [0.0; 3]);
+                assert_eq!(*size, (0.6, 1.95));
+            }
+            other => panic!("expected one Death fx, got {}", other.len()),
+        }
         assert!(moods(54, 12).is_empty(), "zombie is no villager");
         assert!(moods(120, 18).is_empty(), "villager is no animal");
         let mut witch = mob(66);

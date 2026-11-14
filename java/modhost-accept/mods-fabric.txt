@@ -1,0 +1,4 @@
+# entrypoint provider ids (comma list: mod ids with a main or client entrypoint in the jar) | file | pinned Modrinth URL (Legacy Fabric 1.8.9); read by java/modhost-fabric/test.sh
+# legacy-fabric-api is a bundle of modules: the ids are the modules of it that have a main or client entrypoint
+legacy-fabric-command-api-v1,legacy-fabric-permissions-api-v1,legacy-fabric-command-api-v2,legacy-fabric-registry-sync-api-v2-common|legacy-fabric-api-1.13.5.jar|https://cdn.modrinth.com/data/9CJED7xi/versions/Znk9CSGQ/legacy-fabric-api-1.13.5.jar
+fpsdisplay|fpsdisplay-3.1.0+1.8.9.jar|https://cdn.modrinth.com/data/DIlqwRFH/versions/G0lqK9Js/fpsdisplay-3.1.0%2B1.8.9.jar

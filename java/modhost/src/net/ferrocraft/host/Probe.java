@@ -46,7 +46,7 @@ public final class Probe {
 
     /** The stand-in entities that {@link Events} keeps, by id. */
     private final Map<Integer, Object> entities;
-    private final Object forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
+    private final Object forgeBus = Glue.forgeBus();
     private final Object renderer = R.alloc("net.minecraft.client.renderer.entity.RenderPig");
     private final Object renderItem = R.alloc("net.minecraft.client.renderer.entity.RenderItem");
     /** A blaze: its {@code getBrightness} needs no world. */
@@ -147,6 +147,7 @@ public final class Probe {
     }
 
     private boolean listening() {
+        if (forgeBus == null) return false;
         int bus = (Integer) R.get(forgeBus, "busID");
         Object list = R.get(R.cls("net.minecraftforge.client.event.RenderLivingEvent$Pre"), "LISTENER_LIST");
         return ((Object[]) R.call(list, "getListeners", bus)).length > 0;

@@ -21,7 +21,7 @@ final class Chat {
     private static final int INPUT_CLOSED = 4;
     private static final int TAKEN = 3;
 
-    private final Object forgeBus = R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS");
+    private final Object forgeBus = Glue.forgeBus();
     private final ChatGui gui = new ChatGui();
 
     /** The overlay of one frame, drawn through {@link ChatGui}. */
@@ -45,6 +45,11 @@ final class Chat {
         if (type < 2 && ChatGui.owned()) {
             handle(type, text);
             out.writeByte(TAKEN);
+            out.flush();
+            return;
+        }
+        if (forgeBus == null) { // no event bus to give the line to: keep it
+            out.writeByte(0);
             out.flush();
             return;
         }

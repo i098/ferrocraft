@@ -75,6 +75,7 @@ public final class Sink {
     }
 
     public static synchronized void rect(int x0, int y0, int x1, int y1, int argb) {
+        if (Anchor.rect(x0, y0, x1, y1, argb)) return;
         float[] m = STACK[top];
         try {
             out.writeByte('R');
@@ -135,6 +136,7 @@ public final class Sink {
     public static synchronized void text(String s, float x, float y, int argb, boolean shadow) {
         if (s == null || s.isEmpty()) return;
         float[] m = STACK[top];
+        if (Anchor.text(s, x, y, argb, shadow, m)) return;
         byte[] utf = s.getBytes(StandardCharsets.UTF_8);
         try {
             out.writeByte('T');

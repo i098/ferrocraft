@@ -13,6 +13,7 @@ mod input;
 mod mod_boot;
 mod mod_events;
 mod mod_lists;
+mod mod_world;
 mod own_sounds;
 mod pack;
 mod play;
@@ -127,6 +128,8 @@ pub struct App {
     fov_mod: (f32, f32),
     /// What the mods left of the world values at the last frame's start.
     mod_view: ferrocraft_modhost::Overrides,
+    /// What the mods drew in the world at the last frame: name tags, the TNT countdown, hitbox lines.
+    mod_drawn: mod_world::Drawn,
     view_bob: play::ViewBob,
     /// When the last frame was shown, for the `maxFps` limit.
     last_frame: Instant,
@@ -194,6 +197,7 @@ impl App {
             limbs: Limbs::default(),
             fov_mod: (1.0, 1.0),
             mod_view: ferrocraft_modhost::Overrides::default(),
+            mod_drawn: mod_world::Drawn::default(),
             view_bob: play::ViewBob::default(),
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
@@ -761,6 +765,7 @@ impl App {
                 .map(|(id, _)| id)
         });
         let skins = &mut self.skins;
+        let size = self.renderer.as_ref().map_or((0, 0), |r| r.size());
         let mut renderer = self.renderer.as_mut();
         let ridden: std::collections::HashSet<i32> = self
             .game
@@ -795,6 +800,8 @@ impl App {
             self.team_tag(e, d);
             self.held_and_line(e, d, frac);
         }
+        self.mod_drawn =
+            mod_world::Drawn::ask(self.mods.as_ref(), &self.game, &cam, &draws, frac, size);
         draws.extend(self_model);
         // `RenderGlobal`: the spectated entity is not drawn from its own eyes.
         if let (0, Some(id)) = (self.perspective, self.game.camera) {
@@ -885,6 +892,7 @@ impl App {
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_cracks(self.game.cracks());
+        r.set_mod_lines(&self.mod_drawn.lines());
         let verts =
             self.particles
                 .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32, |p| {
@@ -1074,7 +1082,10 @@ impl App {
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
         if show_hud {
-            draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
+            if !self.mod_drawn.labels_owned {
+                draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
+            }
+            mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac);
             let status = status_of(&self.game, self.hud.update_counter);
             self.hud.selected_slot = i32::from(self.game.inv.held);

@@ -1,5 +1,6 @@
 //! Rust side of the mod host. See the README of this crate.
 
+pub mod anchor;
 pub mod chat;
 pub mod events;
 pub mod hooks;
@@ -81,6 +82,8 @@ struct Shared {
     /// A world values request the game thread waits on, and the JVM's answer.
     world: Option<WorldState>,
     world_answer: Option<Overrides>,
+    /// A world draws request and the JVM's answer, see `anchor.rs`.
+    anchor: anchor::Slot,
     /// A chat line the receiving thread waits on, and the JVM's verdict.
     chat: Option<(ChatKind, String)>,
     chat_answer: Option<ChatVerdict>,
@@ -161,6 +164,7 @@ impl ModHost {
                     answer: None,
                     world: None,
                     world_answer: None,
+                    anchor: anchor::Slot::default(),
                     chat: None,
                     chat_answer: None,
                     chat_taken: false,
@@ -602,6 +606,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                 && !s.fresh
                 && s.player.is_none()
                 && s.world.is_none()
+                && s.anchor.request.is_none()
                 && s.chat.is_none()
             {
                 s = link.view.wait(s).unwrap();
@@ -628,6 +633,17 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
                     |st| overrides::write_state(st, &w),
                     overrides::read_overrides,
                     |s, a| s.world_answer = Some(a),
+                )?;
+                continue;
+            }
+            if let Some(a) = s.anchor.request.take() {
+                drop(s);
+                round_trip(
+                    &mut stream,
+                    link,
+                    |st| anchor::write_request(st, &a),
+                    anchor::read_world,
+                    |s, w| s.anchor.answer = Some(w),
                 )?;
                 continue;
             }
@@ -917,6 +933,7 @@ mod tests {
                 answer: None,
                 world: None,
                 world_answer: None,
+                anchor: anchor::Slot::default(),
                 chat: None,
                 chat_answer: None,
                 chat_taken: false,

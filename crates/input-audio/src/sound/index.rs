@@ -284,9 +284,8 @@ impl SoundIndex {
     /// topmost layer that has it.
     pub fn load(minecraft_dir: &Path, version: &str, packs: &[Pack]) -> Result<Self, String> {
         let assets = AssetIndex::load(minecraft_dir, version)?;
-        let resolve = &|name: &str| {
-            // `ResourceLocation(name)`: `ns:foo` is `ns/sounds/foo.ogg`, a bare name is `minecraft`.
-            let (domain, path) = name.split_once(':').unwrap_or(("minecraft", name));
+        let resolve = &|domain: &str, path: &str| {
+            // `ResourceLocation`: `ns:foo` is `ns/sounds/foo.ogg`; a bare name takes the event's domain.
             let rel = format!(
                 "{}/sounds/{}.ogg",
                 domain.to_lowercase(),
@@ -388,7 +387,7 @@ impl SoundIndex {
     pub fn from_json(
         json: &[u8],
         domain: &str,
-        resolve: impl Fn(&str) -> Option<SoundFile>,
+        resolve: impl Fn(&str, &str) -> Option<SoundFile>,
     ) -> Result<Self, String> {
         let root: Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
         let root = root.as_object().ok_or("sounds.json is not an object")?;
@@ -404,16 +403,17 @@ impl SoundIndex {
             let mut refs = Vec::new();
             for s in sounds {
                 let (file, volume, pitch, weight, is_event) = parse_sound(s).map_err(&bad)?;
+                let (d, p) = file.split_once(':').unwrap_or((domain, file));
                 if is_event {
-                    refs.push(canon(file));
-                } else if let Some(path) = resolve(file) {
+                    refs.push(key(d, p));
+                } else if let Some(path) = resolve(d, p) {
                     variants.push(Variant {
                         file: path,
                         volume,
                         pitch,
                         weight,
                     });
-                } else if file.contains(':') {
+                } else if file.contains(':') || domain != "minecraft" {
                     index
                         .dropped
                         .push(format!("sound event {name}: dropped variant {file}"));
@@ -564,7 +564,7 @@ mod tests {
     fn parses_strings_objects_and_weights() {
         let json = br#"{"random.click":{"category":"master","sounds":["random/click"]},
             "mob.pig.say":{"category":"neutral","sounds":[{"name":"mob/pig/say1","weight":3,"volume":0.5},{"name":"mob/pig/say2"},"missing"]}}"#;
-        let idx = SoundIndex::from_json(json, "minecraft", |n| {
+        let idx = SoundIndex::from_json(json, "minecraft", |_, n| {
             (n != "missing").then(|| SoundFile::Path(PathBuf::from(n)))
         })
         .unwrap();
@@ -588,7 +588,7 @@ mod tests {
     }
 
     fn idx(json: &str) -> SoundIndex {
-        SoundIndex::from_json(json.as_bytes(), "minecraft", |n| {
+        SoundIndex::from_json(json.as_bytes(), "minecraft", |_, n| {
             Some(SoundFile::Path(PathBuf::from(n)))
         })
         .unwrap()
@@ -653,7 +653,7 @@ mod tests {
             r#"{"a":{"sounds":[{"name":"x","type":"bogus"}]}}"#,
         ] {
             assert!(
-                SoundIndex::from_json(bad.as_bytes(), "minecraft", |_| None).is_err(),
+                SoundIndex::from_json(bad.as_bytes(), "minecraft", |_, _| None).is_err(),
                 "{bad}"
             );
         }
@@ -753,7 +753,7 @@ mod tests {
         write(
             &pack,
             "assets/mymod/sounds.json",
-            br#"{"blast":{"sounds":["boom","mymod:deep/x","other:gone"]}}"#,
+            br#"{"blast":{"sounds":["boom","mymod:deep/x","other:gone"]},"alias":{"sounds":[{"name":"blast","type":"event"}]}}"#,
         );
         write(
             &pack,
@@ -761,8 +761,9 @@ mod tests {
             br#"{"random.pop":{"sounds":["mymod:boom"]}}"#,
         );
         let i = SoundIndex::load(&mc, "1.8.9", &[Pack::new(pack)]).unwrap();
-        // "boom" has no ns: it resolves to minecraft/sounds/boom.ogg, which is absent
-        assert_eq!(bytes(&i, "mymod:blast"), [b"x".to_vec()]);
+        // bare "boom" resolves in the event's own domain (mymod)
+        assert_eq!(bytes(&i, "mymod:blast"), [b"boom".to_vec(), b"x".to_vec()]);
+        assert_eq!(bytes(&i, "mymod:alias"), bytes(&i, "mymod:blast"));
         assert_eq!(
             bytes(&i, "random.pop"),
             [b"vanilla".to_vec(), b"boom".to_vec()]

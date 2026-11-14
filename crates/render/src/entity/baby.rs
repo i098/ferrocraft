@@ -21,10 +21,10 @@ const BIPED: Split = Split {
 };
 
 /// `ModelQuadruped` with `childYOffset` and `childZOffset`: the head only moves, the rest halves.
-const fn quadruped(heads: usize, y_offset: f32) -> Split {
+const fn quadruped(heads: usize, y_offset: f32, z_offset: f32) -> Split {
     Split {
         heads,
-        head: (1.0, [0.0, y_offset, 4.0]),
+        head: (1.0, [0.0, y_offset, z_offset]),
         rest: (0.5, [0.0, 24.0, 0.0]),
     }
 }
@@ -39,10 +39,10 @@ const CHICKEN: Split = Split {
 fn split(d: &EntityDraw) -> Option<Split> {
     Some(match d.class {
         Class::Mob(54 | 57) => BIPED,
-        // `ModelPig` sets `childYOffset` to 4; `ModelCow` and `ModelSheep` keep the 8 of `ModelQuadruped`.
-        Class::Mob(90) => quadruped(2, 4.0),
-        Class::Mob(92) => quadruped(3, 8.0),
-        Class::Mob(91) => quadruped(1, 8.0),
+        // `ModelQuadruped` has (8, 4); `ModelPig` sets `childYOffset` to 4 and `ModelCow` adds 2 to `childZOffset`.
+        Class::Mob(90) => quadruped(2, 4.0, 4.0),
+        Class::Mob(92) => quadruped(3, 8.0, 6.0),
+        Class::Mob(91) => quadruped(1, 8.0, 4.0),
         Class::Mob(93) => CHICKEN,
         _ => return None,
     })

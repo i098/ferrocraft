@@ -330,7 +330,7 @@ fn file_name(p: &Path) -> String {
         .into_owned()
 }
 
-/// Downloads the SRG zip (checked against its sha1) and runs `NameTable` on the Java 8 runtime.
+/// Downloads the SRG zip (checked against its sha1) and runs `NameTable` on the runtime of the profile (Java 8, or Java 25 for Ornithe).
 fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> Result<(), Error> {
     let names_jar = find_jar(
         "FERROCRAFT_NAMES_JAR",

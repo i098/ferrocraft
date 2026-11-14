@@ -1,8 +1,8 @@
 #!/bin/sh
-# Boots the Fabric host with the Legacy Fabric mods of java/modhost-accept/mods-fabric.txt and prints PASS or FAIL for each
+# Boots the Fabric host with the mods of the list that FERRO_MODS_LIST names (default java/modhost-accept/mods-fabric.txt) and prints PASS or FAIL for each
 # entrypoint, for the hello and for Mixin errors (FabricBootTest). Exit 1 on any FAIL; a JVM that stops before the hello is a FAIL.
 # FERRO_JAVA_HOME and FERRO_LIB are as in build.sh (any JDK 8 or newer; it builds the host jar and the test). FABRIC_LOADER_JAR is as
-# in build.sh. FERRO_FABRIC_CONFIG is a file of Config::provision_fabric: line 1 the Java 8 runtime, line 2 the main dir, line 3 the class path
+# in build.sh. FERRO_FABRIC_CONFIG is a file of Config::provision_fabric or Config::provision_ornithe: line 1 the Java runtime (8 for Legacy Fabric, 25 for Ornithe), line 2 the main dir, line 3 the class path
 # (see README: the ignored Rust test writes it when FERRO_FABRIC_CONFIG_OUT is set). Needs the network for the mod jars.
 # FERRO_MODS_LIST is the mod list: default mods-fabric.txt; java/modhost-accept/mods-ornithe.txt for the Ornithe profile (config from Config::provision_ornithe).
 set -eu

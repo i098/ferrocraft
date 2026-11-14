@@ -13,6 +13,7 @@ mod baby;
 mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
+pub(crate) mod gui;
 pub mod hanging;
 pub mod item;
 pub(crate) mod mobs;
@@ -839,6 +840,19 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
     out
 }
 
+thread_local! {
+    /// Set by [`build_unshaded`]: boxes keep their tint, with no per-face shade.
+    static UNSHADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`build`] at full light and without the per-face shade, for the GUI, which lights the model itself.
+pub(crate) fn build_unshaded(draws: &[EntityDraw], skins: &Skins) -> MeshData {
+    UNSHADED.set(true);
+    let mesh = build(draws, skins, |_| [1.0, 1.0]);
+    UNSHADED.set(false);
+    mesh
+}
+
 /// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
 /// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
 pub fn build(
@@ -1421,6 +1435,7 @@ pub(crate) fn add_box(
         }
     }
     for (corners, uvs, normal, shade) in faces {
+        let shade = if UNSHADED.get() { 1.0 } else { shade };
         let mut order = [0usize, 1, 2, 3];
         let e1 = sub(corners[1], corners[0]);
         let e2 = sub(corners[2], corners[0]);

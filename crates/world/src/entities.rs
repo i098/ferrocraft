@@ -570,14 +570,14 @@ impl Entity {
         };
         let (pos, size) = (self.pos, self.size());
         // Pig, sheep, cow, chicken, wolf, mooshroom, ocelot, horse, rabbit extend `EntityAnimal`;
-        // wolf and ocelot extend `EntityTameable`.
+        // wolf and ocelot extend `EntityTameable`; horse sends taming particles itself.
         let animal = matches!(kind, 90..=93 | 95 | 96 | 98 | 100 | 101);
-        let tameable = matches!(kind, 95 | 98);
+        let taming = matches!(kind, 95 | 98 | 100);
         let mood = match (status, kind) {
             (20, _) => return Some(Fx::Death { pos, size }),
             (18, _) if animal => Mood::Hearts,
-            (7, _) if tameable => Mood::Hearts,
-            (6, _) if tameable => Mood::Smoke,
+            (7, _) if taming => Mood::Hearts,
+            (6, _) if taming => Mood::Smoke,
             (12, 120) => Mood::VillagerHearts,
             (13, 120) => Mood::Angry,
             (14, 120) => Mood::Happy,
@@ -1402,6 +1402,8 @@ mod tests {
         assert_eq!(moods(120, 14), [Some(Mood::Happy)]);
         assert_eq!(moods(95, 7), [Some(Mood::Hearts)]);
         assert_eq!(moods(95, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(100, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(100, 6), [Some(Mood::Smoke)]);
         assert_eq!(moods(91, 18), [Some(Mood::Hearts)]);
         assert!(moods(54, 12).is_empty(), "zombie is no villager");
         assert!(moods(120, 18).is_empty(), "villager is no animal");

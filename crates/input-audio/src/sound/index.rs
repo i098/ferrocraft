@@ -319,15 +319,14 @@ impl SoundIndex {
         };
         for (name, ev) in root {
             let bad = |what: &str| format!("{name}: bad {what}");
-            let (category, replace, sounds) = parse_header(ev).map_err(|what| bad(what))?;
+            let (category, replace, sounds) = parse_header(ev).map_err(&bad)?;
             if replace {
                 index.replace.insert(name.clone());
             }
             let mut variants = Vec::new();
             let mut refs = Vec::new();
             for s in sounds {
-                let (file, volume, pitch, weight, is_event) =
-                    parse_sound(s).map_err(|what| bad(what))?;
+                let (file, volume, pitch, weight, is_event) = parse_sound(s).map_err(&bad)?;
                 if is_event {
                     refs.push(file.to_owned());
                 } else if let Some(path) = resolve(file) {
@@ -595,7 +594,10 @@ mod tests {
     }
 
     fn bytes(i: &SoundIndex, n: &str) -> Vec<Vec<u8>> {
-        i.event(n).unwrap().variants.iter()
+        i.event(n)
+            .unwrap()
+            .variants
+            .iter()
             .map(|v| v.file.read().unwrap().into_inner())
             .collect()
     }
@@ -610,7 +612,8 @@ mod tests {
         let zp = dir.join("pack.zip");
         let mut w = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
         let o = zip::write::SimpleFileOptions::default();
-        w.start_file("assets/minecraft/sounds/random/zclick.ogg", o).unwrap();
+        w.start_file("assets/minecraft/sounds/random/zclick.ogg", o)
+            .unwrap();
         w.write_all(b"zipclick").unwrap();
         w.start_file("assets/minecraft/sounds.json", o).unwrap();
         w.write_all(
@@ -621,7 +624,10 @@ mod tests {
         w.finish().unwrap();
         let i = SoundIndex::load(&mc, "1.8.9", &[Pack::new(zp)]).unwrap();
         assert_eq!(bytes(&i, "random.click"), [b"zipclick".to_vec()]);
-        assert_eq!(bytes(&i, "random.pop"), [b"vanilla".to_vec(), b"zipclick".to_vec()]);
+        assert_eq!(
+            bytes(&i, "random.pop"),
+            [b"vanilla".to_vec(), b"zipclick".to_vec()]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -636,8 +642,16 @@ mod tests {
         // unreadable zip, and a folder pack whose sounds.json is malformed
         write(&dir, "bad.zip", b"not a zip");
         let folder = dir.join("folder");
-        write(&folder, "assets/minecraft/sounds/random/click.ogg", b"custom");
-        write(&folder, "assets/minecraft/sounds.json", br#"{"random.click":{"sounds":[{}]}}"#);
+        write(
+            &folder,
+            "assets/minecraft/sounds/random/click.ogg",
+            b"custom",
+        );
+        write(
+            &folder,
+            "assets/minecraft/sounds.json",
+            br#"{"random.click":{"sounds":[{}]}}"#,
+        );
         let packs = [Pack::new(dir.join("bad.zip")), Pack::new(folder)];
         let i = SoundIndex::load(&mc, "1.8.9", &packs).unwrap();
         // bad sounds.json skipped whole (pop untouched); the pack's click.ogg still overrides the file

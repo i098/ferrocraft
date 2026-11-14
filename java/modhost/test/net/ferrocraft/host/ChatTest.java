@@ -23,6 +23,7 @@ import net.minecraftforge.fml.common.network.FMLNetworkEvent;
  */
 public final class ChatTest {
     private final List<String> seen = new ArrayList<>();
+    private final List<Object> joined = new ArrayList<>();
     private Object world;
     private Object player;
 
@@ -74,13 +75,21 @@ public final class ChatTest {
         join(events, 2, 50, 7); // a creeper
         join(events, 1, 0, 9); // another player
         join(events, 3, 50, 11); // lit TNT
+        join(events, 2, 54, 13); // a zombie
+        join(events, 3, 2, 15); // a dropped item
         post(events, 'a', 7);
         post(events, 'r', 7);
         post(events, 'a', 7); // removed: no event
         post(events, 'a', 99); // never joined: no event
         post(events, 'u');
         post(events, 'd');
-        String want = "connect,load,join 1,join 7,join 9,join 11,attack 7,unload,disconnect";
+        R.set(world, "field_72986_A", R.alloc("net.minecraft.world.storage.WorldInfo")); // the live host's Overrides sets it; Entity.toString reads the world name
+        // A mod reads the name and the text of the entity it gets; a stand-in without a data watcher threw a NullPointerException.
+        for (Object entity : joined) {
+            check(R.call(entity, "func_70005_c_") != null, "getName works"); // getName
+            check(String.valueOf(entity).contains("/" + R.call(entity, "func_145782_y") + ","), "toString shows the id");
+        }
+        String want = "connect,load,join 1,join 7,join 9,join 11,join 13,join 15,attack 7,unload,disconnect";
         check(String.join(",", seen).equals(want), "each event once and in order, got " + seen);
     }
 
@@ -116,7 +125,9 @@ public final class ChatTest {
     @SubscribeEvent
     public void onJoin(EntityJoinWorldEvent e) {
         check(R.get(e, "world") == world, "join carries the world");
-        seen.add("join " + R.call(R.get(e, "entity"), "func_145782_y")); // getEntityId
+        Object entity = R.get(e, "entity");
+        if (entity != player) joined.add(entity); // the player is the test's own, not a stand-in
+        seen.add("join " + R.call(entity, "func_145782_y")); // getEntityId
     }
 
     @SubscribeEvent

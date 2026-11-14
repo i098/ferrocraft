@@ -299,12 +299,13 @@ impl App {
         let packs: Vec<_> = self
             .pack_stack()
             .into_iter()
-            .map(input_audio::sound::index::Pack)
+            .map(input_audio::sound::index::Pack::new)
             .collect();
         let dirs = [
             Some(self.args.game_dir.clone()),
             self.args.game_dir.parent().map(|p| p.to_path_buf()),
         ];
+        self.sound = None;
         for dir in dirs.into_iter().flatten() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
                 self.sound = Some(s);

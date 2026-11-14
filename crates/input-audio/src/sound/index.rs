@@ -3,20 +3,46 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Where one `.ogg` lives: a plain file (assets or a pack folder) or an entry of a pack zip.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub enum SoundFile {
     Path(PathBuf),
-    Zip { zip: PathBuf, entry: String },
+    Zip {
+        archive: Arc<Mutex<zip::ZipArchive<std::fs::File>>>,
+        entry: String,
+    },
+}
+
+impl std::fmt::Debug for SoundFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SoundFile::Path(p) => f.debug_tuple("Path").field(p).finish(),
+            SoundFile::Zip { entry, .. } => f.debug_struct("Zip").field("entry", entry).finish(),
+        }
+    }
+}
+
+impl PartialEq for SoundFile {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SoundFile::Path(a), SoundFile::Path(b)) => a == b,
+            (
+                SoundFile::Zip { archive: a, entry: x },
+                SoundFile::Zip { archive: b, entry: y },
+            ) => Arc::ptr_eq(a, b) && x == y,
+            _ => false,
+        }
+    }
 }
 
 impl SoundFile {
     pub fn read(&self) -> Option<Cursor<Vec<u8>>> {
         match self {
             SoundFile::Path(p) => std::fs::read(p).ok(),
-            SoundFile::Zip { zip, entry } => {
-                let mut z = zip::ZipArchive::new(std::fs::File::open(zip).ok()?).ok()?;
+            SoundFile::Zip { archive, entry } => {
+                let mut z = archive.lock().ok()?;
                 let mut bytes = Vec::new();
                 z.by_name(entry).ok()?.read_to_end(&mut bytes).ok()?;
                 Some(bytes)
@@ -27,21 +53,42 @@ impl SoundFile {
 }
 
 /// One selected resource pack (a folder or a zip), as `FallbackResourceManager` layers it.
-#[derive(Clone, Debug)]
-pub struct Pack(pub PathBuf);
+#[derive(Clone)]
+pub struct Pack {
+    path: PathBuf,
+    zip: Option<Arc<Mutex<zip::ZipArchive<std::fs::File>>>>,
+}
+
+impl std::fmt::Debug for Pack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Pack").field(&self.path).finish()
+    }
+}
 
 impl Pack {
+    /// A zip is opened once here; an unreadable zip or a folder keeps no archive.
+    pub fn new(path: PathBuf) -> Self {
+        let zip = if path.is_dir() {
+            None
+        } else {
+            std::fs::File::open(&path)
+                .ok()
+                .and_then(|f| zip::ZipArchive::new(f).ok())
+                .map(|z| Arc::new(Mutex::new(z)))
+        };
+        Self { path, zip }
+    }
+
     /// `name` is a path under `assets/`, such as `minecraft/sounds.json`.
     fn locate(&self, name: &str) -> Option<SoundFile> {
         let entry = format!("assets/{name}");
-        if self.0.is_dir() {
-            let p = self.0.join(&entry);
+        let Some(zip) = &self.zip else {
+            let p = self.path.join(&entry);
             return p.is_file().then_some(SoundFile::Path(p));
-        }
-        let mut z = zip::ZipArchive::new(std::fs::File::open(&self.0).ok()?).ok()?;
-        z.by_name(&entry).ok()?;
+        };
+        zip.lock().ok()?.by_name(&entry).ok()?;
         Some(SoundFile::Zip {
-            zip: self.0.clone(),
+            archive: zip.clone(),
             entry,
         })
     }
@@ -325,7 +372,7 @@ mod tests {
                 .into_inner()
         };
         assert_eq!(read(&plain, "random.click", 0), b"vanilla");
-        let packed = SoundIndex::load(&mc, "1.8.9", &[Pack(pack)]).unwrap();
+        let packed = SoundIndex::load(&mc, "1.8.9", &[Pack::new(pack)]).unwrap();
         assert_eq!(read(&packed, "random.click", 0), b"custom");
         assert_eq!(packed.event("random.click").unwrap().variants.len(), 1);
         // no `replace`: appended after the vanilla variant

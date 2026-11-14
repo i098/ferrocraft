@@ -228,6 +228,8 @@ pub struct Entity {
     pub hurt_time: i32,
     /// Ticks since death status; the model tips over for 20 ticks, then the entity is removed.
     pub death_time: i32,
+    /// Sheep: ticks left of the grass-eating animation (`sheepTimer`, 40 at status 10).
+    pub sheep_timer: i32,
     /// Metadata that sets the hitbox.
     pub meta: SizeMeta,
     pub equipment: [Option<ItemRef>; EQUIPMENT_SLOTS],
@@ -383,6 +385,7 @@ impl Entity {
             swinging: false,
             hurt_time: 0,
             death_time: 0,
+            sheep_timer: 0,
             meta: SizeMeta::default(),
             equipment: [None; EQUIPMENT_SLOTS],
             stack: None,
@@ -563,6 +566,7 @@ impl Entity {
         if self.death_time > 0 {
             self.death_time += 1;
         }
+        self.sheep_timer = (self.sheep_timer - 1).max(0);
     }
 
     fn set_metadata(
@@ -607,6 +611,8 @@ impl Entity {
                 self.limb_swing_amount = 1.5;
                 self.hurt_time = 10;
             }
+            // `EntitySheep.handleStatusUpdate(10)`.
+            10 if self.kind == Kind::Mob(91) => self.sheep_timer = 40,
             3 if self.death_time == 0 => {
                 self.hurt_time = 10;
                 self.death_time = 1;
@@ -1598,6 +1604,23 @@ mod tests {
             es.tick();
         }
         assert!(matches!(es.take_fx().as_slice(), [Fx::Death { .. }]));
+    }
+
+    #[test]
+    fn eat_grass_status_runs_the_sheep_timer_down_and_ignores_other_mobs() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0; 3]);
+        es.with(1, |e| e.kind = Kind::Mob(91));
+        spawn(&mut es, 2, [0; 3]);
+        for id in [1, 2] {
+            es.apply(EntityEvent::Status { id, status: 10 });
+        }
+        assert_eq!(es.get(1).unwrap().sheep_timer, 40);
+        assert_eq!(es.get(2).unwrap().sheep_timer, 0);
+        for _ in 0..45 {
+            es.tick();
+        }
+        assert_eq!(es.get(1).unwrap().sheep_timer, 0);
     }
 
     #[test]

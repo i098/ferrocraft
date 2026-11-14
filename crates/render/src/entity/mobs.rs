@@ -287,14 +287,9 @@ fn chicken(d: &EntityDraw) -> Model {
 
 /// `ModelSheep2`: the shorn body; the wool is a [`Layer`].
 fn sheep(d: &EntityDraw) -> Model {
+    let (head_origin, head_angles) = super::sheep::head(d);
     let mut parts = vec![
-        Part::new(
-            [0.0, 6.0, -8.0],
-            [-3.0, -4.0, -6.0],
-            [6.0, 6.0, 8.0],
-            (0.0, 0.0),
-        )
-        .rot(head_rot(d)),
+        Part::new(head_origin, [-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], (0.0, 0.0)).rot(head_angles),
         Part::new(
             [0.0, 5.0, 2.0],
             [-4.0, -10.0, -7.0],
@@ -348,13 +343,9 @@ fn fleece(d: &EntityDraw) -> [f32; 3] {
 
 /// `ModelSheep1`, drawn over the sheep unless it is sheared or invisible.
 fn sheep_wool(d: &EntityDraw) -> Layer {
-    let mut head = Part::new(
-        [0.0, 6.0, -8.0],
-        [-3.0, -4.0, -4.0],
-        [6.0, 6.0, 6.0],
-        (0.0, 0.0),
-    )
-    .rot(head_rot(d));
+    let (head_origin, head_angles) = super::sheep::head(d);
+    let mut head =
+        Part::new(head_origin, [-3.0, -4.0, -4.0], [6.0, 6.0, 6.0], (0.0, 0.0)).rot(head_angles);
     head.inflate = 0.6;
     let mut body = Part::new(
         [0.0, 5.0, 2.0],

@@ -4,7 +4,7 @@
 //! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
+//! Not ported yet: villagers. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
 mod armorstand;
@@ -18,6 +18,7 @@ mod mobs;
 mod mobs2;
 mod projectile;
 pub(crate) mod shadow;
+mod sheep;
 mod skin;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
@@ -143,6 +144,10 @@ pub struct Look {
     pub id: i32,
     /// Living entities: metadata 9, arrows stuck in the body.
     pub arrows: u8,
+    /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
+    pub eat_timer: i32,
+    /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
+    pub partial: f32,
 }
 
 impl Default for Look {
@@ -156,6 +161,8 @@ impl Default for Look {
             stand: StandLook::default(),
             id: 0,
             arrows: 0,
+            eat_timer: 0,
+            partial: 0.0,
         }
     }
 }

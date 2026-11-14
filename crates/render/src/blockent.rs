@@ -9,6 +9,7 @@
 
 use crate::assets::{Font, Image};
 use crate::entity::{add_box, rotate, Skin, Skins, V3};
+use crate::jrandom::JavaRandom;
 use crate::mesh::{MeshData, Vertex};
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -17,7 +18,9 @@ mod beacon;
 use beacon::Beacon;
 pub use beacon::{Beams, BEAM_TEXTURE};
 mod portal;
+mod spawner;
 pub use portal::{PORTAL_TEXTURE, SKY_TEXTURE};
+use spawner::Spawner;
 
 pub const CHEST: u16 = 54;
 pub const SIGN_STANDING: u16 = 63;
@@ -105,6 +108,7 @@ pub struct BlockEntities {
     banners: HashMap<[i32; 3], Banner>,
     books: HashMap<[i32; 3], Book>,
     beacons: HashMap<[i32; 3], Beacon>,
+    spawners: HashMap<[i32; 3], Spawner>,
 }
 
 /// The camera and clock of one frame.
@@ -136,6 +140,7 @@ impl BlockEntities {
         self.banners.remove(&pos);
         self.books.remove(&pos);
         self.beacons.remove(&pos);
+        self.spawners.remove(&pos);
     }
 
     /// Rebuilds the tile blocks of chunk (`cx`, `cz`); `at` reads a chunk-local block. Data of a
@@ -166,6 +171,7 @@ impl BlockEntities {
         self.banners.retain(|p, _| keep(p));
         self.books.retain(|p, _| keep(p));
         self.beacons.retain(|p, _| keep(p));
+        self.spawners.retain(|p, _| keep(p));
         self.blocks = old;
         self.blocks.retain(|p, _| !inside(p));
         self.blocks.extend(fresh);
@@ -180,6 +186,7 @@ impl BlockEntities {
         self.banners.retain(|p, _| !inside(p));
         self.books.retain(|p, _| !inside(p));
         self.beacons.retain(|p, _| !inside(p));
+        self.spawners.retain(|p, _| !inside(p));
     }
 
     pub fn clear(&mut self) {
@@ -195,14 +202,29 @@ impl BlockEntities {
         if block == BEACON && event == 1 {
             self.beacons.entry(pos).or_default().dirty = true;
         }
+        if block == MOB_SPAWNER && event == 1 {
+            self.spawners.entry(pos).or_default().delay_to_min();
+        }
     }
 
-    /// Positions of the mob spawners in the loaded chunks.
-    pub fn spawners(&self) -> impl Iterator<Item = [i32; 3]> + '_ {
-        self.blocks
-            .iter()
-            .filter(|(_, s)| *s >> 4 == MOB_SPAWNER)
-            .map(|(p, _)| *p)
+    pub fn set_spawner(&mut self, pos: [i32; 3], entity: &str, delay: i16, min_delay: Option<i32>) {
+        self.spawners
+            .entry(pos)
+            .or_default()
+            .read(entity, delay, min_delay);
+    }
+
+    /// One client tick of every mob spawner in the loaded chunks; returns the smoke and flame
+    /// positions of the activated ones.
+    pub fn tick_spawners(&mut self, players: &[[f64; 3]], rng: &mut JavaRandom) -> Vec<[f64; 3]> {
+        let mut out = Vec::new();
+        for (&pos, _) in self.blocks.iter().filter(|(_, s)| *s >> 4 == MOB_SPAWNER) {
+            if spawner::activated(pos, players) {
+                out.push(spawner::particle(pos, rng));
+                self.spawners.entry(pos).or_default().tick();
+            }
+        }
+        out
     }
 
     pub fn set_sign(&mut self, pos: [i32; 3], lines: [String; 4]) {
@@ -283,11 +305,31 @@ impl BlockEntities {
                 f64::from(pos[2]) + 0.5,
             ];
             let level = light(center);
+            if state >> 4 == MOB_SPAWNER {
+                // The mob keeps its own full-bright layers, so the tile light is set by the mesh.
+                self.spawner_mob(&mut out, pos, view.partial, skins, level);
+                continue;
+            }
             let mark = out.mark();
             self.tile(&mut out, pos, state, view, font, skins);
             out.light_since(mark, level);
         }
         out.0
+    }
+
+    fn spawner_mob(
+        &self,
+        out: &mut Batches,
+        pos: [i32; 3],
+        partial: f32,
+        skins: &Skins,
+        level: [f32; 2],
+    ) {
+        let at = Mat::at(pos.map(f64::from));
+        let mob = self.spawners.get(&pos).cloned().unwrap_or_default();
+        if let Some(mesh) = mob.mob_mesh(at, partial, skins, level) {
+            out.mesh(Tex::Atlas).append(mesh);
+        }
     }
 
     /// One tile at `pos` with block state `state`, by block id.
@@ -318,7 +360,7 @@ impl BlockEntities {
                 book_block(out, &book, at, view.partial);
             }
             // The beam is built by `beams`, the star field by `portals`.
-            // Spawners only emit particles here (`spawner`); the display mob is not ported.
+            // The spawner mob is built by `build`.
             BEACON | END_PORTAL | MOB_SPAWNER => {}
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);

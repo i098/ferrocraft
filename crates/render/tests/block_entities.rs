@@ -273,3 +273,35 @@ fn enchanting_table_book_floats_and_opens_near_a_player() {
     let open = frame(&mut r, &c, "table_open");
     assert!(differs(&closed, &open) > 100, "the book opens");
 }
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn spawner_shows_its_mob_and_turns_it_near_a_player() {
+    let mut r = scene();
+    let c = Camera {
+        pos: [0.5, 65.0, 6.3],
+        yaw: 180.0,
+        pitch: 8.0,
+        ..Camera::default()
+    };
+    r.set_block(0, 64, 4, 52 << 4);
+    let cage = frame(&mut r, &c, "spawner_cage");
+    r.set_spawner([0, 64, 4], "Zombie", 20, None);
+    let zombie = frame(&mut r, &c, "spawner_zombie");
+    assert!(
+        differs(&cage, &zombie) > 300,
+        "the zombie shows in the cage"
+    );
+    // Without a player in range the mob stays; with one it turns.
+    let mut rng = render::JavaRandom::new(1);
+    r.spawner_particles(&[], &mut rng);
+    assert_eq!(differs(&zombie, &frame(&mut r, &c, "spawner_idle")), 0);
+    for _ in 0..10 {
+        r.spawner_particles(&[[0.5, 65.0, 8.5]], &mut rng);
+    }
+    let turned = frame(&mut r, &c, "spawner_turned");
+    assert!(differs(&zombie, &turned) > 100, "the mob turns");
+    r.set_spawner([0, 64, 4], "Wolf", 20, None);
+    let wolf = frame(&mut r, &c, "spawner_unported");
+    assert_eq!(differs(&cage, &wolf), 0, "a mob with no model shows none");
+}

@@ -667,6 +667,14 @@ fn wrap(mut d: f32) -> f32 {
     d
 }
 
+/// Mob ids with a ported model; every other mob draws as a tinted box.
+pub(crate) fn has_model(id: u8) -> bool {
+    const MODELED: [u8; 19] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 99, 120,
+    ];
+    MODELED.contains(&id)
+}
+
 fn model(d: &EntityDraw) -> Model {
     let mut m = adult_model(d);
     baby::apply(&mut m.parts, d);

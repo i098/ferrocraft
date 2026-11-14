@@ -823,6 +823,12 @@ fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
             );
         }
         TileEvent::Banner { pos, base, layers } => r.set_banner(pos, Banner { base, layers }),
+        TileEvent::Spawner {
+            pos,
+            entity,
+            delay,
+            min_delay,
+        } => r.set_spawner(pos, &entity, delay, min_delay),
     }
 }
 

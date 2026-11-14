@@ -230,6 +230,8 @@ pub struct Entity {
     pub death_time: i32,
     /// Sheep: ticks left of the grass-eating animation (`sheepTimer`, 40 at status 10).
     pub sheep_timer: i32,
+    /// Iron golem arm and wolf shake timers.
+    pub anim: crate::mob_anim::MobAnim,
     /// Metadata that sets the hitbox.
     pub meta: SizeMeta,
     pub equipment: [Option<ItemRef>; EQUIPMENT_SLOTS],
@@ -386,6 +388,7 @@ impl Entity {
             hurt_time: 0,
             death_time: 0,
             sheep_timer: 0,
+            anim: Default::default(),
             meta: SizeMeta::default(),
             equipment: [None; EQUIPMENT_SLOTS],
             stack: None,
@@ -567,6 +570,7 @@ impl Entity {
             self.death_time += 1;
         }
         self.sheep_timer = (self.sheep_timer - 1).max(0);
+        self.anim.tick();
     }
 
     fn set_metadata(
@@ -605,6 +609,9 @@ impl Entity {
     }
 
     fn set_status(&mut self, status: i8) {
+        if let Kind::Mob(m) = self.kind {
+            self.anim.set_status(m, status);
+        }
         match status {
             // `handleStatusUpdate(2)`: the hit also kicks the limb swing to 1.5.
             2 => {
@@ -1621,6 +1628,52 @@ mod tests {
             es.tick();
         }
         assert_eq!(es.get(1).unwrap().sheep_timer, 0);
+    }
+
+    fn status_of(kind: u8, status: i8) -> Entities {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0; 3]);
+        es.with(1, |e| e.kind = Kind::Mob(kind));
+        es.apply(EntityEvent::Status { id: 1, status });
+        es
+    }
+
+    #[test]
+    fn golem_attack_status_sets_ten_and_counts_down_for_golems_only() {
+        let mut es = status_of(99, 4);
+        assert_eq!(es.get(1).unwrap().anim.golem_attack, 10);
+        es.tick();
+        assert_eq!(es.get(1).unwrap().anim.golem_attack, 9);
+        assert_eq!(status_of(95, 4).get(1).unwrap().anim.golem_attack, 0);
+    }
+
+    #[test]
+    fn golem_rose_status_sets_400_and_counts_down() {
+        let mut es = status_of(99, 11);
+        assert_eq!(es.get(1).unwrap().anim.golem_rose, 400);
+        for _ in 0..401 {
+            es.tick();
+        }
+        assert_eq!(es.get(1).unwrap().anim.golem_rose, 0);
+    }
+
+    #[test]
+    fn wolf_shake_status_shakes_about_forty_ticks_then_stops() {
+        let mut es = status_of(95, 8);
+        assert!(es.get(1).unwrap().anim.shaking);
+        es.tick();
+        let a = es.get(1).unwrap().anim;
+        assert_eq!((a.prev_shake_time, a.shake_time), (0.0, 0.05));
+        for _ in 0..30 {
+            es.tick();
+        }
+        assert!(es.get(1).unwrap().anim.shaking);
+        for _ in 0..15 {
+            es.tick();
+        }
+        assert!(!es.get(1).unwrap().anim.shaking);
+        assert_eq!(es.get(1).unwrap().anim.shake_time, 0.0);
+        assert!(!status_of(99, 8).get(1).unwrap().anim.shaking);
     }
 
     #[test]

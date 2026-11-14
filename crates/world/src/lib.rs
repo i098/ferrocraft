@@ -18,6 +18,7 @@ pub mod entity_sound;
 pub mod fluid;
 pub mod horse;
 pub mod inventory;
+pub mod mob_anim;
 pub mod motion_sound;
 pub mod place;
 pub mod potion_brew;

@@ -146,6 +146,9 @@ pub struct Look {
     pub arrows: u8,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
     pub eat_timer: i32,
+    /// Iron golem: `attackTimer` and `holdRoseTick`, the arm swing and rose pose.
+    pub golem_attack: i32,
+    pub golem_rose: i32,
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
 }
@@ -162,6 +165,8 @@ impl Default for Look {
             id: 0,
             arrows: 0,
             eat_timer: 0,
+            golem_attack: 0,
+            golem_rose: 0,
             partial: 0.0,
         }
     }

@@ -9,6 +9,7 @@
 
 mod armorstand;
 mod arrows;
+mod baby;
 mod block;
 pub(crate) mod fire;
 pub(crate) mod guardian;
@@ -101,7 +102,7 @@ pub struct EntityDraw {
     pub team_tag: TeamTag,
     /// Another entity rides this one (`riddenByEntity != null`), which hides its tag.
     pub ridden: bool,
-    /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`).
+    /// `isChild`: the tag hangs half a height lower (`RendererLivingEntity.renderName`), the model takes baby proportions (`baby::apply`) and a held item shrinks.
     pub child: bool,
     /// Action of the timed item use in progress (`getItemUseTimer() > 0`), players only.
     pub using: Option<UseAction>,
@@ -651,6 +652,12 @@ fn wrap(mut d: f32) -> f32 {
 }
 
 fn model(d: &EntityDraw) -> Model {
+    let mut m = adult_model(d);
+    baby::apply(&mut m.parts, d);
+    m
+}
+
+fn adult_model(d: &EntityDraw) -> Model {
     match d.class {
         Class::Player { slim } => {
             let (skin, arm) = if slim {

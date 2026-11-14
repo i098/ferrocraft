@@ -21,6 +21,7 @@ final class Minecraft {
         Object mc = R.alloc("net.minecraft.client.Minecraft");
         R.set(mcClass, "field_71432_P", mc); // theMinecraft
         R.set(mc, "field_71412_D", gameDir); // mcDataDir
+        R.set(mc, "field_152351_aB", new java.util.ArrayDeque<Object>()); // scheduledTasks: Minecraft.addScheduledTask locks it
 
         Object settings = R.neu("net.minecraft.client.settings.GameSettings");
         R.set(settings, "field_74354_ai", new File(gameDir, "options.txt")); // optionsFile

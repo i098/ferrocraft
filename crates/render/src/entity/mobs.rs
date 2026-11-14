@@ -4,7 +4,7 @@
 //! sheep wool and the spider and enderman eye layers.
 //!
 //! Not ported: the eat-grass head, the chicken flap (the draw has no on-ground state), the golem
-//! attack and rose arms, villager head shake, and baby proportions.
+//! attack and rose arms, and villager head shake.
 
 use super::{cos, quad_legs, wrap, EntityDraw, Model, Part, Skin};
 use std::f32::consts::{FRAC_PI_2, PI};

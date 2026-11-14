@@ -168,6 +168,16 @@ impl App {
         let players: Vec<[f64; 3]> = own.map(|p| p.pos).chain(others.map(|e| e.pos)).collect();
         if let Some(r) = &mut self.renderer {
             r.tick_block_entities(&players);
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |t| t.as_nanos() as i64);
+            let rng = &mut render::JavaRandom::new(seed);
+            for at in r.spawner_particles(&players, rng) {
+                self.particles
+                    .spawn(render::ParticleKind::Smoke, at, [0.0; 3], 0);
+                self.particles
+                    .spawn(render::ParticleKind::Flame, at, [0.0; 3], 0);
+            }
         }
     }
 

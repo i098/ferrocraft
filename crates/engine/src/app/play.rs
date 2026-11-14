@@ -153,15 +153,16 @@ impl App {
         }
     }
 
+    /// `World.getClosestPlayer` skips spectators (`EntitySelectors.NOT_SPECTATING`).
     fn tick_block_entities(&mut self) {
-        let others = self.game.entities.iter().filter(|e| e.kind == Kind::Player);
-        let players: Vec<[f64; 3]> = self
+        let tab = &self.hud.tablist;
+        let others = self
             .game
-            .player
+            .entities
             .iter()
-            .map(|p| p.pos)
-            .chain(others.map(|e| e.pos))
-            .collect();
+            .filter(|e| e.kind == Kind::Player && !e.uuid.is_some_and(|u| tab.is_spectator(u)));
+        let own = self.game.player.iter().filter(|_| self.game.gamemode != 3);
+        let players: Vec<[f64; 3]> = own.map(|p| p.pos).chain(others.map(|e| e.pos)).collect();
         if let Some(r) = &mut self.renderer {
             r.tick_block_entities(&players);
         }

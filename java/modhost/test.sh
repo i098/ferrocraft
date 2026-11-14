@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs the host tests after build.sh: boots FML with the host's tweakers and a test class in place of the host's
 # entry point. FERRO_JAVA_HOME and FERRO_LIB are as in build.sh; the folder also holds the Minecraft 1.8.9 jar and
-# the other Java 8 libraries of the game.
+# the other Java 8 libraries of the game, including vecmath-1.5.2.jar (javax.vecmath, needed when the host runs a click or a Wither spawn).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin

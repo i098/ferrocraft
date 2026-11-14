@@ -1,7 +1,7 @@
 #!/bin/sh
 # Compiles the host classes into java/modhost/cls and packs them as java/modhost/ferro-host.jar, which Config::provision
 # installs. FERRO_JAVA_HOME may be any JDK 8 or newer: the classes are built for Java 8. FERRO_LIB is a folder with the Java 8 libraries
-# (lw.jar = LaunchWrapper, asm-all, forge.jar, guava).
+# (lw.jar = LaunchWrapper, asm-all, forge.jar, guava, vecmath-1.5.2.jar for the host's ForgeHooksClient).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin

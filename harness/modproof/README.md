@@ -18,7 +18,7 @@ cargo build -p ferrocraft-engine
 FERRO_JAVA_HOME=<JDK 8> FERRO_LIB=<Java 8 libraries> FC_MODS=/tmp/mods-cache/mods harness/modproof/run.sh
 ```
 
-`FERRO_LIB` is the folder of `java/modhost/build.sh`. Other settings are at the top of `run.sh`. The script needs `Xvfb`, `xdotool`, `ffmpeg`, `python3` and `curl`.
+`FERRO_LIB` is the folder of `java/modhost/build.sh` and must hold `vecmath-1.5.2.jar`; `run.sh` stops at once with a message when it is missing. Other settings are at the top of `run.sh`. The script needs `Xvfb`, `xdotool`, `ffmpeg`, `python3` and `curl`.
 
 ## The steps file
 

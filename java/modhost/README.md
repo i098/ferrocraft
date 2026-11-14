@@ -24,7 +24,7 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 ## Build
 
 ```sh
-FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.2.jar forge.jar guava-17.0.jar> java/modhost/build.sh
+FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.2.jar forge.jar guava-17.0.jar vecmath-1.5.2.jar> java/modhost/build.sh
 ```
 
 The class path of the JVM is `java/modhost/cls`, then the libraries, then the Forge jar and the Minecraft 1.8.9 jar.

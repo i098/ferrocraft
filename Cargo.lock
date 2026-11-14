@@ -1613,6 +1613,7 @@ dependencies = [
  "serde_json",
  "winit",
  "world",
+ "zip 2.6.1",
 ]
 
 [[package]]

@@ -175,6 +175,34 @@ impl Scoreboard {
         self.objectives.get(objective).is_some_and(|o| o.hearts)
     }
 
+    /// Every objective as name, display name and `hearts`, in no order.
+    pub fn objectives(&self) -> impl Iterator<Item = (&str, &str, bool)> {
+        self.objectives
+            .iter()
+            .map(|(n, o)| (n.as_str(), o.display.as_str(), o.hearts))
+    }
+
+    /// The points of every player in an objective, in no order.
+    pub fn scores(&self, objective: &str) -> impl Iterator<Item = (&str, i32)> {
+        self.scores
+            .get(objective)
+            .into_iter()
+            .flat_map(|m| m.iter().map(|(n, p)| (n.as_str(), *p)))
+    }
+
+    /// The display slots that hold an objective, with its name, in no order.
+    pub fn slots(&self) -> impl Iterator<Item = (u8, &str)> {
+        self.display
+            .iter()
+            .map(|(s, o)| (*s, o.as_str()))
+            .filter(|(_, o)| self.objectives.contains_key(*o))
+    }
+
+    /// Every team with its name, in no order.
+    pub fn teams(&self) -> impl Iterator<Item = (&str, &Team)> {
+        self.teams.iter().map(|(n, t)| (n.as_str(), t))
+    }
+
     /// The objective in a display slot.
     pub fn objective_in(&self, slot: u8) -> Option<&str> {
         let name = self.display.get(&slot)?;

@@ -11,6 +11,7 @@ macro_rules! metrics {
 mod events;
 mod input;
 mod mod_boot;
+mod mod_lists;
 mod own_sounds;
 mod pack;
 mod play;
@@ -1109,6 +1110,7 @@ impl App {
         let mut mod_textures = Vec::new();
         if let (Some(mods), Some(m)) = (&self.mods, self.mod_mirror()) {
             mods.set_mirror(m);
+            mods.set_lists(self.mod_lists());
         }
         if let Some(mods) = &self.mods {
             mods.set_view(

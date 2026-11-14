@@ -3,6 +3,7 @@
 pub mod chat;
 pub mod hooks;
 pub mod hud;
+pub mod hud_lists;
 pub mod keys;
 pub mod mirror;
 pub mod overrides;
@@ -23,6 +24,7 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
 pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
+pub use hud_lists::Lists as HudLists;
 pub use mirror::Mirror;
 pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
@@ -62,6 +64,8 @@ struct Shared {
     input: Input,
     /// The HUD state for the next frame, sent once.
     mirror: Option<Mirror>,
+    /// The HUD lists for the next frame, sent once after the mirror.
+    lists: Option<HudLists>,
     commands: Vec<DrawCmd>,
     /// A screen a mod opened is current in the JVM.
     screen: bool,
@@ -142,6 +146,7 @@ impl ModHost {
                     fresh: false,
                     input: Input::default(),
                     mirror: None,
+                    lists: None,
                     commands: Vec::new(),
                     screen: false,
                     sources: HashMap::new(),
@@ -192,6 +197,11 @@ impl ModHost {
     /// Set the engine state that HUD mods read; it goes to the JVM with the next frame.
     pub fn set_mirror(&self, mirror: Mirror) {
         self.link.state.lock().unwrap().mirror = Some(mirror);
+    }
+
+    /// Set the tab list, scoreboard, boss bar, title and action bar that the mods read; they go to the JVM with the next frame.
+    pub fn set_lists(&self, lists: HudLists) {
+        self.link.state.lock().unwrap().lists = Some(lists);
     }
 
     /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
@@ -521,7 +531,7 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String, h
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
 fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
-        let (input, mirror) = {
+        let (input, mirror, lists) = {
             let mut s = link.state.lock().unwrap();
             while s.phase == Phase::Live
                 && !s.fresh
@@ -570,11 +580,9 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.fresh = false;
             let input = s.input.clone();
             s.input.events.clear();
-            (input, s.mirror.take())
+            (input, s.mirror.take(), s.lists.take())
         };
-        if let Some(m) = &mirror {
-            mirror::write(&mut stream, m)?;
-        }
+        write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
         apply_frame(&mut link.state.lock().unwrap(), screen, cmds);
@@ -707,6 +715,21 @@ fn rasterize(svg: &[u8], (w, h): (u32, u32), white: bool) -> Result<Vec<u8>, Str
     Ok(out)
 }
 
+/// The HUD state of a frame: the mirror, then the lists, each only when it changed hands.
+fn write_hud(
+    stream: &mut TcpStream,
+    mirror: Option<&Mirror>,
+    lists: Option<&HudLists>,
+) -> io::Result<()> {
+    if let Some(m) = mirror {
+        mirror::write(stream, m)?;
+    }
+    if let Some(l) = lists {
+        hud_lists::write(stream, l)?;
+    }
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -723,6 +746,7 @@ mod tests {
                 fresh: false,
                 input: Input::default(),
                 mirror: None,
+                lists: None,
                 commands: Vec::new(),
                 screen: false,
                 sources: HashMap::new(),

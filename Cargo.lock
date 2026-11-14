@@ -921,6 +921,8 @@ dependencies = [
  "png",
  "portablemc",
  "resvg",
+ "sha1 0.10.7",
+ "ureq",
  "winit",
 ]
 

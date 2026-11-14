@@ -2,5 +2,6 @@
 /java/modhost/cls
 /.live*/
 /java/modhost/ferro-host.jar
+/java/modhost-prepare/ferro-names.jar
 /config/mixinbooter.cfg
 /logs/

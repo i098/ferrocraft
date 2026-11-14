@@ -225,6 +225,9 @@ impl App {
                 yaw: p.yaw,
                 time: self.game.world_time,
             }));
+        if let Some(r) = &mut self.renderer {
+            r.set_dials(icons.dials.turns());
+        }
     }
 
     fn tick_once(&mut self) {

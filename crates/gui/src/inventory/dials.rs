@@ -3,7 +3,7 @@
 //! once per client tick (`TextureManager.tick`). The constants come from the 1.8.9 jar's `bmp`
 //! (compass) and `bmo` (clock) classes, read with `javap`.
 
-use render::celestial_angle;
+use render::{celestial_angle, dial_frame as frame, DialTurns};
 use std::f64::consts::PI;
 
 /// The world state a tick reads from: `Minecraft.theWorld` and `thePlayer`.
@@ -41,12 +41,6 @@ impl Needle {
     }
 }
 
-/// `(int)((turns + 1.0) * frames) % frames`, made non-negative.
-fn frame(turns: f64, frames: usize) -> usize {
-    let n = frames as i64;
-    ((((turns + 1.0) * frames as f64) as i64 % n + n) % n) as usize
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Dials {
     compass: Needle,
@@ -72,14 +66,22 @@ impl Dials {
             .ease(f64::from(celestial_angle(w.time, 1.0)), 1.0);
     }
 
+    /// The needle positions, for the hand and dropped items in the renderer.
+    pub fn turns(&self) -> DialTurns {
+        DialTurns {
+            compass: self.compass.angle / (2.0 * PI),
+            clock: self.clock.angle,
+        }
+    }
+
     /// The compass frame of a strip of `frames` sprites.
     pub fn compass_frame(&self, frames: usize) -> usize {
-        frame(self.compass.angle / (2.0 * PI), frames)
+        frame(self.turns().compass, frames)
     }
 
     /// The clock frame of a strip of `frames` sprites.
     pub fn clock_frame(&self, frames: usize) -> usize {
-        frame(self.clock.angle, frames)
+        frame(self.turns().clock, frames)
     }
 }
 

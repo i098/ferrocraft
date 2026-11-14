@@ -318,7 +318,8 @@ impl BlockEntities {
                 book_block(out, &book, at, view.partial);
             }
             // The beam is built by `beams`, the star field by `portals`.
-            BEACON | END_PORTAL => {}
+            // Spawners only emit particles here (`spawner`); the display mob is not ported.
+            BEACON | END_PORTAL | MOB_SPAWNER => {}
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
                 banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);

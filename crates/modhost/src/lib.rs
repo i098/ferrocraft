@@ -278,6 +278,43 @@ impl ModHost {
                         }
                     }
                 }
+                DrawCmd::Round { rect, radii, argb } => {
+                    let k = factor as f32;
+                    for (r, cover) in round_spans(rect.map(|v| v * k), radii.map(|v| v * k)) {
+                        let [x0, y0, x1, y1] = r.map(|v| v / k);
+                        let c = with_cover(*argb, cover);
+                        g.quad(
+                            "",
+                            [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                            [[0.0; 2]; 4],
+                            [c; 4],
+                        );
+                    }
+                }
+                DrawCmd::Line {
+                    rect: [x0, y0, x1, y1],
+                    width,
+                    argb,
+                } => {
+                    let (dx, dy) = (x1 - x0, y1 - y0);
+                    let len = dx.hypot(dy);
+                    if len > 0.0 {
+                        // Half the width, at least half a pixel, to the left of the direction.
+                        let half = width.max(1.0 / factor as f32) / 2.0;
+                        let (nx, ny) = (-dy / len * half, dx / len * half);
+                        g.quad(
+                            "",
+                            [
+                                [x0 + nx, y0 + ny],
+                                [x1 + nx, y1 + ny],
+                                [x1 - nx, y1 - ny],
+                                [x0 - nx, y0 - ny],
+                            ],
+                            [[0.0; 2]; 4],
+                            [*argb; 4],
+                        );
+                    }
+                }
                 DrawCmd::Clip(rect) => g.set_clip(*rect),
                 DrawCmd::Define { .. } => {}
             }
@@ -619,6 +656,72 @@ impl Config {
 /// Largest side of a rasterized SVG, in window pixels.
 const MAX_SVG_PX: f32 = 2048.0;
 
+/// `argb` with its alpha scaled by `cover`, for the pixels that a shape edge covers in part.
+fn with_cover(argb: u32, cover: f32) -> u32 {
+    let a = ((argb >> 24) as f32 * cover).round() as u32;
+    (argb & 0x00FF_FFFF) | (a.min(255) << 24)
+}
+
+/// The boxes (in pixels, each with the share of it that the shape covers) that fill a rectangle with rounded corners.
+/// The middle is one box; the rows of the corner bands are one box each, with the pixels at the curve in part.
+fn round_spans(rect: [f32; 4], radii: [f32; 4]) -> Vec<([f32; 4], f32)> {
+    let [x0, y0, x1, y1] = rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if w <= 0.0 || h <= 0.0 {
+        return Vec::new();
+    }
+    let [tl, tr, br, bl] = radii.map(|r| r.max(0.0));
+    // Radii that do not fit shrink together, as in CSS.
+    let fit = [(tl + bl, h), (tr + br, h), (tl + tr, w), (bl + br, w)]
+        .into_iter()
+        .filter(|(sum, _)| *sum > 0.0)
+        .fold(1.0f32, |k, (sum, room)| k.min(room / sum));
+    let [tl, tr, br, bl] = [tl, tr, br, bl].map(|r| r * fit);
+    // How far the curve of a corner of radius `r` with its center `d` from the row cuts into the box.
+    let inset = |r: f32, d: f32| {
+        if d <= 0.0 {
+            0.0
+        } else {
+            r - (r * r - d * d).max(0.0).sqrt()
+        }
+    };
+    let (top, bottom) = (tl.max(tr), bl.max(br));
+    let mut out = Vec::new();
+    let (mid0, mid1) = ((y0 + top).ceil(), (y1 - bottom).floor());
+    if mid0 < mid1 {
+        out.push(([x0, mid0, x1, mid1], 1.0));
+    }
+    let mut row = y0.floor();
+    while row < y1 {
+        let (a, b) = (row.max(y0), (row + 1.0).min(y1));
+        row += 1.0;
+        if a >= b || (a >= mid0 && b <= mid1) {
+            continue;
+        }
+        let cy = (a + b) / 2.0;
+        let left = x0 + inset(tl, y0 + tl - cy).max(inset(bl, cy - (y1 - bl)));
+        let right = x1 - inset(tr, y0 + tr - cy).max(inset(br, cy - (y1 - br)));
+        if left >= right {
+            continue;
+        }
+        let (first, last) = (left.ceil(), right.floor());
+        if first > last {
+            out.push(([left.floor(), a, left.floor() + 1.0, b], right - left));
+            continue;
+        }
+        if first < last {
+            out.push(([first, a, last, b], 1.0));
+        }
+        if left < first {
+            out.push(([first - 1.0, a, first, b], first - left));
+        }
+        if right > last {
+            out.push(([last, a, last + 1.0, b], right - last));
+        }
+    }
+    out
+}
+
 /// The texture name and the tint to blit an image with, registering the texture on first use. An SVG is rasterized
 /// at `size` pixels, in white when `recolor` so that the tint gives its color. `None` when the file does not
 /// decode (logged once).
@@ -694,6 +797,31 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::time::Instant;
+
+    fn area(spans: &[([f32; 4], f32)]) -> f32 {
+        spans
+            .iter()
+            .map(|([x0, y0, x1, y1], c)| (x1 - x0) * (y1 - y0) * c)
+            .sum()
+    }
+
+    #[test]
+    fn rounded_rect_covers_the_area_of_its_shape() {
+        let (w, h, r) = (100.0f32, 60.0f32, 12.0f32);
+        let want = w * h - (4.0 - std::f32::consts::PI) * r * r;
+        let got = area(&round_spans([3.3, 5.6, 3.3 + w, 5.6 + h], [r; 4]));
+        assert!((got - want).abs() / want < 0.005, "{got} vs {want}");
+        // One radius: only that corner is cut.
+        let want = w * h - (1.0 - std::f32::consts::FRAC_PI_4) * r * r;
+        let got = area(&round_spans([0.0, 0.0, w, h], [r, 0.0, 0.0, 0.0]));
+        assert!((got - want).abs() / want < 0.005, "{got} vs {want}");
+        // No radius: the rectangle itself, in one box.
+        assert_eq!(round_spans([0.0, 0.0, w, h], [0.0; 4]).len(), 1);
+        // A radius past half the box is a pill, with no overlap.
+        let got = area(&round_spans([0.0, 0.0, 40.0, 20.0], [99.0; 4]));
+        let want = 20.0 * 20.0 + std::f32::consts::PI * 100.0;
+        assert!((got - want).abs() / want < 0.01, "{got} vs {want}");
+    }
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;

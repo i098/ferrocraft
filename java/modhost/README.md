@@ -43,6 +43,6 @@ Set `FERRO_PREPARE_OUT` to the folder `java/modhost-prepare/run.sh` wrote, and b
 - The Minecraft classes are the vanilla 1.8.9 classes from the player's jar, patched at load time. `java/modhost-prepare` makes the same patched jar once, so FML then patches nothing; the stand-in bodies are not written yet.
 - The stand-in player, world and options are mirrors of Rust state. Only what the HUD mods read is filled in.
 - Mods that draw with GL calls other than rectangles, gradients, text, images, SVG files and clip rectangles are not forwarded yet.
-- Mod screens are drawn only where the mod HUD is drawn (in a world); the window and sound handler parts of `displayGuiScreen` are skipped.
-- File dialogs (`TinyFD`) and `AssetHelper` do nothing. A click on a mod card above its name row opens the mod's config page. Rounded corners draw square (also on images), `drawLine` draws horizontal and vertical lines only, and an image tint is a multiply, not NanoVG's alpha-only paint.
+- A mod screen is drawn in a world and on the main menu, where it takes the place of the menu; the window and sound handler parts of `displayGuiScreen` are skipped.
+- File dialogs (`TinyFD`) and `AssetHelper` do nothing. A click on a mod card above its name row opens the mod's config page. Rounded corners draw on rectangles only (an image keeps square corners), and the curve is anti-aliased on its left and right edges only.
 - `EntityRenderer.loadShader` does nothing: no shader group loads, so OneConfig's background blur never turns on.

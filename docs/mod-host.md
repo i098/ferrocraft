@@ -30,7 +30,7 @@ T2 real bodies make the most-mixed client classes and their Forge events work at
 
 ## Boot
 
-The JVM starts like a Forge client:
+The JVM starts like a Forge client (with `Loader::Fabric` it starts `KnotClient` with the host agent instead; see `java/modhost-fabric/README.md`):
 
 ```
 java -Dfml.ignoreInvalidMinecraftCertificates=true \

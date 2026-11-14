@@ -1249,6 +1249,7 @@ impl App {
             }
         }
         let hover = self.chat_hover(&m);
+        let player = self.container_player(frac);
         let mut c = gui::GuiCanvas::new(&mut g);
         if let (Some(cs), Some(icons)) = (&mut self.container, &self.icons) {
             let view = gui::inventory::InventoryView {
@@ -1256,6 +1257,7 @@ impl App {
                 icons,
                 advanced_tooltips: self.ui.settings.advanced_item_tooltips,
                 effects: &self.game.effects,
+                player: player.as_ref(),
             };
             cs.draw(&mut c, &view, mx, my);
         }
@@ -1275,8 +1277,24 @@ impl App {
             mods.draw(&mut g, &mut mod_textures);
         }
         textures.extend(mod_textures);
-        (g.into_quads(), textures, effects)
+        (with_entities(r, g), textures, effects)
     }
+
+    /// The local player for the model of an open container screen.
+    fn container_player(&self, frac: f64) -> Option<EntityDraw> {
+        self.container.as_ref().and(self.self_draw(frac))
+    }
+}
+
+/// The frame's quads with the entity models of `Gui::entity` spliced in at their draw position.
+fn with_entities(r: &render::Renderer, mut g: gui::Gui) -> Vec<render::Quad> {
+    let entities = g.take_entities();
+    let mut quads = g.into_quads();
+    for e in entities.iter().rev() {
+        let model = r.gui_entity(e.origin, e.scale, e.mouse, &e.draw);
+        quads.splice(e.at..e.at, model);
+    }
+    quads
 }
 
 /// One language's `.lang` text: the asset index copy, then every pack's copy over it

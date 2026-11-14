@@ -1,7 +1,7 @@
 //! Vanilla `Gui`, `FontRenderer`, `ScaledResolution` and `GuiButton`, drawing into a list of
 //! [`render::Quad`]s. Coordinates are GUI units (scaled pixels, origin top-left).
 
-use render::{Blend, Font, Quad};
+use render::{Blend, EntityDraw, Font, Quad};
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
@@ -363,12 +363,23 @@ impl TextStyle {
     }
 }
 
+/// One [`Gui::entity`] call in window pixels, with the index in the quad list where its quads go.
+pub struct PlacedEntity {
+    pub at: usize,
+    pub origin: [f32; 2],
+    pub scale: f32,
+    pub mouse: [f32; 2],
+    pub draw: EntityDraw,
+}
+
 /// A frame's draw list with the GL state vanilla GUI code leans on: a matrix stack, the current
 /// color (`GlStateManager.color`) and the blend function.
 pub struct Gui<'f> {
     pub scale: GuiScale,
     font: Metrics<'f>,
     quads: Vec<Quad>,
+    /// Entity models and the quad count when each was drawn; see [`Gui::take_entities`].
+    entities: Vec<PlacedEntity>,
     matrix: Affine,
     stack: Vec<Affine>,
     color: u32,
@@ -388,6 +399,7 @@ impl<'f> Gui<'f> {
             scale,
             font: Metrics(font),
             quads: Vec::new(),
+            entities: Vec::new(),
             matrix: [s, 0.0, 0.0, s, 0.0, 0.0],
             stack: Vec::new(),
             color: 0xFFFF_FFFF,
@@ -405,6 +417,26 @@ impl<'f> Gui<'f> {
 
     pub fn into_quads(self) -> Vec<Quad> {
         self.quads
+    }
+
+    /// `GuiInventory.drawEntityOnScreen`: the model of `draw` standing at (`x`, `y`) with `scale`
+    /// pixels per block, turned toward the cursor offset `mouse`. The renderer turns it into quads
+    /// ([`render::Renderer::gui_entity`]); [`Gui::take_entities`] returns where each belongs.
+    pub fn entity(&mut self, x: f32, y: f32, scale: f32, mouse: [f32; 2], draw: &EntityDraw) {
+        let origin = apply(&self.matrix, [x, y]);
+        let scale = scale * self.matrix[0];
+        self.entities.push(PlacedEntity {
+            at: self.quads.len(),
+            origin,
+            scale,
+            mouse,
+            draw: draw.clone(),
+        });
+    }
+
+    /// The entity models drawn so far, each with the index in [`Gui::into_quads`] where its quads go.
+    pub fn take_entities(&mut self) -> Vec<PlacedEntity> {
+        std::mem::take(&mut self.entities)
     }
 
     pub fn metrics(&self) -> Metrics<'f> {

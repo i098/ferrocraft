@@ -66,6 +66,9 @@ pub trait Canvas: Metrics {
     /// `GlStateManager.pushMatrix` + translate, uniform scale, then rotate about Z (degrees).
     fn push(&mut self, translate: [f32; 2], scale: f32, rotate_deg: f32);
     fn pop(&mut self);
+    /// `GuiInventory.drawEntityOnScreen`: the entity standing at (`x`, `y`), `scale` pixels per GUI
+    /// unit of height, its head toward the cursor offset `mouse`.
+    fn entity(&mut self, x: f32, y: f32, scale: f32, mouse: [f32; 2], draw: &render::EntityDraw);
 }
 
 /// LWJGL `Keyboard` codes, the values `options.txt` stores.

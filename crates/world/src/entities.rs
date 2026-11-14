@@ -1262,30 +1262,40 @@ mod tests {
 
     /// Oracle: `EntityHanging.updateBoundingBox` worked by hand for the 2x1 "Pool" painting on block (0, 64, 0):
     /// the slab is 1/16 thick on the facing axis, 2 wide on the other, and sits 1/32 inside the block face.
+    fn assert_pool_box(facing: u8, x: [f64; 2], z: [f64; 2]) {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 1,
+            title: "Pool".into(),
+            pos: [0, 64, 0],
+            facing,
+        });
+        let (lo, hi) = es.get(1).unwrap().bounds();
+        assert_eq!(
+            ([lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]),
+            (x, [64.0, 65.0], z),
+            "facing {facing}"
+        );
+    }
+
     #[test]
-    fn painting_box_is_correct_for_all_four_facings() {
-        // facing -> (lo, hi) in x and z; y is always 64..65.
-        let cases = [
-            (0, [0.0, 2.0], [0.0, 0.0625]),
-            (1, [0.9375, 1.0], [0.0, 2.0]),
-            (2, [-1.0, 1.0], [0.9375, 1.0]),
-            (3, [0.0, 0.0625], [-1.0, 1.0]),
-        ];
-        for (facing, x, z) in cases {
-            let mut es = Entities::default();
-            es.apply(EntityEvent::SpawnPainting {
-                id: 1,
-                title: "Pool".into(),
-                pos: [0, 64, 0],
-                facing,
-            });
-            let (lo, hi) = es.get(1).unwrap().bounds();
-            assert_eq!(
-                ([lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]),
-                (x, [64.0, 65.0], z),
-                "facing {facing}"
-            );
-        }
+    fn painting_box_facing_0() {
+        assert_pool_box(0, [0.0, 2.0], [0.0, 0.0625]);
+    }
+
+    #[test]
+    fn painting_box_facing_1() {
+        assert_pool_box(1, [0.9375, 1.0], [0.0, 2.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_2() {
+        assert_pool_box(2, [-1.0, 1.0], [0.9375, 1.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_3() {
+        assert_pool_box(3, [0.0, 0.0625], [-1.0, 1.0]);
     }
 
     use super::*;

@@ -43,12 +43,13 @@ public final class ShellTransformer implements IClassTransformer {
     private static final String MERGED = "Lorg/spongepowered/asm/mixin/transformer/meta/MixinMerged;";
     private static final String CALLBACK = "org/spongepowered/asm/mixin/injection/callback/CallbackInfo";
     private static final int MAX_BLOCK = 40;
-    /** The methods in SRG names (what the host sees) and in MCP names; all take no argument and return nothing. */
+    /** The methods in SRG names (what the host sees) and in MCP names, each also under the loader's name; all take no argument and return nothing. */
     private static final Set<String> SHELLS = new HashSet<>();
 
     static {
         for (String n : new String[] {"func_71407_l", "runTick", "func_71411_J", "runGameLoop", "func_71384_a", "startGame"}) {
             SHELLS.add(n + "()V");
+            SHELLS.add(Names.of(n) + "()V");
         }
     }
 
@@ -57,7 +58,7 @@ public final class ShellTransformer implements IClassTransformer {
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] bytes) {
-        if (bytes == null || !transformedName.equals("net.minecraft.client.Minecraft")) return bytes;
+        if (bytes == null || !transformedName.equals(Names.of("net.minecraft.client.Minecraft"))) return bytes;
         return shell(bytes);
     }
 

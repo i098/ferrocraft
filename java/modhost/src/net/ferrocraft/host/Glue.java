@@ -7,9 +7,21 @@ import java.util.List;
  * loader gives one implementation ({@link ForgeGlue} for Forge).
  */
 interface Glue {
-    /** The loader of this run. */
+    /** The loader of this run: Fabric when Knot started it, else Forge. {@code FabricGlue} is in the Fabric host jar only. */
     static Glue current() {
-        return ForgeGlue.INSTANCE;
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        try {
+            Class.forName("net.fabricmc.loader.api.FabricLoader", false, loader);
+        } catch (ClassNotFoundException e) {
+            return ForgeGlue.INSTANCE;
+        }
+        try {
+            java.lang.reflect.Field instance = Class.forName("net.ferrocraft.host.FabricGlue", true, loader).getDeclaredField("INSTANCE");
+            instance.setAccessible(true);
+            return (Glue) instance.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Fabric Loader is here but FabricGlue is not: the class path needs the Fabric host jar", e);
+        }
     }
 
     /** Ends the JVM; the loader may trap every other exit. */

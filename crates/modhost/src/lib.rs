@@ -15,9 +15,10 @@ pub mod provision_fabric;
 pub mod wire;
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -41,11 +42,26 @@ fn token() -> String {
         .collect()
 }
 
+/// The mod loader the JVM runs.
+pub enum Loader {
+    /// FML on LaunchWrapper: the host tweakers register the transformers.
+    Forge,
+    /// Fabric Loader's Knot, with the host jar (`java/modhost-fabric`) as its Java agent.
+    Fabric {
+        /// The host jar; it is on the class path too.
+        agent: PathBuf,
+        /// Tiny v2 file from Forge's MCP names to intermediary names, see `provision_fabric`.
+        names: PathBuf,
+    },
+}
+
 /// What the JVM needs to start.
 pub struct Config {
+    pub loader: Loader,
     /// `bin/java` of a Java 8 runtime.
     pub java: PathBuf,
-    /// Class path: LaunchWrapper, Forge, the stand-in Minecraft jar, the host classes and the libraries.
+    /// Class path: for Forge LaunchWrapper, Forge, the stand-in Minecraft jar, the host classes and the libraries; for Fabric
+    /// the host jar, LaunchWrapper's classes, Knot and its libraries and the game jar.
     pub class_path: Vec<PathBuf>,
     /// Vanilla game directory; mods are read from `mods/` below it.
     pub game_dir: PathBuf,
@@ -116,6 +132,12 @@ struct Link {
 /// How long the game tick waits for the JVM's answer to a player tick.
 const PLAYER_TICK_WAIT: Duration = Duration::from_millis(100);
 
+fn prefixed(prefix: &str, path: &Path) -> OsString {
+    let mut arg = OsString::from(prefix);
+    arg.push(path);
+    arg
+}
+
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
     child: Arc<Mutex<Child>>,
@@ -137,15 +159,30 @@ impl ModHost {
             .collect::<Vec<_>>()
             .join(sep);
         let token = token();
-        let child = Command::new(&cfg.java)
-            .env("FERROCRAFT_BRIDGE_TOKEN", &token)
-            .arg(format!("-Dferro.bridge=127.0.0.1:{port}"))
-            .args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
-            .args([
-                "--tweakClass",
-                "net.minecraftforge.fml.common.launcher.FMLTweaker",
-            ])
-            .args(["--tweakClass", "net.ferrocraft.tweak.HostTweaker"])
+        let mut cmd = Command::new(&cfg.java);
+        cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
+            .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
+        match &cfg.loader {
+            Loader::Forge => {
+                cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
+                    .args([
+                        "--tweakClass",
+                        "net.minecraftforge.fml.common.launcher.FMLTweaker",
+                    ])
+                    .args(["--tweakClass", "net.ferrocraft.tweak.HostTweaker"]);
+            }
+            Loader::Fabric { agent, names } => {
+                cmd.arg(prefixed("-javaagent:", agent))
+                    .arg(prefixed("-Dferro.tiny=", names))
+                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
+                    .args([
+                        "-cp",
+                        &cp,
+                        "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                    ]);
+            }
+        }
+        let child = cmd
             .args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
             .args(["--assetsDir".as_ref(), cfg.assets_dir.as_os_str()])
             .args(["--version", "1.8.9", "--accessToken", "x"])
@@ -772,6 +809,7 @@ impl Config {
             std::env::split_paths(&std::env::var_os("FERROCRAFT_MODHOST_CP")?).collect();
         let game_dir = PathBuf::from(std::env::var_os("FERROCRAFT_MODHOST_GAMEDIR")?);
         Some(Self {
+            loader: Loader::Forge,
             java,
             class_path,
             assets_dir: game_dir.join("assets"),

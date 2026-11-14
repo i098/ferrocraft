@@ -7,7 +7,7 @@ use std::{fmt, fs, io};
 
 use portablemc::{base, forge};
 
-use crate::Config;
+use crate::{Config, Loader};
 
 /// Forge 1.8.9 build the mods are made for.
 const FORGE: &str = "1.8.9-11.15.1.2318-1.8.9";
@@ -93,6 +93,7 @@ impl Config {
         class_path.extend(libs);
         fs::create_dir_all(main.join("mods"))?;
         Ok(Config {
+            loader: Loader::Forge,
             java: game.jvm_file,
             class_path,
             assets_dir: main.join("assets"),

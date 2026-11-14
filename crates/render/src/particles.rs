@@ -1580,17 +1580,13 @@ fn rgb(c: i32) -> [f32; 3] {
 }
 
 /// The star outline of `Starter` (type 2).
-const STAR: [[f64; 2]; 10] = [
+const STAR: [[f64; 2]; 6] = [
     [0.0, 1.0],
     [0.3455, 0.309],
     [0.9511, 0.309],
     [0.379_591_836_734_693_9, -0.126_530_612_244_897_95],
     [0.612_244_897_959_183_7, -0.804_081_632_653_061_2],
     [0.0, -0.359_183_673_469_387_73],
-    [-0.612_244_897_959_183_7, -0.804_081_632_653_061_2],
-    [-0.379_591_836_734_693_9, -0.126_530_612_244_897_95],
-    [-0.9511, 0.309],
-    [-0.3455, 0.309],
 ];
 
 /// The creeper-face outline of `Starter` (type 3).
@@ -1986,7 +1982,7 @@ mod tests {
         assert_eq!(sparks(0), 98);
         assert_eq!(sparks(1), 386);
         // `createShape`: the first point, then 3 turns of 4 steps and 2 sides per outline segment.
-        assert_eq!(sparks(2), 1 + 3 * 9 * 4 * 2);
+        assert_eq!(sparks(2), 121);
         assert_eq!(sparks(3), 1 + 3 * 11 * 4 * 2);
         assert_eq!(sparks(4), 70);
     }

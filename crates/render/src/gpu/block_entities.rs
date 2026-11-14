@@ -25,9 +25,9 @@ impl Renderer {
         self.block_entities.set_banner(pos, banner);
     }
 
-    /// One client tick (20 Hz) of the chest lids.
-    pub fn tick_block_entities(&mut self) {
-        self.block_entities.tick();
+    /// One client tick (20 Hz) of the chest lids and enchanting table books; `players` are all player positions.
+    pub fn tick_block_entities(&mut self, players: &[[f64; 3]]) {
+        self.block_entities.tick(players);
     }
 
     /// Meshes the block entities in range for the next frames. `world_time` is the total world

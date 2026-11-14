@@ -21,6 +21,7 @@ pub const ENDER_CHEST: u16 = 130;
 pub const TRAPPED_CHEST: u16 = 146;
 pub const BANNER_STANDING: u16 = 176;
 pub const BANNER_WALL: u16 = 177;
+pub const ENCHANTING_TABLE: u16 = 116;
 
 /// Block ids that carry a block entity drawn here.
 pub fn is_tile(id: u16) -> bool {
@@ -34,6 +35,7 @@ pub fn is_tile(id: u16) -> bool {
             | SKULL
             | BANNER_STANDING
             | BANNER_WALL
+            | ENCHANTING_TABLE
     )
 }
 
@@ -89,6 +91,7 @@ pub struct BlockEntities {
     signs: HashMap<[i32; 3], [String; 4]>,
     skulls: HashMap<[i32; 3], Skull>,
     banners: HashMap<[i32; 3], Banner>,
+    books: HashMap<[i32; 3], Book>,
 }
 
 /// The camera and clock of one frame.
@@ -118,6 +121,7 @@ impl BlockEntities {
         self.signs.remove(&pos);
         self.skulls.remove(&pos);
         self.banners.remove(&pos);
+        self.books.remove(&pos);
     }
 
     /// Rebuilds the tile blocks of chunk (`cx`, `cz`); `at` reads a chunk-local block. Data of a
@@ -146,6 +150,7 @@ impl BlockEntities {
         self.signs.retain(|p, _| keep(p));
         self.skulls.retain(|p, _| keep(p));
         self.banners.retain(|p, _| keep(p));
+        self.books.retain(|p, _| keep(p));
         self.blocks = old;
         self.blocks.retain(|p, _| !inside(p));
         self.blocks.extend(fresh);
@@ -158,6 +163,7 @@ impl BlockEntities {
         self.signs.retain(|p, _| !inside(p));
         self.skulls.retain(|p, _| !inside(p));
         self.banners.retain(|p, _| !inside(p));
+        self.books.retain(|p, _| !inside(p));
     }
 
     pub fn clear(&mut self) {
@@ -183,8 +189,30 @@ impl BlockEntities {
         self.banners.insert(pos, banner);
     }
 
-    /// One client tick of every chest lid (`TileEntityChest.update`).
-    pub fn tick(&mut self) {
+    /// One client tick of every chest lid (`TileEntityChest.update`) and enchanting table book
+    /// (`TileEntityEnchantmentTable.update`); `players` are the positions of all players in the world.
+    pub fn tick(&mut self, players: &[[f64; 3]]) {
+        for (&pos, &state) in &self.blocks {
+            if state >> 4 != ENCHANTING_TABLE {
+                continue;
+            }
+            let centre = [
+                f64::from(pos[0]) + 0.5,
+                f64::from(pos[1]) + 0.5,
+                f64::from(pos[2]) + 0.5,
+            ];
+            // `World.getClosestPlayer(.., 3.0)`.
+            let near = players
+                .iter()
+                .min_by(|a, b| dist3(a, &centre).total_cmp(&dist3(b, &centre)))
+                .filter(|p| dist3(p, &centre) < 9.0)
+                .map(|p| (p[0] - centre[0], p[2] - centre[2]));
+            let seed = i64::from(pos[0]) ^ (i64::from(pos[1]) << 20) ^ (i64::from(pos[2]) << 40);
+            self.books
+                .entry(pos)
+                .or_insert_with(|| Book::new(seed))
+                .update(near);
+        }
         for lid in self.lids.values_mut() {
             lid.prev = lid.now;
             let open = lid.viewers > 0;
@@ -257,6 +285,10 @@ impl BlockEntities {
                 let skull = self.skulls.get(&pos).copied().unwrap_or_default();
                 skull_block(out, meta & 7, skull, at, skins);
             }
+            ENCHANTING_TABLE => {
+                let book = self.books.get(&pos).copied().unwrap_or_default();
+                book_block(out, &book, at, view.partial);
+            }
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
                 banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);
@@ -327,6 +359,137 @@ fn chest_texture(id: u16, double: bool) -> &'static str {
         (TRAPPED_CHEST, true) => "trapped_double",
         (_, false) => "normal",
         (_, true) => "normal_double",
+    }
+}
+
+fn dist3(p: &[f64; 3], c: &[f64; 3]) -> f64 {
+    (0..3).map(|i| (p[i] - c[i]).powi(2)).sum()
+}
+
+const PI: f32 = std::f32::consts::PI;
+
+/// Wraps `a` into [-pi, pi) the way the tile code does.
+fn wrap_pi(mut a: f32) -> f32 {
+    while a >= PI {
+        a -= 2.0 * PI;
+    }
+    while a < -PI {
+        a += 2.0 * PI;
+    }
+    a
+}
+
+/// The animation state of `TileEntityEnchantmentTable` (fields by their MCP names).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Book {
+    pub tick_count: i32,
+    pub page_flip: f32,
+    pub page_flip_prev: f32,
+    flip_t: f32,
+    flip_a: f32,
+    pub book_spread: f32,
+    pub book_spread_prev: f32,
+    pub book_rotation: f32,
+    pub book_rotation_prev: f32,
+    t_rot: f32,
+    rng: Option<crate::jrandom::JavaRandom>,
+}
+
+impl Book {
+    fn new(seed: i64) -> Book {
+        Book {
+            rng: Some(crate::jrandom::JavaRandom::new(seed)),
+            ..Book::default()
+        }
+    }
+
+    /// `TileEntityEnchantmentTable.update`; `near` is the x and z offset from the block centre to the
+    /// closest player within 3 blocks.
+    pub fn update(&mut self, near: Option<(f64, f64)>) {
+        self.book_spread_prev = self.book_spread;
+        self.book_rotation_prev = self.book_rotation;
+        if let Some((dx, dz)) = near {
+            self.t_rot = dz.atan2(dx) as f32;
+            self.book_spread += 0.1;
+            let rng = self.rng.get_or_insert_with(|| crate::jrandom::JavaRandom::new(0));
+            if self.book_spread < 0.5 || rng.next_int(40) == 0 {
+                let before = self.flip_t;
+                while before == self.flip_t {
+                    self.flip_t += (rng.next_int(4) - rng.next_int(4)) as f32;
+                }
+            }
+        } else {
+            self.t_rot += 0.02;
+            self.book_spread -= 0.1;
+        }
+        self.book_rotation = wrap_pi(self.book_rotation);
+        self.t_rot = wrap_pi(self.t_rot);
+        self.book_rotation += wrap_pi(self.t_rot - self.book_rotation) * 0.4;
+        self.book_spread = self.book_spread.clamp(0.0, 1.0);
+        self.tick_count += 1;
+        self.page_flip_prev = self.page_flip;
+        let f = ((self.flip_t - self.page_flip) * 0.4).clamp(-0.2, 0.2);
+        self.flip_a += (f - self.flip_a) * 0.9;
+        self.page_flip += self.flip_a;
+    }
+}
+
+/// Opening angle and page flips of `ModelBook` at `partial`: (`ticks`, left flip, right flip, spread).
+fn book_pose(b: &Book, partial: f32) -> (f32, f32, f32, f32) {
+    let flip = b.page_flip_prev + (b.page_flip - b.page_flip_prev) * partial;
+    let clamp = |f: f32| ((f - f.trunc()) * 1.6 - 0.3).clamp(0.0, 1.0);
+    (
+        b.tick_count as f32 + partial,
+        clamp(flip + 0.25),
+        clamp(flip + 0.75),
+        b.book_spread_prev + (b.book_spread - b.book_spread_prev) * partial,
+    )
+}
+
+/// `ModelBook.setRotationAngles`: y rotation of the two covers, two page stacks and two flipping
+/// pages, and the shared x of the pages' rotation point (model pixels).
+fn book_angles(ticks: f32, flip_l: f32, flip_r: f32, spread: f32) -> ([f32; 6], f32) {
+    let f = ((ticks * 0.02).sin() * 0.1 + 1.25) * spread;
+    (
+        [
+            PI + f,
+            -f,
+            f,
+            -f,
+            f - f * 2.0 * flip_l,
+            f - f * 2.0 * flip_r,
+        ],
+        f.sin(),
+    )
+}
+
+/// `TileEntityEnchantmentTableRenderer.renderTileEntityAt`.
+fn book_block(out: &mut Batches, book: &Book, at: Mat, partial: f32) {
+    let (ticks, flip_l, flip_r, spread) = book_pose(book, partial);
+    let turn = wrap_pi(book.book_rotation - book.book_rotation_prev);
+    let yaw = book.book_rotation_prev + turn * partial;
+    let m = at
+        .translate([0.5, 0.75, 0.5])
+        .translate([0.0, 0.1 + (ticks * 0.1).sin() * 0.01, 0.0])
+        .rotate_y(-yaw * 180.0 / PI)
+        .rotate_z(80.0);
+    let (y, page_x) = book_angles(ticks, flip_l, flip_r, spread);
+    let target = out.mesh(Tex::Named("textures/entity/enchanting_table_book.png".into()));
+    let tex = [64.0, 32.0];
+    let part = |min: V3, size: V3, uv, pivot: V3, rot_y: f32| {
+        Cube::new(min, size, uv).at(pivot, [0.0, rot_y, 0.0])
+    };
+    let page = [page_x, 0.0, 0.0];
+    for cube in [
+        part([-6.0, -5.0, 0.0], [6.0, 10.0, 0.0], (0.0, 0.0), [0.0, 0.0, -1.0], y[0]),
+        part([0.0, -5.0, 0.0], [6.0, 10.0, 0.0], (16.0, 0.0), [0.0, 0.0, 1.0], y[1]),
+        part([-1.0, -5.0, 0.0], [2.0, 10.0, 0.0], (12.0, 0.0), [0.0; 3], PI / 2.0),
+        part([0.0, -4.0, -0.99], [5.0, 8.0, 1.0], (0.0, 10.0), page, y[2]),
+        part([0.0, -4.0, -0.01], [5.0, 8.0, 1.0], (12.0, 10.0), page, y[3]),
+        part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[4]),
+        part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[5]),
+    ] {
+        cube.emit(target, &m, tex, 0.0);
     }
 }
 
@@ -406,6 +569,12 @@ impl Mat {
             }
         }
         self
+    }
+
+    /// `glRotatef(deg, 0, 0, 1)`.
+    pub fn rotate_z(self, deg: f32) -> Mat {
+        let (s, c) = deg.to_radians().sin_cos();
+        self.times([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
     }
 
     /// `glRotatef(deg, 0, 1, 0)`.
@@ -924,7 +1093,7 @@ mod tests {
 
     fn tick_n(lid: &mut BlockEntities, n: usize) {
         for _ in 0..n {
-            lid.tick();
+            lid.tick(&[]);
         }
     }
 
@@ -1028,5 +1197,51 @@ mod tests {
             &img.rgba[0..4],
             &[tinted(0x99), tinted(0x33), tinted(0x33), 255]
         );
+    }
+
+    #[test]
+    fn book_opens_by_a_tenth_per_tick_while_a_player_is_near() {
+        let mut book = Book::new(1);
+        book.update(Some((1.0, 0.0)));
+        let one = book.book_spread;
+        book.update(Some((1.0, 0.0)));
+        assert_eq!((one, book.book_spread), (0.1, 0.2));
+        assert_eq!(book.tick_count, 2);
+        // The book turns toward the player: atan2(dz, dx) = 0 pulls the rotation to 0.
+        assert_eq!(book.book_rotation, 0.0);
+        for _ in 0..20 {
+            book.update(None);
+        }
+        assert_eq!(book.book_spread, 0.0);
+    }
+
+    #[test]
+    fn book_page_angles_at_two_ticks() {
+        // ModelBook.setRotationAngles with p1 = 0 (sin 0): f = 1.25 * spread.
+        let (y, x) = book_angles(0.0, 0.0, 1.0, 0.5);
+        let f = 0.625_f32;
+        assert_eq!(y[0], PI + f);
+        assert_eq!(y[1], -f);
+        assert_eq!(y[4], f); // left flipping page at rest: f - 2f * 0
+        assert_eq!(y[5], -f); // right one fully turned: f - 2f * 1
+        assert_eq!(x, f.sin());
+        // Fifty ticks later the sway term sin(1.0) * 0.1 widens the opening.
+        let (y, _) = book_angles(50.0, 0.0, 0.0, 0.5);
+        let f = (1.0_f32.sin() * 0.1 + 1.25) * 0.5;
+        assert_eq!(y[2], f);
+        assert!(y[2] > 0.625);
+    }
+
+    #[test]
+    fn flipping_page_phase_wraps_into_the_unit_range() {
+        let book = Book {
+            page_flip: 3.9,
+            page_flip_prev: 3.9,
+            ..Book::default()
+        };
+        let (_, l, r, _) = book_pose(&book, 0.0);
+        // (4.15 - 4) * 1.6 - 0.3 < 0 clamps to 0; (4.65 - 4) * 1.6 - 0.3 = 0.74.
+        assert_eq!(l, 0.0);
+        assert!((r - 0.74).abs() < 1e-5);
     }
 }

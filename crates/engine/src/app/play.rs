@@ -154,8 +154,10 @@ impl App {
     }
 
     fn tick_block_entities(&mut self) {
+        // Only the local player turns the book toward itself; other players are not read here.
+        let players: Vec<[f64; 3]> = self.game.player.iter().map(|p| p.pos).collect();
         if let Some(r) = &mut self.renderer {
-            r.tick_block_entities();
+            r.tick_block_entities(&players);
         }
     }
 

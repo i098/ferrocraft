@@ -118,6 +118,11 @@ impl Hud {
         self.record_up_for = 60;
     }
 
+    /// The action bar text and the ticks it stays; `None` once it is gone.
+    pub fn action_bar(&self) -> Option<(&str, i32)> {
+        (self.record_up_for > 0).then_some((self.record.as_str(), self.record_up_for))
+    }
+
     /// `BossStatus.setBossStatus`: call each frame a boss is in view.
     pub fn set_boss(&mut self, name: String, ratio: f32) {
         self.boss.set(name, ratio);

@@ -877,6 +877,37 @@ struct Xf {
     generic: bool,
 }
 
+/// Vertical drop of the model: `RenderPlayer` lowers a sneaking player (a stand sneaks through its own
+/// model offset); `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
+fn sneak_drop(d: &EntityDraw) -> f32 {
+    if d.sneaking && d.class != Class::Object(78) {
+        0.125
+    } else if d.class == Class::Mob(mobs2::BAT) {
+        -mobs2::bat_lift(d)
+    } else {
+        0.0
+    }
+}
+
+/// `preRenderCallback` scale: the player by 15/16, `RenderCaveSpider` 0.7, `RenderVillager` 15/16
+/// (halved for a child), `RenderSlime` and `RenderMagmaCube` by the size at rest (no squish yet),
+/// `RenderGhast` (8 + 1) / 2 and `RenderBat` 0.35.
+fn model_scale(d: &EntityDraw) -> f32 {
+    match d.class {
+        Class::Player { .. } => 0.9375,
+        Class::Mob(mobs::CAVE_SPIDER) => 0.7,
+        // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
+        Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
+        Class::Mob(mobs::VILLAGER) => 0.9375,
+        // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
+        Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
+        // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
+        Class::Mob(mobs2::GHAST) => 4.5,
+        Class::Mob(mobs2::BAT) => 0.35,
+        _ => 1.0,
+    }
+}
+
 impl Xf {
     fn new(d: &EntityDraw, generic: bool) -> Xf {
         let spinning = matches!(d.class, Class::Orb);
@@ -903,15 +934,7 @@ impl Xf {
             pos: d.pos,
             st,
             ct,
-            // Only `RenderPlayer` lowers the model; a stand sneaks through its own model offset.
-            sneak_drop: if d.sneaking && d.class != Class::Object(78) {
-                0.125
-            } else if d.class == Class::Mob(mobs2::BAT) {
-                // `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
-                -mobs2::bat_lift(d)
-            } else {
-                0.0
-            },
+            sneak_drop: sneak_drop(d),
             fall,
             scale: model_scale(d),
             generic,

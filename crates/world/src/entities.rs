@@ -286,6 +286,32 @@ fn hanging_raw(pos: [i32; 3], facing: u8, width: u16, height: u16) -> [i32; 3] {
     ]
 }
 
+/// `EntityHanging.updateBoundingBox`: the slab around the centre `pos`, `width` by `height` pixels, one pixel
+/// (a 32nd of a block, each side) thick on the axis of `facing`.
+fn hanging_bounds(pos: [f64; 3], facing: u8, width: u16, height: u16) -> ([f64; 3], [f64; 3]) {
+    let (w, h) = (f64::from(width) / 32.0, f64::from(height) / 32.0);
+    let thick = 1.0 / 32.0;
+    // Facing 0 and 2 look along z, so the slab is wide in x.
+    let (hx, hz) = if facing & 1 == 0 {
+        (w, thick)
+    } else {
+        (thick, w)
+    };
+    (
+        [pos[0] - hx, pos[1] - h, pos[2] - hz],
+        [pos[0] + hx, pos[1] + h, pos[2] + hz],
+    )
+}
+
+/// `EntityLeashKnot.updateBoundingBox`: 0.375 wide and 0.5 high, centred on the block of the knot, 0.125 up.
+fn leash_knot_bounds(pos: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let c = pos.map(|p| p.floor() + 0.5);
+    (
+        [c[0] - 0.1875, c[1] - 0.25 + 0.125, c[2] - 0.1875],
+        [c[0] + 0.1875, c[1] + 0.25 + 0.125, c[2] + 0.1875],
+    )
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct Target {
     pos: [f64; 3],
@@ -441,7 +467,19 @@ impl Entity {
 
     /// Axis-aligned hitbox `(min, max)` at the current position.
     pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
-        bounds_at(self.pos, self.size())
+        match self.kind {
+            Kind::Painting => {
+                let (_, w, h, ..) = PAINTINGS
+                    .iter()
+                    .find(|p| p.0 == self.title)
+                    .copied()
+                    .unwrap_or(PAINTINGS[0]);
+                hanging_bounds(self.pos, self.facing, w, h)
+            }
+            Kind::Object(71) => hanging_bounds(self.pos, self.facing, 12, 12),
+            Kind::Object(77) => leash_knot_bounds(self.pos),
+            _ => bounds_at(self.pos, self.size()),
+        }
     }
 
     /// Hitbox `(width, height)`: armor stands (marker only; 1.8.9 keeps the box of a small one), baby mobs and
@@ -1188,6 +1226,78 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+    /// Oracle: `EntityHanging.updateBoundingBox` and `EntityLeashKnot.updateBoundingBox` worked by hand for
+    /// blocks at (0, 64, 0): the slab is 1/16 thick on the facing axis and sits 1/32 from the block face.
+    #[test]
+    fn hanging_entities_have_a_facing_dependent_box() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 1,
+            title: "Pool".into(),
+            pos: [0, 64, 0],
+            facing: 1,
+        });
+        // West: the slab is thin in x, 2 wide in z (Pool is 32x16 pixels, centred one block along rotateYCCW).
+        let (lo, hi) = es.get(1).unwrap().bounds();
+        assert_eq!(
+            (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]),
+            (0.0625, 1.0, 2.0)
+        );
+        assert_eq!((lo[0], lo[1]), (0.96875 - 0.03125, 64.0));
+        let frame = Entity {
+            facing: 2,
+            ..Entity::new(2, Kind::Object(71), [16, 2064, 16 - 15], 0, 0)
+        };
+        let (lo, hi) = frame.bounds();
+        assert_eq!(
+            (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]),
+            (0.75, 0.75, 0.0625)
+        );
+        let (lo, hi) = Entity::new(3, Kind::Object(77), [0, 64 * 32, 0], 0, 0).bounds();
+        assert_eq!(
+            (lo, hi),
+            ([0.3125, 64.375, 0.3125], [0.6875, 64.875, 0.6875])
+        );
+    }
+
+    /// Oracle: `EntityHanging.updateBoundingBox` worked by hand for the 2x1 "Pool" painting on block (0, 64, 0):
+    /// the slab is 1/16 thick on the facing axis, 2 wide on the other, and sits 1/32 inside the block face.
+    fn assert_pool_box(facing: u8, x: [f64; 2], z: [f64; 2]) {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 1,
+            title: "Pool".into(),
+            pos: [0, 64, 0],
+            facing,
+        });
+        let (lo, hi) = es.get(1).unwrap().bounds();
+        assert_eq!(
+            ([lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]),
+            (x, [64.0, 65.0], z),
+            "facing {facing}"
+        );
+    }
+
+    #[test]
+    fn painting_box_facing_0() {
+        assert_pool_box(0, [0.0, 2.0], [0.0, 0.0625]);
+    }
+
+    #[test]
+    fn painting_box_facing_1() {
+        assert_pool_box(1, [0.9375, 1.0], [0.0, 2.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_2() {
+        assert_pool_box(2, [-1.0, 1.0], [0.9375, 1.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_3() {
+        assert_pool_box(3, [0.0, 0.0625], [-1.0, 1.0]);
+    }
+
     use super::*;
 
     /// `EntityHanging.updateBoundingBox`: a 2x1 painting facing north on the wall of block (4, 70, 9)

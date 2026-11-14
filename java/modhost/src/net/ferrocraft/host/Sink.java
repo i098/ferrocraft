@@ -17,7 +17,7 @@ import java.util.Set;
  * sent once per name. 'I' image: the name as in 'D', 4 f32, i32 argb, u8 recolor (an SVG takes the color of argb).
  * 'C' clip: u8 on, then 4 f32 when on; later commands are cut to it. 'S' shape: u8 kind; kind 0 a rounded rect: 4 f32
  * box, 4 f32 radii (top left, top right, bottom right, bottom left), i32 argb; kind 1 a line: 4 f32 (x0 y0 x1 y1), f32 width,
- * i32 argb. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
+ * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
     private static final int MODELVIEW = 5888;
@@ -190,6 +190,17 @@ public final class Sink {
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
             clipped = box != null;
+            count++;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */
+    static synchronized void hud(int bits) {
+        try {
+            out.writeByte('H');
+            out.writeInt(bits);
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);

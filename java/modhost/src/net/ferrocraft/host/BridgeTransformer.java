@@ -6,6 +6,7 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
@@ -406,13 +407,35 @@ public class BridgeTransformer implements IClassTransformer {
     }
 
     /**
-     * EntityRenderer.loadShader builds a ShaderGroup from the resource manager and a framebuffer, which feed
+     * EntityRenderer.updateCameraAndRender keeps only the call of the HUD, the place where mods hook it (the world and the
+     * hand are Rust's). EntityRenderer.loadShader builds a ShaderGroup from the resource manager and a framebuffer, which feed
      * the GPU post pass (OneConfig's blur). Rust draws, so there is no pass: no group loads, and mods read
      * getShaderGroup as null, the state of a client without shader support.
      */
     private static InsnList entityRendererMethod(MethodNode m) {
-        if (!(m.name + m.desc).equals("func_175069_a(Lnet/minecraft/util/ResourceLocation;)V")) return null;
+        switch (m.name + m.desc) {
+            case "func_175069_a(Lnet/minecraft/util/ResourceLocation;)V":
+                return noBody();
+            case "func_181560_a(FJ)V": // updateCameraAndRender: only the HUD call, where mods hook (PolyCrosshair draws here)
+                return hudCall();
+            default:
+                return null;
+        }
+    }
+
+    private static InsnList noBody() {
         InsnList l = new InsnList();
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
+    }
+
+    private static InsnList hudCall() {
+        InsnList l = new InsnList();
+        l.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/renderer/EntityRenderer", "field_78531_r", "Lnet/minecraft/client/Minecraft;"));
+        l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/Minecraft", "field_71456_v", "Lnet/minecraft/client/gui/GuiIngame;"));
+        l.add(new VarInsnNode(Opcodes.FLOAD, 1));
+        l.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/client/gui/GuiIngame", "func_175180_a", "(F)V", false));
         l.add(new InsnNode(Opcodes.RETURN));
         return l;
     }

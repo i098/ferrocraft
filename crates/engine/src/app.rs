@@ -932,6 +932,13 @@ impl App {
         self.modal() || self.input.chat_input().is_some()
     }
 
+    /// Switch off in `frame` the vanilla HUD elements that a mod owns.
+    fn leave_out_mod_hud(&self, frame: &mut gui::Frame) {
+        if let Some(mods) = &self.mods {
+            mods.hud_owned().leave_out(frame);
+        }
+    }
+
     /// What HUD mods read from `Minecraft` and `EntityPlayerSP`, as the engine has it now. `None` without a player.
     fn mod_mirror(&self) -> Option<ferrocraft_modhost::Mirror> {
         use ferrocraft_modhost::mirror::{Effect, Stack, SLOTS};
@@ -1076,36 +1083,35 @@ impl App {
                 icons,
                 bob: self.game.bob,
             });
-            self.hud.draw(
-                &mut g,
-                &gui::Frame {
-                    partial_ticks: frac as f32,
-                    chat_input: self.input.chat_field(),
-                    debug: debug
-                        .as_deref()
-                        .filter(|_| self.show_debug)
-                        .map(|l| (l, &[][..])),
-                    reduced_debug: self.reduced_debug(),
-                    fancy: self.ui.settings.fancy_graphics,
-                    brightness: 1.0,
-                    border_warning: self.game.player.as_ref().map_or(0.0, |p| {
-                        let now = crate::game::now_ms();
-                        self.game.border.warning(p.pos[0], p.pos[2], now)
-                    }),
-                    player_view: self.game.gamemode != 3,
-                    status: Some(&status),
-                    hotbar,
-                    player_list: self.input.player_list_held(),
-                    now_ms: crate::game::now_ms(),
-                    local_player: &self.args.username,
-                    held_item_tooltips: self.ui.settings.held_item_tooltips,
-                    helmet_pumpkin: self.perspective == 0
-                        && self.game.inv.player[5]
-                            .as_ref()
-                            .is_some_and(|s| s.id == PUMPKIN),
-                    nausea: self.game.effects.has(Fx::NAUSEA),
-                },
-            );
+            let mut frame = gui::Frame {
+                partial_ticks: frac as f32,
+                chat_input: self.input.chat_field(),
+                debug: debug
+                    .as_deref()
+                    .filter(|_| self.show_debug)
+                    .map(|l| (l, &[][..])),
+                reduced_debug: self.reduced_debug(),
+                fancy: self.ui.settings.fancy_graphics,
+                brightness: 1.0,
+                border_warning: self.game.player.as_ref().map_or(0.0, |p| {
+                    let now = crate::game::now_ms();
+                    self.game.border.warning(p.pos[0], p.pos[2], now)
+                }),
+                player_view: self.game.gamemode != 3,
+                status: Some(&status),
+                hotbar,
+                player_list: self.input.player_list_held(),
+                now_ms: crate::game::now_ms(),
+                local_player: &self.args.username,
+                held_item_tooltips: self.ui.settings.held_item_tooltips,
+                helmet_pumpkin: self.perspective == 0
+                    && self.game.inv.player[5]
+                        .as_ref()
+                        .is_some_and(|s| s.id == PUMPKIN),
+                nausea: self.game.effects.has(Fx::NAUSEA),
+            };
+            self.leave_out_mod_hud(&mut frame);
+            self.hud.draw(&mut g, &frame);
         }
         let mut mod_textures = Vec::new();
         if let (Some(mods), Some(m)) = (&self.mods, self.mod_mirror()) {

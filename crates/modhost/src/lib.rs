@@ -2,6 +2,7 @@
 
 pub mod chat;
 pub mod hooks;
+pub mod hud;
 pub mod hud_lists;
 pub mod keys;
 pub mod mirror;
@@ -90,6 +91,8 @@ struct Shared {
     brand: Option<String>,
     /// The vanilla methods that a mod changed, from the hello; empty until the JVM connected.
     hooks: hooks::Hooks,
+    /// The HUD elements that Java owns in the last frame.
+    hud: hud::Owned,
 }
 
 struct Link {
@@ -160,6 +163,7 @@ impl ModHost {
                     stalled: false,
                     brand: None,
                     hooks: hooks::Hooks::default(),
+                    hud: hud::Owned::default(),
                 }),
                 view: Condvar::new(),
                 answered: Condvar::new(),
@@ -329,7 +333,7 @@ impl ModHost {
                     }
                 }
                 DrawCmd::Clip(rect) => g.set_clip(*rect),
-                DrawCmd::Define { .. } => {}
+                DrawCmd::Define { .. } | DrawCmd::Hud(_) => {}
             }
         }
         g.set_clip(None);
@@ -431,6 +435,12 @@ impl ModHost {
         }
     }
 
+    /// The vanilla HUD elements that Java owns in the last frame, once the JVM is live: Rust does not draw them. Nothing
+    /// is owned before that, so Rust draws the whole HUD.
+    pub fn hud_owned(&self) -> hud::Owned {
+        self.link.state.lock().unwrap().hud
+    }
+
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.
     pub fn screen_open(&self) -> bool {
         self.link.state.lock().unwrap().screen
@@ -441,6 +451,7 @@ impl ModHost {
             let mut s = self.link.state.lock().unwrap();
             s.phase = Phase::Done;
             s.commands.clear();
+            s.hud = hud::Owned::default();
             s.screen = false;
             self.link.view.notify_all();
             self.link.answered.notify_all();
@@ -507,6 +518,7 @@ fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str) {
     }
     s.phase = Phase::Done;
     s.commands.clear();
+    s.hud = hud::Owned::default();
     s.screen = false;
     link.answered.notify_all();
 }
@@ -622,19 +634,25 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
         write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
-        let mut s = link.state.lock().unwrap();
-        s.commands = Vec::with_capacity(cmds.len());
-        for c in cmds {
-            match c {
-                DrawCmd::Define { name, data } => {
-                    s.sources.insert(name, data);
-                }
-                c => s.commands.push(c),
-            }
-        }
-        s.screen = screen;
-        s.stalled = false;
+        apply_frame(&mut link.state.lock().unwrap(), screen, cmds);
     }
+}
+
+/// Stores one frame of the JVM: the draw commands, the resources, the HUD elements it owns and the screen flag.
+fn apply_frame(s: &mut Shared, screen: bool, cmds: Vec<DrawCmd>) {
+    s.commands = Vec::with_capacity(cmds.len());
+    s.hud = hud::Owned::default();
+    for c in cmds {
+        match c {
+            DrawCmd::Define { name, data } => {
+                s.sources.insert(name, data);
+            }
+            DrawCmd::Hud(bits) => s.hud = s.hud.with(bits),
+            c => s.commands.push(c),
+        }
+    }
+    s.screen = screen;
+    s.stalled = false;
 }
 
 /// Sends one request and records the JVM's answer; a stalled client keeps the answer out.
@@ -883,6 +901,7 @@ mod tests {
                 stalled: false,
                 brand: None,
                 hooks: hooks::Hooks::default(),
+                hud: hud::Owned::default(),
             }),
             view: Condvar::new(),
             answered: Condvar::new(),

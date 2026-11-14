@@ -53,15 +53,14 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         Ok(l) => l,
         Err(e) => return fail(&e),
     };
-    if loader == oneclient::Loader::Other {
+    // Ornithe keeps the Forge twin route until the Fabric host loads Ornithe jars (slice B7).
+    let Some(fabric) = fabric_host(loader) else {
         log::line(&format!(
             "cluster {}: loader {loader:?} has no mod host",
             cluster.display()
         ));
         return None;
-    }
-    // Ornithe keeps the Forge twin route until the Fabric host loads Ornithe jars (slice B7).
-    let fabric = loader == oneclient::Loader::Fabric;
+    };
     stage(cluster, loader, fabric)?;
     let cfg = if fabric {
         Config::provision_fabric().map_err(|e| e.to_string())
@@ -69,6 +68,14 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         Config::provision().map_err(|e| e.to_string())
     };
     cfg.map_err(|e| fail::<Config>(&e)).ok()
+}
+
+/// `Some(true)` for the Fabric host, `Some(false)` for the Forge host, `None` when no host loads the loader.
+fn fabric_host(loader: oneclient::Loader) -> Option<bool> {
+    match loader {
+        oneclient::Loader::Other => None,
+        l => Some(l == oneclient::Loader::Fabric),
+    }
 }
 
 /// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
@@ -165,13 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn cluster_with_no_host_loader_starts_nothing() {
-        let d = std::env::temp_dir().join(format!("fc-modboot-other-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join(".instance.json"), r#"{"mc_loader":3}"#).unwrap();
-        std::fs::write(d.join(".oneclient-mods.json"), r#"{"entries":[]}"#).unwrap();
-        assert!(from_cluster(&d).is_none());
-        std::fs::remove_dir_all(&d).unwrap();
+    fn each_loader_gets_its_host_or_none() {
+        use oneclient::Loader::*;
+        assert_eq!(fabric_host(Forge), Some(false));
+        assert_eq!(fabric_host(Fabric), Some(true));
+        assert_eq!(fabric_host(Ornithe), Some(false));
+        assert_eq!(fabric_host(Other), None);
     }
 
     #[test]

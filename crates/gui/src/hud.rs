@@ -82,8 +82,6 @@ pub struct Frame<'a> {
     pub helmet_pumpkin: bool,
     /// The Nausea effect is active: it replaces the portal swirl.
     pub nausea: bool,
-    /// A mod owns the crosshair: it draws its own, or none.
-    pub hide_crosshair: bool,
 }
 
 impl Hud {
@@ -144,7 +142,7 @@ impl Hud {
         }
         gui.set_color(0xFFFF_FFFF);
         let spectator = f.status.is_some_and(|s| s.spectator);
-        if crosshair_shown(f, spectator) {
+        if (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
         }
@@ -261,11 +259,6 @@ impl Hud {
         gui.blit_tinted(VIGNETTE, 0.0, 0.0, w, h, [0.0, 0.0, 1.0, 1.0], tint);
         gui.set_blend(Blend::Alpha);
     }
-}
-
-/// The crosshair draws unless a mod owns it, the player spectates, or F3 shows without reduced debug.
-fn crosshair_shown(f: &Frame, spectator: bool) -> bool {
-    !f.hide_crosshair && !spectator && (f.debug.is_none() || f.reduced_debug)
 }
 
 /// `renderHotbarItem` for all nine slots: the pop squash, the icon and the count.

@@ -1102,7 +1102,6 @@ impl App {
                         .as_ref()
                         .is_some_and(|s| s.id == PUMPKIN),
                 nausea: self.game.effects.has(Fx::NAUSEA),
-                hide_crosshair: false,
             };
             self.leave_out_mod_hud(&mut frame);
             self.hud.draw(&mut g, &frame);

@@ -251,6 +251,13 @@ impl ModHost {
         self.link.view.notify_one();
     }
 
+    /// Set the F3 flag and the player list key state for the next frame: Java mirrors them so that Forge posts the DEBUG and PLAYER_LIST events.
+    pub fn set_overlays(&self, debug: bool, player_list: bool) {
+        let mut s = self.link.state.lock().unwrap();
+        s.input.debug = debug;
+        s.input.player_list = player_list;
+    }
+
     /// Set the engine state that HUD mods read; it goes to the JVM with the next frame.
     pub fn set_mirror(&self, mirror: Mirror) {
         self.link.state.lock().unwrap().mirror = Some(mirror);
@@ -1107,12 +1114,12 @@ mod tests {
         };
 
         let mut stream = jvm(port, TOKEN);
-        let mut frame = [0; 25 + 2 * 8];
+        let mut frame = [0; 26 + 2 * 8];
         stream.read_exact(&mut frame).unwrap();
         assert_eq!(frame[0], b'F');
-        assert_eq!(frame[23..25], [0, 2]);
-        assert_eq!(frame[25..33], [b'K', 0, 0, 0, 54, 0b01, 0, 0x41]);
-        assert_eq!(frame[33..41], [b'K', 0, 0, 0, 54, 0, 0, 0]);
+        assert_eq!(frame[24..26], [0, 2]);
+        assert_eq!(frame[26..34], [b'K', 0, 0, 0, 54, 0b01, 0, 0x41]);
+        assert_eq!(frame[34..42], [b'K', 0, 0, 0, 54, 0, 0, 0]);
 
         let mut reply = vec![
             1, 0, 0, 0, 2, b'D', 0, 0, 0, 1, b'a', 0, 0, 0, 2, 7, 8, b'R',

@@ -103,6 +103,16 @@ final class Minecraft {
         R.call(R.cls("net.minecraft.client.settings.KeyBinding"), "func_74506_a"); // unPressAllKeys
     }
 
+    /**
+     * Rust owns the F3 screen and the tab key. Forge posts the DEBUG and PLAYER_LIST events only when
+     * GameSettings.showDebugInfo and keyBindPlayerList.pressed say so, so set them from Rust's state.
+     */
+    static void setOverlayKeys(Object mc, boolean debug, boolean playerList) {
+        Object settings = R.get(mc, "field_71474_y"); // gameSettings
+        R.set(settings, "field_74330_P", debug); // showDebugInfo
+        R.set(R.get(settings, "field_151445_Q"), "field_74513_e", playerList); // keyBindPlayerList.pressed
+    }
+
     /** The screen a mod opened, or null: the stand-in for Rust's screens does not count. */
     static Object modScreen(Object mc) {
         Object current = R.get(mc, "field_71462_r");

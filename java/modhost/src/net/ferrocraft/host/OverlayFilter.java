@@ -14,10 +14,10 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
  * <p>The bit of an element is the one of {@code crates/modhost/src/hud.rs}. Elements with no bit are always Rust's, the crosshair too until issue #282 lets Java draw the vanilla texture.
  */
 public final class OverlayFilter {
-    private static final int EVERY_BIT = 0b11;
+    private static final int EVERY_BIT = 0b1111;
     /** Index = bit number of crates/modhost/src/hud.rs. */
     private static final java.util.List<ElementType> OWNABLE = java.util.Arrays.asList(
-            ElementType.HELMET, ElementType.HOTBAR);
+            ElementType.HELMET, ElementType.HOTBAR, ElementType.DEBUG, ElementType.PLAYER_LIST);
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void pre(RenderGameOverlayEvent.Pre e) {

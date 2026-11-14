@@ -286,6 +286,32 @@ fn hanging_raw(pos: [i32; 3], facing: u8, width: u16, height: u16) -> [i32; 3] {
     ]
 }
 
+/// `EntityHanging.updateBoundingBox`: the slab around the centre `pos`, `width` by `height` pixels, one pixel
+/// (a 32nd of a block, each side) thick on the axis of `facing`.
+fn hanging_bounds(pos: [f64; 3], facing: u8, width: u16, height: u16) -> ([f64; 3], [f64; 3]) {
+    let (w, h) = (f64::from(width) / 32.0, f64::from(height) / 32.0);
+    let thick = 1.0 / 32.0;
+    // Facing 0 and 2 look along z, so the slab is wide in x.
+    let (hx, hz) = if facing & 1 == 0 {
+        (w, thick)
+    } else {
+        (thick, w)
+    };
+    (
+        [pos[0] - hx, pos[1] - h, pos[2] - hz],
+        [pos[0] + hx, pos[1] + h, pos[2] + hz],
+    )
+}
+
+/// `EntityLeashKnot.updateBoundingBox`: 0.375 wide and 0.5 high, centred on the block of the knot, 0.125 up.
+fn leash_knot_bounds(pos: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let c = pos.map(|p| p.floor() + 0.5);
+    (
+        [c[0] - 0.1875, c[1] - 0.25 + 0.125, c[2] - 0.1875],
+        [c[0] + 0.1875, c[1] + 0.25 + 0.125, c[2] + 0.1875],
+    )
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct Target {
     pos: [f64; 3],
@@ -441,7 +467,19 @@ impl Entity {
 
     /// Axis-aligned hitbox `(min, max)` at the current position.
     pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
-        bounds_at(self.pos, self.size())
+        match self.kind {
+            Kind::Painting => {
+                let (_, w, h, ..) = PAINTINGS
+                    .iter()
+                    .find(|p| p.0 == self.title)
+                    .copied()
+                    .unwrap_or(PAINTINGS[0]);
+                hanging_bounds(self.pos, self.facing, w, h)
+            }
+            Kind::Object(71) => hanging_bounds(self.pos, self.facing, 12, 12),
+            Kind::Object(77) => leash_knot_bounds(self.pos),
+            _ => bounds_at(self.pos, self.size()),
+        }
     }
 
     /// Hitbox `(width, height)`: armor stands (marker only; 1.8.9 keeps the box of a small one), baby mobs and
@@ -561,6 +599,30 @@ impl Entity {
             }
             _ => {}
         }
+    }
+
+    /// The particles `handleStatusUpdate` starts for `status` on this mob type.
+    fn status_fx(&self, status: i8) -> Option<Fx> {
+        let Kind::Mob(kind) = self.kind else {
+            return None;
+        };
+        let (pos, size) = (self.pos, self.size());
+        // Pig, sheep, cow, chicken, wolf, mooshroom, ocelot, horse, rabbit extend `EntityAnimal`;
+        // wolf and ocelot extend `EntityTameable`; horse sends taming particles itself.
+        let animal = matches!(kind, 90..=93 | 95 | 96 | 98 | 100 | 101);
+        let taming = matches!(kind, 95 | 98 | 100);
+        let mood = match (status, kind) {
+            (20, _) => return Some(Fx::Death { pos, size }),
+            (18, _) if animal => Mood::Hearts,
+            (7, _) if taming => Mood::Hearts,
+            (6, _) if taming => Mood::Smoke,
+            (12, 120) => Mood::VillagerHearts,
+            (13, 120) => Mood::Angry,
+            (14, 120) => Mood::Happy,
+            (15, 66) => return Some(Fx::Witch { pos, size }),
+            _ => return None,
+        };
+        Some(Fx::Mood { mood, pos, size })
     }
 
     /// Arm swing progress in `0.0..1.0`, interpolated between ticks (`getSwingProgress`).
@@ -762,6 +824,35 @@ pub enum Fx {
     },
     /// `EntityLivingBase.onDeathUpdate` at tick 20: the 20-particle puff.
     Death { pos: [f64; 3], size: (f32, f32) },
+    /// A `handleStatusUpdate` particle shower in the entity's box (see `Mood`).
+    Mood {
+        mood: Mood,
+        pos: [f64; 3],
+        size: (f32, f32),
+    },
+    /// `EntityWitch.handleStatusUpdate(15)`: witch magic specks around the head; `size` is `(width, height)`.
+    Witch { pos: [f64; 3], size: (f32, f32) },
+}
+
+/// The particle of a mob mood status: `EntityAnimal` 18, `EntityTameable` 6 and 7, `EntityVillager` 12 to 14.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mood {
+    Hearts,
+    Smoke,
+    VillagerHearts,
+    Angry,
+    Happy,
+}
+
+impl Mood {
+    /// Animals and tameables spawn 7 particles from half a block above the feet;
+    /// villagers spawn 5 from one block above.
+    pub fn count_and_rise(self) -> (u32, f64) {
+        match self {
+            Mood::Hearts | Mood::Smoke => (7, 0.5),
+            Mood::VillagerHearts | Mood::Angry | Mood::Happy => (5, 1.0),
+        }
+    }
 }
 
 impl Entities {
@@ -1017,7 +1108,14 @@ impl Entities {
                 }
                 self.with(id, |e| e.animate(animation))
             }
-            E::Status { id, status } => self.with(id, |e| e.set_status(status)),
+            E::Status { id, status } => {
+                if let Some(e) = self.map.get(&id) {
+                    if let Some(fx) = e.status_fx(status) {
+                        self.fx.push(fx);
+                    }
+                }
+                self.with(id, |e| e.set_status(status))
+            }
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
@@ -1188,6 +1286,78 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+    /// Oracle: `EntityHanging.updateBoundingBox` and `EntityLeashKnot.updateBoundingBox` worked by hand for
+    /// blocks at (0, 64, 0): the slab is 1/16 thick on the facing axis and sits 1/32 from the block face.
+    #[test]
+    fn hanging_entities_have_a_facing_dependent_box() {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 1,
+            title: "Pool".into(),
+            pos: [0, 64, 0],
+            facing: 1,
+        });
+        // West: the slab is thin in x, 2 wide in z (Pool is 32x16 pixels, centred one block along rotateYCCW).
+        let (lo, hi) = es.get(1).unwrap().bounds();
+        assert_eq!(
+            (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]),
+            (0.0625, 1.0, 2.0)
+        );
+        assert_eq!((lo[0], lo[1]), (0.96875 - 0.03125, 64.0));
+        let frame = Entity {
+            facing: 2,
+            ..Entity::new(2, Kind::Object(71), [16, 2064, 16 - 15], 0, 0)
+        };
+        let (lo, hi) = frame.bounds();
+        assert_eq!(
+            (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]),
+            (0.75, 0.75, 0.0625)
+        );
+        let (lo, hi) = Entity::new(3, Kind::Object(77), [0, 64 * 32, 0], 0, 0).bounds();
+        assert_eq!(
+            (lo, hi),
+            ([0.3125, 64.375, 0.3125], [0.6875, 64.875, 0.6875])
+        );
+    }
+
+    /// Oracle: `EntityHanging.updateBoundingBox` worked by hand for the 2x1 "Pool" painting on block (0, 64, 0):
+    /// the slab is 1/16 thick on the facing axis, 2 wide on the other, and sits 1/32 inside the block face.
+    fn assert_pool_box(facing: u8, x: [f64; 2], z: [f64; 2]) {
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnPainting {
+            id: 1,
+            title: "Pool".into(),
+            pos: [0, 64, 0],
+            facing,
+        });
+        let (lo, hi) = es.get(1).unwrap().bounds();
+        assert_eq!(
+            ([lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]),
+            (x, [64.0, 65.0], z),
+            "facing {facing}"
+        );
+    }
+
+    #[test]
+    fn painting_box_facing_0() {
+        assert_pool_box(0, [0.0, 2.0], [0.0, 0.0625]);
+    }
+
+    #[test]
+    fn painting_box_facing_1() {
+        assert_pool_box(1, [0.9375, 1.0], [0.0, 2.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_2() {
+        assert_pool_box(2, [-1.0, 1.0], [0.9375, 1.0]);
+    }
+
+    #[test]
+    fn painting_box_facing_3() {
+        assert_pool_box(3, [0.0, 0.0625], [-1.0, 1.0]);
+    }
+
     use super::*;
 
     /// `EntityHanging.updateBoundingBox`: a 2x1 painting facing north on the wall of block (4, 70, 9)
@@ -1305,6 +1475,62 @@ mod tests {
         }
         es.tick();
         assert!(es.get(3).is_none());
+    }
+
+    #[test]
+    fn mood_statuses_pick_the_vanilla_particle_for_the_mob_type() {
+        let mob = |kind| {
+            let mut es = Entities::default();
+            es.apply(EntityEvent::SpawnMob {
+                id: 1,
+                kind,
+                pos: [0; 3],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: SizeMeta::default(),
+            });
+            es
+        };
+        let moods = |kind, status| {
+            let mut es = mob(kind);
+            es.apply(EntityEvent::Status { id: 1, status });
+            es.take_fx()
+                .into_iter()
+                .map(|f| match f {
+                    Fx::Mood { mood, .. } => Some(mood),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(moods(120, 12), [Some(Mood::VillagerHearts)]);
+        assert_eq!(moods(120, 13), [Some(Mood::Angry)]);
+        assert_eq!(moods(120, 14), [Some(Mood::Happy)]);
+        assert_eq!(moods(95, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(95, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(100, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(100, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(98, 7), [Some(Mood::Hearts)]);
+        assert_eq!(moods(98, 6), [Some(Mood::Smoke)]);
+        assert_eq!(moods(91, 18), [Some(Mood::Hearts)]);
+        let mut zombie = mob(54);
+        zombie.apply(EntityEvent::Status { id: 1, status: 20 });
+        match zombie.take_fx().as_slice() {
+            [Fx::Death { pos, size }] => {
+                assert_eq!(*pos, [0.0; 3]);
+                assert_eq!(*size, (0.6, 1.95));
+            }
+            other => panic!("expected one Death fx, got {}", other.len()),
+        }
+        assert!(moods(54, 12).is_empty(), "zombie is no villager");
+        assert!(moods(120, 18).is_empty(), "villager is no animal");
+        let mut witch = mob(66);
+        witch.apply(EntityEvent::Status { id: 1, status: 15 });
+        assert!(matches!(witch.take_fx().as_slice(), [Fx::Witch { .. }]));
     }
 
     #[test]

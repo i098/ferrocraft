@@ -67,11 +67,18 @@ struct ChunkMesh {
     light: Option<crate::light::Light>,
 }
 
+/// What a held compass or clock needs to pick another strip frame.
+struct Strip {
+    id: i16,
+    image: Image,
+    display: hand::Mat,
+}
+
 /// The resolved model of the held item.
 enum Held {
     Block(MeshData),
     /// Extruded sprite and its item texture, bound with the hand globals.
-    Flat(hand::Flat, wgpu::BindGroup),
+    Flat(Box<hand::Flat>, wgpu::BindGroup, Strip),
     /// No model (unknown item, entity models such as skulls): nothing is drawn.
     Nothing,
 }
@@ -119,6 +126,8 @@ pub struct Renderer {
     flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
     item_models: entity::item::Models,
+    dials: hand::DialTurns,
+    frame_compasses: entity::hanging::Compasses,
     /// Wood models of item frames, read the first time one is drawn.
     frames: Option<entity::hanging::Frames>,
     /// Colour index bytes of each received map, 128x128.
@@ -426,6 +435,8 @@ impl Renderer {
             glint_mesh: None,
             flash_mesh: None,
             item_models: HashMap::new(),
+            dials: hand::DialTurns::default(),
+            frame_compasses: HashMap::new(),
             frames: None,
             maps: HashMap::new(),
             item_meshes: Vec::new(),
@@ -923,9 +934,15 @@ impl Renderer {
         self.load_frames(draws);
         let frames = self.frames.take().unwrap_or_default();
         let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
-        entity::hanging::build(&mut items, draws, &frames, &self.item_models, |p| {
-            self.light_at(p)
-        });
+        entity::hanging::build(
+            &mut items,
+            draws,
+            &frames,
+            &self.item_models,
+            &self.frame_compasses,
+            &self.dials,
+            |p| self.light_at(p),
+        );
         self.frames = Some(frames);
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas)).chain(
@@ -1013,14 +1030,31 @@ impl Renderer {
             .iter()
             .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))
         {
-            if self.item_models.contains_key(&key) {
+            let fresh = self
+                .item_models
+                .get(&key)
+                .is_some_and(|m| m.as_ref().is_none_or(|m| !m.stale(&self.dials)));
+            if fresh {
                 continue;
             }
             let model = self.source.as_mut().and_then(|source| {
                 let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
-                entity::item::resolve(&mut read, &self.atlas, key.0, key.1)
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &self.dials)
             });
             self.item_models.insert(key, model);
+        }
+        for (key, turns) in draws
+            .iter()
+            .filter_map(|d| entity::hanging::compass(d, &self.dials))
+        {
+            if self.frame_compasses.contains_key(&key) {
+                continue;
+            }
+            let model = self.source.as_mut().and_then(|source| {
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
+                entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &turns)
+            });
+            self.frame_compasses.insert(key, model);
         }
     }
 
@@ -1231,6 +1265,12 @@ impl Renderer {
     }
 
     /// First-person hand for the next frames; `None` hides it (F1, third person).
+    /// `TextureManager.tick`: the needle positions of the compass and the clock, for the hand and
+    /// for dropped items.
+    pub fn set_dials(&mut self, dials: hand::DialTurns) {
+        self.dials = dials;
+    }
+
     pub fn set_hand(&mut self, hand: Option<Hand>) {
         self.hand = hand;
     }
@@ -1306,9 +1346,15 @@ impl Renderer {
             let held = self.resolve_held(kind);
             self.held = Some((kind, held));
         }
+        if let Some((_, Held::Flat(flat, _, strip))) = &mut self.held {
+            let frame = self.dials.frame(strip.id, hand::strip_frames(&strip.image));
+            if frame != flat.frame {
+                **flat = hand::Flat::new(&strip.image, strip.display, frame);
+            }
+        }
         match &self.held.as_ref()?.1 {
             Held::Block(mesh) => Some((hand::block(&hand, mesh), HandTex::Atlas)),
-            Held::Flat(flat, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
+            Held::Flat(flat, _, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
             Held::Nothing => None,
         }
     }
@@ -1396,13 +1442,18 @@ impl Renderer {
             &self.sampler,
             &view,
         );
-        Some(Held::Flat(hand::Flat::new(&image, display), group))
+        let flat = Box::new(hand::Flat::new(
+            &image,
+            display,
+            self.dials.frame(id, hand::strip_frames(&image)),
+        ));
+        Some(Held::Flat(flat, group, Strip { id, image, display }))
     }
 
     fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
         match (tex, &self.hand_skin, &self.held) {
             (HandTex::Skin, Some((group, _)), _) => group,
-            (HandTex::Item, _, Some((_, Held::Flat(_, group)))) => group,
+            (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,
             _ => &self.hand_atlas_group,
         }
     }

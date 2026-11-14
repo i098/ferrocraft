@@ -4,10 +4,11 @@
 //! shortcut: the edges and back of a painting sample one texel of the sheet instead of vanilla's
 //! strips, and the map decorations (player and frame markers) are not drawn.
 
-use super::item::{dir, point, Items, Models, Stack};
+use super::item::{dir, point, ItemModel, Items, Models, Stack};
 use super::{Class, EntityDraw, V3};
-use crate::hand::{chain, ident, rotate, scale, translate, Mat};
+use crate::hand::{chain, ident, rotate, scale, translate, DialTurns, Mat};
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub const PAINTING_SHEET: &str = "textures/painting/paintings_kristoffer_zetterstrand.png";
 pub const FILLED_MAP: i16 = 358;
@@ -150,10 +151,23 @@ pub fn map_pixel(c: u8) -> [u8; 4] {
     [ch(16), ch(8), ch(0), 255]
 }
 
+/// Models of the compasses in frames, by `(id, damage, needle turns)`: the needle depends on the
+/// frame, not the player.
+pub type Compasses = HashMap<(i16, i16, u64), Option<ItemModel>>;
+
+/// The key of the compass model frame `d` shows, and the turns it is drawn with.
+pub fn compass(d: &EntityDraw, dials: &DialTurns) -> Option<((i16, i16, u64), DialTurns)> {
+    let s = d
+        .stack
+        .filter(|s| is_frame(d) && s.id == DialTurns::COMPASS)?;
+    let turns = dials.framed([d.pos[0], d.pos[2]], d.hang.facing);
+    Some(((s.id, s.damage, turns.compass.to_bits()), turns))
+}
+
 /// The stack a frame shows, whose model `draw` needs.
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     d.stack
-        .filter(|_| is_frame(d))
+        .filter(|s| is_frame(d) && s.id != DialTurns::COMPASS)
         .map(|s| (s.id, s.damage))
         .into_iter()
 }
@@ -164,10 +178,12 @@ pub fn build(
     draws: &[EntityDraw],
     frames: &Frames,
     models: &Models,
+    compasses: &Compasses,
+    dials: &DialTurns,
     light: impl Fn([f64; 3]) -> [f32; 2],
 ) {
     for d in draws {
-        draw(out, d, frames, models, &light);
+        draw(out, d, frames, models, compasses, dials, &light);
     }
 }
 
@@ -177,6 +193,8 @@ fn draw(
     d: &EntityDraw,
     frames: &Frames,
     models: &Models,
+    compasses: &Compasses,
+    dials: &DialTurns,
     light: &impl Fn([f64; 3]) -> [f32; 2],
 ) {
     let facing = d.hang.facing;
@@ -185,7 +203,7 @@ fn draw(
     if d.class == Class::Painting {
         painting(out, d, &turn, light);
     } else if is_frame(d) {
-        frame(out, d, &turn, frames, models, light);
+        frame(out, d, &turn, frames, models, compasses, dials, light);
     }
 }
 
@@ -265,12 +283,15 @@ fn painting(out: &mut Items, d: &EntityDraw, turn: &Mat, light: &impl Fn([f64; 3
 }
 
 /// `RenderItemFrame.render` and `renderDisplayItem`.
+#[allow(clippy::too_many_arguments)]
 fn frame(
     out: &mut Items,
     d: &EntityDraw,
     turn: &Mat,
     frames: &Frames,
     models: &Models,
+    compasses: &Compasses,
+    dials: &DialTurns,
     light: &impl Fn([f64; 3]) -> [f32; 2],
 ) {
     // The frame is drawn at the centre of the block its entity stands in.
@@ -330,7 +351,11 @@ fn frame(
         );
         return;
     }
-    let Some(Some(m)) = models.get(&(stack.id, stack.damage)) else {
+    let model = match compass(d, dials) {
+        Some((key, _)) => compasses.get(&key),
+        None => models.get(&(stack.id, stack.damage)),
+    };
+    let Some(Some(m)) = model else {
         return;
     };
     let prepare = if m.gui3d() { ident() } else { rotate(180.0, 1) };

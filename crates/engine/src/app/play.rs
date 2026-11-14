@@ -225,6 +225,9 @@ impl App {
                 yaw: p.yaw,
                 time: self.game.world_time,
             }));
+        if let Some(r) = &mut self.renderer {
+            r.set_dials(icons.dials.turns());
+        }
     }
 
     fn tick_once(&mut self) {
@@ -328,6 +331,19 @@ impl App {
                     self.particles.hit_burst(magic, pos, size)
                 }
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
+                world::entities::Fx::Mood { mood, pos, size } => {
+                    use render::ParticleKind as K;
+                    use world::entities::Mood;
+                    let kind = match mood {
+                        Mood::Hearts | Mood::VillagerHearts => K::Heart,
+                        Mood::Smoke => K::Smoke,
+                        Mood::Angry => K::AngryVillager,
+                        Mood::Happy => K::HappyVillager,
+                    };
+                    let (count, rise) = mood.count_and_rise();
+                    self.particles.mood(kind, count, rise, pos, size)
+                }
+                world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
             }
         }
         let g = &self.game;

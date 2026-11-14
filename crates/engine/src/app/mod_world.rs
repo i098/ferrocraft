@@ -121,13 +121,21 @@ fn draw_hitbox(game: &Game, id: Option<i32>, d: &EntityDraw) -> Vec<Segment> {
     let (eye, living) = match id.map(|id| game.entities.get(id)) {
         None => (1.62 - if d.sneaking { 0.08 } else { 0.0 }, true),
         Some(None) => return Vec::new(),
+        Some(Some(e)) if matches!(e.kind, Kind::Painting | Kind::Object(71 | 77)) => {
+            return Vec::new()
+        }
         Some(Some(e)) => (
             e.eye_height(),
             matches!(e.kind, Kind::Player | Kind::Mob(_) | Kind::Object(78)),
         ),
     };
-    let yaw = if living { d.head_yaw } else { d.yaw };
-    vanilla_hitbox(d.pos, d.size, eye, living, look_vector(yaw, d.pitch))
+    let look = look_of(living, d.yaw, d.head_yaw, d.pitch);
+    vanilla_hitbox(d.pos, d.size, eye, living, look)
+}
+
+/// `EntityLivingBase.getLook` aims by the head yaw; `Entity.getLook` by the body yaw.
+fn look_of(living: bool, yaw: f32, head_yaw: f32, pitch: f32) -> [f64; 3] {
+    look_vector(if living { head_yaw } else { yaw }, pitch)
 }
 
 impl Drawn {
@@ -398,6 +406,19 @@ mod tests {
             [(blue.0[1], blue.1[1]), (blue.0[2], blue.1[2]), (0.0, 0.0)],
             [(65.62, 65.62), (2.0, 4.0), (0.0, 0.0)],
         );
+    }
+
+    /// Oracle: `getVectorForRotation(-30, 90)` worked by hand: x = sin(-270 deg) * -cos(30 deg) = -0.866,
+    /// y = sin(30 deg) = 0.5, z = cos(-270 deg) * -cos(30 deg) = 0. A flipped yaw or pitch sign changes it.
+    #[test]
+    fn the_look_follows_yaw_and_pitch_and_the_head_only_for_living_entities() {
+        let look = look_of(true, 0.0, 90.0, -30.0);
+        assert_span(
+            [(look[0], look[0]), (look[1], look[1]), (look[2], look[2])],
+            [(-0.866_025_4, -0.866_025_4), (0.5, 0.5), (0.0, 0.0)],
+        );
+        assert_eq!(look_of(false, 90.0, 0.0, -30.0), look);
+        assert_ne!(look_of(true, 90.0, 0.0, -30.0), look);
     }
 
     #[test]

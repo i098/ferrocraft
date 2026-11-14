@@ -3,9 +3,7 @@
 //! layout, texture offsets and `setRotationAngles`. Every constant was read from the 1.8.9 classes
 //! with `harness/mobmodels.sh`, which also runs the constructors and animation of the models.
 //!
-//! Not ported: the squish of `RenderSlime` and `RenderMagmaCube` (it needs the client-side jump
-//! state of the entity, which the draw does not carry, so the cube stays at its resting shape) and
-//! the stuck rotation of a bat wing from a roost (`ModelBat` keeps the last pose in the shared
+//! Not ported: the stuck rotation of a bat wing from a roost (`ModelBat` keeps the last pose in the shared
 //! model; here a flying bat starts from flat wings).
 
 use super::mobs::{head_rot, model, Layer};
@@ -21,7 +19,7 @@ pub(super) const BAT: u8 = 65;
 pub(super) fn build(d: &EntityDraw, id: u8) -> Option<Model> {
     Some(match id {
         SLIME => slime(),
-        MAGMA_CUBE => magma_cube(),
+        MAGMA_CUBE => magma_cube(d),
         BLAZE => blaze(d),
         GHAST => ghast(d),
         BAT => bat(d),
@@ -50,6 +48,15 @@ pub(super) fn layers(d: &EntityDraw) -> Vec<Layer> {
 /// `EntitySlime.getSlimeSize` from metadata 16; a slime that never sent it has size 1.
 pub(super) fn cube_size(d: &EntityDraw) -> f32 {
     f32::from(d.look.variant.max(1))
+}
+
+/// `RenderSlime.preRenderCallback` and `RenderMagmaCube.preRenderCallback`: with the squish `s`
+/// eased over the partial tick and `f = s / (size / 2 + 1)`, the model scales by
+/// `(size / (f + 1), size * (f + 1))` on the horizontal and the vertical axes.
+pub(super) fn cube_scale(d: &EntityDraw) -> [f32; 2] {
+    let size = cube_size(d);
+    let k = 1.0 / (d.look.squish / (size * 0.5 + 1.0) + 1.0);
+    [k * size, 1.0 / k * size]
 }
 
 /// `EntityMagmaCube.getBrightnessForRender` and `EntityBlaze.getBrightnessForRender` are 15728880.
@@ -86,9 +93,9 @@ fn slime() -> Model {
     )
 }
 
-/// `ModelMagmaCube`: the core and eight one-pixel slices of the shell. The slices sit apart by
-/// `-(4 - i) * squish * 1.7`, which is nil at rest.
-fn magma_cube() -> Model {
+/// `ModelMagmaCube`: the core and eight one-pixel slices of the shell. `setLivingAnimations` moves
+/// slice `i` by `-(4 - i) * squish * 1.7` on y, where the squish is at least 0.
+fn magma_cube(d: &EntityDraw) -> Model {
     const SLICE_UV: [(f32, f32); 8] = [
         (0.0, 0.0),
         (0.0, 1.0),
@@ -99,13 +106,21 @@ fn magma_cube() -> Model {
         (0.0, 6.0),
         (0.0, 7.0),
     ];
-    let at = [0.0; 3];
+    let squish = d.look.squish.max(0.0);
     let mut parts: Vec<Part> = SLICE_UV
         .iter()
         .enumerate()
-        .map(|(i, &uv)| Part::new(at, [-4.0, 16.0 + i as f32, -4.0], [8.0, 1.0, 8.0], uv))
+        .map(|(i, &uv)| {
+            let at = [0.0, -((4 - i as i32) as f32) * squish * 1.7, 0.0];
+            Part::new(at, [-4.0, 16.0 + i as f32, -4.0], [8.0, 1.0, 8.0], uv)
+        })
         .collect();
-    parts.push(Part::new(at, [-2.0, 18.0, -2.0], [4.0; 3], (0.0, 16.0)));
+    parts.push(Part::new(
+        [0.0; 3],
+        [-2.0, 18.0, -2.0],
+        [4.0; 3],
+        (0.0, 16.0),
+    ));
     model(Skin::MagmaCube, parts)
 }
 
@@ -268,6 +283,22 @@ mod tests {
         assert_eq!(cube_size(&d), 1.0);
         d.look.variant = 4;
         assert_eq!(cube_size(&d), 4.0);
+    }
+
+    #[test]
+    fn squish_flattens_the_cube_and_spreads_the_magma_slices() {
+        let mut d = mob(MAGMA_CUBE);
+        d.look.variant = 2;
+        assert_eq!(cube_scale(&d), [2.0, 2.0]);
+        d.look.squish = -0.5;
+        let [xz, y] = cube_scale(&d);
+        assert!(xz > 2.0 && y < 2.0);
+        d.look.squish = 1.0;
+        let m = build(&d, MAGMA_CUBE).unwrap();
+        assert!((m.parts[0].pivot[1] + 4.0 * 1.7).abs() < 1e-5);
+        assert_eq!(m.parts[4].pivot[1], 0.0);
+        d.look.squish = -0.5;
+        assert_eq!(build(&d, MAGMA_CUBE).unwrap().parts[0].pivot[1], 0.0);
     }
 
     #[test]

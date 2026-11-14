@@ -252,6 +252,8 @@ pub struct Entity {
     pub title: String,
     /// Firework rockets: the explosions of the item at metadata index 8.
     pub explosions: Vec<FireworkExplosion>,
+    /// Slimes and magma cubes: the jump squish.
+    pub squish: crate::squish::Squish,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -400,6 +402,7 @@ impl Entity {
             facing: 0,
             title: String::new(),
             owner: 0,
+            squish: crate::squish::Squish::default(),
         }
     }
 
@@ -562,6 +565,9 @@ impl Entity {
             }
         } else {
             self.swing_ticks = 0;
+        }
+        if let Kind::Mob(id @ (55 | 62)) = self.kind {
+            self.squish.tick(self.on_ground, id == 62);
         }
         if self.hurt_time > 0 {
             self.hurt_time -= 1;
@@ -1909,5 +1915,46 @@ mod tests {
         entity.flags = 0;
         entity.meta.slime = Some(1);
         assert!(entity.burning());
+    }
+
+    /// Packet path of #270: a mob spawn, then ground flags from move packets, drive the squish the
+    /// renderer reads. A zombie (54) must never squish.
+    #[test]
+    fn ground_flags_from_move_packets_squish_slimes_and_magma_cubes() {
+        for (kind, squishes) in [(55u8, true), (62, true), (54, false)] {
+            let mut es = Entities::default();
+            es.apply(EntityEvent::SpawnMob {
+                id: 1,
+                kind,
+                pos: [0, 64 * 32, 0],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: SizeMeta::default(),
+            });
+            let mv = |es: &mut Entities, on_ground| {
+                es.apply(EntityEvent::Move {
+                    id: 1,
+                    delta: [0; 3],
+                    look: None,
+                    on_ground,
+                });
+                es.tick();
+            };
+            mv(&mut es, false);
+            mv(&mut es, false);
+            mv(&mut es, true);
+            mv(&mut es, true);
+            let landed = es.get(1).unwrap().squish.factor(1.0);
+            assert_eq!(landed < 0.0, squishes, "kind {kind}: {landed}");
+            for _ in 0..80 {
+                mv(&mut es, true);
+            }
+            assert!(es.get(1).unwrap().squish.factor(1.0).abs() < 1e-3);
+        }
     }
 }

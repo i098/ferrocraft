@@ -28,6 +28,8 @@ import net.minecraft.flat.WorldChunk;
 import net.minecraft.flat.Dimension;
 import net.minecraft.flat.ProtoChunk;
 import net.minecraft.flat.EmptyWorldStorage;
+import net.minecraft.flat.MagmaCubeEntity;
+import net.minecraft.flat.SlimeEntity;
 
 /**
  * Ground-truth oracle: drives the real, remapped 1.8.9 player movement code.
@@ -51,6 +53,8 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   stats                         Stats: G|key|formatter, M|item id|key, U|item id|key, A<m|c|u|b>|id|key per array slot, I|item id|registry name|translation key, E|entity key|kill key|killed-by key
  *   statfmt <kind> <ints...>      Stat.format of the formatter (number, time, distance, tenth): one line per int
  *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
+ *   squish <magma 0/1> <ticks> <kick tick>  a slime or magma cube dropped from y 66 onto the floor, which gets a jump
+ *                                 at the kick tick; per tick: onGround, stretch and lastStretch as float bits in hex; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -226,6 +230,21 @@ public class Harness {
         init.invoke(world.dimension);
         System.out.println(shadowAlpha(Float.parseFloat(t[1]), Double.parseDouble(t[2]),
             Integer.parseInt(t[3]), world.dimension.getBrightnessTable()[Integer.parseInt(t[4])]));
+    }
+
+    /** `SlimeEntity.tick`: the squish state after each tick of a real slime or magma cube. */
+    static void squishCommand(String[] t) {
+        SlimeEntity s = t[1].equals("1") ? new MagmaCubeEntity(world) : new SlimeEntity(world);
+        s.setPosition(0.5, 66, 0.5);
+        int kick = Integer.parseInt(t[3]);
+        for (int i = 0; i < Integer.parseInt(t[2]); i++) {
+            if (i == kick) {
+                s.velocityY = 0.42;
+            }
+            s.tick();
+            System.out.println((s.onGround ? 1 : 0) + " " + Integer.toHexString(Float.floatToRawIntBits(s.stretch))
+                + " " + Integer.toHexString(Float.floatToRawIntBits(s.lastStretch)));
+        }
     }
 
     /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
@@ -545,6 +564,9 @@ public class Harness {
                 }
                 case "shadow":
                     shadowCommand(t);
+                    break;
+                case "squish":
+                    squishCommand(t);
                     break;
                 case "mip":
                     mipLines(t);

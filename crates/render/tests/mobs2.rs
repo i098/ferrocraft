@@ -136,3 +136,52 @@ fn slime_magma_cube_blaze_ghast_and_bat_draw_their_models() {
         encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
     }
 }
+
+/// Rows and columns that differ from the empty frame: `(height, width)` in pixels.
+fn extent(img: &[u8], empty: &[u8]) -> (usize, usize) {
+    let (mut y0, mut y1, mut x0, mut x1) = (usize::MAX, 0, usize::MAX, 0);
+    for (i, (a, b)) in img.chunks(4).zip(empty.chunks(4)).enumerate() {
+        if a != b {
+            let (x, y) = (i % 800, i / 800);
+            (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+        }
+    }
+    (y1 + 1 - y0, x1 + 1 - x0)
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn landing_squish_flattens_a_slime_and_a_magma_cube() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(800, 450, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=2 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let empty = r.render_to_rgba(&cam, &[]).2;
+    for (id, x) in [(55, 2.0), (62, -2.0)] {
+        let mut d = mob(id, x, 6.0, (1.02, 1.02), 2);
+        r.set_entities(std::slice::from_ref(&d));
+        let rest = r.render_to_rgba(&cam, &[]).2;
+        // The squish a slime has on the tick after it lands (`targetStretch` -0.5, eased by one half).
+        d.look.squish = -0.25;
+        r.set_entities(std::slice::from_ref(&d));
+        let flat = r.render_to_rgba(&cam, &[]).2;
+        let ((h0, w0), (h1, w1)) = (extent(&rest, &empty), extent(&flat, &empty));
+        assert!(
+            h1 < h0 && w1 > w0,
+            "mob {id}: {h0}x{w0} at rest, {h1}x{w1} squished"
+        );
+        if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            encode_png(&dir.join(format!("rest-{id}.png")), 800, 450, &rest).unwrap();
+            encode_png(&dir.join(format!("squished-{id}.png")), 800, 450, &flat).unwrap();
+        }
+    }
+}

@@ -128,7 +128,7 @@ pub struct App {
     fov_mod: (f32, f32),
     /// What the mods left of the world values at the last frame's start.
     mod_view: ferrocraft_modhost::Overrides,
-    /// What the mods drew in the world at the last frame: name tags, the TNT countdown, hitbox lines.
+    /// What the mods drew in the world at the last frame: name tags and the TNT countdown.
     mod_drawn: mod_world::Drawn,
     view_bob: play::ViewBob,
     /// When the last frame was shown, for the `maxFps` limit.
@@ -892,7 +892,6 @@ impl App {
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
         r.set_cracks(self.game.cracks());
-        r.set_mod_lines(&self.mod_drawn.lines());
         let verts =
             self.particles
                 .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32, |p| {

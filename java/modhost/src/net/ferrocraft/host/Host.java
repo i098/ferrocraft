@@ -15,7 +15,7 @@ import net.minecraft.launchwrapper.Launch;
  * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF, then the hook table of {@link HookIndex}.
  * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
- * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'E' is a world or entity event, see {@link Events}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'L' is the HUD lists (tab list, scoreboard, boss bar, title, action bar), see {@link HudLists}, which follows the mirror. 'O' asks for the world values mods change, see {@link Overrides}. 'A' asks for the name tags, TNT countdown and hitbox lines that mods draw in the world, see {@link Anchor}. Any other first byte ends the host.
+ * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'E' is a world or entity event, see {@link Events}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'L' is the HUD lists (tab list, scoreboard, boss bar, title, action bar), see {@link HudLists}, which follows the mirror. 'O' asks for the world values mods change, see {@link Overrides}. 'A' asks for the name tags and TNT countdown that mods draw in the world, see {@link Anchor}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {

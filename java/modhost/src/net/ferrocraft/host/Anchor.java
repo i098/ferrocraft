@@ -23,22 +23,21 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 /**
- * Draws in the world: name tags, the TNT countdown and the lines of hitboxes. Rust sends the entities in view; this
+ * Draws in the world: name tags and the TNT countdown. Rust sends the entities in view; this
  * runs the real vanilla methods that mods changed with Mixin ({@code Render.renderLivingLabel},
- * {@code RenderTNTPrimed.doRender}, {@code RenderManager.renderDebugBoundingBox}) on stand-in entities, with the
+ * {@code RenderTNTPrimed.doRender}) on stand-in entities, with the
  * entity at the origin, and records what they draw: the text of {@link Sink#text} and the vertices of
  * {@code WorldRenderer} (patched by {@link #patch}). Rust projects and draws the result.
  *
  * <p>A label hangs billboard-like: its text and plates are recorded as an offset to the right and up, in blocks,
- * from the entity's feet. A hitbox is recorded as lines, as offsets from the feet in the world axes.
+ * from the entity's feet.
  *
- * <p>Request, after the tag 'A': see crates/modhost/src/anchor.rs. Reply: u32 item count, then 'L' labels and 'W' lines.
+ * <p>Request, after the tag 'A': see crates/modhost/src/anchor.rs. Reply: u32 item count, then 'L' labels.
  * Subject drawing that throws (a stand-in lacks something the code reads) is logged once per role and dropped.
  */
 public final class Anchor {
     private static final int LABEL = 1;
     private static final int COUNTDOWN = 2;
-    private static final int HITBOX = 4;
     private static final String RENDER_TNT = "net.minecraft.client.renderer.entity.RenderTNTPrimed";
     /** The stand-in vanilla class of each wire class (player, other, primed TNT). */
     private static final String[] ENTITY = {"net.minecraft.client.entity.EntityOtherPlayerMP", "net.minecraft.entity.passive.EntityPig", "net.minecraft.entity.item.EntityTNTPrimed"};
@@ -47,7 +46,6 @@ public final class Anchor {
     /** The role being drawn; 0 when no subject is. */
     private static int role;
     private static List<Object[]> ops;
-    private static List<float[]> lines;
     private static final List<float[]> VERTS = new ArrayList<>();
     private static int mode;
     private static float[] color = {1, 1, 1, 1};
@@ -56,7 +54,7 @@ public final class Anchor {
     private final Object manager;
     private final Map<Integer, Object> entities = new HashMap<>();
     private Object render;
-    /** Stands for the player that looks: the label distance and the hitbox visibility read its position. */
+    /** Stands for the player that looks: the label distance reads its position. */
     private final Object viewer;
 
     Anchor(Object mc) {
@@ -122,30 +120,22 @@ public final class Anchor {
         VERTS.add(new float[] {(float) x, (float) y, (float) z, 0, 0, 0, 0});
     }
 
-    /** One vertex done: lines in the world axes for a hitbox, plates in the billboard axes for a label. */
+    /** One vertex done: a plate quad in the billboard axes. */
     public static synchronized void endVertex() {
         if (role == 0 || VERTS.isEmpty()) return;
         float[] v = VERTS.get(VERTS.size() - 1);
         v[3] = argb(color);
         int n = VERTS.size();
-        if (role == HITBOX) {
-            if (mode == 1 && n % 2 == 0) lines.add(segment(VERTS.get(n - 2), v));
-            if ((mode == 3 || mode == 2) && n > 1) lines.add(segment(VERTS.get(n - 2), v));
-        } else if (mode == 7 && n % 4 == 0) {
-            float[] f = new float[9];
-            for (int i = 0; i < 4; i++) {
-                float[] p = VERTS.get(n - 4 + i);
-                float[] t = Sink.transform(p[0], p[1], p[0], p[1]);
-                f[i * 2] = -t[0];
-                f[i * 2 + 1] = t[1];
-            }
-            f[8] = v[3];
-            ops.add(new Object[] {'Q', f});
+        if (mode != 7 || n % 4 != 0) return;
+        float[] f = new float[9];
+        for (int i = 0; i < 4; i++) {
+            float[] p = VERTS.get(n - 4 + i);
+            float[] t = Sink.transform(p[0], p[1], p[0], p[1]);
+            f[i * 2] = -t[0];
+            f[i * 2 + 1] = t[1];
         }
-    }
-
-    private static float[] segment(float[] a, float[] b) {
-        return new float[] {a[0], a[1], a[2], b[0], b[1], b[2], b[3]};
+        f[8] = v[3];
+        ops.add(new Object[] {'Q', f});
     }
 
     private static float argb(float[] c) {
@@ -258,7 +248,6 @@ public final class Anchor {
             }
             if ((roles & LABEL) != 0) count += draw(w, id, LABEL, e, label, partial, yaw);
             if ((roles & COUNTDOWN) != 0) count += draw(w, id, COUNTDOWN, e, null, partial, yaw);
-            if ((roles & HITBOX) != 0) count += draw(w, id, HITBOX, e, null, partial, yaw);
         }
         entities.keySet().retainAll(seen);
         out.writeInt(count);
@@ -271,7 +260,6 @@ public final class Anchor {
         synchronized (Anchor.class) {
             role = what;
             ops = new ArrayList<>();
-            lines = new ArrayList<>();
             mode = 0;
             VERTS.clear();
             color = new float[] {1, 1, 1, 1};
@@ -280,28 +268,17 @@ public final class Anchor {
         Sink.identity();
         try {
             if (render == null) render = R.neu(RENDER_TNT, manager);
-            switch (what) {
-                case LABEL:
-                    R.call(render, "func_147906_a", e, label, 0.0, 0.0, 0.0, 64); // Render.renderLivingLabel
-                    break;
-                case COUNTDOWN:
-                    R.call(render, "func_76986_a", e, 0.0, 0.0, 0.0, yaw, partial); // RenderTNTPrimed.doRender
-                    break;
-                default:
-                    R.call(manager, "func_85094_b", e, 0.0, 0.0, 0.0, yaw, partial); // RenderManager.renderDebugBoundingBox
-                    break;
-            }
+            if (what == LABEL) R.call(render, "func_147906_a", e, label, 0.0, 0.0, 0.0, 64); // Render.renderLivingLabel
+            else R.call(render, "func_76986_a", e, 0.0, 0.0, 0.0, yaw, partial); // RenderTNTPrimed.doRender
         } catch (RuntimeException x) {
             failed("role " + what, x);
         } finally {
             Sink.pop();
         }
         List<Object[]> o;
-        List<float[]> l;
         synchronized (Anchor.class) {
             role = 0;
             o = ops;
-            l = lines;
         }
         int count = 0;
         if (!o.isEmpty()) {
@@ -323,17 +300,11 @@ public final class Anchor {
                     w.writeFloat((Float) op[3]);
                     w.writeInt((Integer) op[4]);
                     w.writeByte((Boolean) op[5] ? 1 : 0);
-                    w.writeInt(utf.length);
-                    w.write(utf);
+                    int len = Math.min(utf.length, 4096);
+                    w.writeInt(len);
+                    w.write(utf, 0, len);
                 }
             }
-            count++;
-        }
-        for (float[] s : l) {
-            w.writeByte('W');
-            w.writeInt(id);
-            for (int k = 0; k < 6; k++) w.writeFloat(s[k]);
-            w.writeInt(Float.floatToRawIntBits(s[6]));
             count++;
         }
         return count;

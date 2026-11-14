@@ -1,17 +1,15 @@
-//! Draws in the world: name tags, the TNT countdown and the lines of hitboxes. A mod changes these in vanilla methods
-//! that Rust ports (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`, `RenderManager.renderDebugBoundingBox`).
-//! Once per frame Rust sends the entities in view, and Java runs those vanilla methods on stand-in entities at the
-//! origin and records the text, plates and lines they draw. Rust projects them and draws them: lines in the world
-//! pass, text and plates over the world.
+//! Draws in the world: name tags and the TNT countdown. A mod changes these in vanilla methods that Rust ports
+//! (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`). Once per frame Rust sends the entities in view, and Java
+//! runs those vanilla methods on stand-in entities at the origin and records the text and plates they draw. Rust
+//! projects them and draws them over the world.
 //!
 //! Wire, a round trip like `overrides.rs`. Rust to Java: `'A'`, f32 partial tick, f32 view yaw, f32 view pitch, three f64
-//! camera position, u16 subject count, then per subject: i32 entity id, u8 class (0 player, 1 other, 2 primed TNT), u8
-//! roles (1 label, 2 countdown, 4 hitbox), three f64 position of the feet, f32 width, f32 height, f32 yaw, f32 label
+//! camera position, u16 subject count, then per subject: i32 entity id, u8 class (0 player, 1 other, 2 primed TNT),
+//! u8 roles (1 label, 2 countdown), three f64 position of the feet, f32 width, f32 height, f32 yaw, f32 label
 //! offset, i32 fuse, and for the label role u32 length and the UTF-8 text.
 //! Java to Rust: u32 item count, then per item `'L'` (i32 entity id, u16 op count, then per op `'Q'`: four points of
 //! two f32 and i32 ARGB; or `'T'`: f32 right, f32 up, f32 blocks per text pixel, i32 ARGB, u8 shadow, u32 length and
-//! UTF-8) or `'W'` (i32 entity id, two points of three f32, i32 ARGB). Label points are blocks to the right of the
-//! feet and up from them, facing the camera. Line points are offsets from the feet in the world axes.
+//! UTF-8). Label points are blocks to the right of the feet and up from them, facing the camera.
 
 use std::io::{self, Read, Write};
 
@@ -26,7 +24,6 @@ const MAX_TEXT: usize = 1 << 12;
 
 pub const ROLE_LABEL: u8 = 1;
 pub const ROLE_COUNTDOWN: u8 = 2;
-pub const ROLE_HITBOX: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
@@ -86,19 +83,10 @@ pub struct Label {
     pub ops: Vec<Op>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Line {
-    pub id: i32,
-    pub from: [f32; 3],
-    pub to: [f32; 3],
-    pub argb: u32,
-}
-
 /// What the mods drew for one frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct World {
     pub labels: Vec<Label>,
-    pub lines: Vec<Line>,
 }
 
 /// The request the pump has not sent yet and the answer it has not handed out.
@@ -174,12 +162,6 @@ pub fn read_world(r: &mut impl Read) -> io::Result<World> {
     for _ in 0..n {
         match u8_(r)? {
             b'L' => world.labels.push(read_label(r)?),
-            b'W' => world.lines.push(Line {
-                id: u32_(r)? as i32,
-                from: point(r)?,
-                to: point(r)?,
-                argb: u32_(r)?,
-            }),
             t => return Err(io::Error::other(format!("unknown world item {t}"))),
         }
     }
@@ -194,25 +176,26 @@ fn read_label(r: &mut impl Read) -> io::Result<Label> {
     if n > MAX_OPS {
         return Err(io::Error::other(format!("{n} ops in one label")));
     }
-    let mut ops = Vec::with_capacity(usize::from(n));
-    for _ in 0..n {
-        ops.push(match u8_(r)? {
-            b'Q' => Op::Quad {
-                pts: [point2(r)?, point2(r)?, point2(r)?, point2(r)?],
-                argb: u32_(r)?,
-            },
-            b'T' => Op::Text {
-                right: f32_(r)?,
-                up: f32_(r)?,
-                scale: f32_(r)?,
-                argb: u32_(r)?,
-                shadow: u8_(r)? != 0,
-                text: text(r)?,
-            },
-            t => return Err(io::Error::other(format!("unknown label op {t}"))),
-        });
-    }
+    let ops = (0..n).map(|_| read_op(r)).collect::<io::Result<_>>()?;
     Ok(Label { id, ops })
+}
+
+fn read_op(r: &mut impl Read) -> io::Result<Op> {
+    match u8_(r)? {
+        b'Q' => Ok(Op::Quad {
+            pts: [point2(r)?, point2(r)?, point2(r)?, point2(r)?],
+            argb: u32_(r)?,
+        }),
+        b'T' => Ok(Op::Text {
+            right: f32_(r)?,
+            up: f32_(r)?,
+            scale: f32_(r)?,
+            argb: u32_(r)?,
+            shadow: u8_(r)? != 0,
+            text: text(r)?,
+        }),
+        t => Err(io::Error::other(format!("unknown label op {t}"))),
+    }
 }
 
 fn text(r: &mut impl Read) -> io::Result<String> {
@@ -227,10 +210,6 @@ fn text(r: &mut impl Read) -> io::Result<String> {
 
 fn point2(r: &mut impl Read) -> io::Result<[f32; 2]> {
     Ok([f32_(r)?, f32_(r)?])
-}
-
-fn point(r: &mut impl Read) -> io::Result<[f32; 3]> {
-    Ok([f32_(r)?, f32_(r)?, f32_(r)?])
 }
 
 fn u8_(r: &mut impl Read) -> io::Result<u8> {
@@ -252,12 +231,6 @@ fn f32_(r: &mut impl Read) -> io::Result<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn pts(b: &mut Vec<u8>, p: &[[f32; 3]]) {
-        for v in p.iter().flatten() {
-            b.extend(v.to_be_bytes());
-        }
-    }
 
     #[test]
     fn writes_the_request_java_reads() {
@@ -302,8 +275,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_labels_and_lines() {
-        let mut b = 2u32.to_be_bytes().to_vec();
+    fn reads_labels() {
+        let mut b = 1u32.to_be_bytes().to_vec();
         b.push(b'L');
         b.extend((-3i32).to_be_bytes());
         b.extend(2u16.to_be_bytes());
@@ -321,10 +294,6 @@ mod tests {
         b.push(1);
         b.extend(3u32.to_be_bytes());
         b.extend(b"TNT");
-        b.push(b'W');
-        b.extend(5i32.to_be_bytes());
-        pts(&mut b, &[[0.0; 3], [1.0, 2.0, 3.0]]);
-        b.extend(0xff00_ff00u32.to_be_bytes());
         let w = read_world(&mut b.as_slice()).unwrap();
         assert_eq!(w.labels.len(), 1);
         assert_eq!(w.labels[0].id, -3);
@@ -337,15 +306,6 @@ mod tests {
         );
         assert!(
             matches!(&w.labels[0].ops[1], Op::Text { text, shadow: true, .. } if text == "TNT")
-        );
-        assert_eq!(
-            w.lines,
-            vec![Line {
-                id: 5,
-                from: [0.0; 3],
-                to: [1.0, 2.0, 3.0],
-                argb: 0xff00_ff00
-            }]
         );
     }
 

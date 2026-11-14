@@ -1,12 +1,11 @@
-//! Draws in the world that mods changed: name tags, the TNT countdown and hitbox lines. Once per frame the engine
-//! sends the entities in view to the mod host (`ferrocraft_modhost::anchor`), and draws what comes back: lines in the
-//! world pass, text and plates over the world. A role is asked only when the hook table says a mod changed the vanilla
-//! method behind it; the vanilla name tags stay when no mod did, or when the host does not answer in time.
+//! Draws in the world that mods changed: name tags and the TNT countdown. Once per frame the engine sends the
+//! entities in view to the mod host (`ferrocraft_modhost::anchor`), and draws what comes back as text and plates over
+//! the world. A role is asked only when the hook table says a mod changed the vanilla method behind it; the vanilla
+//! name tags stay when no mod did, or when the host does not answer in time.
 
 use crate::game::Game;
 use ferrocraft_modhost::anchor::{
-    Class as SubjectClass, Line, Op, Request, Subject, World, MAX_SUBJECTS, ROLE_COUNTDOWN,
-    ROLE_HITBOX, ROLE_LABEL,
+    Class as SubjectClass, Op, Request, Subject, World, MAX_SUBJECTS, ROLE_COUNTDOWN, ROLE_LABEL,
 };
 use ferrocraft_modhost::hooks::Hooks;
 use ferrocraft_modhost::ModHost;
@@ -21,14 +20,13 @@ const TNT_OBJECT: i8 = 50;
 
 const RENDER: &str = "net/minecraft/client/renderer/entity/Render";
 const RENDER_TNT: &str = "net/minecraft/client/renderer/entity/RenderTNTPrimed";
-const RENDER_MANAGER: &str = "net/minecraft/client/renderer/entity/RenderManager";
 const ENTITY_DESC: &str = "(Lnet/minecraft/entity/Entity;";
 
 /// What the mods drew for the last frame.
 #[derive(Default)]
 pub(super) struct Drawn {
     world: World,
-    /// Where each entity of the request stood: the origin of its labels and lines.
+    /// Where each entity of the request stood: the origin of its labels.
     feet: HashMap<i32, [f64; 3]>,
     /// The mods own the name tags in this frame, so the vanilla ones are not drawn.
     pub labels_owned: bool,
@@ -47,18 +45,7 @@ fn roles(h: &Hooks) -> u8 {
     ]
     .iter()
     .any(|d| h.changed(RENDER_TNT, "func_76986_a", d));
-    let hitbox = h.changed(
-        RENDER_MANAGER,
-        "func_85094_b",
-        &format!("{ENTITY_DESC}DDDFF)V"),
-    ) || h.changed(
-        RENDER_MANAGER,
-        "func_147939_a",
-        &format!("{ENTITY_DESC}DDDFFZ)Z"),
-    );
-    u8::from(label) * ROLE_LABEL
-        + u8::from(countdown) * ROLE_COUNTDOWN
-        + u8::from(hitbox) * ROLE_HITBOX
+    u8::from(label) * ROLE_LABEL + u8::from(countdown) * ROLE_COUNTDOWN
 }
 
 impl Drawn {
@@ -79,61 +66,12 @@ impl Drawn {
             return Drawn::default();
         }
         let vp = render::view_proj(cam, w as f32 / h as f32);
-        let mut subjects: Vec<(f64, Subject)> = Vec::new();
-        for (e, d) in game.entities.iter().zip(draws) {
-            let dist: f64 = (0..3)
-                .map(|i| (d.pos[i] - cam.pos[i]).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            if dist >= RANGE {
-                continue;
-            }
-            let tnt = matches!(d.class, Class::Object(TNT_OBJECT));
-            let mut roles = owned & ROLE_HITBOX;
-            let mut label = String::new();
-            if owned & ROLE_LABEL != 0 {
-                let tags = render::nametags(
-                    std::slice::from_ref(d),
-                    cam.pos,
-                    &vp,
-                    cam.fov_deg,
-                    w as f32,
-                    h as f32,
-                );
-                if let Some(tag) = tags.last() {
-                    roles |= ROLE_LABEL;
-                    label = tag.text.clone();
-                }
-            }
-            if tnt {
-                roles |= owned & ROLE_COUNTDOWN;
-            }
-            if roles == 0 {
-                continue;
-            }
-            subjects.push((
-                dist,
-                Subject {
-                    id: e.id,
-                    class: match d.class {
-                        Class::Player { .. } => SubjectClass::Player,
-                        _ if tnt => SubjectClass::PrimedTnt,
-                        _ => SubjectClass::Other,
-                    },
-                    roles,
-                    pos: d.pos,
-                    size: d.size,
-                    yaw: d.yaw,
-                    label_dy: 0.0,
-                    fuse: if tnt {
-                        TNT_FUSE - d.age.floor() as i32
-                    } else {
-                        0
-                    },
-                    label,
-                },
-            ));
-        }
+        let mut subjects: Vec<(f64, Subject)> = game
+            .entities
+            .iter()
+            .zip(draws)
+            .filter_map(|(e, d)| subject(owned, e.id, d, cam, &vp, (w, h)))
+            .collect();
         subjects.sort_by(|a, b| a.0.total_cmp(&b.0));
         subjects.truncate(MAX_SUBJECTS);
         if subjects.is_empty() {
@@ -157,19 +95,63 @@ impl Drawn {
     }
 }
 
-impl Drawn {
-    /// The hitbox lines in world space.
-    pub fn lines(&self) -> Vec<([f64; 3], [f64; 3], u32)> {
-        self.world
-            .lines
-            .iter()
-            .filter_map(|l: &Line| {
-                let f = self.feet.get(&l.id)?;
-                let at = |p: [f32; 3]| [0, 1, 2].map(|i| f[i] + f64::from(p[i]));
-                Some((at(l.from), at(l.to), l.argb))
-            })
-            .collect()
+/// The request entry for one entity, with its distance, when a mod owns a role for it in range.
+fn subject(
+    owned: u8,
+    id: i32,
+    d: &EntityDraw,
+    cam: &Camera,
+    vp: &[[f32; 4]; 4],
+    (w, h): (u32, u32),
+) -> Option<(f64, Subject)> {
+    let dist: f64 = (0..3)
+        .map(|i| (d.pos[i] - cam.pos[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    if dist >= RANGE {
+        return None;
     }
+    let tnt = matches!(d.class, Class::Object(TNT_OBJECT));
+    let mut roles = u8::from(tnt) * (owned & ROLE_COUNTDOWN);
+    let mut label = String::new();
+    if owned & ROLE_LABEL != 0 {
+        let tags = render::nametags(
+            std::slice::from_ref(d),
+            cam.pos,
+            vp,
+            cam.fov_deg,
+            w as f32,
+            h as f32,
+        );
+        if let Some(tag) = tags.last() {
+            roles |= ROLE_LABEL;
+            label = tag.text.clone();
+        }
+    }
+    (roles != 0).then(|| {
+        let class = match d.class {
+            Class::Player { .. } => SubjectClass::Player,
+            _ if tnt => SubjectClass::PrimedTnt,
+            _ => SubjectClass::Other,
+        };
+        let fuse = if tnt {
+            TNT_FUSE - d.age.floor() as i32
+        } else {
+            0
+        };
+        let s = Subject {
+            id,
+            class,
+            roles,
+            pos: d.pos,
+            size: d.size,
+            yaw: d.yaw,
+            label_dy: 0.0,
+            fuse,
+            label,
+        };
+        (dist, s)
+    })
 }
 
 /// Text and plates over the world. A label hangs from its entity's feet and faces the camera: one block is

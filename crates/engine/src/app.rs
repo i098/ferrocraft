@@ -12,6 +12,7 @@ mod events;
 mod input;
 mod mod_boot;
 mod mod_lists;
+mod mod_events;
 mod own_sounds;
 mod pack;
 mod play;

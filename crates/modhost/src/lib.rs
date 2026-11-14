@@ -1,6 +1,7 @@
 //! Rust side of the mod host. See the README of this crate.
 
 pub mod chat;
+pub mod events;
 pub mod hooks;
 pub mod hud_lists;
 pub mod keys;
@@ -24,6 +25,7 @@ use winit::keyboard::PhysicalKey;
 
 pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
 pub use hud_lists::Lists as HudLists;
+pub use events::{Event as ModEvent, Spawn};
 pub use mirror::Mirror;
 pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
@@ -83,6 +85,8 @@ struct Shared {
     chat_answer: Option<ChatVerdict>,
     /// The last chat reply said Java keeps the chat: a timed-out line may already be on its screen.
     chat_taken: bool,
+    /// World and entity events for the next frame, oldest first.
+    events: Vec<events::Event>,
     /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
@@ -157,6 +161,7 @@ impl ModHost {
                     chat: None,
                     chat_answer: None,
                     chat_taken: false,
+                    events: Vec::new(),
                     stalled: false,
                     brand: None,
                     hooks: hooks::Hooks::default(),
@@ -201,6 +206,17 @@ impl ModHost {
     /// Set the tab list, scoreboard, boss bar, title and action bar that the mods read; they go to the JVM with the next frame.
     pub fn set_lists(&self, lists: HudLists) {
         self.link.state.lock().unwrap().lists = Some(lists);
+    }
+
+    /// Queue a world or entity event for the mods' Forge handlers. It goes to the JVM before the next frame, in order.
+    /// Events wait while the JVM loads the mods; they are dropped once it has stopped, or when a stalled JVM lets
+    /// 16384 pile up.
+    pub fn post_event(&self, event: events::Event) {
+        const MAX_EVENTS: usize = 1 << 14;
+        let mut s = self.link.state.lock().unwrap();
+        if s.phase != Phase::Done && s.events.len() < MAX_EVENTS {
+            s.events.push(event);
+        }
     }
 
     /// Queue key, mouse button and wheel transitions from a winit window event for the next frame.
@@ -568,7 +584,7 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String, h
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
 fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
     loop {
-        let (input, mirror, lists) = {
+        let (input, mirror, lists, events) = {
             let mut s = link.state.lock().unwrap();
             while s.phase == Phase::Live
                 && !s.fresh
@@ -617,8 +633,11 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.fresh = false;
             let input = s.input.clone();
             s.input.events.clear();
-            (input, s.mirror.take(), s.lists.take())
+            (input, s.mirror.take(), s.lists.take(), std::mem::take(&mut s.events))
         };
+        for e in &events {
+            events::write(&mut stream, e)?;
+        }
         write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
@@ -880,6 +899,7 @@ mod tests {
                 chat: None,
                 chat_answer: None,
                 chat_taken: false,
+                events: Vec::new(),
                 stalled: false,
                 brand: None,
                 hooks: hooks::Hooks::default(),

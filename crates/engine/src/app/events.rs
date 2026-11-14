@@ -162,6 +162,7 @@ impl App {
 
     /// Back to the menus: forget the world and the connection.
     fn leave_world(&mut self) {
+        self.mod_leave_world();
         self.link = Link::Offline;
         self.game = Game::new();
         self.hud = gui::Hud::default();
@@ -283,6 +284,7 @@ impl App {
     fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
         self.note_session_state(&ev);
         self.entity_sound(&ev);
+        self.mod_net_event(&ev);
         if let NetEvent::Map { id, area, data } = &ev {
             if let Some(r) = &mut self.renderer {
                 r.map_update(*id, *area, data);

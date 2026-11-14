@@ -17,6 +17,7 @@ pub mod item;
 mod mobs;
 mod mobs2;
 mod projectile;
+pub(crate) mod shadow;
 mod skin;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.

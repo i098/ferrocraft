@@ -13,6 +13,10 @@ use crate::mesh::{MeshData, Vertex};
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 
+mod beacon;
+use beacon::Beacon;
+pub use beacon::{Beams, BEAM_TEXTURE};
+
 pub const CHEST: u16 = 54;
 pub const SIGN_STANDING: u16 = 63;
 pub const SIGN_WALL: u16 = 68;
@@ -22,6 +26,7 @@ pub const TRAPPED_CHEST: u16 = 146;
 pub const BANNER_STANDING: u16 = 176;
 pub const BANNER_WALL: u16 = 177;
 pub const ENCHANTING_TABLE: u16 = 116;
+pub const BEACON: u16 = 138;
 
 /// Block ids that carry a block entity drawn here.
 pub fn is_tile(id: u16) -> bool {
@@ -36,6 +41,7 @@ pub fn is_tile(id: u16) -> bool {
             | BANNER_STANDING
             | BANNER_WALL
             | ENCHANTING_TABLE
+            | BEACON
     )
 }
 
@@ -92,6 +98,7 @@ pub struct BlockEntities {
     skulls: HashMap<[i32; 3], Skull>,
     banners: HashMap<[i32; 3], Banner>,
     books: HashMap<[i32; 3], Book>,
+    beacons: HashMap<[i32; 3], Beacon>,
 }
 
 /// The camera and clock of one frame.
@@ -122,6 +129,7 @@ impl BlockEntities {
         self.skulls.remove(&pos);
         self.banners.remove(&pos);
         self.books.remove(&pos);
+        self.beacons.remove(&pos);
     }
 
     /// Rebuilds the tile blocks of chunk (`cx`, `cz`); `at` reads a chunk-local block. Data of a
@@ -151,6 +159,7 @@ impl BlockEntities {
         self.skulls.retain(|p, _| keep(p));
         self.banners.retain(|p, _| keep(p));
         self.books.retain(|p, _| keep(p));
+        self.beacons.retain(|p, _| keep(p));
         self.blocks = old;
         self.blocks.retain(|p, _| !inside(p));
         self.blocks.extend(fresh);
@@ -164,16 +173,21 @@ impl BlockEntities {
         self.skulls.retain(|p, _| !inside(p));
         self.banners.retain(|p, _| !inside(p));
         self.books.retain(|p, _| !inside(p));
+        self.beacons.retain(|p, _| !inside(p));
     }
 
     pub fn clear(&mut self) {
         *self = BlockEntities::default();
     }
 
-    /// `S24 BlockAction` for a chest: event 1 carries the number of viewers.
+    /// `S24 BlockAction`: event 1 of a chest carries the number of viewers; event 1 of a beacon
+    /// makes it rescan its beam.
     pub fn block_action(&mut self, pos: [i32; 3], block: u16, event: u8, value: u8) {
         if matches!(block, CHEST | ENDER_CHEST | TRAPPED_CHEST) && event == 1 {
             self.lids.entry(pos).or_default().viewers = value;
+        }
+        if block == BEACON && event == 1 {
+            self.beacons.entry(pos).or_default().dirty = true;
         }
     }
 
@@ -289,6 +303,8 @@ impl BlockEntities {
                 let book = self.books.get(&pos).copied().unwrap_or_default();
                 book_block(out, &book, at, view.partial);
             }
+            // The beam is built by `beams`.
+            BEACON => {}
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
                 banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);

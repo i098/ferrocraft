@@ -137,6 +137,17 @@ fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {
 }
 
 
+// Beacon beam: no light map and no fog (`disableFog`, `disableLighting`), `alphaFunc(GREATER, 0.1)`.
+@fragment
+fn fs_beam(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    let a = t.a * i.color.a;
+    if (a <= 0.1) {
+        discard;
+    }
+    return vec4<f32>(t.rgb * i.color.rgb, a);
+}
+
 // Block crack overlay: no light map and no fog; `alphaFunc(GREATER, 0.1)` on the faded alpha.
 @fragment
 fn fs_crack(i: WorldOut) -> @location(0) vec4<f32> {

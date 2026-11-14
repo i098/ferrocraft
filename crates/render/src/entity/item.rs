@@ -414,8 +414,8 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let parts = model(d).parts;
     let Some(arm) = parts.get(3) else { return };
     let xf = Xf::new(d, false);
-    // A small holder first shrinks and tilts the item (`ItemInHandLayer`, `isBaby`).
-    let child = if d.child && d.class == Class::Object(78) {
+    // A small holder first shrinks and tilts the item (`LayerHeldItem`, `isChild`).
+    let child = if d.child {
         chain(&[translate(0.0, 0.625, 0.0), rotate(20.0, 0), scale(0.5)])
     } else {
         ident()

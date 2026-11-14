@@ -3,8 +3,6 @@
 //! `ModelSpider` and `ModelEnderman` (box layout, texture offsets and `setRotationAngles`), plus the
 //! sheep wool and the spider and enderman eye layers.
 //!
-//! Not ported: the chicken flap (the draw has no on-ground state), villager head shake, and baby
-//! proportions.
 
 use super::{cos, quad_legs, wrap, EntityDraw, Model, Part, Skin};
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -313,7 +311,7 @@ const SHEEP_LEGS: [[f32; 3]; 4] = [
 ];
 
 /// `EntitySheep.fleeceColorTable`, by dye meta.
-const FLEECE: [[f32; 3]; 16] = [
+pub(crate) const FLEECE: [[f32; 3]; 16] = [
     [1.0, 1.0, 1.0],
     [0.85, 0.5, 0.2],
     [0.7, 0.3, 0.85],
@@ -363,6 +361,7 @@ fn sheep_wool(d: &EntityDraw) -> Layer {
         leg.inflate = 0.5;
         parts.push(leg);
     }
+    super::baby::apply(&mut parts, d);
     Layer {
         skin: Skin::SheepFur,
         tint: fleece(d),

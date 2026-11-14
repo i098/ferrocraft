@@ -32,6 +32,8 @@ public final class MirrorHudTest {
                 byte[] hello = new byte[33];
                 in.readFully(hello);
                 check(hello[0] == 'H', "hello");
+                in.readUTF(); // the brand
+                HookIndex.skip(in);
                 enable("getFps", "getFps");
                 enable("getBiome", "getHud");
                 enable("getServerIP", "getHud");

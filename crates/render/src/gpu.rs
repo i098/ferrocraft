@@ -2570,7 +2570,10 @@ pub fn view_proj(cam: &Camera, aspect: f32) -> [[f32; 4]; 4] {
     ];
     mul(
         projection(cam.fov_deg, aspect),
-        mul(hurt_matrix(cam.hurt_roll), mul(bob_matrix(cam.bob), view)),
+        mul(
+            hurt_matrix(cam.hurt_roll),
+            mul(bob_matrix(cam.bob), mul(nausea_matrix(cam.nausea), view)),
+        ),
     )
 }
 
@@ -2583,6 +2586,31 @@ fn hurt_matrix(roll: f32) -> [[f32; 4]; 4] {
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ]
+}
+
+/// `rotatef(a, 0, 1, 1)`, `scalef(sx, 1, 1)`, `rotatef(-a, 0, 1, 1)` of the nausea wobble, column-major.
+fn nausea_matrix([deg, sx]: [f32; 2]) -> [[f32; 4]; 4] {
+    let (s, c) = deg.to_radians().sin_cos();
+    let (y, z) = (
+        std::f32::consts::FRAC_1_SQRT_2,
+        std::f32::consts::FRAC_1_SQRT_2,
+    );
+    let k = 1.0 - c;
+    let rot = |s: f32| {
+        [
+            [c, z * s, -y * s, 0.0],
+            [-z * s, y * y * k + c, y * z * k, 0.0],
+            [y * s, y * z * k, z * z * k + c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    };
+    let scale = [
+        [sx, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    mul(rot(s), mul(scale, rot(-s)))
 }
 
 /// `T(x, y, 0) * Rz(roll) * Rx(pitch)` of `EntityRenderer.setupViewBobbing`, column-major.
@@ -2677,6 +2705,22 @@ mod tests {
         for pitch in [-90.0, -89.0, 0.0, 89.0, 90.0] {
             assert!(clip_x(&at(pitch), [1.0, 0.0, 0.0]) < 0.0, "pitch {pitch}");
         }
+    }
+
+    #[test]
+    fn nausea_wobble_squashes_x_between_two_rotations_about_0_1_1() {
+        let apply = |m: [[f32; 4]; 4], p: [f32; 3]| {
+            [0, 1, 2].map(|r| (0..3).map(|c| m[c][r] * p[c]).sum::<f32>())
+        };
+        let near = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-5);
+        let p = [1.0, 2.0, 3.0];
+        assert!(near(apply(nausea_matrix([77.0, 1.0]), p), p), "no squash");
+        assert!(near(apply(nausea_matrix([0.0, 2.0]), p), [2.0, 2.0, 3.0]));
+        // The rotation axis has no x part, so the squash leaves it alone at any angle.
+        assert!(near(
+            apply(nausea_matrix([77.0, 2.0]), [0.0, 1.0, 1.0]),
+            [0.0, 1.0, 1.0]
+        ));
     }
 
     #[test]

@@ -24,8 +24,8 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::PhysicalKey;
 
 pub use chat::{Kind as ChatKind, Verdict as ChatVerdict};
-pub use hud_lists::Lists as HudLists;
 pub use events::{Event as ModEvent, Spawn};
+pub use hud_lists::Lists as HudLists;
 pub use mirror::Mirror;
 pub use overrides::{Camera, Overrides, WorldState};
 pub use wire::{DrawCmd, Event, Input, PlayerInput, PlayerState};
@@ -633,7 +633,12 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.fresh = false;
             let input = s.input.clone();
             s.input.events.clear();
-            (input, s.mirror.take(), s.lists.take(), std::mem::take(&mut s.events))
+            (
+                input,
+                s.mirror.take(),
+                s.lists.take(),
+                std::mem::take(&mut s.events),
+            )
         };
         events::write_all(&mut stream, &events)?;
         write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;

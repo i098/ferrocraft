@@ -53,7 +53,7 @@ ASM coremods are designed to run unchanged through FML. A transformer that match
 ## Events and rendering crossing to Rust
 
 - Hook table: Rust ports are annotated `#[vanilla_method("net/minecraft/client/Minecraft.func_71411_J()V")]`. If a mod or Mixin changed that method, Rust calls Java; otherwise the flag is unset.
-- World, entity-join, connect and attack events now fire (see Step 4). Forge events for render, input, tick, chat and GUI are planned to fire from Rust at the patched call sites, to be tested against the oracle's trace.
+- World, entity-join, connect and attack events now fire (see Step 5). Forge events for render, input, tick, chat and GUI are planned to fire from Rust at the patched call sites, to be tested against the oracle's trace.
 - Java draws through a small LWJGL 2 / GL shim that writes a command stream. It goes to Rust over a loopback socket, and Rust replays it on the wgpu renderer.
 - Rust owns the window and feeds `Keyboard`/`Mouse` shim events so `GuiScreen.handleInput` and Forge `KeyInputEvent` are designed to work unchanged.
 

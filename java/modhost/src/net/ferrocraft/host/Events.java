@@ -118,6 +118,15 @@ final class Events {
     private void place(Object entity, int id, double x, double y, double z) {
         R.set(entity, "field_145783_c", id); // entityId
         R.set(entity, "field_70170_p", world()); // worldObj
+        // The watcher slots Entity's constructor registers, so a mod can read the name and flags. Forge's join handler reads an item's stack from slot 10.
+        Object watcher = R.neu("net.minecraft.entity.DataWatcher", entity);
+        R.call(watcher, "func_75682_a", 0, (byte) 0); // addObject
+        R.call(watcher, "func_75682_a", 1, (short) 300);
+        R.call(watcher, "func_75682_a", 3, (byte) 0);
+        R.call(watcher, "func_75682_a", 2, "");
+        R.call(watcher, "func_75682_a", 4, (byte) 0);
+        if (entity.getClass().getName().equals("net.minecraft.entity.item.EntityItem")) R.call(watcher, "func_82709_a", 10, 5); // an empty ItemStack
+        R.set(entity, "field_70180_af", watcher); // dataWatcher
         try {
             R.call(entity, "func_70107_b", x, y, z); // setPosition
         } catch (RuntimeException e) {

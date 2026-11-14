@@ -119,7 +119,7 @@ mod tests {
         let (a, b) = (d.join("a.jar"), d.join("b.jar"));
         std::fs::write(&a, "").unwrap();
         std::fs::write(&b, "").unwrap();
-        prune(&d, &[a.clone()]);
+        prune(&d, std::slice::from_ref(&a));
         assert!(a.exists() && !b.exists());
         std::fs::remove_dir_all(&d).unwrap();
     }

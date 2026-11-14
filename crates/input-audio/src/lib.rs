@@ -977,6 +977,7 @@ mod tests {
                 Action::Drop { whole_stack: true },
                 Action::ToggleDebug,
                 Action::Debug(DebugCombo::ClearChat),
+                Action::Debug(DebugCombo::Hitboxes),
                 Action::Pause,
             ]
         );

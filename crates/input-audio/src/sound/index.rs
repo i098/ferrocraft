@@ -285,13 +285,17 @@ impl SoundIndex {
                     ),
                     _ => continue,
                 };
-                if let Some(path) = resolve(file) {
-                    variants.push(Variant {
+                match resolve(file) {
+                    Some(path) => variants.push(Variant {
                         file: path,
                         volume,
                         pitch,
                         weight,
-                    });
+                    }),
+                    None if file.contains(':') => {
+                        eprintln!("input-audio: sound event {name}: dropped variant {file}");
+                    }
+                    None => {}
                 }
             }
             events.insert(name.clone(), Event { category, variants });

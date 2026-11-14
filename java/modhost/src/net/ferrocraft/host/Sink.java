@@ -1,13 +1,10 @@
 package net.ferrocraft.host;
 
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -163,47 +160,6 @@ public final class Sink {
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
-    }
-
-    private static Object bound;
-    private static final Map<String, byte[]> PNGS = new HashMap<>();
-
-    /** The texture that {@code TextureManager.bindTexture} bound last. */
-    public static synchronized void bind(Object location) {
-        bound = location;
-    }
-
-    /**
-     * {@code Gui.drawScaledCustomSizeModalRect}: the part u v uw vh of the bound texture in the box x y w h. Only a
-     * texture a mod made at run time (a {@code DynamicTexture}) has its pixels here; a resource texture draws nothing.
-     * The GL color is not read: the quad keeps its own colors.
-     */
-    public static synchronized void scaledQuad(int x, int y, float u, float v, int uw, int vh, int w, int h, float tw, float th) {
-        if (bound == null || uw <= 0 || vh <= 0) return;
-        Object mc = R.call(R.cls("net.minecraft.client.Minecraft"), "func_71410_x");
-        Object tex = R.call(R.get(mc, "field_71446_o"), "func_110581_b", bound);
-        if (tex == null || !tex.getClass().getName().equals("net.minecraft.client.renderer.texture.DynamicTexture")) return;
-        int[] px = (int[]) R.call(tex, "func_110565_c");
-        int tx = (int) u, ty = (int) v;
-        if (px.length != (int) tw * (int) th || tx < 0 || ty < 0 || tx + uw > (int) tw || ty + vh > (int) th) return;
-        int[] part = new int[uw * vh];
-        for (int j = 0; j < vh; j++) System.arraycopy(px, (ty + j) * (int) tw + tx, part, j * uw, uw);
-        String name = "dyn:" + uw + "x" + vh + ":" + java.util.Arrays.hashCode(part);
-        byte[] png = PNGS.get(name);
-        if (png == null) {
-            if (PNGS.size() >= 64) PNGS.clear();
-            BufferedImage img = new BufferedImage(uw, vh, BufferedImage.TYPE_INT_ARGB);
-            img.setRGB(0, 0, uw, vh, part, 0, uw);
-            ByteArrayOutputStream b = new ByteArrayOutputStream();
-            try {
-                javax.imageio.ImageIO.write(img, "png", b);
-            } catch (IOException e) {
-                throw new IllegalStateException(e);
-            }
-            png = b.toByteArray();
-            PNGS.put(name, png);
-        }
-        image(name, png, x, y, x + w, y + h, 0xFFFFFFFF, false);
     }
 
     /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */

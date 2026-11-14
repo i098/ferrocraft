@@ -62,8 +62,6 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::sendQueueMethod);
             case "net/minecraft/client/gui/Gui":
                 return patch(bytes, BridgeTransformer::guiMethod);
-            case "net/minecraft/client/renderer/texture/TextureManager":
-                return noteBind(bytes);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":
                 return patch(bytes, BridgeTransformer::lwjglManagerMethod);
             case "cc/polyfrost/oneconfig/renderer/NanoVGHelper":
@@ -299,31 +297,9 @@ public class BridgeTransformer implements IClassTransformer {
                 call(l, SINK, "gradient", "(IIIIII)V");
                 l.add(new InsnNode(Opcodes.RETURN));
                 return l;
-            case "func_152125_a(IIFFIIIIFF)V": // Gui.drawScaledCustomSizeModalRect
-                loads(l, m, 0);
-                call(l, SINK, "scaledQuad", "(IIFFIIIIFF)V");
-                l.add(new InsnNode(Opcodes.RETURN));
-                return l;
             default:
                 return null;
         }
-    }
-
-    /** TextureManager.bindTexture keeps its body and tells {@link Sink} which texture the next quad uses. */
-    private static byte[] noteBind(byte[] bytes) {
-        ClassNode cn = new ClassNode();
-        new ClassReader(bytes).accept(cn, 0);
-        for (Object o : cn.methods) {
-            MethodNode m = (MethodNode) o;
-            if (!(m.name + m.desc).equals("func_110577_a(Lnet/minecraft/util/ResourceLocation;)V")) continue;
-            InsnList l = new InsnList();
-            l.add(new VarInsnNode(Opcodes.ALOAD, 1));
-            call(l, SINK, "bind", "(Ljava/lang/Object;)V");
-            m.instructions.insert(l);
-        }
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-        cn.accept(cw);
-        return cw.toByteArray();
     }
 
     /**
@@ -437,22 +413,31 @@ public class BridgeTransformer implements IClassTransformer {
      * getShaderGroup as null, the state of a client without shader support.
      */
     private static InsnList entityRendererMethod(MethodNode m) {
-        InsnList l = new InsnList();
         switch (m.name + m.desc) {
             case "func_175069_a(Lnet/minecraft/util/ResourceLocation;)V":
-                l.add(new InsnNode(Opcodes.RETURN));
-                return l;
+                return noBody();
             case "func_181560_a(FJ)V": // updateCameraAndRender: only the HUD call, where mods hook (PolyCrosshair draws here)
-                l.add(new VarInsnNode(Opcodes.ALOAD, 0));
-                l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/renderer/EntityRenderer", "field_78531_r", "Lnet/minecraft/client/Minecraft;"));
-                l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/Minecraft", "field_71456_v", "Lnet/minecraft/client/gui/GuiIngame;"));
-                l.add(new VarInsnNode(Opcodes.FLOAD, 1));
-                l.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/client/gui/GuiIngame", "func_175180_a", "(F)V", false));
-                l.add(new InsnNode(Opcodes.RETURN));
-                return l;
+                return hudCall();
             default:
                 return null;
         }
+    }
+
+    private static InsnList noBody() {
+        InsnList l = new InsnList();
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
+    }
+
+    private static InsnList hudCall() {
+        InsnList l = new InsnList();
+        l.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/renderer/EntityRenderer", "field_78531_r", "Lnet/minecraft/client/Minecraft;"));
+        l.add(new FieldInsnNode(Opcodes.GETFIELD, "net/minecraft/client/Minecraft", "field_71456_v", "Lnet/minecraft/client/gui/GuiIngame;"));
+        l.add(new VarInsnNode(Opcodes.FLOAD, 1));
+        l.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/client/gui/GuiIngame", "func_175180_a", "(F)V", false));
+        l.add(new InsnNode(Opcodes.RETURN));
+        return l;
     }
 
     /**

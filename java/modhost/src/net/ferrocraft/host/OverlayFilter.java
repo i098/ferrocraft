@@ -17,15 +17,13 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
  * <p>The bit of an element is the one of {@code crates/modhost/src/hud.rs}. Elements with no bit are always Rust's.
  */
 public final class OverlayFilter {
-    private static final int EVERY_BIT = 0b11111;
+    private static final int EVERY_BIT = 0b111;
+    /** Index = bit number of crates/modhost/src/hud.rs. */
+    private static final java.util.List<ElementType> OWNABLE = java.util.Arrays.asList(
+            ElementType.HELMET, ElementType.CROSSHAIRS, ElementType.HOTBAR);
     private static final String SHOW_CROSSHAIR = "net/minecraft/client/gui/GuiIngame.func_175183_b()Z";
 
     private final Set<String> hooks = new HashSet<>(HookIndex.list());
-
-    public OverlayFilter() {
-        // GuiIngameForge posts the CROSSHAIRS event only while this flag is on, and a mod can cancel the event only if it is posted.
-        R.set(R.cls("net.minecraftforge.client.GuiIngameForge"), "renderCrosshairs", true);
-    }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void pre(RenderGameOverlayEvent.Pre e) {
@@ -43,20 +41,8 @@ public final class OverlayFilter {
 
     /** The wire bit of an element Rust can leave out, or 0. */
     private static int bit(ElementType type) {
-        switch (type) {
-            case HELMET:
-                return 1;
-            case CROSSHAIRS:
-                return 2;
-            case HOTBAR:
-                return 4;
-            case PLAYER_LIST:
-                return 8;
-            case DEBUG:
-                return 16;
-            default:
-                return 0;
-        }
+        int i = OWNABLE.indexOf(type);
+        return i < 0 ? 0 : 1 << i;
     }
 
     /**

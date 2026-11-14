@@ -576,21 +576,25 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
         }
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;
-        let mut s = link.state.lock().unwrap();
-        s.commands = Vec::with_capacity(cmds.len());
-        s.hud = hud::Owned::default();
-        for c in cmds {
-            match c {
-                DrawCmd::Define { name, data } => {
-                    s.sources.insert(name, data);
-                }
-                DrawCmd::Hud(bits) => s.hud = s.hud.with(bits),
-                c => s.commands.push(c),
-            }
-        }
-        s.screen = screen;
-        s.stalled = false;
+        apply_frame(&mut link.state.lock().unwrap(), screen, cmds);
     }
+}
+
+/// Stores one frame of the JVM: the draw commands, the resources, the HUD elements it owns and the screen flag.
+fn apply_frame(s: &mut Shared, screen: bool, cmds: Vec<DrawCmd>) {
+    s.commands = Vec::with_capacity(cmds.len());
+    s.hud = hud::Owned::default();
+    for c in cmds {
+        match c {
+            DrawCmd::Define { name, data } => {
+                s.sources.insert(name, data);
+            }
+            DrawCmd::Hud(bits) => s.hud = s.hud.with(bits),
+            c => s.commands.push(c),
+        }
+    }
+    s.screen = screen;
+    s.stalled = false;
 }
 
 /// Sends one request and records the JVM's answer; a stalled client keeps the answer out.

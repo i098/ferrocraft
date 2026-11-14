@@ -921,6 +921,13 @@ impl App {
         self.modal() || self.input.chat_input().is_some()
     }
 
+    /// Switch off in `frame` the vanilla HUD elements that a mod owns.
+    fn leave_out_mod_hud(&self, frame: &mut gui::Frame) {
+        if let Some(mods) = &self.mods {
+            mods.hud_owned().leave_out(frame);
+        }
+    }
+
     /// What HUD mods read from `Minecraft` and `EntityPlayerSP`, as the engine has it now. `None` without a player.
     fn mod_mirror(&self) -> Option<ferrocraft_modhost::Mirror> {
         use ferrocraft_modhost::mirror::{Effect, Stack, SLOTS};
@@ -1093,9 +1100,7 @@ impl App {
                 nausea: self.game.effects.has(Fx::NAUSEA),
                 hide_crosshair: false,
             };
-            if let Some(mods) = &self.mods {
-                mods.hud_owned().leave_out(&mut frame);
-            }
+            self.leave_out_mod_hud(&mut frame);
             self.hud.draw(&mut g, &frame);
         }
         let mut mod_textures = Vec::new();

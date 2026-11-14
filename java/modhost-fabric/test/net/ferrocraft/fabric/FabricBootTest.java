@@ -112,7 +112,8 @@ public final class FabricBootTest {
         System.out.println((loaded ? "PASS" : "FAIL") + " mods loaded");
         boolean mixin = log.stream().anyMatch(l -> Arrays.stream(MIXIN_ERRORS).anyMatch(l::contains));
         System.out.println((mixin ? "FAIL" : "PASS") + " no Mixin error in the log");
-        System.out.println((hello != null ? "PASS" : "FAIL") + " hello" + (hello != null ? "" : ": the JVM stopped before it connected, exit status " + exit));
+        String why = log.stream().filter(l -> l.startsWith("hello failed: ")).findFirst().orElse("the JVM stopped before it connected");
+        System.out.println((hello != null ? "PASS" : "FAIL") + " hello" + (hello != null ? "" : ": " + why + ", exit status " + exit));
         ok &= loaded && !mixin && hello != null;
         System.out.println(ok ? "FabricBootTest passed" : "FabricBootTest FAILED");
         System.exit(ok ? 0 : 1);

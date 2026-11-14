@@ -238,5 +238,16 @@ mod tests {
         assert!(table.lines().any(|l| l.starts_with(
             "\tf\tLnet/minecraft/client/entity/EntityPlayerSP;\tfield_71439_g\tfield_"
         )));
+        // The config file of java/modhost-fabric/test.sh: java, main dir, class path.
+        if let Some(out) = std::env::var_os("FERRO_FABRIC_CONFIG_OUT") {
+            let cp = std::env::join_paths(&config.class_path).unwrap();
+            let text = format!(
+                "{}\n{}\n{}\n",
+                config.java.display(),
+                config.game_dir.display(),
+                cp.to_string_lossy()
+            );
+            fs::write(out, text).unwrap();
+        }
     }
 }

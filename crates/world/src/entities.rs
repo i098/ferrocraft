@@ -1134,15 +1134,7 @@ impl Entities {
                 self.with(id, |e| e.animate(animation))
             }
             E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
-            E::Status { id, status: 17 } => self.firework_explode(id),
-            E::Status { id, status } => {
-                if let Some(e) = self.map.get(&id) {
-                    if let Some(fx) = e.status_fx(status) {
-                        self.fx.push(fx);
-                    }
-                }
-                self.with(id, |e| e.set_status(status))
-            }
+            E::Status { id, status } => self.handle_status(id, status),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
@@ -1162,6 +1154,17 @@ impl Entities {
             }
             _ => {}
         }
+    }
+
+    fn handle_status(&mut self, id: i32, status: i8) {
+        if status == 17 {
+            self.firework_explode(id);
+            return;
+        }
+        if let Some(fx) = self.map.get(&id).and_then(|e| e.status_fx(status)) {
+            self.fx.push(fx);
+        }
+        self.with(id, |e| e.set_status(status));
     }
 
     fn firework_explode(&mut self, id: i32) {

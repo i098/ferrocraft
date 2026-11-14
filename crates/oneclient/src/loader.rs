@@ -11,7 +11,7 @@ pub enum Loader {
     Forge,
     /// Fabric Loader (Legacy Fabric on 1.8.9).
     Fabric,
-    /// Ornithe: Java 25 mods, not loadable by the Fabric host before slice B7.
+    /// Ornithe: Fabric-family mods on Java 25, loaded by the Fabric host with the Ornithe profile.
     Ornithe,
     /// Vanilla, Quilt, NeoForge: no host for it.
     Other,

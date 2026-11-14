@@ -283,6 +283,7 @@ fn painting(out: &mut Items, d: &EntityDraw, turn: &Mat, light: &impl Fn([f64; 3
 }
 
 /// `RenderItemFrame.render` and `renderDisplayItem`.
+#[allow(clippy::too_many_arguments)]
 fn frame(
     out: &mut Items,
     d: &EntityDraw,

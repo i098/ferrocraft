@@ -78,7 +78,7 @@ struct Strip {
 enum Held {
     Block(MeshData),
     /// Extruded sprite and its item texture, bound with the hand globals.
-    Flat(hand::Flat, wgpu::BindGroup, Strip),
+    Flat(Box<hand::Flat>, wgpu::BindGroup, Strip),
     /// No model (unknown item, entity models such as skulls): nothing is drawn.
     Nothing,
 }
@@ -1329,7 +1329,7 @@ impl Renderer {
         if let Some((_, Held::Flat(flat, _, strip))) = &mut self.held {
             let frame = self.dials.frame(strip.id, hand::strip_frames(&strip.image));
             if frame != flat.frame {
-                *flat = hand::Flat::new(&strip.image, strip.display, frame);
+                **flat = hand::Flat::new(&strip.image, strip.display, frame);
             }
         }
         match &self.held.as_ref()?.1 {
@@ -1422,11 +1422,11 @@ impl Renderer {
             &self.sampler,
             &view,
         );
-        let flat = hand::Flat::new(
+        let flat = Box::new(hand::Flat::new(
             &image,
             display,
             self.dials.frame(id, hand::strip_frames(&image)),
-        );
+        ));
         Some(Held::Flat(flat, group, Strip { id, image, display }))
     }
 

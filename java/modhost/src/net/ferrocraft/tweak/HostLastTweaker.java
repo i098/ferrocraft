@@ -28,6 +28,8 @@ public final class HostLastTweaker implements ITweaker {
     public String[] getLaunchArguments() {
         // Mixin's transformer moves to the end of the list while the launch arguments are read; the hook table must see its result.
         loader.registerTransformer("net.ferrocraft.host.HookIndex$Scanner");
+        // After the scanner, which must see the hooks of the whole method before the shell drops the body.
+        loader.registerTransformer("net.ferrocraft.host.ShellTransformer");
         return new String[0];
     }
 }

@@ -81,6 +81,7 @@ mod tests {
         let texts = Texts::parse("gui.yes=Yes\ngui.no=No\n", "");
         let mut settings = Settings::new(PathBuf::from("/tmp"));
         let mut clip = String::new();
+        let stats = crate::screens::PlayerStats::default();
         let mut ctx = Ctx {
             width: 320,
             height: 240,
@@ -95,6 +96,9 @@ mod tests {
             clipboard: &mut clip,
             metrics: &M,
             shift: false,
+            stats: &stats,
+            icons: None,
+            player_id: "",
         };
         let mut s = PackPrompt::new("http://h/p.zip".into(), "abc".into());
         s.init(&mut ctx);

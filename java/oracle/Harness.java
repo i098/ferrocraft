@@ -47,6 +47,7 @@ import net.minecraft.flat.EmptyWorldStorage;
  *                                 (float bits in hex), toolNotRequired; needs "start"
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
+ *   achievements                  AchievementList: key|column|row|parent|challenge|item id|damage per line, then the display bounds
  *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
@@ -153,6 +154,20 @@ public class Harness {
     /** One line of `C12PacketUpdateSign.writePacketData`: `IChatComponent.Serializer.componentToJson(new ChatComponentText(line))`. */
     static String signLine(String hexText) {
         return toHex(net.minecraft.flat.Text.Serializer.toJson(new net.minecraft.flat.LiteralText(fromHex(hexText))));
+    }
+
+    /**
+     * `AchievementList.achievementList`: one line per achievement, `key|column|row|parent|challenge|id|damage`,
+     * then `minColumn minRow maxColumn maxRow`. `Bootstrap` must have registered its items first.
+     */
+    static void achievementLines() {
+        for (net.minecraft.flat.AchievementStat a : net.minecraft.flat.Achievements.ALL) {
+            System.out.println(a.key + "|" + a.column + "|" + a.row + "|"
+                + (a.parent == null ? "-" : a.parent.key) + "|" + a.isChallenge() + "|"
+                + net.minecraft.flat.Item.getId(a.icon.getItem()) + "|" + a.icon.getMetadata());
+        }
+        System.out.println(net.minecraft.flat.Achievements.minColumn + " " + net.minecraft.flat.Achievements.minRow + " "
+            + net.minecraft.flat.Achievements.maxColumn + " " + net.minecraft.flat.Achievements.maxRow);
     }
 
     static long key(int x, int z) {
@@ -369,6 +384,9 @@ public class Harness {
                     break;
                 case "signjson":
                     System.out.println(signLine(t.length > 1 ? t[1] : ""));
+                    break;
+                case "achievements":
+                    achievementLines();
                     break;
                 default:
                     throw new IllegalArgumentException(line);

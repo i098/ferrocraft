@@ -1,7 +1,8 @@
 //! Menu screens: owns the `gui` screen stack, its settings and texts, and runs each call with a `Ctx`.
 
+use gui::inventory::icons::Icons;
 use gui::screens::{Canvas, Metrics};
-use gui::screens::{Ctx, Effect, Event, Screen, Screens, Settings, Texts};
+use gui::screens::{Ctx, Effect, Event, PlayerStats, Screen, Screens, Settings, Texts};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -18,6 +19,11 @@ pub struct Ui {
     pub in_world: bool,
     pub difficulty: Option<u8>,
     pub hardcore: bool,
+    /// `S37PacketStatistics` values of this server session.
+    pub stats: PlayerStats,
+    /// `Session.getPlayerID`.
+    // shortcut: the username stands in for the session uuid, which only seeds the achievement background.
+    pub player_id: String,
     game_dir: PathBuf,
     started: Instant,
 }
@@ -35,6 +41,8 @@ impl Ui {
             in_world: false,
             difficulty: None,
             hardcore: false,
+            stats: PlayerStats::default(),
+            player_id: String::new(),
             game_dir,
             started: Instant::now(),
         }
@@ -66,6 +74,17 @@ impl Ui {
         shift: bool,
         f: impl FnOnce(&mut Screens, &mut Ctx) -> R,
     ) -> (R, Vec<Effect>) {
+        self.run_with(m, shift, None, f)
+    }
+
+    /// [`Ui::run`] with the item icons the screens may draw.
+    fn run_with<R>(
+        &mut self,
+        m: &dyn Metrics,
+        shift: bool,
+        icons: Option<&Icons>,
+        f: impl FnOnce(&mut Screens, &mut Ctx) -> R,
+    ) -> (R, Vec<Effect>) {
         let mut ctx = Ctx {
             width: self.width,
             height: self.height,
@@ -80,6 +99,9 @@ impl Ui {
             clipboard: &mut self.clipboard,
             metrics: m,
             shift,
+            stats: &self.stats,
+            icons,
+            player_id: &self.player_id,
         };
         let before = ctx.clipboard.clone();
         let r = f(&mut self.screens, &mut ctx);
@@ -142,8 +164,23 @@ impl Ui {
         self.run(m, false, |s, c| s.tick(c)).1
     }
 
-    pub fn draw(&mut self, m: &dyn Metrics, c: &mut dyn Canvas, mx: i32, my: i32) -> Vec<Effect> {
-        self.run(m, false, |s, ctx| s.draw(c, mx, my, ctx)).1
+    pub fn draw(
+        &mut self,
+        m: &dyn Metrics,
+        c: &mut dyn Canvas,
+        (mx, my): (i32, i32),
+        icons: Option<&Icons>,
+    ) -> Vec<Effect> {
+        self.run_with(m, false, icons, |s, ctx| s.draw(c, mx, my, ctx))
+            .1
+    }
+
+    /// `S37PacketStatistics`: store the values, then tell the open screen.
+    pub fn stats_arrived(&mut self, values: &[(String, i32)]) {
+        for (name, value) in values {
+            self.stats.set(name, *value);
+        }
+        self.screens.stats_ready();
     }
 
     /// A fresh title screen, as the parent of the login screen.

@@ -4,6 +4,7 @@
 //! one [`Screens`], feeds it input as [`Event`]s with LWJGL key codes, and acts on the
 //! [`Effect`]s the screens push into [`Ctx::effects`].
 
+mod achievements;
 mod book;
 mod connecting;
 mod death;
@@ -19,6 +20,7 @@ mod sign;
 mod snooper;
 mod title;
 
+pub use achievements::{Achievements, PlayerStats};
 pub use book::Book;
 pub use connecting::{Connecting, DownloadingTerrain};
 pub use death::Death;
@@ -36,6 +38,7 @@ pub use title::Title;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::inventory::icons::Icons;
 use crate::toolkit::GuiScale;
 
 /// Font measurement, `FontRenderer.getStringWidth`: `§` codes have no width.
@@ -126,6 +129,9 @@ pub enum Effect {
     Disconnect,
     /// `C16PacketClientStatus(PERFORM_RESPAWN)`.
     Respawn,
+    /// `C16PacketClientStatus(REQUEST_STATS)`: the achievement and statistics screens ask for the
+    /// counters; the answer is `S37PacketStatistics`, then [`Screens::stats_ready`].
+    RequestStats,
     /// `Minecraft.shutdown`.
     Quit,
     /// `options.txt` was written: apply changed settings and send `C15PacketClientSettings` when in a world.
@@ -261,6 +267,12 @@ pub struct Ctx<'a> {
     pub metrics: &'a dyn Metrics,
     /// `GuiScreen.isShiftKeyDown`, for clicks.
     pub shift: bool,
+    /// What the server sent with `S37PacketStatistics`.
+    pub stats: &'a PlayerStats,
+    /// Item icons, once the assets are loaded.
+    pub icons: Option<&'a Icons>,
+    /// `Session.getPlayerID`, the seed of the achievement background.
+    pub player_id: &'a str,
 }
 
 impl Ctx<'_> {
@@ -322,6 +334,8 @@ pub trait Screen {
     fn confirm(&mut self, _yes: bool, _id: i32, _ctx: &mut Ctx) -> Option<Nav> {
         None
     }
+    /// `IProgressMeter.doneLoading`: `S37PacketStatistics` arrived.
+    fn stats_ready(&mut self) {}
     /// Downcast hook for [`Screens`] events that concern one screen type.
     fn as_connecting(&mut self) -> Option<&mut Connecting> {
         None
@@ -445,6 +459,13 @@ impl Screens {
             Box::new(Disconnected::new(parent, "connect.failed", msg)),
             ctx,
         );
+    }
+
+    /// `S37PacketStatistics` arrived (`NetHandlerPlayClient.handleStatistics`).
+    pub fn stats_ready(&mut self) {
+        if let Some(s) = self.current.as_mut() {
+            s.stats_ready();
+        }
     }
 
     /// `S01PacketJoinGame` arrived: `GuiDownloadingTerrain` until the first position packet.

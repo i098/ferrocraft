@@ -103,6 +103,7 @@ fn press_action(bind: Bind, ctrl: bool) -> Option<Action> {
 fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
     Some(match code {
         KeyCode::KeyA => DebugCombo::ReloadChunks,
+        KeyCode::KeyB => DebugCombo::Hitboxes,
         KeyCode::KeyD => DebugCombo::ClearChat,
         KeyCode::KeyH => DebugCombo::AdvancedTooltips,
         KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
@@ -976,6 +977,7 @@ mod tests {
                 Action::Drop { whole_stack: true },
                 Action::ToggleDebug,
                 Action::Debug(DebugCombo::ClearChat),
+                Action::Debug(DebugCombo::Hitboxes),
                 Action::Pause,
             ]
         );

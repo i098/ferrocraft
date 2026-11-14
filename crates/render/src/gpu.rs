@@ -143,6 +143,8 @@ pub struct Renderer {
     /// `renderMiningProgress` blend: source times destination, twice.
     crack_pipe: wgpu::RenderPipeline,
     selection: Option<[f64; 6]>,
+    /// World-space line list that the mod host drew (hitboxes).
+    lines: Vec<Vertex>,
     /// Blocks with a crack stage `0..=9` for the next frames.
     cracks: Vec<([i32; 3], u8)>,
     /// Lightning bolts `(position, seed)` for the next frames.
@@ -443,6 +445,7 @@ impl Renderer {
             hand_glint_pipe,
             bolts: Vec::new(),
             selection: None,
+            lines: Vec::new(),
             hand_globals,
             hand_atlas_group,
             item_group,
@@ -507,6 +510,22 @@ impl Renderer {
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
     pub fn set_selection(&mut self, selection: Option<[f64; 6]>) {
         self.selection = selection;
+    }
+
+    /// Lines for the next frames, each `(from, to, argb)` in world space; an empty list draws none.
+    pub fn set_lines(&mut self, lines: Vec<([f64; 3], [f64; 3], u32)>) {
+        self.lines = lines
+            .into_iter()
+            .flat_map(|(a, b, argb)| {
+                let color = [16, 8, 0, 24].map(|s| ((argb >> s) & 0xff) as f32 / 255.0);
+                [a, b].map(|p| Vertex {
+                    pos: p.map(|v| v as f32),
+                    uv: [0.0; 2],
+                    color,
+                    light: [1.0; 2],
+                })
+            })
+            .collect();
     }
 
     /// Blocks being mined, with their destroy stage in `0..=9`: the local target and other players' `BlockBreakAnim`.
@@ -1631,6 +1650,15 @@ impl Renderer {
                 })
         });
 
+        let line_buf = (!self.lines.is_empty()).then(|| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&self.lines),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
         let world = self.running_post().map_or(view, Post::main);
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -1751,6 +1779,12 @@ impl Renderer {
                 pass.set_pipeline(&self.line_pipe);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..SELECTION_VERTICES, 0..1);
+            }
+            if let Some(buf) = &line_buf {
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.line_pipe);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..self.lines.len() as u32, 0..1);
             }
             if let Some(m) = &clouds {
                 pass.set_bind_group(0, &self.env_group, &[]);

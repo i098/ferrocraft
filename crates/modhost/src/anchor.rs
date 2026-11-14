@@ -1,15 +1,17 @@
-//! Draws in the world: name tags and the TNT countdown. A mod changes these in vanilla methods that Rust ports
-//! (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`). Once per frame Rust sends the entities in view, and Java
+//! Draws in the world: name tags, the TNT countdown and hitbox lines. A mod changes these in vanilla methods that Rust ports
+//! (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`, `RenderManager.renderDebugBoundingBox`/`func_85094_b`). Once per frame Rust sends the entities in view, and Java
 //! runs those vanilla methods on stand-in entities at the origin and records the text and plates they draw. Rust
 //! projects them and draws them over the world.
 //!
 //! Wire, a round trip like `overrides.rs`. Rust to Java: `'A'`, f32 partial tick, f32 view yaw, f32 view pitch, three f64
 //! camera position, u16 subject count, then per subject: i32 entity id, u8 class (0 player, 1 other, 2 primed TNT),
-//! u8 roles (1 label, 2 countdown), three f64 position of the feet, f32 width, f32 height, f32 yaw, f32 label
+//! u8 roles (1 label, 2 countdown, 4 hitbox), three f64 position of the feet, f32 width, f32 height, f32 yaw, f32 label
 //! offset, i32 fuse, and for the label role u32 length and the UTF-8 text.
 //! Java to Rust: u32 item count, then per item `'L'` (i32 entity id, u16 op count, then per op `'Q'`: four points of
 //! two f32 and i32 ARGB; or `'T'`: f32 right, f32 up, f32 blocks per text pixel, i32 ARGB, u8 shadow, u32 length and
-//! UTF-8). Label points are blocks to the right of the feet and up from them, facing the camera.
+//! UTF-8); or `'H'` (i32 entity id, u16 segment count, then per segment two points of three f32, blocks from the
+//! feet, and i32 ARGB: the hitbox lines; count 0 means the mod drew nothing, which hides the vanilla box for that
+//! entity). Label points are blocks to the right of the feet and up from them, facing the camera.
 
 use std::io::{self, Read, Write};
 
@@ -20,10 +22,13 @@ pub const MAX_SUBJECTS: usize = 256;
 /// Counts above these mean a corrupt stream.
 const MAX_ITEMS: u32 = 1 << 14;
 const MAX_OPS: u16 = 256;
+const MAX_SEGMENTS: u16 = 256;
 const MAX_TEXT: usize = 1 << 12;
 
 pub const ROLE_LABEL: u8 = 1;
 pub const ROLE_COUNTDOWN: u8 = 2;
+/// `RenderManager.renderDebugBoundingBox`; asked only while F3+B shows hitboxes.
+pub const ROLE_HITBOX: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
@@ -83,10 +88,25 @@ pub struct Label {
     pub ops: Vec<Op>,
 }
 
+/// One hitbox line, in blocks from the feet of its entity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Segment {
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub argb: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lines {
+    pub id: i32,
+    pub segments: Vec<Segment>,
+}
+
 /// What the mods drew for one frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct World {
     pub labels: Vec<Label>,
+    pub lines: Vec<Lines>,
 }
 
 /// The request the pump has not sent yet and the answer it has not handed out.
@@ -162,6 +182,7 @@ pub fn read_world(r: &mut impl Read) -> io::Result<World> {
     for _ in 0..n {
         match u8_(r)? {
             b'L' => world.labels.push(read_label(r)?),
+            b'H' => world.lines.push(read_lines(r)?),
             t => return Err(io::Error::other(format!("unknown world item {t}"))),
         }
     }
@@ -178,6 +199,35 @@ fn read_label(r: &mut impl Read) -> io::Result<Label> {
     }
     let ops = (0..n).map(|_| read_op(r)).collect::<io::Result<_>>()?;
     Ok(Label { id, ops })
+}
+
+fn read_lines(r: &mut impl Read) -> io::Result<Lines> {
+    let id = u32_(r)? as i32;
+    let mut b = [0; 2];
+    r.read_exact(&mut b)?;
+    let n = u16::from_be_bytes(b);
+    if n > MAX_SEGMENTS {
+        return Err(io::Error::other(format!("{n} hitbox segments")));
+    }
+    let point = |r: &mut dyn Read| -> io::Result<[f32; 3]> {
+        let mut p = [0.0; 3];
+        for v in &mut p {
+            let mut b = [0; 4];
+            r.read_exact(&mut b)?;
+            *v = f32::from_be_bytes(b);
+        }
+        Ok(p)
+    };
+    let segments = (0..n)
+        .map(|_| {
+            Ok(Segment {
+                from: point(r)?,
+                to: point(r)?,
+                argb: u32_(r)?,
+            })
+        })
+        .collect::<io::Result<_>>()?;
+    Ok(Lines { id, segments })
 }
 
 fn read_op(r: &mut impl Read) -> io::Result<Op> {
@@ -306,6 +356,44 @@ mod tests {
         );
         assert!(
             matches!(&w.labels[0].ops[1], Op::Text { text, shadow: true, .. } if text == "TNT")
+        );
+    }
+
+    #[test]
+    fn reads_hitbox_lines() {
+        let mut b = 1u32.to_be_bytes().to_vec();
+        b.push(b'H');
+        b.extend(9i32.to_be_bytes());
+        b.extend(1u16.to_be_bytes());
+        for v in [0.0f32, 0.0, 0.0, 1.0, 2.0, 3.0] {
+            b.extend(v.to_be_bytes());
+        }
+        b.extend(0xff00_00ffu32.to_be_bytes());
+        let w = read_world(&mut b.as_slice()).unwrap();
+        assert_eq!(w.lines[0].id, 9);
+        assert_eq!(
+            w.lines[0].segments[0],
+            Segment {
+                from: [0.0; 3],
+                to: [1.0, 2.0, 3.0],
+                argb: 0xff00_00ff
+            }
+        );
+    }
+
+    #[test]
+    fn reads_an_empty_hitbox_record() {
+        let mut b = 1u32.to_be_bytes().to_vec();
+        b.push(b'H');
+        b.extend(9i32.to_be_bytes());
+        b.extend(0u16.to_be_bytes());
+        let w = read_world(&mut b.as_slice()).unwrap();
+        assert_eq!(
+            w.lines,
+            vec![Lines {
+                id: 9,
+                segments: Vec::new()
+            }]
         );
     }
 

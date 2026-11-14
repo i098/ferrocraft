@@ -6,6 +6,7 @@ pub mod keys;
 pub mod mirror;
 pub mod overrides;
 pub mod provision;
+pub mod provision_fabric;
 pub mod wire;
 
 use std::collections::HashMap;

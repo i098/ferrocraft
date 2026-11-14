@@ -15,6 +15,29 @@ pub struct Caster {
     pub opaque: f32,
 }
 
+/// `shadowSize` of each mob renderer by entity type id; mobs not listed use the renderer default.
+const MOB_SIZES: [(f32, &[u8]); 7] = [
+    (1.0, &[52, 64]),
+    (3.0, &[53]),
+    (0.5, &[54, 56, 57, 58, 61, 63, 66, 68, 95, 97, 99]),
+    (0.25, &[62, 65]),
+    (0.7, &[59, 90, 91, 92, 94, 96]),
+    (0.3, &[60, 67, 93, 101]),
+    (0.75, &[100]),
+];
+
+fn mob_size(id: u8, d: &EntityDraw) -> f32 {
+    match id {
+        55 => 0.25 * (d.size.0 / 0.51).round(),
+        98 => 0.4,
+        120 => 0.5 * if d.child { 0.5 } else { 1.0 },
+        _ => MOB_SIZES
+            .iter()
+            .find(|(_, ids)| ids.contains(&id))
+            .map_or(0.5, |(size, _)| *size),
+    }
+}
+
 /// `shadowSize` and `shadowOpaque` of the renderer of `d`; 0 where the renderer sets no shadow.
 fn shadow_of(d: &EntityDraw) -> (f32, f32) {
     match d.class {
@@ -23,31 +46,8 @@ fn shadow_of(d: &EntityDraw) -> (f32, f32) {
         Class::Orb | Class::Object(2) => (0.15, 0.75),
         // Boat, minecart, primed TNT, ender crystal, falling block.
         Class::Object(1 | 10 | 50 | 51 | 70) => (0.5, 1.0),
-        Class::Mob(id) => {
-            let size = match id {
-                52 | 64 => 1.0,
-                53 => 3.0,
-                54 | 56 | 57 | 58 | 61 | 63 | 66 | 68 | 95 | 97 | 99 => 0.5,
-                55 => 0.25 * (d.size.0 / 0.51).round(),
-                62 => 0.25,
-                120 => {
-                    if d.child {
-                        0.25
-                    } else {
-                        0.5
-                    }
-                }
-                59 | 90..=92 | 94 | 96 => 0.7,
-                60 | 67 | 93 | 101 => 0.3,
-                65 => 0.25,
-                98 => 0.4,
-                100 => 0.75,
-                // Unmodelled mobs: the renderer default.
-                _ => 0.5,
-            };
-            // `renderShadow`: `shadowSize * getShadowScale()`, halved for a baby.
-            (if d.child { size * 0.5 } else { size }, 1.0)
-        }
+        // `renderShadow`: `shadowSize * getShadowScale()`, halved for a baby.
+        Class::Mob(id) => (mob_size(id, d) * if d.child { 0.5 } else { 1.0 }, 1.0),
         _ => (0.0, 1.0),
     }
 }
@@ -106,47 +106,65 @@ pub fn build(
         // `EntityRenderer.squaredDistanceToCamera` removes the fade over 16 blocks.
         let dist: f64 = (0..3).map(|i| (view[i] - c.pos[i]).powi(2)).sum();
         let shadow_alpha = ((1.0 - dist / 256.0) * f64::from(c.opaque)) as f32;
-        if shadow_alpha <= 0.0 {
-            continue;
+        if shadow_alpha > 0.0 {
+            cast(&mut mesh, c, shadow_alpha, &block, &light, subtracted);
         }
-        let [x, y, z] = c.pos;
-        let s = f64::from(c.size);
-        let (x0, x1) = ((x - s).floor() as i32, (x + s).floor() as i32);
-        let (y0, y1) = ((y - s).floor() as i32, y.floor() as i32);
-        let (z0, z1) = ((z - s).floor() as i32, (z + s).floor() as i32);
-        for by in y0..=y1 {
-            for bz in z0..=z1 {
-                for bx in x0..=x1 {
-                    let [sky, lit] = light(bx, by, bz);
-                    let level = (sky - subtracted).max(lit);
-                    // Both the light gate and the brightness table use the darkened sky light.
-                    if level <= 3 || !full_cube(block(bx, by - 1, bz)) {
-                        continue;
-                    }
-                    let Some(a) = alpha(shadow_alpha, y, by, level) else {
-                        continue;
-                    };
-                    // A full cube spans 0 to 1 on each axis.
-                    let (px0, px1) = (f64::from(bx), f64::from(bx) + 1.0);
-                    let (pz0, pz1) = (f64::from(bz), f64::from(bz) + 1.0);
-                    let py = f64::from(by) + 0.015625;
-                    let u = |edge: f64| ((x - edge) / 2.0 / s + 0.5) as f32;
-                    let v = |edge: f64| ((z - edge) / 2.0 / s + 0.5) as f32;
-                    let base = mesh.vertices.len() as u32;
-                    for (px, pz) in [(px0, pz0), (px0, pz1), (px1, pz1), (px1, pz0)] {
-                        mesh.vertices.push(Vertex {
-                            pos: [px as f32, py as f32, pz as f32],
-                            uv: [u(px), v(pz)],
-                            color: [1.0, 1.0, 1.0, a],
-                            light: [1.0; 2],
-                        });
-                    }
-                    mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+    }
+    mesh
+}
+
+/// `renderShadow` of one entity over the blocks around its feet.
+fn cast(
+    mesh: &mut MeshData,
+    c: &Caster,
+    shadow_alpha: f32,
+    block: &impl Fn(i32, i32, i32) -> u16,
+    light: &impl Fn(i32, i32, i32) -> [i32; 2],
+    subtracted: i32,
+) {
+    let [x, y, z] = c.pos;
+    let s = f64::from(c.size);
+    let (x0, x1) = ((x - s).floor() as i32, (x + s).floor() as i32);
+    let (y0, y1) = ((y - s).floor() as i32, y.floor() as i32);
+    let (z0, z1) = ((z - s).floor() as i32, (z + s).floor() as i32);
+    for by in y0..=y1 {
+        for bz in z0..=z1 {
+            for bx in x0..=x1 {
+                let [sky, lit] = light(bx, by, bz);
+                let level = (sky - subtracted).max(lit);
+                // Both the light gate and the brightness table use the darkened sky light.
+                if level <= 3 || !full_cube(block(bx, by - 1, bz)) {
+                    continue;
+                }
+                if let Some(a) = alpha(shadow_alpha, y, by, level) {
+                    quad(mesh, c, [bx, by, bz], a);
                 }
             }
         }
     }
-    mesh
+}
+
+/// `renderShadowOnBlock`: the block's top face, textured around the entity at the texture's middle.
+fn quad(mesh: &mut MeshData, c: &Caster, [bx, by, bz]: [i32; 3], a: f32) {
+    let [x, _, z] = c.pos;
+    let s = f64::from(c.size);
+    // A full cube spans 0 to 1 on each axis.
+    let (px0, px1) = (f64::from(bx), f64::from(bx) + 1.0);
+    let (pz0, pz1) = (f64::from(bz), f64::from(bz) + 1.0);
+    let py = f64::from(by) + 0.015625;
+    let base = mesh.vertices.len() as u32;
+    for (px, pz) in [(px0, pz0), (px0, pz1), (px1, pz1), (px1, pz0)] {
+        mesh.vertices.push(Vertex {
+            pos: [px as f32, py as f32, pz as f32],
+            uv: [
+                ((x - px) / 2.0 / s + 0.5) as f32,
+                ((z - pz) / 2.0 / s + 0.5) as f32,
+            ],
+            color: [1.0, 1.0, 1.0, a],
+            light: [1.0; 2],
+        });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
 }
 
 #[cfg(test)]

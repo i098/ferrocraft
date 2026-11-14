@@ -896,10 +896,16 @@ impl App {
         }
     }
 
-    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor. Only in a world,
-    /// where the mod frame is drawn.
+    /// A screen a mod opened is current in the JVM: it owns the keys, the mouse and the cursor, in a world and on
+    /// the main menu.
     fn mod_screen(&self) -> bool {
-        self.in_world() && self.mods.as_ref().is_some_and(|m| m.screen_open())
+        self.mods.as_ref().is_some_and(|m| m.screen_open())
+    }
+
+    /// A menu of the engine is open in a world. The main menu is not a game screen: a mod sees its keys, so a key bind
+    /// opens a mod screen there.
+    fn mod_game_screen(&self) -> bool {
+        self.in_world() && self.screen_open()
     }
 
     fn in_world(&self) -> bool {
@@ -1112,7 +1118,7 @@ impl App {
                 h as i32,
                 i32::from(self.ui.settings.gui_scale),
                 self.ui.unicode(),
-                self.screen_open(),
+                self.mod_game_screen(),
                 (self.cursor.0 as i32, self.cursor.1 as i32),
             );
             if show_hud {
@@ -1130,11 +1136,21 @@ impl App {
             };
             cs.draw(&mut c, &view, mx, my);
         }
+        // A mod screen draws over the menu and takes its input: the menu's own effects are dropped.
         let effects = self.ui.draw(&m, &mut c, mx, my);
+        let effects = if self.mod_screen() {
+            Vec::new()
+        } else {
+            effects
+        };
         if let Some(lines) = hover {
             gui::screens::tooltip(&mut c, &lines, mx, my, scale.width, scale.height);
         }
         let mut textures = std::mem::take(&mut c.pending_textures);
+        // On the main menu a mod screen draws over the menu.
+        if let (Some(mods), false, true) = (&self.mods, show_hud, self.mod_screen()) {
+            mods.draw(&mut g, &mut mod_textures);
+        }
         textures.extend(mod_textures);
         (g.into_quads(), textures, effects)
     }
@@ -1242,13 +1258,9 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        let screen = self.screen_open();
+        let screen = self.mod_game_screen();
         self.route_window_event(&event);
-        if let Some(mods) = self
-            .mods
-            .as_ref()
-            .filter(|m| self.in_world() || !m.screen_open())
-        {
+        if let Some(mods) = &self.mods {
             mods.window_event(&event, screen);
         }
         match event {

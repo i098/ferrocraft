@@ -14,8 +14,8 @@ import java.util.function.LongConsumer;
 /**
  * Stands in for OneConfig's NanoVG renderer (NanoVGHelperImpl). Its calls become Sink commands, so
  * HUD mods built on OneConfig draw through the same path as plain Gui and FontRenderer mods.
- * Coordinates are GUI pixels. Rounded corners draw square: the wire has no rounded rect yet. Images and SVG files are
- * read from the class path and sent whole once; Rust decodes them.
+ * Coordinates are GUI pixels. Images and SVG files are read from the class path and sent whole once; Rust decodes
+ * them. Rounded corners draw on rectangles only; an image keeps square corners.
  */
 public final class Nvg {
     private static final int MODELVIEW = 5888;
@@ -92,18 +92,29 @@ public final class Nvg {
     }
 
     public static void drawRoundedRect(long vg, float x, float y, float w, float h, int argb, float radius) {
-        drawRect(vg, x, y, w, h, argb);
+        drawRoundedRectVaried(vg, x, y, w, h, argb, radius, radius, radius, radius);
     }
 
-    /** The four radii are dropped as in drawRoundedRect. */
+    /** The radii are the corners top left, top right, bottom right, bottom left. */
     public static void drawRoundedRectVaried(long vg, float x, float y, float w, float h, int argb, float tl, float tr, float br, float bl) {
-        drawRect(vg, x, y, w, h, argb);
+        if (tl <= 0f && tr <= 0f && br <= 0f && bl <= 0f) {
+            drawRect(vg, x, y, w, h, argb);
+            return;
+        }
+        Sink.matrixMode(MODELVIEW);
+        Sink.roundRect(x, y, x + w, y + h, new float[] {tl, tr, br, bl}, argb);
     }
 
-    /** A line as the box of its end points grown by half the width: right for the horizontal and vertical lines OneConfig draws. */
+    /** A line at any angle. A horizontal or vertical one is a rectangle, which keeps the pixel grid. */
     public static void drawLine(long vg, float x0, float y0, float x1, float y1, float width, int argb) {
-        float half = width / 2f;
-        drawRect(vg, Math.min(x0, x1) - half, Math.min(y0, y1) - half, Math.abs(x1 - x0) + width, Math.abs(y1 - y0) + width, argb);
+        if (x0 == x1 || y0 == y1) {
+            float px = x0 == x1 ? width / 2f : 0f;
+            float py = y0 == y1 ? width / 2f : 0f;
+            drawRect(vg, Math.min(x0, x1) - px, Math.min(y0, y1) - py, Math.abs(x1 - x0) + 2f * px, Math.abs(y1 - y0) + 2f * py, argb);
+            return;
+        }
+        Sink.matrixMode(MODELVIEW);
+        Sink.line(x0, y0, x1, y1, width, argb);
     }
 
     public static void translate(long vg, float x, float y) {
@@ -166,7 +177,7 @@ public final class Nvg {
         image(file, x, y, w, h, false, a, b);
     }
 
-    /** The radius is dropped as in drawRoundedRect. */
+    /** The radius is dropped: an image keeps square corners. */
     public static void drawRoundImage(long vg, Object file, float x, float y, float w, float h, float radius, Object a) {
         image(file, x, y, w, h, false, a, null);
     }
@@ -183,7 +194,10 @@ public final class Nvg {
         image(file, x, y, w, h, true, a, b);
     }
 
-    /** A file name, then a tint (an Integer) or a Class to load from, in either order. An SVG with a tint is painted in it. */
+    /**
+     * A file name, then a tint (an Integer) or a Class to load from, in either order. An SVG with a tint is painted in
+     * it. A bitmap takes only the alpha of its tint, as NanoVG's image paint does.
+     */
     private static void image(Object file, float x, float y, float w, float h, boolean svg, Object a, Object b) {
         if (!(file instanceof String)) return;
         Integer tint = null;
@@ -195,6 +209,7 @@ public final class Nvg {
         byte[] data = resource((String) file, from);
         if (data.length == 0) return;
         Sink.matrixMode(MODELVIEW);
+        if (tint != null && !svg) tint |= 0x00FFFFFF;
         Sink.image((String) file, data, x, y, x + w, y + h, tint == null ? -1 : tint, svg && tint != null);
     }
 

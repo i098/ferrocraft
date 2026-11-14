@@ -2,10 +2,11 @@
 
 use crate::{send, Session};
 use ferrocraft_protocol::codec::{MetaEntry, MetaValue, Metadata, Slot, VarInt};
+use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
 use ferrocraft_protocol::play::clientbound as cb;
 use ferrocraft_protocol::play::{serverbound as sb, PlayerListAction, UseAction};
 use std::io;
-use world::entities::{EntityEvent, ItemRef, SizeMeta};
+use world::entities::{EntityEvent, FireworkExplosion, ItemRef, SizeMeta};
 
 fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
@@ -65,6 +66,54 @@ fn stack(meta: &Metadata) -> Option<ItemRef> {
     }
 }
 
+/// `Items.fireworks`.
+const FIREWORKS: i16 = 401;
+
+/// The `Fireworks.Explosions` of the rocket item at metadata index 8.
+fn firework(id: i32, meta: &Metadata) -> Option<EntityEvent> {
+    let Some(MetaValue::Slot(Some(s))) = find(meta, 8) else {
+        return None;
+    };
+    if s.id != FIREWORKS {
+        return None;
+    }
+    let explosions = s.nbt.as_ref().map(explosions).unwrap_or_default();
+    Some(EntityEvent::Firework { id, explosions })
+}
+
+fn get(c: &Compound, key: &str) -> Option<Tag> {
+    c.iter().find(|(k, _)| k == key).map(|(_, t)| t.clone())
+}
+
+fn explosions(nbt: &Nbt) -> Vec<FireworkExplosion> {
+    let Some(Tag::Compound(fireworks)) = get(&nbt.root, "Fireworks") else {
+        return Vec::new();
+    };
+    let Some(Tag::List(list)) = get(&fireworks, "Explosions") else {
+        return Vec::new();
+    };
+    let ints = |c: &Compound, key| match get(c, key) {
+        Some(Tag::IntArray(v)) => v,
+        _ => Vec::new(),
+    };
+    let flag = |c: &Compound, key| matches!(get(c, key), Some(Tag::Byte(b)) if b != 0);
+    list.iter()
+        .filter_map(|t| match t {
+            Tag::Compound(c) => Some(FireworkExplosion {
+                shape: match get(c, "Type") {
+                    Some(Tag::Byte(b)) => b,
+                    _ => 0,
+                },
+                trail: flag(c, "Trail"),
+                flicker: flag(c, "Flicker"),
+                colors: ints(c, "Colors"),
+                fade: ints(c, "FadeColors"),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 fn size_meta(meta: &Metadata) -> SizeMeta {
     let byte = |index| match find(meta, index) {
         Some(MetaValue::Byte(b)) => Some(*b as u8),
@@ -111,6 +160,7 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<EntityEvent> {
         .or_else(|| state_event(packet))
         .into_iter()
         .chain(meta.and_then(|m| potion(id, m)))
+        .chain(meta.and_then(|m| firework(id, m)))
         .collect()
 }
 

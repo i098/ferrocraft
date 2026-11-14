@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 52] = [
+const SKINS: [&str; 53] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -65,6 +65,7 @@ const SKINS: [&str; 52] = [
     "entity/ghast/ghast.png",
     "entity/ghast/ghast_shooting.png",
     "entity/bat.png",
+    "items/fireworks.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -74,13 +75,14 @@ const EYES: [usize; 2] = [43, 44];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Skin; 6] = [
+const SLIME_SLOT_SKINS: [Skin; 7] = [
     Skin::Slime,
     Skin::MagmaCube,
     Skin::Blaze,
     Skin::Ghast,
     Skin::GhastShooting,
     Skin::Bat,
+    Skin::Firework,
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -139,6 +141,8 @@ pub enum Skin {
     Bat,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
+    /// `items/fireworks.png`, the rocket icon.
+    Firework,
     /// A downloaded cape in dynamic slot `n`.
     Cape(u8),
     /// An armor texture, by index into the armor part of the slot table.

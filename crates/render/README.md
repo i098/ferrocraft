@@ -19,6 +19,7 @@ draws as the extruded sprite with its `firstperson` transform.
 Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial, |p| renderer.light_at(p))` and then
 `set_particles` before each `render`. The quads are relative to that frame's camera; each particle is lit by the world
 light at its position like the 1.8.9 particle classes.
+Fireworks: the engine calls `Particles::firework(pos, vel, explosions)` for a blast and `firework_trail(pos, vel)` each tick of rocket flight. It also calls `set_viewer(eye_pos)` each tick and plays the `take_sounds()` entries (blast, twinkle) itself.
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.

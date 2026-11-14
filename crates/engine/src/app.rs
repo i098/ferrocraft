@@ -1580,6 +1580,7 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            squish: e.squish.factor(p),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,

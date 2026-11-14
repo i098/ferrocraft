@@ -146,6 +146,8 @@ pub struct Look {
     pub id: i32,
     /// Living entities: metadata 9, arrows stuck in the body.
     pub arrows: u8,
+    /// Slimes and magma cubes: `prevSquishFactor` eased to `squishFactor` by the partial tick.
+    pub squish: f32,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
     pub eat_timer: i32,
     /// Iron golem: `attackTimer` and `holdRoseTick`, the arm swing and rose pose.
@@ -166,6 +168,7 @@ impl Default for Look {
             stand: StandLook::default(),
             id: 0,
             arrows: 0,
+            squish: 0.0,
             eat_timer: 0,
             golem_attack: 0,
             golem_rose: 0,
@@ -907,7 +910,8 @@ struct Xf {
     ct: f32,
     sneak_drop: f32,
     fall: f32,
-    scale: f32,
+    /// Horizontal and vertical scale of `preRenderCallback`.
+    scale: [f32; 2],
     /// The generic box is built y-up from the feet, so it skips the body offset.
     generic: bool,
 }
@@ -925,22 +929,24 @@ fn sneak_drop(d: &EntityDraw) -> f32 {
 }
 
 /// `preRenderCallback` scale: the player by 15/16, `RenderCaveSpider` 0.7, `RenderVillager` 15/16
-/// (halved for a child), `RenderSlime` and `RenderMagmaCube` by the size at rest (no squish yet),
-/// `RenderGhast` (8 + 1) / 2 and `RenderBat` 0.35.
-fn model_scale(d: &EntityDraw) -> f32 {
-    match d.class {
+/// (halved for a child), `RenderSlime` and `RenderMagmaCube` by the size and the squish,
+/// `RenderGhast` (8 + 1) / 2 and `RenderBat` 0.35. Returns the horizontal and the vertical scale.
+fn model_scale(d: &EntityDraw) -> [f32; 2] {
+    if let Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) = d.class {
+        return mobs2::cube_scale(d);
+    }
+    let s = match d.class {
         Class::Player { .. } => 0.9375,
         Class::Mob(mobs::CAVE_SPIDER) => 0.7,
         // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
         Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
         Class::Mob(mobs::VILLAGER) => 0.9375,
-        // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
-        Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
         Class::Mob(mobs2::BAT) => 0.35,
         _ => 1.0,
-    }
+    };
+    [s, s]
 }
 
 impl Xf {
@@ -991,9 +997,9 @@ impl Xf {
             // y-up block coordinates: the box hangs from y = 0 downward in model space.
             return self.yaw(-q[0] / 16.0, -q[1] / 16.0, q[2] / 16.0, 0.0);
         }
-        let s = self.scale;
-        let (x, y) = (-q[0] / 16.0 * s, (BODY_OFFSET - q[1] / 16.0) * s);
-        let z = q[2] / 16.0 * s;
+        let [sx, sy] = self.scale;
+        let (x, y) = (-q[0] / 16.0 * sx, (BODY_OFFSET - q[1] / 16.0) * sy);
+        let z = q[2] / 16.0 * sx;
         let (x, y) = if self.fall != 0.0 {
             // `LivingRenderer.applyRotation`: a z rotation about the feet origin.
             let (sf, cf) = self.fall.sin_cos();

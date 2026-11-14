@@ -80,6 +80,13 @@ impl TabList {
         self.entries.retain(|e| e.uuid != uuid);
     }
 
+    /// `NetworkPlayerInfo.getGameType() == SPECTATOR` for the player with `uuid`.
+    pub fn is_spectator(&self, uuid: u128) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.uuid == uuid && e.gamemode == SPECTATOR)
+    }
+
     pub fn entry_mut(&mut self, uuid: u128) -> Option<&mut TabEntry> {
         self.entries.iter_mut().find(|e| e.uuid == uuid)
     }
@@ -420,6 +427,22 @@ fn draw_ping(gui: &mut Gui, w: i32, x: i32, y: i32, ping: i32) {
 mod tests {
     use super::*;
     use crate::toolkit::GuiScale;
+
+    /// Only the entry with the uuid and game type 3 is a spectator; an unknown uuid is not.
+    #[test]
+    fn only_a_game_type_3_entry_is_a_spectator() {
+        let mut list = TabList::default();
+        for (uuid, gamemode) in [(1, 3), (2, 1)] {
+            list.add(TabEntry {
+                uuid,
+                gamemode,
+                ..TabEntry::default()
+            });
+        }
+        assert!(list.is_spectator(1));
+        assert!(!list.is_spectator(2));
+        assert!(!list.is_spectator(3));
+    }
 
     /// The face is the 8x8 at (8, 8), the hat the 8x8 at (40, 8); Dinnerbone reads them upside down.
     #[test]

@@ -82,6 +82,8 @@ pub struct Frame<'a> {
     pub helmet_pumpkin: bool,
     /// The Nausea effect is active: it replaces the portal swirl.
     pub nausea: bool,
+    /// A mod owns the crosshair: it draws its own, or none.
+    pub hide_crosshair: bool,
 }
 
 impl Hud {
@@ -142,7 +144,7 @@ impl Hud {
         }
         gui.set_color(0xFFFF_FFFF);
         let spectator = f.status.is_some_and(|s| s.spectator);
-        if (f.debug.is_none() || f.reduced_debug) && !spectator {
+        if !f.hide_crosshair && (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
         }

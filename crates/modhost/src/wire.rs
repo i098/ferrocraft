@@ -17,6 +17,7 @@
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
 //! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
 //! `'C'` clip (u8 on, then four f32 corners when on).
+//! `'H'` HUD owner (u32 bit set): the vanilla HUD elements that Java owns this frame, see `hud.rs`; Rust does not draw them.
 //! `'O'` world values, once per frame: see `overrides.rs`.
 //! Rust to Java, also `'P'` (player tick) and `'C'` (a received chat line, see `chat.rs`).
 
@@ -88,6 +89,8 @@ pub enum DrawCmd {
     },
     /// Cut the commands after this one to the rectangle; `None` lifts the cut.
     Clip(Option<[f32; 4]>),
+    /// Elements of the vanilla HUD that Java owns this frame, as the bit set of `hud::Element`.
+    Hud(u32),
 }
 
 /// A resource file above this many bytes means a corrupt stream.
@@ -220,6 +223,7 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
         } else {
             None
         })),
+        b'H' => Ok(DrawCmd::Hud(u32_(r)?)),
         t => Err(io::Error::other(format!("unknown command tag {t}"))),
     }
 }
@@ -263,10 +267,10 @@ mod tests {
     use super::*;
 
     /// Bytes as `Sink.take(true)` writes them: the screen flag, a rect, a text with a scaled matrix, a
-    /// resource, an image and the two forms of clip.
+    /// resource, an image, the two forms of clip and a HUD owner set.
     fn frame() -> Vec<u8> {
         let mut b = vec![1];
-        b.extend(6u32.to_be_bytes());
+        b.extend(7u32.to_be_bytes());
         b.push(b'R');
         for v in [1.0f32, 2.0, 21.0, 22.0] {
             b.extend(v.to_be_bytes());
@@ -301,6 +305,8 @@ mod tests {
         for v in [1.0f32, 2.0, 3.0, 4.0] {
             b.extend(v.to_be_bytes());
         }
+        b.push(b'H');
+        b.extend(0b10u32.to_be_bytes());
         b
     }
 
@@ -335,6 +341,7 @@ mod tests {
                 },
                 DrawCmd::Clip(None),
                 DrawCmd::Clip(Some([1.0, 2.0, 3.0, 4.0])),
+                DrawCmd::Hud(0b10),
             ]
         );
     }

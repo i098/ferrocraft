@@ -3,6 +3,7 @@
 //! `ModelSpider` and `ModelEnderman` (box layout, texture offsets and `setRotationAngles`), plus the
 //! sheep wool and the spider and enderman eye layers.
 //!
+//! Not ported: the chicken flap (the draw has no on-ground state) and villager head shake.
 
 use super::{cos, quad_legs, wrap, EntityDraw, Model, Part, Skin};
 use std::f32::consts::{FRAC_PI_2, PI};

@@ -76,6 +76,8 @@ pub struct App {
     hud: gui::Hud,
     /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set or the game dir is a OneClient cluster.
     mods: Option<ferrocraft_modhost::ModHost>,
+    /// The mod host while it starts on its thread.
+    mods_boot: Option<std::sync::mpsc::Receiver<Option<ferrocraft_modhost::ModHost>>>,
     /// The resource pack the server sent (S48): on top of the selected packs until the world is left.
     server_pack: Option<std::path::PathBuf>,
     /// `host:port` of the server last connected to, for the mod host's mirror.
@@ -158,6 +160,7 @@ impl App {
             renderer: None,
             hud: gui::Hud::default(),
             mods: None,
+            mods_boot: None,
             server_pack: None,
             server: String::new(),
             pack_mode: None,
@@ -1216,7 +1219,7 @@ impl ApplicationHandler for App {
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
-        self.mods = mod_boot::start(&self.args.game_dir);
+        self.mods_boot = Some(mod_boot::spawn(self.args.game_dir.clone()));
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
@@ -1257,6 +1260,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Some(done) = self.mods_boot.as_ref().and_then(mod_boot::poll) {
+            self.mods = done;
+            self.mods_boot = None;
+        }
         self.pump_network();
         let due = self.pace_frame(el);
         if due {

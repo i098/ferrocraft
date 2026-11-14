@@ -111,6 +111,7 @@ public final class MirrorHudTest {
         w.writeInt(2);
         w.writeByte(0);
         w.writeByte(0);
+        w.writeByte(0);
         w.writeInt(0);
         w.writeInt(0);
         w.writeShort(0);

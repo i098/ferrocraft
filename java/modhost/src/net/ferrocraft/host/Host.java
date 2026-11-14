@@ -12,7 +12,7 @@ import net.minecraft.launchwrapper.Launch;
 /**
  * Boots Forge's FML around Minecraft state that Rust owns, then answers one frame message at a time.
  *
- * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF.
+ * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF, then the hook table of {@link HookIndex}.
  * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
  * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'O' asks for the world values mods change, see {@link Overrides}. Any other first byte ends the host.
@@ -79,6 +79,7 @@ public final class Host {
         log("minecraft state ready");
         Minecraft.loadMods(mc);
         log("mods loaded");
+        HookIndex.settle();
         registerAs(new OverlayFilter());
         startOneConfig();
 
@@ -99,6 +100,7 @@ public final class Host {
         out.writeByte('H');
         out.write(System.getenv("FERROCRAFT_BRIDGE_TOKEN").getBytes(StandardCharsets.US_ASCII));
         out.writeUTF((String) R.call(R.cls("net.minecraft.client.ClientBrandRetriever"), "getClientModName"));
+        HookIndex.write(out);
         out.flush();
         while (true) {
             int tag = in.read();

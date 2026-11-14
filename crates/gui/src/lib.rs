@@ -9,6 +9,7 @@ pub mod debug;
 pub mod hover;
 pub mod hud;
 pub mod inventory;
+pub mod overlay;
 pub mod scoreboard;
 pub mod screens;
 pub mod status;

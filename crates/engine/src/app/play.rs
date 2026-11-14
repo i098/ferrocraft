@@ -159,6 +159,51 @@ impl App {
         }
     }
 
+    /// `Entity.checkBlockCollisions` for nether portal blocks: any block (id 90) in the player's box
+    /// shrunk by 0.001 sets `inPortal`; a rider or a vehicle never does (`BlockPortal.onEntityCollidedWithBlock`).
+    fn portal_touch(&mut self) {
+        let Some(p) = self
+            .game
+            .player
+            .as_ref()
+            .filter(|_| self.game.vehicle.is_none())
+        else {
+            return;
+        };
+        let lo = [p.pos[0] - 0.3, p.pos[1], p.pos[2] - 0.3].map(|v| (v + 0.001).floor() as i32);
+        let hi =
+            [p.pos[0] + 0.3, p.pos[1] + 1.8, p.pos[2] + 0.3].map(|v| (v - 0.001).floor() as i32);
+        let store = &self.game.store;
+        let hit = (lo[0]..=hi[0])
+            .flat_map(|x| {
+                (lo[1]..=hi[1]).flat_map(move |y| (lo[2]..=hi[2]).map(move |z| (x, y, z)))
+            })
+            .any(|(x, y, z)| store.get_block(x, y, z) >> 4 == 90);
+        if hit {
+            self.hud.portal.touch();
+            self.close_portal_screen();
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: `displayGuiScreen(null)` while a non-pausing screen is open.
+    /// A container screen never pauses (`GuiContainer.doesGuiPauseGame`).
+    fn close_portal_screen(&mut self) {
+        self.close_container();
+        if self.ui.is_open() && !self.ui.pauses() {
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: the trigger sound on the tick the player enters a portal.
+    fn tick_portal(&mut self) {
+        let nausea = self.game.effects.get(world::effects::id::NAUSEA);
+        if self.hud.portal.tick(nausea.map(|e| e.duration)) {
+            self.play_portal_trigger();
+        }
+    }
+
     /// `TextureManager.tick`: the compass and clock sprites pick their frame.
     fn tick_dials(&mut self) {
         let Some(icons) = &mut self.icons else {
@@ -178,6 +223,7 @@ impl App {
         self.chat_tick();
         self.tick_block_entities();
         self.hud.tick();
+        self.tick_portal();
         if self.game.player.is_some() {
             self.hud.update_held(self.game.inv.held_stack());
         }
@@ -234,6 +280,7 @@ impl App {
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();
         self.game.tick(input);
+        self.portal_touch();
         self.tick_dials();
         self.fall_sounds();
         abilities |= self.game.fly_land();
@@ -1308,7 +1355,7 @@ fn precipitation_top(
 
 #[cfg(test)]
 mod tests {
-    use super::{activates, item_used_on, sprint_dust_state, App};
+    use super::{activates, item_used_on, sprint_dust_state, App, ContainerScreen};
     use crate::game::Game;
     use render::Particles;
     use world::chunk::Chunk;
@@ -1411,5 +1458,29 @@ mod tests {
         assert!(item_used_on(259, 1 << 4, 0, 1, 0) && !item_used_on(259, 1 << 4, 0, 1, 2));
         assert!(item_used_on(295, 60 << 4, 0, 1, 0) && !item_used_on(295, 2 << 4, 0, 1, 0));
         assert!(!item_used_on(325, 1 << 4, 0, 1, 0));
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: `displayGuiScreen(null)` for a non-pausing screen only.
+    #[test]
+    fn a_portal_closes_a_container_and_a_container_screen_but_not_the_pause_menu() {
+        let mut app = App::new(crate::args::Args {
+            username: "Player".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
+        let mut c = Chunk::new(0, 0);
+        c.set_block(0, 64, 0, 90 << 4);
+        app.game.store.insert(c);
+        app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
+        app.portal_touch();
+        assert!(app.container.is_none(), "a container does not pause");
+
+        app.open_pause();
+        assert!(app.ui.is_open());
+        app.portal_touch();
+        assert!(app.ui.is_open(), "the pause menu pauses, so it stays");
     }
 }

@@ -44,6 +44,11 @@ impl Ui {
         self.screens.is_open()
     }
 
+    /// `currentScreen.doesGuiPauseGame()`.
+    pub fn pauses(&self) -> bool {
+        self.screens.pauses()
+    }
+
     /// `Minecraft.isUnicode`: the language or `forceUnicodeFont` asks for the unicode glyphs.
     pub fn unicode(&self) -> bool {
         self.settings.force_unicode || self.texts.unicode

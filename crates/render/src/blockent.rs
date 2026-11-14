@@ -29,6 +29,7 @@ pub const BANNER_STANDING: u16 = 176;
 pub const BANNER_WALL: u16 = 177;
 pub const ENCHANTING_TABLE: u16 = 116;
 pub const BEACON: u16 = 138;
+const MOB_SPAWNER: u16 = 52;
 pub const END_PORTAL: u16 = 119;
 
 /// Block ids that carry a block entity drawn here.
@@ -45,6 +46,7 @@ pub fn is_tile(id: u16) -> bool {
             | BANNER_WALL
             | ENCHANTING_TABLE
             | BEACON
+            | MOB_SPAWNER
             | END_PORTAL
     )
 }
@@ -195,6 +197,14 @@ impl BlockEntities {
         }
     }
 
+    /// Positions of the mob spawners in the loaded chunks.
+    pub fn spawners(&self) -> impl Iterator<Item = [i32; 3]> + '_ {
+        self.blocks
+            .iter()
+            .filter(|(_, s)| *s >> 4 == MOB_SPAWNER)
+            .map(|(p, _)| *p)
+    }
+
     pub fn set_sign(&mut self, pos: [i32; 3], lines: [String; 4]) {
         self.signs.insert(pos, lines);
     }
@@ -308,7 +318,8 @@ impl BlockEntities {
                 book_block(out, &book, at, view.partial);
             }
             // The beam is built by `beams`, the star field by `portals`.
-            BEACON | END_PORTAL => {}
+            // Spawners only emit particles here (`spawner`); the display mob is not ported.
+            BEACON | END_PORTAL | MOB_SPAWNER => {}
             _ => {
                 let banner = self.banners.get(&pos).unwrap_or(&NO_BANNER);
                 banner_block(out, id == BANNER_STANDING, meta, pos, view, banner, at);

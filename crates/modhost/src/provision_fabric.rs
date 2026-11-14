@@ -76,7 +76,8 @@ impl Config {
         let mut installer = fabric::Installer::new(
             fabric::Loader::LegacyFabric,
             fabric::GameVersion::Name(GAME.into()),
-            fabric::LoaderVersion::Stable,
+            // 0.20.1 cannot patch Minecraft 1.8.9 ("Could not find game constructor"); 0.19.5 starts it.
+            fabric::LoaderVersion::Name("0.19.5".into()),
         );
         let moj = installer.mojang_mut();
         moj.base_mut().set_main_dir(&main);

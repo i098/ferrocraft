@@ -81,6 +81,8 @@ struct Shared {
     /// A chat line the receiving thread waits on, and the JVM's verdict.
     chat: Option<(ChatKind, String)>,
     chat_answer: Option<ChatVerdict>,
+    /// The last chat reply said Java keeps the chat: a timed-out line may already be on its screen.
+    chat_taken: bool,
     /// A player tick, a world values request or a chat line got no answer in time: no more are asked until the pump has finished the round trip it is in,
     /// and the late answer is dropped.
     stalled: bool,
@@ -154,6 +156,7 @@ impl ModHost {
                     world_answer: None,
                     chat: None,
                     chat_answer: None,
+                    chat_taken: false,
                     stalled: false,
                     brand: None,
                     hooks: hooks::Hooks::default(),
@@ -397,10 +400,19 @@ impl ModHost {
                 s.chat_answer.is_none() && s.phase == Phase::Live
             })
             .unwrap();
+        // Sent but unanswered while Java keeps the chat: it may still print the line, so Rust must not.
+        let sent = s.chat.is_none();
         s.chat = None;
         let answer = s.chat_answer.take();
         s.stalled = answer.is_none() && s.phase == Phase::Live;
-        answer.unwrap_or(ChatVerdict::Keep)
+        match answer {
+            Some(a) => {
+                s.chat_taken = a == ChatVerdict::Taken;
+                a
+            }
+            None if sent && s.chat_taken && s.phase == Phase::Live => ChatVerdict::Cancel,
+            None => ChatVerdict::Keep,
+        }
     }
 
     /// The brand the hosted `ClientBrandRetriever.getClientModName()` returned (`fml,forge`), once the JVM is
@@ -867,6 +879,7 @@ mod tests {
                 world_answer: None,
                 chat: None,
                 chat_answer: None,
+                chat_taken: false,
                 stalled: false,
                 brand: None,
                 hooks: hooks::Hooks::default(),
@@ -1011,6 +1024,52 @@ mod tests {
         host.stop();
         worker.join().unwrap();
         assert_eq!(host.chat(ChatKind::Chat, "x"), ChatVerdict::Keep);
+    }
+
+    fn chat_after_replies(replies: &[u8]) -> ChatVerdict {
+        let (l, port) = listener();
+        let link = link();
+        let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
+        let mut host = ModHost {
+            child: Arc::clone(&child),
+            link: Arc::clone(&link),
+        };
+        let worker = {
+            let (child, link) = (Arc::clone(&child), Arc::clone(&link));
+            thread::spawn(move || run(&l, &child, &link, TOKEN))
+        };
+        let mut stream = jvm(port, TOKEN);
+        wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
+        for r in replies {
+            thread::scope(|scope| {
+                let sender = scope.spawn(|| host.chat(ChatKind::InputOpen, ""));
+                let mut request = [0; 6];
+                stream.read_exact(&mut request).unwrap();
+                stream.write_all(&[*r]).unwrap();
+                sender.join().unwrap();
+            });
+        }
+        let verdict = thread::scope(|scope| {
+            let sender = scope.spawn(|| host.chat(ChatKind::Chat, "late"));
+            let mut request = [0; 10];
+            stream.read_exact(&mut request).unwrap();
+            sender.join().unwrap() // Java never answers
+        });
+        drop(stream);
+        host.stop();
+        worker.join().unwrap();
+        verdict
+    }
+
+    #[test]
+    fn a_timed_out_chat_line_is_kept_unless_java_keeps_the_chat() {
+        assert_eq!(chat_after_replies(&[]), ChatVerdict::Keep);
+        assert_eq!(chat_after_replies(&[3, 0]), ChatVerdict::Keep);
+    }
+
+    #[test]
+    fn a_timed_out_chat_line_is_not_printed_twice_when_java_keeps_the_chat() {
+        assert_eq!(chat_after_replies(&[3]), ChatVerdict::Cancel);
     }
 
     #[test]

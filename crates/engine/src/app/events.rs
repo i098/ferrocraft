@@ -659,7 +659,8 @@ impl App {
                 &ferrocraft_net_client::formatted_text(&runs),
             ) {
                 ferrocraft_modhost::ChatVerdict::Keep => {}
-                ferrocraft_modhost::ChatVerdict::Cancel => return,
+                ferrocraft_modhost::ChatVerdict::Cancel
+                | ferrocraft_modhost::ChatVerdict::Taken => return,
                 ferrocraft_modhost::ChatVerdict::Replace(text) => {
                     runs = vec![ferrocraft_net_client::Styled {
                         text,
@@ -673,6 +674,22 @@ impl App {
         self.hud
             .chat
             .print(runs, 0, self.hud.update_counter, open, m);
+    }
+
+    /// Tells the mod host that the chat input opened or closed, so a mod's `GuiNewChat` draws the open chat. A no-op
+    /// while the state is the same as the last tick; the reply does not matter.
+    pub(super) fn mod_chat_state(&mut self, open: bool) {
+        if open == self.chat_open {
+            return;
+        }
+        if let Some(mods) = &self.mods {
+            let kind = if open {
+                ferrocraft_modhost::ChatKind::InputOpen
+            } else {
+                ferrocraft_modhost::ChatKind::InputClosed
+            };
+            mods.chat(kind, "");
+        }
     }
 
     /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.

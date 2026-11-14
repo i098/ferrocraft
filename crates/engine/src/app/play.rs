@@ -471,6 +471,7 @@ impl App {
             self.chat_note(&names);
         }
         let chat_open = self.input.chat_input().is_some();
+        self.mod_chat_state(chat_open);
         if self.chat_open && !chat_open {
             self.hud.chat.reset_scroll();
         }

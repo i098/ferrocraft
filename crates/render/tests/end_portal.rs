@@ -72,9 +72,21 @@ fn end_portal_fills_its_frame_with_stars() {
     assert!(r + g + b < 3.0 * 110.0, "portal too bright: {r} {g} {b}");
     assert!(g.max(b) > 8.0, "portal black: {r} {g} {b}");
     assert!(g.max(b) > r, "portal not blue-green: {r} {g} {b}");
-    assert!(g > 0.5 * r.min(b), "missing-texture purple (g≈0, r≈b): {r} {g} {b}");
-    let purple = region.iter().filter(|p| p[1] < 4 && p[0] > 12 && p[2] > 12).count();
-    assert!(purple * 10 < region.len(), "missing-texture colours: {purple}");
-    let stars = region.iter().filter(|p| p[1].max(p[2]) as f64 > g.max(b) + 40.0).count();
+    assert!(
+        g > 0.5 * r.min(b),
+        "missing-texture purple (g≈0, r≈b): {r} {g} {b}"
+    );
+    let purple = region
+        .iter()
+        .filter(|p| p[1] < 4 && p[0] > 12 && p[2] > 12)
+        .count();
+    assert!(
+        purple * 10 < region.len(),
+        "missing-texture colours: {purple}"
+    );
+    let stars = region
+        .iter()
+        .filter(|p| p[1].max(p[2]) as f64 > g.max(b) + 40.0)
+        .count();
     assert!(stars > 20, "no additive star layers: {stars}");
 }

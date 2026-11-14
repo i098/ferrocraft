@@ -1,11 +1,12 @@
 #!/bin/sh
 # Runs the host tests after build.sh: boots FML with the host's tweakers and a test class in place of the host's
 # entry point. FERRO_JAVA_HOME and FERRO_LIB are as in build.sh; the folder also holds the Minecraft 1.8.9 jar and
-# the other Java 8 libraries of the game.
+# the other Java 8 libraries of the game, including vecmath-1.5.2.jar (javax.vecmath, needed when the host runs a click or a Wither spawn).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin
 L=${FERRO_LIB:?set FERRO_LIB to the library folder}
+ls "$L"/vecmath*.jar >/dev/null 2>&1 || { echo "FERRO_LIB has no vecmath*.jar: add vecmath-1.5.2.jar (Forge installer library java3d:vecmath:1.5.2); without it the host JVM exits on a click or a Wither spawn" >&2; exit 2; }
 rm -rf "$here/cls/test" && mkdir "$here/cls/test"
 others=$(ls "$L"/*.jar | grep -v 'forge.jar\|minecraft-1' | tr '\n' ':')
 # FERRO_PREPARE_OUT, from java/modhost-prepare/run.sh, boots on the generated jars instead of the player's two jars.

@@ -13,6 +13,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin
 L=${FERRO_LIB:?set FERRO_LIB to the library folder}
+ls "$L"/vecmath*.jar >/dev/null 2>&1 || { echo "FERRO_LIB has no vecmath*.jar: add vecmath-1.5.2.jar (Forge installer library java3d:vecmath:1.5.2); without it the host JVM exits on a click or a Wither spawn" >&2; exit 2; }
 MODS=${FC_MODS:-${TMPDIR:-/tmp}/ferro-modhost-accept/mods}
 ENGINE=${FC_ENGINE:-${CARGO_TARGET_DIR:-$root/target}/debug/ferrocraft-engine}
 OUT=${FC_OUT:-${TMPDIR:-/tmp}/ferrocraft-modproof}

@@ -180,6 +180,17 @@ pub struct ItemRef {
     pub glint: bool,
 }
 
+/// One `Fireworks.Explosions` entry of a rocket (`Type`, `Trail`, `Flicker`, `Colors`, `FadeColors`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FireworkExplosion {
+    /// 0 small ball, 1 large ball, 2 star, 3 creeper, 4 burst.
+    pub shape: i8,
+    pub trail: bool,
+    pub flicker: bool,
+    pub colors: Vec<i32>,
+    pub fade: Vec<i32>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Entity {
     pub id: i32,
@@ -235,6 +246,8 @@ pub struct Entity {
     pub facing: u8,
     /// Paintings: the motive name (`EntityPainting.EnumArt.title`).
     pub title: String,
+    /// Firework rockets: the explosions of the item at metadata index 8.
+    pub explosions: Vec<FireworkExplosion>,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -377,6 +390,7 @@ impl Entity {
             age: 0,
             potion_color: 0,
             potion_ambient: false,
+            explosions: Vec::new(),
             facing: 0,
             title: String::new(),
             owner: 0,
@@ -751,6 +765,11 @@ pub enum EntityEvent {
         stack: Option<ItemRef>,
         size: SizeMeta,
     },
+    /// Metadata index 8 of a firework rocket: the `Fireworks.Explosions` of its item.
+    Firework {
+        id: i32,
+        explosions: Vec<FireworkExplosion>,
+    },
     /// Metadata index 7 (potion colour) and 8 (ambient), where a packet carried them.
     Potion {
         id: i32,
@@ -814,7 +833,7 @@ struct Emitter {
 const EMITTER_TICKS: u8 = 3;
 
 /// Particles an entity causes; `size` is `(width, height)` and positions are feet-level.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Fx {
     /// One `EmitterParticle.tick` burst around the entity (`magic` is the enchant crit).
     Hit {
@@ -832,6 +851,12 @@ pub enum Fx {
     },
     /// `EntityWitch.handleStatusUpdate(15)`: witch magic specks around the head; `size` is `(width, height)`.
     Witch { pos: [f64; 3], size: (f32, f32) },
+    /// `EntityFireworkRocket.handleStatusUpdate(17)`: the `Starter` at the rocket, moving as it did.
+    Firework {
+        pos: [f64; 3],
+        vel: [f64; 3],
+        explosions: Vec<FireworkExplosion>,
+    },
 }
 
 /// The particle of a mob mood status: `EntityAnimal` 18, `EntityTameable` 6 and 7, `EntityVillager` 12 to 14.
@@ -1108,14 +1133,8 @@ impl Entities {
                 }
                 self.with(id, |e| e.animate(animation))
             }
-            E::Status { id, status } => {
-                if let Some(e) = self.map.get(&id) {
-                    if let Some(fx) = e.status_fx(status) {
-                        self.fx.push(fx);
-                    }
-                }
-                self.with(id, |e| e.set_status(status))
-            }
+            E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
+            E::Status { id, status } => self.handle_status(id, status),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
@@ -1134,6 +1153,27 @@ impl Entities {
                 self.names.remove(&uuid);
             }
             _ => {}
+        }
+    }
+
+    fn handle_status(&mut self, id: i32, status: i8) {
+        if status == 17 {
+            self.firework_explode(id);
+            return;
+        }
+        if let Some(fx) = self.map.get(&id).and_then(|e| e.status_fx(status)) {
+            self.fx.push(fx);
+        }
+        self.with(id, |e| e.set_status(status));
+    }
+
+    fn firework_explode(&mut self, id: i32) {
+        if let Some(e) = self.map.get(&id).filter(|e| e.kind == Kind::Object(76)) {
+            self.fx.push(Fx::Firework {
+                pos: e.pos,
+                vel: [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]),
+                explosions: e.explosions.clone(),
+            });
         }
     }
 

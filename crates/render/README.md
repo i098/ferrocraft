@@ -19,11 +19,15 @@ draws as the extruded sprite with its `firstperson` transform.
 Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, partial, |p| renderer.light_at(p))` and then
 `set_particles` before each `render`. The quads are relative to that frame's camera; each particle is lit by the world
 light at its position like the 1.8.9 particle classes.
+Fireworks: the engine calls `Particles::firework(pos, vel, explosions)` for a blast and `firework_trail(pos, vel)` each tick of rocket flight. It also calls `set_viewer(eye_pos)` each tick and plays the `take_sounds()` entries (blast, twinkle) itself.
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
+Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
+`set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.
+`set_shadow_view` supplies the view entity's feet, so the F5 camera offset does not change the distance fade.
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.
 The engine disables that overlay in third-person views and spectator mode.

@@ -1,6 +1,6 @@
 //! Vanilla 1.8.9 asset index plus `sounds.json`: event name -> weighted `.ogg` choices.
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -29,8 +29,14 @@ impl PartialEq for SoundFile {
         match (self, other) {
             (SoundFile::Path(a), SoundFile::Path(b)) => a == b,
             (
-                SoundFile::Zip { archive: a, entry: x },
-                SoundFile::Zip { archive: b, entry: y },
+                SoundFile::Zip {
+                    archive: a,
+                    entry: x,
+                },
+                SoundFile::Zip {
+                    archive: b,
+                    entry: y,
+                },
             ) => Arc::ptr_eq(a, b) && x == y,
             _ => false,
         }
@@ -217,6 +223,9 @@ impl AssetIndex {
 
 pub struct SoundIndex {
     events: HashMap<String, Event>,
+    /// Events a `"type": "event"` entry points at, per event; folded into `events` by `merge`.
+    refs: HashMap<String, Vec<String>>,
+    replace: HashSet<String>,
 }
 
 impl SoundIndex {
@@ -242,20 +251,30 @@ impl SoundIndex {
             };
             // A broken pack file is skipped, as vanilla logs and skips it.
             if let Ok(over) = Self::from_json(bytes.get_ref(), resolve) {
-                index.merge(over, bytes.get_ref());
+                index.merge(over);
             }
         }
         Ok(index)
     }
 
     /// `SoundHandler.loadSoundResource`: an event of `over` replaces the old one when it is new
-    /// or has `"replace": true`; otherwise its sounds are appended to the old ones.
-    fn merge(&mut self, over: SoundIndex, json: &[u8]) {
-        let root: Value = serde_json::from_slice(json).unwrap_or_default();
-        for (name, ev) in over.events {
-            let replace = root[&name]["replace"].as_bool().unwrap_or(false);
+    /// or has `"replace": true`; otherwise its sounds are appended to the old ones. An event
+    /// reference takes the sounds of the named event, from `over` first, else from the old index.
+    /// An event left without sounds keeps its old definition rather than going silent.
+    fn merge(&mut self, over: SoundIndex) {
+        let mut merged = Vec::new();
+        for (name, ev) in &over.events {
+            let mut ev = ev.clone();
+            let mut seen = vec![name.as_str()];
+            ev.variants.extend(self.expand(&over, name, &mut seen));
+            merged.push((name.clone(), ev));
+        }
+        for (name, ev) in merged {
             match self.events.get_mut(&name) {
-                Some(old) if !replace => old.variants.extend(ev.variants),
+                Some(_)
+                    if ev.variants.is_empty()
+                        && over.refs.get(&name).is_some_and(|r| !r.is_empty()) => {}
+                Some(old) if !over.replace.contains(&name) => old.variants.extend(ev.variants),
                 _ => {
                     self.events.insert(name, ev);
                 }
@@ -263,44 +282,72 @@ impl SoundIndex {
         }
     }
 
-    /// `resolve` maps a sound name such as `random/click` to its `.ogg` file.
+    fn expand<'a>(
+        &self,
+        over: &'a SoundIndex,
+        name: &str,
+        seen: &mut Vec<&'a str>,
+    ) -> Vec<Variant> {
+        let mut out = Vec::new();
+        for r in over.refs.get(name).into_iter().flatten() {
+            if seen.contains(&r.as_str()) {
+                continue;
+            }
+            seen.push(r);
+            if let Some(ev) = over.events.get(r) {
+                out.extend(ev.variants.iter().cloned());
+                out.extend(self.expand(over, r, seen));
+            } else if let Some(ev) = self.events.get(r) {
+                out.extend(ev.variants.iter().cloned());
+            }
+        }
+        out
+    }
+
+    /// `resolve` maps a sound name such as `random/click` to its `.ogg` file. A malformed
+    /// record is an `Err`, as vanilla's `SoundListSerializer` rejects the whole file.
     pub fn from_json(
         json: &[u8],
         resolve: impl Fn(&str) -> Option<SoundFile>,
     ) -> Result<Self, String> {
         let root: Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
         let root = root.as_object().ok_or("sounds.json is not an object")?;
-        let mut events = HashMap::new();
+        let mut index = Self {
+            events: HashMap::new(),
+            refs: HashMap::new(),
+            replace: HashSet::new(),
+        };
         for (name, ev) in root {
-            let category = Category::parse(ev["category"].as_str().unwrap_or("master"));
+            let bad = |what: &str| format!("{name}: bad {what}");
+            let (category, replace, sounds) = parse_header(ev).map_err(|what| bad(what))?;
+            if replace {
+                index.replace.insert(name.clone());
+            }
             let mut variants = Vec::new();
-            for s in ev["sounds"].as_array().into_iter().flatten() {
-                let (file, volume, pitch, weight) = match s {
-                    Value::String(n) => (n.as_str(), 1.0, 1.0, 1),
-                    Value::Object(o) => (
-                        o["name"].as_str().unwrap_or(""),
-                        o.get("volume").and_then(Value::as_f64).unwrap_or(1.0) as f32,
-                        o.get("pitch").and_then(Value::as_f64).unwrap_or(1.0) as f32,
-                        o.get("weight").and_then(Value::as_u64).unwrap_or(1) as u32,
-                    ),
-                    _ => continue,
-                };
-                match resolve(file) {
-                    Some(path) => variants.push(Variant {
+            let mut refs = Vec::new();
+            for s in sounds {
+                let (file, volume, pitch, weight, is_event) =
+                    parse_sound(s).map_err(|what| bad(what))?;
+                if is_event {
+                    refs.push(file.to_owned());
+                } else if let Some(path) = resolve(file) {
+                    variants.push(Variant {
                         file: path,
                         volume,
                         pitch,
                         weight,
-                    }),
-                    None if file.contains(':') => {
-                        eprintln!("input-audio: sound event {name}: dropped variant {file}");
-                    }
-                    None => {}
+                    });
+                } else if file.contains(':') {
+                    eprintln!("input-audio: sound event {name}: dropped variant {file}");
                 }
             }
-            events.insert(name.clone(), Event { category, variants });
+            let category = Category::parse(category);
+            index.refs.insert(name.clone(), refs);
+            index
+                .events
+                .insert(name.clone(), Event { category, variants });
         }
-        Ok(Self { events })
+        Ok(index)
     }
 
     pub fn event(&self, name: &str) -> Option<&Event> {
@@ -333,6 +380,56 @@ fn parse_objects(index: &[u8]) -> Result<HashMap<String, String>, String> {
         .collect())
 }
 
+/// One event record: (category name, `replace`, `sounds` entries).
+fn parse_header(ev: &Value) -> Result<(&str, bool, &[Value]), &'static str> {
+    let ev = ev.as_object().ok_or("record")?;
+    let category = match ev.get("category") {
+        None => "master",
+        Some(Value::String(s)) => s,
+        Some(_) => return Err("category"),
+    };
+    let replace = match ev.get("replace") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err("replace"),
+    };
+    let sounds = match ev.get("sounds") {
+        None => &[][..],
+        Some(Value::Array(a)) => a,
+        Some(_) => return Err("sounds"),
+    };
+    Ok((category, replace, sounds))
+}
+
+/// One `sounds` entry: (name, volume, pitch, weight, is an event reference).
+fn parse_sound(s: &Value) -> Result<(&str, f32, f32, u32, bool), &'static str> {
+    let o = match s {
+        Value::String(n) => return Ok((n, 1.0, 1.0, 1, false)),
+        Value::Object(o) => o,
+        _ => return Err("sound entry"),
+    };
+    let num = |k: &'static str| match o.get(k) {
+        None => Ok(1.0),
+        Some(v) => v.as_f64().map(|f| f as f32).ok_or(k),
+    };
+    let weight = match o.get("weight") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .and_then(|w| u32::try_from(w).ok())
+            .ok_or("weight")?,
+    };
+    let is_event = match o.get("type") {
+        None => false,
+        Some(t) => match t.as_str() {
+            Some("sound") => false,
+            Some("event") => true,
+            _ => return Err("type"),
+        },
+    };
+    let file = o.get("name").and_then(Value::as_str).ok_or("name")?;
+    Ok((file, num("volume")?, num("pitch")?, weight, is_event))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +507,74 @@ mod tests {
             );
         }
         assert_eq!(idx.random_in(&[Category::Weather], 0), None);
+    }
+
+    fn idx(json: &str) -> SoundIndex {
+        SoundIndex::from_json(json.as_bytes(), |n| Some(SoundFile::Path(PathBuf::from(n)))).unwrap()
+    }
+
+    fn files(i: &SoundIndex, n: &str) -> Vec<PathBuf> {
+        i.event(n)
+            .unwrap()
+            .variants
+            .iter()
+            .map(|v| match &v.file {
+                SoundFile::Path(p) => p.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    const BASE: &str = r#"{"random.click":{"sounds":["a"]},"random.pop":{"sounds":["b"]}}"#;
+
+    #[test]
+    fn event_reference_takes_named_event_sounds() {
+        let mut i = idx(BASE);
+        i.merge(idx(
+            r#"{"random.click":{"replace":true,"sounds":[{"name":"random.pop","type":"event"}]}}"#,
+        ));
+        assert_eq!(files(&i, "random.click"), [PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn unknown_event_reference_keeps_old_sound() {
+        let mut i = idx(BASE);
+        i.merge(idx(
+            r#"{"random.click":{"replace":true,"sounds":[{"name":"nope","type":"event"}]}}"#,
+        ));
+        assert_eq!(files(&i, "random.click"), [PathBuf::from("a")]);
+    }
+
+    #[test]
+    fn event_reference_cycle_terminates() {
+        let mut i = idx(BASE);
+        i.merge(idx(r#"{"x":{"sounds":["c",{"name":"y","type":"event"}]},
+                "y":{"sounds":[{"name":"x","type":"event"}]}}"#));
+        assert_eq!(files(&i, "x"), [PathBuf::from("c")]);
+        assert_eq!(files(&i, "y"), [PathBuf::from("c")]);
+    }
+
+    #[test]
+    fn empty_replace_mutes_event() {
+        let mut i = idx(BASE);
+        i.merge(idx(r#"{"random.click":{"replace":true,"sounds":[]}}"#));
+        assert!(i.event("random.click").unwrap().variants.is_empty());
+    }
+
+    #[test]
+    fn malformed_records_are_errors_not_panics() {
+        for bad in [
+            r#"{"a":{"sounds":[{}]}}"#,
+            r#"{"a":{"sounds":[{"name":"x","weight":4294967296}]}}"#,
+            r#"{"a":{"replace":"yes"}}"#,
+            r#"{"a":{"sounds":"x"}}"#,
+            r#"{"a":{"category":1}}"#,
+            r#"{"a":{"sounds":[{"name":"x","type":"bogus"}]}}"#,
+        ] {
+            assert!(
+                SoundIndex::from_json(bad.as_bytes(), |_| None).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

@@ -13,7 +13,7 @@ flowchart TD
     Crates --> Launcher["launcher: drop-in install json + boot jar"]
     Crates --> ModHost["modhost: Rust side of the Java mod host"]
     Crates --> Oracle["oracle: Java oracle harness + differential tests"]
-    Crates --> OneClient["oneclient: OneClient cluster reader + Forge 1.8.9 resolver (Modrinth)"]
+    Crates --> OneClient["oneclient: OneClient cluster reader + loader choice + Forge 1.8.9 resolver (Modrinth)"]
     Loaders --> Forge["forge: Forge 1.8.9 host, LaunchWrapper + Mixin over stand-in classes (Java + Rust glue)"]
     Loaders --> Fabric["fabric: Fabric mod jar that starts the engine binary (OneClient)"]
     Adapters --> Universal["universal-client: placeholder for future open-source universal client adapter (README only)"]

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
-use ferrocraft_modhost::{provision, Config, ModHost};
+use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost};
 use ferrocraft_oneclient as oneclient;
 
 use crate::log;
@@ -49,27 +49,74 @@ fn cluster(env: Option<std::ffi::OsString>, game_dir: &Path) -> PathBuf {
 }
 
 fn from_cluster(cluster: &Path) -> Option<Config> {
-    let mods = match provision::main_dir() {
+    let loader = match oneclient::loader(cluster) {
+        Ok(l) => l,
+        Err(e) => return fail(&e),
+    };
+    // Ornithe keeps the Forge twin route until the Fabric host loads Ornithe jars (slice B7).
+    let Some(fabric) = fabric_host(loader) else {
+        log::line(&format!(
+            "cluster {}: loader {loader:?} has no mod host",
+            cluster.display()
+        ));
+        return None;
+    };
+    stage(cluster, loader, fabric)?;
+    let cfg = if fabric {
+        Config::provision_fabric().map_err(|e| e.to_string())
+    } else {
+        Config::provision().map_err(|e| e.to_string())
+    };
+    cfg.map_err(|e| fail::<Config>(&e)).ok()
+}
+
+/// `Some(true)` for the Fabric host, `Some(false)` for the Forge host, `None` when no host loads the loader.
+fn fabric_host(loader: oneclient::Loader) -> Option<bool> {
+    match loader {
+        oneclient::Loader::Other => None,
+        l => Some(l == oneclient::Loader::Fabric),
+    }
+}
+
+/// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
+fn stage(cluster: &Path, loader: oneclient::Loader, fabric: bool) -> Option<()> {
+    let main = if fabric {
+        provision_fabric::main_dir().map_err(|e| e.to_string())
+    } else {
+        provision::main_dir().map_err(|e| e.to_string())
+    };
+    let mods = match main {
         Ok(main) => main.join("mods"),
         Err(e) => return fail(&e),
     };
-    match oneclient::resolve(cluster, &mods) {
-        Ok(r) => {
-            prune(&mods, &r.jars);
-            log::line(&format!(
-                "cluster {}: {} mods, {} denied {:?}, {} with no Forge 1.8.9 build {:?}",
-                cluster.display(),
-                r.jars.len(),
-                r.denied.len(),
-                r.denied,
-                r.no_forge.len(),
-                r.no_forge
-            ));
-        }
+    let resolved = if fabric {
+        oneclient::fabric_jars(cluster, &mods)
+    } else {
+        oneclient::resolve(cluster, &mods)
+    };
+    let r = match resolved {
+        Ok(r) => r,
         Err(oneclient::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => return fail(&e),
-    }
-    Config::provision().map_err(|e| fail::<Config>(&e)).ok()
+    };
+    prune(&mods, &r.jars);
+    let twin = if r.no_forge.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ", {} with no Forge 1.8.9 build {:?}",
+            r.no_forge.len(),
+            r.no_forge
+        )
+    };
+    log::line(&format!(
+        "cluster {} ({loader:?}): {} mods, {} denied {:?}{twin}",
+        cluster.display(),
+        r.jars.len(),
+        r.denied.len(),
+        r.denied
+    ));
+    Some(())
 }
 
 fn prune(mods: &Path, keep: &[PathBuf]) {
@@ -125,10 +172,39 @@ mod tests {
     }
 
     #[test]
+    fn each_loader_gets_its_host_or_none() {
+        use oneclient::Loader::*;
+        assert_eq!(fabric_host(Forge), Some(false));
+        assert_eq!(fabric_host(Fabric), Some(true));
+        assert_eq!(fabric_host(Ornithe), Some(false));
+        assert_eq!(fabric_host(Other), None);
+    }
+
+    #[test]
     fn folder_without_manifest_starts_no_mods() {
         let d = std::env::temp_dir().join(format!("fc-modboot-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         assert!(from_cluster(&d).is_none());
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Real run, by hand (network, JDK-built host jars, a clean `HOME`): `FERRO_LIVE_CLUSTER=<cluster dir> HOME=$(mktemp -d)
+    /// cargo test -p ferrocraft-engine live_cluster -- --ignored --nocapture`. A JVM that stops before the hello fails it.
+    #[test]
+    #[ignore]
+    fn live_cluster_starts_its_host_and_gets_the_hello() {
+        let cluster =
+            PathBuf::from(std::env::var_os("FERRO_LIVE_CLUSTER").expect("FERRO_LIVE_CLUSTER"));
+        let mut host = start(&cluster).expect("the cluster started no host");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while host.client_brand().is_none() {
+            assert!(
+                std::time::Instant::now() < end,
+                "no hello: the JVM stopped or hung"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        println!("hello: client brand {:?}", host.client_brand());
+        host.stop();
     }
 }

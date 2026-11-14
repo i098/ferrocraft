@@ -17,7 +17,7 @@ The Rust process owns the game and every subsystem that matters for play.
 - `crates/input-audio` - input and audio.
 - `crates/launcher` - drop-in install and boot.
 - `crates/modhost` - Rust side of the Java mod host: starts the JVM, feeds it input, draws its commands.
-- `crates/oneclient` - reads a OneClient cluster and resolves the Forge 1.8.9 build of each mod from Modrinth (sha1-checked, deny list applied).
+- `crates/oneclient` - reads a OneClient cluster and its loader; for Forge it resolves the Forge 1.8.9 build of each mod from Modrinth (sha1-checked, deny list applied), for Fabric it uses the cluster jars as they are.
 
 ## Java mod host
 

@@ -803,7 +803,7 @@ impl App {
         self.mod_drawn =
             mod_world::Drawn::ask(self.mods.as_ref(), &self.game, &cam, &draws, frac, size);
         let mut ids: Vec<i32> = self.game.entities.iter().map(|e| e.id).collect();
-        let (hurt, glint, cancelled) = self.mod_probe(&draws, cam.pos);
+        let (hurt, glint, cancelled) = self.mod_probe(&draws, self_model.as_ref(), cam.pos);
         if !cancelled.is_empty() {
             let mut at = 0;
             draws.retain(|_| {
@@ -812,7 +812,7 @@ impl App {
             });
             ids.retain(|id| !cancelled.contains(id));
         }
-        draws.extend(self_model);
+        draws.extend(self_model.filter(|_| !cancelled.contains(&self.game.entity_id)));
         // `RenderGlobal`: the spectated entity is not drawn from its own eyes.
         if let (0, Some(id)) = (self.perspective, self.game.camera) {
             if let Some(i) = ids.iter().position(|&e| e == id) {
@@ -922,6 +922,7 @@ impl App {
     fn mod_probe(
         &self,
         draws: &[EntityDraw],
+        self_model: Option<&EntityDraw>,
         cam: [f64; 3],
     ) -> (Option<[f32; 4]>, Option<[f32; 4]>, Vec<i32>) {
         let Some(mods) = &self.mods else {
@@ -934,8 +935,11 @@ impl App {
             .iter()
             .zip(draws)
             .filter(|(e, _)| living(e))
-            .map(|(e, d)| ferrocraft_modhost::probe::Target {
-                id: e.id,
+            .filter(|(e, _)| self.perspective != 0 || self.game.camera != Some(e.id))
+            .map(|(e, d)| (e.id, d))
+            .chain(self_model.map(|d| (self.game.entity_id, d)))
+            .map(|(id, d)| ferrocraft_modhost::probe::Target {
+                id,
                 pos: [d.pos[0] - cam[0], d.pos[1] - cam[1], d.pos[2] - cam[2]],
             })
             .collect();

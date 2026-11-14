@@ -11,4 +11,5 @@ rodio = { version = "0.23.0", default-features = false, features = ["playback", 
 serde_json = "1.0.154"
 gui = { path = "../gui" }
 winit = "0.30"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 world = { path = "../world" }

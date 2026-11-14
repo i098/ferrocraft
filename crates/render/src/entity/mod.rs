@@ -970,24 +970,6 @@ impl Xf {
     }
 }
 
-/// `preRenderCallback` scale of each entity's model.
-fn model_scale(d: &EntityDraw) -> f32 {
-    match d.class {
-        // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
-        Class::Player { .. } => 0.9375,
-        Class::Mob(mobs::CAVE_SPIDER) => 0.7,
-        // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
-        Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
-        Class::Mob(mobs::VILLAGER) => 0.9375,
-        // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
-        Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
-        // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
-        Class::Mob(mobs2::GHAST) => 4.5,
-        Class::Mob(mobs2::BAT) => 0.35,
-        _ => 1.0,
-    }
-}
-
 /// Texture and tint of the main layer: the real skin when loaded, else white with a stand-in tint.
 fn base_look(m: &Model, d: &EntityDraw, skins: &Skins) -> (Skin, [f32; 3]) {
     let own = match (d.class, d.skin) {

@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 46] = [
+const SKINS: [&str; 52] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -59,11 +59,30 @@ const SKINS: [&str; 46] = [
     "entity/spider_eyes.png",
     "entity/enderman/enderman_eyes.png",
     "entity/armorstand/wood.png",
+    "entity/slime/slime.png",
+    "entity/slime/magmacube.png",
+    "entity/blaze.png",
+    "entity/ghast/ghast.png",
+    "entity/ghast/ghast_shooting.png",
+    "entity/bat.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
 /// Slots of the eye layer textures; their black counts as transparent (additive blending).
 const EYES: [usize; 2] = [43, 44];
+/// Slot of `slime.png` and the size of its outer gel region (top left, texels): the entity pass has
+/// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
+const SLIME_SLOT: usize = 46;
+/// Skins of the slots from [`SLIME_SLOT`] on, in order.
+const SLIME_SLOT_SKINS: [Skin; 6] = [
+    Skin::Slime,
+    Skin::MagmaCube,
+    Skin::Blaze,
+    Skin::Ghast,
+    Skin::GhastShooting,
+    Skin::Bat,
+];
+const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
 const ARMOR_FIRST: u8 = 15;
 /// Slot of `guardian_elder.png`, the last one before the mob textures.
@@ -109,6 +128,15 @@ pub enum Skin {
     Enderman,
     SpiderEyes,
     EndermanEyes,
+    /// `textures/entity/slime/slime.png`, the body and the outer gel layer.
+    Slime,
+    MagmaCube,
+    Blaze,
+    Ghast,
+    /// `ghast_shooting.png`, drawn while the ghast charges a fireball.
+    GhastShooting,
+    /// `textures/entity/bat.png` (64x64).
+    Bat,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// A downloaded cape in dynamic slot `n`.
@@ -292,6 +320,9 @@ impl Skins {
                 if EYES.contains(&i) {
                     s.clear_black(i as u32);
                 }
+                if i == SLIME_SLOT {
+                    s.screen_door(i as u32, SLIME_GEL);
+                }
             } else {
                 s.blit(i as u32, &img);
             }
@@ -311,6 +342,17 @@ impl Skins {
             let n = img.width.min(w);
             let dst = ((base + y) * w) * 4;
             self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
+        }
+    }
+
+    /// Makes every other texel of the top left `w` by `h` region of a slot transparent, in a checkerboard,
+    /// so a translucent layer drawn without blending lets what lies behind it show.
+    fn screen_door(&mut self, slot: u32, (w, h): (usize, usize)) {
+        let base = (slot * SLOT) as usize;
+        for y in 0..h {
+            for x in (y % 2..w).step_by(2) {
+                self.rgba[((base + y) * WIDTH as usize + x) * 4 + 3] = 0;
+            }
         }
     }
 
@@ -444,7 +486,12 @@ fn mob_slot(skin: Skin) -> Option<u32> {
         Skin::SpiderEyes => 43,
         Skin::EndermanEyes => 44,
         Skin::ArmorStand => 45,
-        _ => return None,
+        _ => {
+            return SLIME_SLOT_SKINS
+                .iter()
+                .position(|&s| s == skin)
+                .map(|i| (SLIME_SLOT + i) as u32)
+        }
     })
 }
 

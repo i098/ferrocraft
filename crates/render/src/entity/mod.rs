@@ -1,6 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
 //! and `ModelCow` here and from the villager, golem, silverfish, chicken, sheep, spider and
-//! enderman models in [`mobs`]: box geometry, texture layout and limb animation. Mobs without a
+//! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
+//! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
 //! Not ported yet: sheep wool, villagers. Held items and dropped items are in [`item`]. Name tags
@@ -14,6 +15,7 @@ pub(crate) mod guardian;
 pub mod hanging;
 pub mod item;
 mod mobs;
+mod mobs2;
 mod projectile;
 mod skin;
 
@@ -203,6 +205,9 @@ struct Part {
     /// about the model origin.
     scale: f32,
     shift: [f32; 3],
+    /// Parent `ModelRenderer`s, nearest first, as (pivot, rotation): the part's box is carried
+    /// through each one's translate and rotate (`ModelBat` wings).
+    parents: Vec<([f32; 3], [f32; 3])>,
 }
 
 impl Part {
@@ -217,6 +222,7 @@ impl Part {
             mirror: false,
             scale: 1.0,
             shift: [0.0; 3],
+            parents: Vec::new(),
         }
     }
     /// `scalef(scale)` after `translatef(shift)`, as `ModelBiped.render` does for a child.
@@ -231,6 +237,10 @@ impl Part {
     }
     fn mirrored(mut self, mirror: bool) -> Part {
         self.mirror = mirror;
+        self
+    }
+    fn under(mut self, parents: Vec<([f32; 3], [f32; 3])>) -> Part {
+        self.parents = parents;
         self
     }
 }
@@ -655,7 +665,9 @@ fn model(d: &EntityDraw) -> Model {
         Class::Mob(50) => creeper(d),
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
-        Class::Mob(id) => mobs::build(d, id).unwrap_or_else(|| generic(d)),
+        Class::Mob(id) => mobs::build(d, id)
+            .or_else(|| mobs2::build(d, id))
+            .unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
     }
@@ -829,7 +841,7 @@ pub fn build(
 
 /// `[sky, block]` light of one entity; `flash` adds the hurt flag of a flashing body.
 fn light_level(d: &EntityDraw, light: &impl Fn([f64; 3]) -> [f32; 2], flash: bool) -> [f32; 2] {
-    let level = if d.burning {
+    let level = if d.burning || mobs2::glows(d) {
         [1.0, 1.0]
     } else {
         light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
@@ -866,6 +878,37 @@ struct Xf {
     generic: bool,
 }
 
+/// Vertical drop of the model: `RenderPlayer` lowers a sneaking player (a stand sneaks through its own
+/// model offset); `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
+fn sneak_drop(d: &EntityDraw) -> f32 {
+    if d.sneaking && d.class != Class::Object(78) {
+        0.125
+    } else if d.class == Class::Mob(mobs2::BAT) {
+        -mobs2::bat_lift(d)
+    } else {
+        0.0
+    }
+}
+
+/// `preRenderCallback` scale: the player by 15/16, `RenderCaveSpider` 0.7, `RenderVillager` 15/16
+/// (halved for a child), `RenderSlime` and `RenderMagmaCube` by the size at rest (no squish yet),
+/// `RenderGhast` (8 + 1) / 2 and `RenderBat` 0.35.
+fn model_scale(d: &EntityDraw) -> f32 {
+    match d.class {
+        Class::Player { .. } => 0.9375,
+        Class::Mob(mobs::CAVE_SPIDER) => 0.7,
+        // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
+        Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
+        Class::Mob(mobs::VILLAGER) => 0.9375,
+        // `RenderSlime` and `RenderMagmaCube` scale by the size at rest (no squish yet).
+        Class::Mob(mobs2::SLIME | mobs2::MAGMA_CUBE) => mobs2::cube_size(d),
+        // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
+        Class::Mob(mobs2::GHAST) => 4.5,
+        Class::Mob(mobs2::BAT) => 0.35,
+        _ => 1.0,
+    }
+}
+
 impl Xf {
     fn new(d: &EntityDraw, generic: bool) -> Xf {
         let spinning = matches!(d.class, Class::Orb);
@@ -892,22 +935,9 @@ impl Xf {
             pos: d.pos,
             st,
             ct,
-            // Only `RenderPlayer` lowers the model; a stand sneaks through its own model offset.
-            sneak_drop: if d.sneaking && d.class != Class::Object(78) {
-                0.125
-            } else {
-                0.0
-            },
+            sneak_drop: sneak_drop(d),
             fall,
-            // `RenderPlayer.preRenderCallback` scales the player by 15/16, `RenderCaveSpider` the spider by 0.7.
-            scale: match d.class {
-                Class::Player { .. } => 0.9375,
-                Class::Mob(mobs::CAVE_SPIDER) => 0.7,
-                // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
-                Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
-                Class::Mob(mobs::VILLAGER) => 0.9375,
-                _ => 1.0,
-            },
+            scale: model_scale(d),
             generic,
         }
     }
@@ -963,8 +993,13 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
     let min = part.min.map(|m| m - grow);
     let size = part.size.map(|s| s + 2.0 * grow);
     let tf = |p: V3| -> V3 {
-        let r = rotate(p, part.rot);
-        xf.world([0, 1, 2].map(|i| (r[i] + part.pivot[i] + part.shift[i]) * part.scale))
+        let mut q = rotate(p, part.rot);
+        q = [0, 1, 2].map(|i| q[i] + part.pivot[i]);
+        for &(pivot, rot) in &part.parents {
+            q = rotate(q, rot);
+            q = [0, 1, 2].map(|i| q[i] + pivot[i]);
+        }
+        xf.world([0, 1, 2].map(|i| (q[i] + part.shift[i]) * part.scale))
     };
     add_box(
         out,
@@ -1241,6 +1276,11 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Spider | Skin::CaveSpider => [0.25, 0.22, 0.2],
         Skin::Enderman => [0.1, 0.08, 0.12],
         Skin::SpiderEyes | Skin::EndermanEyes => [1.0; 3],
+        Skin::Slime => [0.35, 0.75, 0.3],
+        Skin::MagmaCube => [0.45, 0.12, 0.05],
+        Skin::Blaze => [0.9, 0.7, 0.1],
+        Skin::Ghast | Skin::GhastShooting => [0.92; 3],
+        Skin::Bat => [0.3, 0.22, 0.15],
         _ => return None,
     })
 }

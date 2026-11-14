@@ -27,7 +27,7 @@ pub(super) struct Layer {
     pub bright: bool,
 }
 
-fn head_rot(d: &EntityDraw) -> [f32; 3] {
+pub(super) fn head_rot(d: &EntityDraw) -> [f32; 3] {
     [
         d.pitch.to_radians(),
         wrap(d.head_yaw - d.yaw).to_radians(),
@@ -35,7 +35,7 @@ fn head_rot(d: &EntityDraw) -> [f32; 3] {
     ]
 }
 
-fn model(skin: Skin, parts: Vec<Part>) -> Model {
+pub(super) fn model(skin: Skin, parts: Vec<Part>) -> Model {
     Model {
         skin,
         tint: [1.0; 3],
@@ -516,6 +516,6 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         SHEEP if d.look.variant & 16 == 0 && !d.invisible => vec![sheep_wool(d)],
         SPIDER | CAVE_SPIDER => vec![eyes(Skin::SpiderEyes)],
         ENDERMAN => vec![eyes(Skin::EndermanEyes)],
-        _ => Vec::new(),
+        _ => super::mobs2::layers(d),
     }
 }

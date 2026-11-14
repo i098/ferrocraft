@@ -17,6 +17,7 @@ render = { path = "../render" }
 input-audio = { path = "../input-audio" }
 gui = { path = "../gui" }
 ferrocraft-modhost = { path = "../modhost" }
+ferrocraft-oneclient = { path = "../oneclient" }
 winit = "0.30"
 arboard = { version = "3", default-features = false }
 

@@ -1,7 +1,9 @@
 //! The renderer side of `blockent.rs`: server data in, per-frame meshes out.
 
 use super::*;
-use crate::blockent::{banner_image, Banner, Beams, Skull, View, WornHead, BEAM_TEXTURE};
+use crate::blockent::{
+    banner_image, Banner, Beams, Skull, View, WornHead, BEAM_TEXTURE, PORTAL_TEXTURE, SKY_TEXTURE,
+};
 
 impl Renderer {
     /// `S24 BlockAction` (`event` 1 and `value` = viewers) opens or closes the lid of a chest.
@@ -101,6 +103,37 @@ impl Renderer {
         if let Some(outer) = outer {
             pass.set_pipeline(&self.beam_glow_pipe);
             draw_mesh(pass, outer);
+        }
+        pass.set_pipeline(&self.opaque_pipe);
+        pass.set_bind_group(0, &self.world_group, &[]);
+    }
+
+    /// Builds the end portal star field for this frame (`TileEntityEndPortalRenderer`).
+    pub(super) fn prepare_portals(&mut self, cam: &Camera) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        let portals = self.block_entities.portals(cam, now);
+        for name in [SKY_TEXTURE, PORTAL_TEXTURE] {
+            if !portals.sky.is_empty() {
+                self.load_texture(name);
+            }
+        }
+        self.portal_meshes = [portals.sky, portals.layers].map(|m| self.upload_mesh(m, [0.0; 3]));
+    }
+
+    /// Draws the end portal star field and restores the opaque pipeline.
+    pub(super) fn draw_portals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        let [Some(sky), layers] = &self.portal_meshes else {
+            return;
+        };
+        pass.set_bind_group(0, &self.textures[SKY_TEXTURE], &[]);
+        pass.set_pipeline(&self.portal_sky_pipe);
+        draw_mesh(pass, sky);
+        if let Some(layers) = layers {
+            pass.set_bind_group(0, &self.textures[PORTAL_TEXTURE], &[]);
+            pass.set_pipeline(&self.portal_add_pipe);
+            draw_mesh(pass, layers);
         }
         pass.set_pipeline(&self.opaque_pipe);
         pass.set_bind_group(0, &self.world_group, &[]);

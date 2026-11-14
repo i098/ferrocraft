@@ -48,6 +48,8 @@ import net.minecraft.flat.EmptyWorldStorage;
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
  *   achievements                  AchievementList: key|column|row|parent|challenge|item id|damage per line, then the display bounds
+ *   stats                         Stats: G|key|formatter, M|item id|key, U|item id|key, A<m|c|u|b>|id|key per array slot, I|item id|registry name|translation key, E|entity key|kill key|killed-by key
+ *   statfmt <kind> <ints...>      Stat.format of the formatter (number, time, distance, tenth): one line per int
  *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
@@ -255,6 +257,84 @@ public class Harness {
         }
         System.out.println(net.minecraft.flat.Achievements.minColumn + " " + net.minecraft.flat.Achievements.minRow + " "
             + net.minecraft.flat.Achievements.maxColumn + " " + net.minecraft.flat.Achievements.maxRow);
+    }
+
+    static String formatterKind(Object f) {
+        if (f == net.minecraft.flat.Stat.TIME_FORMATTER) {
+            return "time";
+        }
+        if (f == net.minecraft.flat.Stat.DISTANCE_FORMATTER) {
+            return "distance";
+        }
+        if (f == net.minecraft.flat.Stat.DIVIDE_BY_TEN_FORMATTER) {
+            return "tenth";
+        }
+        if (f == net.minecraft.flat.Stat.NUMBER_FORMATTER) {
+            return "number";
+        }
+        throw new IllegalStateException("unknown formatter");
+    }
+
+    /** `statfmt`: the real formatter of `kind` on each int. */
+    static void statFormat(String[] t) {
+        net.minecraft.flat.StatFormatter f;
+        switch (t[1]) {
+            case "time": f = net.minecraft.flat.Stat.TIME_FORMATTER; break;
+            case "distance": f = net.minecraft.flat.Stat.DISTANCE_FORMATTER; break;
+            case "tenth": f = net.minecraft.flat.Stat.DIVIDE_BY_TEN_FORMATTER; break;
+            default: f = net.minecraft.flat.Stat.NUMBER_FORMATTER; break;
+        }
+        for (int i = 2; i < t.length; i++) {
+            System.out.println(f.format(Integer.parseInt(t[i])));
+        }
+    }
+
+    /** `registry name|translation key`: what stat keys and the stat screen print for an item. */
+    static String itemNames(net.minecraft.flat.Item item) {
+        Object id = net.minecraft.flat.Item.REGISTRY.getKey(item);
+        return id.toString().replace(':', '.') + "|" + new net.minecraft.flat.ItemStack(item).getTranslationKey();
+    }
+
+    /** `stats`: the `Stats` tables, in registration order. `Bootstrap` must have registered its items first. */
+    static void statLines() throws Exception {
+        Field formatter = net.minecraft.flat.Stat.class.getDeclaredField("formatter");
+        formatter.setAccessible(true);
+        java.util.TreeMap<Integer, String> names = new java.util.TreeMap<>();
+        for (net.minecraft.flat.Stat s : net.minecraft.flat.Stats.GENERAL) {
+            System.out.println("G|" + s.key + "|" + formatterKind(formatter.get(s)));
+        }
+        String[] tags = {"M", "U"};
+        java.util.List<java.util.List<net.minecraft.flat.ItemStat>> lists = java.util.Arrays.asList(
+            net.minecraft.flat.Stats.MINED, net.minecraft.flat.Stats.USED);
+        for (int l = 0; l < 2; l++) {
+            for (net.minecraft.flat.ItemStat s : lists.get(l)) {
+                int id = net.minecraft.flat.Item.getId(s.getItem());
+                System.out.println(tags[l] + "|" + id + "|" + s.key);
+                names.put(id, itemNames(s.getItem()));
+            }
+        }
+        net.minecraft.flat.Stat[][] arrays = {
+            net.minecraft.flat.Stats.BLOCKS_MINED, net.minecraft.flat.Stats.ITEMS_CRAFTED,
+            net.minecraft.flat.Stats.ITEMS_USED, net.minecraft.flat.Stats.ITEMS_BROKEN};
+        String[] arrayTags = {"Am", "Ac", "Au", "Ab"};
+        for (int a = 0; a < 4; a++) {
+            for (int i = 0; i < arrays[a].length; i++) {
+                if (arrays[a][i] != null) {
+                    System.out.println(arrayTags[a] + "|" + i + "|" + arrays[a][i].key);
+                    net.minecraft.flat.Item item = net.minecraft.flat.Item.byId(i);
+                    if (item != null) {
+                        names.put(i, itemNames(item));
+                    }
+                }
+            }
+        }
+        for (java.util.Map.Entry<Integer, String> e : names.entrySet()) {
+            System.out.println("I|" + e.getKey() + "|" + e.getValue());
+        }
+        for (net.minecraft.flat.Entities.SpawnEggData d : net.minecraft.flat.Entities.SPAWN_EGG_DATA.values()) {
+            System.out.println("E|" + net.minecraft.flat.Entities.getKey(d.id) + "|" + d.killEntityStat.key + "|"
+                + d.entityKilledByStat.key);
+        }
     }
 
     static long key(int x, int z) {
@@ -477,6 +557,12 @@ public class Harness {
                     break;
                 case "achievements":
                     achievementLines();
+                    break;
+                case "stats":
+                    statLines();
+                    break;
+                case "statfmt":
+                    statFormat(t);
                     break;
                 default:
                     throw new IllegalArgumentException(line);

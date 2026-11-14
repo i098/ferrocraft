@@ -30,6 +30,15 @@ impl Renderer {
         self.block_entities.tick(players);
     }
 
+    /// Smoke and flame positions of this tick's activated mob spawners (`MobSpawnerBaseLogic.updateSpawner`).
+    pub fn spawner_particles(
+        &self,
+        players: &[[f64; 3]],
+        rng: &mut crate::jrandom::JavaRandom,
+    ) -> Vec<[f64; 3]> {
+        crate::spawner::spawner_particles(self.block_entities.spawners(), players, rng)
+    }
+
     /// Meshes the block entities in range for the next frames. `world_time` is the total world
     /// time in ticks, `partial` the tick fraction.
     pub fn set_block_entities(&mut self, eye: [f64; 3], world_time: i64, partial: f32) {

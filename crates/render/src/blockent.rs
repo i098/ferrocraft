@@ -27,6 +27,7 @@ pub const BANNER_STANDING: u16 = 176;
 pub const BANNER_WALL: u16 = 177;
 pub const ENCHANTING_TABLE: u16 = 116;
 pub const BEACON: u16 = 138;
+const MOB_SPAWNER: u16 = 52;
 
 /// Block ids that carry a block entity drawn here.
 pub fn is_tile(id: u16) -> bool {
@@ -42,6 +43,7 @@ pub fn is_tile(id: u16) -> bool {
             | BANNER_WALL
             | ENCHANTING_TABLE
             | BEACON
+            | MOB_SPAWNER
     )
 }
 
@@ -189,6 +191,14 @@ impl BlockEntities {
         if block == BEACON && event == 1 {
             self.beacons.entry(pos).or_default().dirty = true;
         }
+    }
+
+    /// Positions of the mob spawners in the loaded chunks.
+    pub fn spawners(&self) -> impl Iterator<Item = [i32; 3]> + '_ {
+        self.blocks
+            .iter()
+            .filter(|(_, s)| *s >> 4 == MOB_SPAWNER)
+            .map(|(p, _)| *p)
     }
 
     pub fn set_sign(&mut self, pos: [i32; 3], lines: [String; 4]) {

@@ -53,8 +53,26 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         Ok(l) => l,
         Err(e) => return fail(&e),
     };
+    if loader == oneclient::Loader::Other {
+        log::line(&format!(
+            "cluster {}: loader {loader:?} has no mod host",
+            cluster.display()
+        ));
+        return None;
+    }
     // Ornithe keeps the Forge twin route until the Fabric host loads Ornithe jars (slice B7).
     let fabric = loader == oneclient::Loader::Fabric;
+    stage(cluster, loader, fabric)?;
+    let cfg = if fabric {
+        Config::provision_fabric().map_err(|e| e.to_string())
+    } else {
+        Config::provision().map_err(|e| e.to_string())
+    };
+    cfg.map_err(|e| fail::<Config>(&e)).ok()
+}
+
+/// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
+fn stage(cluster: &Path, loader: oneclient::Loader, fabric: bool) -> Option<()> {
     let main = if fabric {
         provision_fabric::main_dir().map_err(|e| e.to_string())
     } else {
@@ -69,29 +87,29 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
     } else {
         oneclient::resolve(cluster, &mods)
     };
-    match resolved {
-        Ok(r) => {
-            prune(&mods, &r.jars);
-            log::line(&format!(
-                "cluster {} ({loader:?}): {} mods, {} denied {:?}, {} with no Forge 1.8.9 build {:?}",
-                cluster.display(),
-                r.jars.len(),
-                r.denied.len(),
-                r.denied,
-                r.no_forge.len(),
-                r.no_forge
-            ));
-        }
+    let r = match resolved {
+        Ok(r) => r,
         Err(oneclient::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => return fail(&e),
-    }
-    if fabric {
-        Config::provision_fabric()
-            .map_err(|e| fail::<Config>(&e))
-            .ok()
+    };
+    prune(&mods, &r.jars);
+    let twin = if r.no_forge.is_empty() {
+        String::new()
     } else {
-        Config::provision().map_err(|e| fail::<Config>(&e)).ok()
-    }
+        format!(
+            ", {} with no Forge 1.8.9 build {:?}",
+            r.no_forge.len(),
+            r.no_forge
+        )
+    };
+    log::line(&format!(
+        "cluster {} ({loader:?}): {} mods, {} denied {:?}{twin}",
+        cluster.display(),
+        r.jars.len(),
+        r.denied.len(),
+        r.denied
+    ));
+    Some(())
 }
 
 fn prune(mods: &Path, keep: &[PathBuf]) {
@@ -143,6 +161,16 @@ mod tests {
         std::fs::write(&b, "").unwrap();
         prune(&d, std::slice::from_ref(&a));
         assert!(a.exists() && !b.exists());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn cluster_with_no_host_loader_starts_nothing() {
+        let d = std::env::temp_dir().join(format!("fc-modboot-other-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(".instance.json"), r#"{"mc_loader":3}"#).unwrap();
+        std::fs::write(d.join(".oneclient-mods.json"), r#"{"entries":[]}"#).unwrap();
+        assert!(from_cluster(&d).is_none());
         std::fs::remove_dir_all(&d).unwrap();
     }
 

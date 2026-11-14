@@ -30,13 +30,15 @@ pub fn loader(cluster: &Path) -> Result<Loader, Error> {
     let v: Value = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Format(format!("{}: {e}", file.display())))?;
     let raw = &v["mc_loader"];
-    let name = raw.as_str().map(str::to_ascii_lowercase);
-    match (raw.as_i64(), name.as_deref()) {
-        (Some(1), _) | (_, Some("forge")) => Ok(Loader::Forge),
-        (Some(4), _) | (_, Some("fabric")) => Ok(Loader::Fabric),
-        (Some(5), _) | (_, Some("ornithe")) => Ok(Loader::Ornithe),
-        (Some(_), _) | (_, Some(_)) => Ok(Loader::Other),
-        _ => Err(Error::Format(format!("{}: no `mc_loader`", file.display()))),
+    match raw.as_i64() {
+        Some(1) => Ok(Loader::Forge),
+        Some(4) => Ok(Loader::Fabric),
+        Some(5) => Ok(Loader::Ornithe),
+        Some(_) => Ok(Loader::Other),
+        None => Err(Error::Format(format!(
+            "{}: no numeric `mc_loader`",
+            file.display()
+        ))),
     }
 }
 
@@ -65,6 +67,12 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
             });
         }
         let dest: PathBuf = out_dir.join(file_name(&path));
+        if out.jars.contains(&dest) {
+            return Err(Error::Format(format!(
+                "two mods named {}",
+                file_name(&path)
+            )));
+        }
         std::fs::write(&dest, bytes)?;
         out.jars.push(dest);
     }
@@ -91,7 +99,7 @@ mod tests {
             (r#"{"mc_loader":5}"#, Loader::Ornithe),
             (r#"{"mc_loader":1}"#, Loader::Forge),
             (r#"{"mc_loader":3}"#, Loader::Other),
-            (r#"{"mc_loader":"Fabric"}"#, Loader::Fabric),
+            (r#"{"mc_loader":0}"#, Loader::Other),
         ] {
             std::fs::write(d.join(".instance.json"), json).unwrap();
             assert_eq!(loader(&d).unwrap(), want, "{json}");
@@ -122,6 +130,30 @@ mod tests {
         assert!(matches!(fabric_jars(&d, &out), Err(Error::Sha1 { .. })));
         std::fs::remove_file(d.join("mods/a.jar")).unwrap();
         assert!(matches!(fabric_jars(&d, &out), Err(Error::Format(_))));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn fabric_jars_with_one_base_name_fail() {
+        let d = temp("dup");
+        let mut entries = vec![];
+        for dir in ["a", "b"] {
+            std::fs::create_dir_all(d.join("mods").join(dir)).unwrap();
+            std::fs::write(d.join("mods").join(dir).join("x.jar"), b"jar").unwrap();
+            entries.push(format!(
+                r#"{{"path":"mods/{dir}/x.jar","hash":"{}"}}"#,
+                sha1_hex(b"jar")
+            ));
+        }
+        std::fs::write(
+            d.join(".oneclient-mods.json"),
+            format!(r#"{{"entries":[{}]}}"#, entries.join(",")),
+        )
+        .unwrap();
+        assert!(matches!(
+            fabric_jars(&d, &d.join("out")),
+            Err(Error::Format(_))
+        ));
         std::fs::remove_dir_all(d).unwrap();
     }
 }

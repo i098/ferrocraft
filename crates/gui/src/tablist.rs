@@ -334,7 +334,7 @@ fn draw_hearts_text(gui: &mut Gui, score: i32, (x1, x2, y): (i32, i32, i32)) {
 }
 
 /// `DefaultPlayerSkin.getDefaultSkin`: Alex for an odd `UUID.hashCode`, else Steve.
-fn default_skin(uuid: u128) -> &'static str {
+pub(crate) fn default_skin(uuid: u128) -> &'static str {
     let hash = uuid as u32 ^ (uuid >> 32) as u32 ^ (uuid >> 64) as u32 ^ (uuid >> 96) as u32;
     if hash & 1 == 1 {
         ALEX
@@ -345,7 +345,7 @@ fn default_skin(uuid: u128) -> &'static str {
 
 /// The face at (8, 8) and the hat layer at (40, 8) of a 64x64 skin; `upside_down` reads the rows
 /// from 16 up to 8 as `drawScaledCustomSizeModalRect` does with a height of -8.
-fn head_uvs(upside_down: bool) -> [[f32; 4]; 2] {
+pub(crate) fn head_uvs(upside_down: bool) -> [[f32; 4]; 2] {
     let (top, bottom) = if upside_down {
         (16.0, 8.0)
     } else {

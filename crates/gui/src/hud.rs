@@ -8,6 +8,7 @@ use crate::inventory::{icons::Icons, tooltip};
 use crate::overlay::{self, Portal};
 use crate::scoreboard::Scoreboard;
 use crate::screens::TextField;
+use crate::spectator::SpectatorGui;
 use crate::status::{self, Status, StatusState};
 use crate::tablist::{Clock, TabList};
 use crate::title::TitleState;
@@ -27,6 +28,7 @@ pub struct Hud {
     pub selected_slot: i32,
     pub status_state: StatusState,
     pub tablist: TabList,
+    pub spectator: SpectatorGui,
     pub scoreboard: Scoreboard,
     pub title: TitleState,
     pub boss: BossStatus,
@@ -142,11 +144,13 @@ impl Hud {
         if !f.nausea && portal > 0.0 {
             overlay::draw_portal(gui, portal, self.update_counter);
         }
-        if f.player_view {
+        let spectator = f.status.is_some_and(|s| s.spectator);
+        if spectator {
+            self.spectator.draw_hotbar(gui, f.now_ms);
+        } else if f.player_view {
             self.draw_hotbar(gui, f);
         }
         gui.set_color(0xFFFF_FFFF);
-        let spectator = f.status.is_some_and(|s| s.spectator);
         if (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
@@ -159,6 +163,8 @@ impl Hud {
         }
         if f.held_item_tooltips && !spectator {
             self.draw_selected_item(gui, survival);
+        } else if spectator {
+            self.spectator.draw_tooltip(gui, f.now_ms);
         }
         if let Some((left, right)) = f.debug {
             debug::draw(gui, left, right);

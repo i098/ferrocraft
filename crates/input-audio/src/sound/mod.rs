@@ -8,11 +8,10 @@ pub mod index;
 pub mod music;
 
 use blocks::{effect_sound, wire_pitch, BlockSound};
-use index::{Category, SoundIndex};
+use index::{Category, Pack, SoundIndex};
 use music::MusicTicker;
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::Path;
 
 /// Vanilla caps concurrent non-stream sounds at 28.
@@ -31,8 +30,9 @@ pub struct Sound {
 
 impl Sound {
     /// `minecraft_dir` is the launcher dir holding `assets/`. Fails when assets or an output device are missing.
-    pub fn new(minecraft_dir: &Path, version: &str) -> Result<Self, String> {
-        let index = SoundIndex::load(minecraft_dir, version)?;
+    /// `packs` are the selected resource packs, top first.
+    pub fn new(minecraft_dir: &Path, version: &str, packs: &[Pack]) -> Result<Self, String> {
+        let index = SoundIndex::load(minecraft_dir, version, packs)?;
         let mut sink = DeviceSinkBuilder::open_default_sink().map_err(|e| e.to_string())?;
         sink.log_on_drop(false);
         let seed = std::time::SystemTime::now()
@@ -130,7 +130,7 @@ impl Sound {
         if self.players.len() >= MAX_SOUNDS {
             return;
         }
-        let Ok(file) = File::open(&v.file) else {
+        let Some(file) = v.file.read() else {
             return;
         };
         let Ok(dec) = Decoder::try_from(file) else {
@@ -225,7 +225,7 @@ impl Sound {
         let Some(v) = self.index.event(event).and_then(|e| e.pick(pick)) else {
             return;
         };
-        let Ok(file) = File::open(&v.file) else {
+        let Some(file) = v.file.read() else {
             return;
         };
         let Ok(dec) = Decoder::try_from(file) else {

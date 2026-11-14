@@ -279,27 +279,39 @@ impl App {
 
     /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
     pub(super) fn asset_source(&self) -> Option<AssetSource> {
-        // `ResourcePackRepository.setServerResourcePack`: the server pack is the top layer.
-        let packs: Vec<_> = self
-            .server_pack
+        AssetSource::layered(&self.pack_stack(), self.args.assets_dir.as_deref()?)
+    }
+
+    /// The active packs, top first. `ResourcePackRepository.setServerResourcePack`: the server pack is the top layer.
+    fn pack_stack(&self) -> Vec<std::path::PathBuf> {
+        self.server_pack
             .iter()
             .cloned()
             .chain(gui::screens::selected_paths(
                 &self.args.game_dir,
                 &self.ui.settings,
             ))
-            .collect();
-        AssetSource::layered(&packs, self.args.assets_dir.as_deref()?)
+            .collect()
     }
 
-    fn load_sound(&mut self) {
+    /// `SoundHandler.onResourceManagerReload`: sounds from the vanilla index and every active pack.
+    pub(super) fn load_sound(&mut self) {
+        let packs: Vec<_> = self
+            .pack_stack()
+            .into_iter()
+            .map(input_audio::sound::index::Pack::new)
+            .collect();
         let dirs = [
             Some(self.args.game_dir.clone()),
             self.args.game_dir.parent().map(|p| p.to_path_buf()),
         ];
+        self.sound = None;
         for dir in dirs.into_iter().flatten() {
-            if let Ok(s) = Sound::new(&dir, "1.8.9") {
+            if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
                 self.sound = Some(s);
+                if let (Some(s), Some(p)) = (&mut self.sound, &self.game.player) {
+                    s.set_listener(p.pos);
+                }
                 self.apply_settings();
                 return;
             }

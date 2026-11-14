@@ -11,8 +11,11 @@ public final class HostLastTweaker implements ITweaker {
     public void acceptOptions(List<String> args, File gameDir, File assetsDir, String profile) {
     }
 
+    private LaunchClassLoader loader;
+
     @Override
     public void injectIntoClassLoader(LaunchClassLoader cl) {
+        loader = cl;
         cl.registerTransformer("net.ferrocraft.host.MinecraftBridgeTransformer");
     }
 
@@ -23,6 +26,8 @@ public final class HostLastTweaker implements ITweaker {
 
     @Override
     public String[] getLaunchArguments() {
+        // Mixin's transformer moves to the end of the list while the launch arguments are read; the hook table must see its result.
+        loader.registerTransformer("net.ferrocraft.host.HookIndex$Scanner");
         return new String[0];
     }
 }

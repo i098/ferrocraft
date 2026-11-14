@@ -137,6 +137,15 @@ fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {
 }
 
 
+// End portal star field: the texture times the vertex color in the world fog, no light map and no alpha test.
+@fragment
+fn fs_portal(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    let d = length(i.world - g.eye.xyz);
+    let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
+    return vec4<f32>(mix(g.fog_color.rgb, t.rgb * i.color.rgb, fog), t.a * i.color.a);
+}
+
 // Beacon beam: no light map and no fog (`disableFog`, `disableLighting`), `alphaFunc(GREATER, 0.1)`.
 @fragment
 fn fs_beam(i: WorldOut) -> @location(0) vec4<f32> {

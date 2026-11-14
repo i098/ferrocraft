@@ -5,7 +5,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import sun.misc.Unsafe;
 
-/** Reflection over Minecraft and Forge classes by SRG name; the host has no compile-time link to them. */
+/** Reflection over Minecraft and loader classes by SRG name, mapped through {@link Names}; the host has no compile-time link to them. */
 final class R {
     private static final Unsafe UNSAFE;
 
@@ -23,7 +23,7 @@ final class R {
 
     static Class<?> cls(String name) {
         try {
-            return Class.forName(name, true, Thread.currentThread().getContextClassLoader());
+            return Class.forName(Names.of(name), true, Thread.currentThread().getContextClassLoader());
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException(e);
         }
@@ -56,9 +56,10 @@ final class R {
     static Object call(Object target, String name, Object... args) {
         Class<?> c = target instanceof Class ? (Class<?>) target : target.getClass();
         Object self = target instanceof Class ? null : target;
+        String real = Names.of(name);
         for (Class<?> k = c; k != null; k = k.getSuperclass()) {
             for (Method m : k.getDeclaredMethods()) {
-                if (m.getName().equals(name) && fits(m.getParameterTypes(), args)) {
+                if (m.getName().equals(real) && fits(m.getParameterTypes(), args)) {
                     try {
                         m.setAccessible(true);
                         return m.invoke(self, args);
@@ -93,7 +94,7 @@ final class R {
         Class<?> c = target instanceof Class ? (Class<?>) target : target.getClass();
         for (Class<?> k = c; k != null; k = k.getSuperclass()) {
             try {
-                Field f = k.getDeclaredField(name);
+                Field f = k.getDeclaredField(Names.of(name));
                 f.setAccessible(true);
                 return f;
             } catch (NoSuchFieldException ignored) {

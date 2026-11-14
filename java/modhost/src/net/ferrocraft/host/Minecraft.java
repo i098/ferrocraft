@@ -77,19 +77,12 @@ final class Minecraft {
         Object er = R.alloc("net.minecraft.client.renderer.EntityRenderer");
         R.set(er, "field_78531_r", mc); // EntityRenderer.mc: setupOverlayRendering reads the window size from it
         R.set(mc, "field_71460_t", er); // entityRenderer
-        // Rust draws the vanilla HUD elements; the helmet, crosshair and hotbar flags stay on so their Pre events fire for mods.
-        Class<?> forgeGui = R.cls("net.minecraftforge.client.GuiIngameForge");
-        for (String flag : new String[] {"renderPortal", "renderBossHealth", "renderHealth", "renderArmor", "renderFood", "renderHealthMount", "renderAir", "renderJumpBar", "renderExperiance", "renderObjective"}) {
-            R.set(forgeGui, flag, false);
-        }
-        R.set(mc, "field_71456_v", R.neu("net.minecraftforge.client.GuiIngameForge", mc)); // ingameGUI
+        R.set(mc, "field_71456_v", Glue.current().newIngameGui(mc)); // ingameGUI
     }
 
-    /** What Minecraft.<init> and startGame call in Forge's patched order. */
+    /** What Minecraft.<init> and startGame call, in the order of the loader. */
     static void loadMods(Object mc) {
-        Object fml = R.call(R.cls("net.minecraftforge.fml.client.FMLClientHandler"), "instance");
-        R.call(fml, "beginMinecraftLoading", mc, packs, resources);
-        R.call(fml, "finishMinecraftLoading");
+        Glue.current().loadMods(mc, packs, resources);
     }
 
     static void renderOverlay(Object mc, float partial) {

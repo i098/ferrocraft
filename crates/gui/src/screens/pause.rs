@@ -68,7 +68,7 @@ impl Screen for Pause {
                 ctx.tr("gui.stats"),
             ),
         ];
-        // shortcut: no statistics screen yet, and LAN needs singleplayer; their buttons stay disabled.
+        // shortcut: Statistics needs #322; LAN needs singleplayer. Keep both buttons disabled until then.
         for b in self
             .buttons
             .iter_mut()

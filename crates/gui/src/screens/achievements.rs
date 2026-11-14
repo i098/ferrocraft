@@ -144,7 +144,7 @@ impl PlayerStats {
 
     /// `canUnlockAchievement`: no parent, or the parent is unlocked.
     pub fn can_unlock(&self, a: &Achievement) -> bool {
-        a.parent().map_or(true, |p| self.has(p))
+        a.parent().is_none_or(|p| self.has(p))
     }
 
     /// `func_150874_c`: 0 when unlocked, else how many locked parents lie before the first
@@ -182,6 +182,28 @@ fn java_hash(s: &str) -> i32 {
 fn gray(f: f32) -> u32 {
     let g = (f * 255.0).round() as u32;
     0xFF00_0000 | g << 16 | g << 8 | g
+}
+
+fn background_texture(seed: i32, column: i32, row: i32) -> &'static str {
+    let s = seed.wrapping_add(column).wrapping_add(row.wrapping_mul(16));
+    let mut rand = JavaRandom::new(i64::from(s));
+    let n = rand.next_int(1 + row) + row / 2;
+    if n > 37 || row == 35 {
+        return "textures/blocks/bedrock.png";
+    }
+    stone_texture(n, &mut rand)
+}
+
+fn stone_texture(n: i32, rand: &mut JavaRandom) -> &'static str {
+    match n {
+        22 if rand.next_int(2) == 0 => "textures/blocks/diamond_ore.png",
+        22 => "textures/blocks/redstone_ore.png",
+        10 => "textures/blocks/iron_ore.png",
+        8 => "textures/blocks/coal_ore.png",
+        5.. => "textures/blocks/stone.png",
+        1.. => "textures/blocks/dirt.png",
+        _ => "textures/blocks/sand.png",
+    }
 }
 
 /// `Gui.drawTexturedModalRect` on the 256 x 256 background sheet.
@@ -245,7 +267,8 @@ impl Clip<'_> {
     fn clipped(&self, pts: [[f32; 2]; 4], uv: [[f32; 2]; 4], argb: [u32; 4]) -> Vec<Vertex> {
         let mut poly: Vec<Vertex> = (0..4).map(|i| (pts[i], uv[i], unpack(argb[i]))).collect();
         let [x0, y0, x1, y1] = self.area;
-        let sides: [(usize, f32, fn(f32, f32) -> bool); 4] = [
+        type Side = (usize, f32, fn(f32, f32) -> bool);
+        let sides: [Side; 4] = [
             (0, x0, |v, e| v >= e),
             (0, x1, |v, e| v <= e),
             (1, y0, |v, e| v >= e),
@@ -389,25 +412,28 @@ impl Achievements {
         self.prev = self.target;
     }
 
-    /// The drag, the zoom and the scroll limits of `drawScreen`.
-    fn update_view(&mut self, mx: i32, my: i32, ctx: &Ctx) {
+    fn update_drag(&mut self, mx: i32, my: i32, ctx: &Ctx) {
         let (i, j) = ((ctx.width - WIDTH) / 2, (ctx.height - HEIGHT) / 2);
         let (k, l) = (i + 8, j + 17);
-        if self.left_down {
-            let inside = (k..k + 224).contains(&mx) && (l..l + 155).contains(&my);
-            if self.drag <= 1 && inside {
-                if self.drag == 0 {
-                    self.drag = 1;
-                } else {
-                    self.target[0] -= f64::from((mx - self.last_mouse.0) as f32 * self.zoom);
-                    self.target[1] -= f64::from((my - self.last_mouse.1) as f32 * self.zoom);
-                    self.set_all();
-                }
-                self.last_mouse = (mx, my);
-            }
-        } else {
+        if !self.left_down {
             self.drag = 0;
+            return;
         }
+        let inside = (k..k + 224).contains(&mx) && (l..l + 155).contains(&my);
+        if self.drag > 1 || !inside {
+            return;
+        }
+        if self.drag == 0 {
+            self.drag = 1;
+        } else {
+            self.target[0] -= f64::from((mx - self.last_mouse.0) as f32 * self.zoom);
+            self.target[1] -= f64::from((my - self.last_mouse.1) as f32 * self.zoom);
+            self.set_all();
+        }
+        self.last_mouse = (mx, my);
+    }
+
+    fn update_zoom(&mut self) {
         let old = self.zoom;
         let wheel = std::mem::take(&mut self.wheel);
         if wheel < 0 {
@@ -426,10 +452,16 @@ impl Achievements {
             }
             self.set_all();
         }
-        for axis in 0..2 {
-            self.pos[axis] = self.pos[axis].max(f64::from(Self::MIN[axis]));
-            if self.pos[axis] >= f64::from(Self::MAX[axis]) {
-                self.pos[axis] = f64::from(Self::MAX[axis] - 1);
+    }
+
+    /// The drag, the zoom and the scroll limits of `drawScreen`.
+    fn update_view(&mut self, mx: i32, my: i32, ctx: &Ctx) {
+        self.update_drag(mx, my, ctx);
+        self.update_zoom();
+        for (axis, pos) in self.pos.iter_mut().enumerate() {
+            *pos = pos.max(f64::from(Self::MIN[axis]));
+            if *pos >= f64::from(Self::MAX[axis]) {
+                *pos = f64::from(Self::MAX[axis] - 1);
             }
         }
     }
@@ -477,31 +509,7 @@ impl Achievements {
             let tint = gray(0.6 - (row0 + i) as f32 / 25.0 * 0.3);
             let mut j = 0;
             while (j as f32 * step - off_x as f32) < 224.0 {
-                let s = seed
-                    .wrapping_add(col0)
-                    .wrapping_add(j)
-                    .wrapping_add((row0 + i).wrapping_mul(16));
-                let mut rand = JavaRandom::new(i64::from(s));
-                let n = rand.next_int(1 + row0 + i) + (row0 + i) / 2;
-                let tex = if n > 37 || row0 + i == 35 {
-                    "textures/blocks/bedrock.png"
-                } else if n == 22 {
-                    if rand.next_int(2) == 0 {
-                        "textures/blocks/diamond_ore.png"
-                    } else {
-                        "textures/blocks/redstone_ore.png"
-                    }
-                } else if n == 10 {
-                    "textures/blocks/iron_ore.png"
-                } else if n == 8 {
-                    "textures/blocks/coal_ore.png"
-                } else if n > 4 {
-                    "textures/blocks/stone.png"
-                } else if n > 0 {
-                    "textures/blocks/dirt.png"
-                } else {
-                    "textures/blocks/sand.png"
-                };
+                let tex = background_texture(seed, col0 + j, row0 + i);
                 let (x, y) = (j * 16 - off_x, i * 16 - off_y);
                 c.blit(
                     tex,
@@ -525,6 +533,18 @@ impl Achievements {
         ]
     }
 
+    fn draw_arrow(c: &mut dyn Canvas, x: i32, y: i32, px: i32, py: i32, color: u32) {
+        if x > px {
+            sheet(c, x - 11 - 7, y - 5, (114, 234), (7, 11), color);
+        } else if x < px {
+            sheet(c, x + 11, y - 5, (107, 234), (7, 11), color);
+        } else if y > py {
+            sheet(c, x - 5, y - 11 - 7, (96, 234), (11, 7), color);
+        } else if y < py {
+            sheet(c, x - 5, y + 11, (96, 241), (11, 7), color);
+        }
+    }
+
     /// The lines and arrows from each achievement to its parent.
     fn draw_links(&self, c: &mut dyn Canvas, vx: i32, vy: i32, ctx: &Ctx) {
         for a in &ACHIEVEMENTS {
@@ -545,16 +565,31 @@ impl Achievements {
             hline(c, x, px, y, color);
             vline(c, px, y, py, color);
             // The arrow sheet is drawn with the color the line left set.
-            if x > px {
-                sheet(c, x - 11 - 7, y - 5, (114, 234), (7, 11), color);
-            } else if x < px {
-                sheet(c, x + 11, y - 5, (107, 234), (7, 11), color);
-            } else if y > py {
-                sheet(c, x - 5, y - 11 - 7, (96, 234), (11, 7), color);
-            } else if y < py {
-                sheet(c, x - 5, y + 11, (96, 241), (11, 7), color);
-            }
+            Self::draw_arrow(c, x, y, px, py, color);
         }
+    }
+
+    fn frame_tint(a: &Achievement, stats: &PlayerStats) -> Option<f32> {
+        if stats.has(a) {
+            return Some(0.75);
+        }
+        if stats.can_unlock(a) {
+            return Some(1.0);
+        }
+        match stats.depth(a) {
+            ..3 => Some(0.3),
+            3 => Some(0.2),
+            4 => Some(0.1),
+            _ => None,
+        }
+    }
+
+    fn frame_contains(x: i32, y: i32, mx: f32, my: f32) -> bool {
+        mx >= x as f32 && mx <= (x + 22) as f32 && my >= y as f32 && my <= (y + 22) as f32
+    }
+
+    fn frame_outside_view(&self, x: i32, y: i32) -> bool {
+        x < -24 || y < -24 || x as f32 > 224.0 * self.zoom || y as f32 > 155.0 * self.zoom
     }
 
     /// The frames and item icons; returns the achievement under the mouse.
@@ -571,21 +606,10 @@ impl Achievements {
         let mut hover = None;
         for a in &ACHIEVEMENTS {
             let (x, y) = (a.column * 24 - vx, a.row * 24 - vy);
-            if x < -24 || y < -24 || x as f32 > 224.0 * self.zoom || y as f32 > 155.0 * self.zoom {
+            if self.frame_outside_view(x, y) {
                 continue;
             }
-            let depth = stats.depth(a);
-            let tint = if stats.has(a) {
-                0.75
-            } else if stats.can_unlock(a) {
-                1.0
-            } else if depth < 3 {
-                0.3
-            } else if depth == 3 {
-                0.2
-            } else if depth == 4 {
-                0.1
-            } else {
+            let Some(tint) = Self::frame_tint(a, stats) else {
                 continue;
             };
             let frame = if a.challenge { (26, 202) } else { (0, 202) };
@@ -599,11 +623,83 @@ impl Achievements {
                 };
                 icons.draw(c, &stack, x + 3, y + 3);
             }
-            if mx >= x as f32 && mx <= (x + 22) as f32 && my >= y as f32 && my <= (y + 22) as f32 {
+            if Self::frame_contains(x, y, mx, my) {
                 hover = Some(a);
             }
         }
         hover
+    }
+
+    fn tooltip_description(
+        c: &mut dyn Canvas,
+        a: &Achievement,
+        x: i32,
+        y: i32,
+        name: &str,
+        ctx: &Ctx,
+    ) {
+        let w = c.width(name).max(120);
+        let desc = description(a, ctx);
+        let lines = wrap(ctx.metrics, &desc, w);
+        let mut h = lines.len() as i32 * 9;
+        if ctx.stats.has(a) {
+            h += 12;
+        }
+        c.gradient(
+            x - 3,
+            y - 3,
+            x + w + 3,
+            y + h + 3 + 12,
+            0xC000_0000,
+            0xC000_0000,
+        );
+        for (n, line) in lines.iter().enumerate() {
+            c.text(
+                line,
+                x as f32,
+                (y + 12 + n as i32 * 9) as f32,
+                0xFFA0_A0A0,
+                false,
+            );
+        }
+        if ctx.stats.has(a) {
+            let taken = ctx.tr("achievement.taken");
+            c.text(&taken, x as f32, (y + h + 4) as f32, 0xFF90_90FF, true);
+        }
+    }
+
+    fn tooltip_requirement(
+        c: &mut dyn Canvas,
+        a: &Achievement,
+        x: i32,
+        y: i32,
+        name: &str,
+        ctx: &Ctx,
+    ) {
+        let parent = a.parent().map(|p| ctx.tr(&p.stat_name()));
+        let requires = ctx
+            .texts
+            .fmt("achievement.requires", &[parent.as_deref().unwrap_or("")]);
+        let w = c.width(name).max(120);
+        let lines = wrap(ctx.metrics, &requires, w);
+        let h = lines.len() as i32 * 9;
+        c.gradient(
+            x - 3,
+            y - 3,
+            x + w + 3,
+            y + h + 12 + 3,
+            0xC000_0000,
+            0xC000_0000,
+        );
+        for (n, line) in lines.iter().enumerate() {
+            c.text(
+                line,
+                x as f32,
+                (y + 12 + n as i32 * 9) as f32,
+                0xFF70_5050,
+                false,
+            );
+        }
     }
 
     /// The text box of the achievement under the mouse.
@@ -618,41 +714,8 @@ impl Achievements {
         let name = ctx.tr(&a.stat_name());
         let (x, y) = (mx + 12, my - 4);
         let depth = stats.depth(a);
-        let line_h = 9;
-        let requires = |ctx: &Ctx| {
-            let parent = a.parent().map(|p| ctx.tr(&p.stat_name()));
-            ctx.texts
-                .fmt("achievement.requires", &[parent.as_deref().unwrap_or("")])
-        };
         let shown = if stats.can_unlock(a) {
-            let w = c.width(&name).max(120);
-            let desc = description(a, ctx);
-            let lines = wrap(ctx.metrics, &desc, w);
-            let mut h = lines.len() as i32 * line_h;
-            if stats.has(a) {
-                h += 12;
-            }
-            c.gradient(
-                x - 3,
-                y - 3,
-                x + w + 3,
-                y + h + 3 + 12,
-                0xC000_0000,
-                0xC000_0000,
-            );
-            for (n, line) in lines.iter().enumerate() {
-                c.text(
-                    line,
-                    x as f32,
-                    (y + 12 + n as i32 * line_h) as f32,
-                    0xFFA0_A0A0,
-                    false,
-                );
-            }
-            if stats.has(a) {
-                let taken = ctx.tr("achievement.taken");
-                c.text(&taken, x as f32, (y + h + 4) as f32, 0xFF90_90FF, true);
-            }
+            Self::tooltip_description(c, a, x, y, &name, ctx);
             Some(name)
         } else if depth <= 3 {
             let name = if depth == 3 {
@@ -660,26 +723,7 @@ impl Achievements {
             } else {
                 name
             };
-            let w = c.width(&name).max(120);
-            let lines = wrap(ctx.metrics, &requires(ctx), w);
-            let h = lines.len() as i32 * line_h;
-            c.gradient(
-                x - 3,
-                y - 3,
-                x + w + 3,
-                y + h + 12 + 3,
-                0xC000_0000,
-                0xC000_0000,
-            );
-            for (n, line) in lines.iter().enumerate() {
-                c.text(
-                    line,
-                    x as f32,
-                    (y + 12 + n as i32 * line_h) as f32,
-                    0xFF70_5050,
-                    false,
-                );
-            }
+            Self::tooltip_requirement(c, a, x, y, &name, ctx);
             Some(name)
         } else {
             None

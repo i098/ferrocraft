@@ -60,6 +60,10 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::entityPlayerMethod);
             case "net/minecraft/client/network/NetHandlerPlayClient":
                 return patch(bytes, BridgeTransformer::sendQueueMethod);
+            case "net/minecraft/client/renderer/BlockRendererDispatcher":
+                return Anchor.patchDispatcher(bytes);
+            case "net/minecraft/client/renderer/WorldRenderer":
+                return Anchor.patch(bytes);
             case "net/minecraft/client/gui/Gui":
                 return patch(bytes, BridgeTransformer::guiMethod);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":

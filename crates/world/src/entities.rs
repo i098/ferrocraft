@@ -1043,15 +1043,7 @@ impl Entities {
                 self.with(id, |e| e.animate(animation))
             }
             E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
-            E::Status { id, status: 17 } => {
-                if let Some(e) = self.map.get(&id).filter(|e| e.kind == Kind::Object(76)) {
-                    self.fx.push(Fx::Firework {
-                        pos: e.pos,
-                        vel: [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]),
-                        explosions: e.explosions.clone(),
-                    });
-                }
-            }
+            E::Status { id, status: 17 } => self.firework_explode(id),
             E::Status { id, status } => self.with(id, |e| e.set_status(status)),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
@@ -1071,6 +1063,16 @@ impl Entities {
                 self.names.remove(&uuid);
             }
             _ => {}
+        }
+    }
+
+    fn firework_explode(&mut self, id: i32) {
+        if let Some(e) = self.map.get(&id).filter(|e| e.kind == Kind::Object(76)) {
+            self.fx.push(Fx::Firework {
+                pos: e.pos,
+                vel: [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]),
+                explosions: e.explosions.clone(),
+            });
         }
     }
 

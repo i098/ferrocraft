@@ -36,7 +36,7 @@ import org.objectweb.asm.tree.VarInsnNode;
  * everything else, so that the host calls the method and the handlers run with no hand-made copy.
  *
  * <p>A handler that reads a local of the vanilla body, and a redirect or a modified variable, needs the state of the vanilla
- * instructions around it, and loses its place. {@link #lost()} lists each such handler call. Registered after
+ * instructions around it, and loses its place. {@link #lost()} lists each such handler call. A handler call in an if or a switch case is kept without its guard and logged as conditional; one in a loop is lost. Registered after
  * {@link HookIndex.Scanner}, so that the hook table still sees the hooks of the whole method.
  */
 public final class ShellTransformer implements IClassTransformer {
@@ -100,12 +100,13 @@ public final class ShellTransformer implements IClassTransformer {
         List<AbstractInsnNode> head = new ArrayList<>();
         List<AbstractInsnNode> tail = new ArrayList<>();
         Map<LabelNode, Integer> frames = new HashMap<>();
-        collect(m, cls, merged, head, tail, frames);
+        Set<AbstractInsnNode> cond = new HashSet<>();
+        collect(m, cls, merged, head, tail, frames, cond);
         List<AbstractInsnNode> all = new ArrayList<>(head);
         all.addAll(tail);
         List<String> gone = new ArrayList<>();
         List<String> here = new ArrayList<>();
-        sortCalls(old, cls, m.name, merged, new HashSet<>(all), here, gone);
+        sortCalls(old, cls, m.name, merged, new HashSet<>(all), cond, here, gone);
         List<MethodNode> parts = new ArrayList<>();
         parts.add(part(m, "$head", build(old, head, frames, cls.name)));
         parts.add(part(m, "$tail", build(old, tail, frames, cls.name)));
@@ -117,16 +118,18 @@ public final class ShellTransformer implements IClassTransformer {
             lost.addAll(gone);
         }
         for (String s : here) Host.log("shell: kept " + s);
-        for (String s : gone) Host.log("shell: lost, inside the body: " + s);
+        for (String s : gone) Host.log("shell: lost, inside a loop: " + s);
         return parts;
     }
 
     /** Splits the handler calls of the vanilla body into those the shell keeps and those it loses. */
-    private static void sortCalls(InsnList old, ClassNode cls, String method, Set<String> merged, Set<AbstractInsnNode> keptSet, List<String> here, List<String> gone) {
+    private static void sortCalls(InsnList old, ClassNode cls, String method, Set<String> merged, Set<AbstractInsnNode> keptSet, Set<AbstractInsnNode> cond, List<String> here, List<String> gone) {
         for (AbstractInsnNode n = old.getFirst(); n != null; n = n.getNext()) {
             if (!isHandlerCall(n, cls, merged)) continue;
             MethodInsnNode call = (MethodInsnNode) n;
-            (keptSet.contains(n) ? here : gone).add(cls.name + "." + method + ": " + call.name + call.desc);
+            String what = cls.name + "." + method + ": " + call.name + call.desc;
+            if (!keptSet.contains(n)) gone.add(what);
+            else here.add(cond.contains(n) ? "conditional: " + what : what);
         }
     }
 
@@ -137,17 +140,18 @@ public final class ShellTransformer implements IClassTransformer {
     }
 
     /**
-     * Picks the instructions of the blocks that no branch encloses. A block the method returns right after is a return block
+     * Picks the instructions of the blocks that no loop encloses; those in an if or a switch case go to {@code cond} as well. A block the method returns right after is a return block
      * and goes to {@code tail}; the others go to {@code head}. The cancel-check frame labels go to {@code frames}.
      */
-    private static void collect(MethodNode m, ClassNode cls, Set<String> merged, List<AbstractInsnNode> head, List<AbstractInsnNode> tail, Map<LabelNode, Integer> frames) {
+    private static void collect(MethodNode m, ClassNode cls, Set<String> merged, List<AbstractInsnNode> head, List<AbstractInsnNode> tail, Map<LabelNode, Integer> frames, Set<AbstractInsnNode> cond) {
         for (AbstractInsnNode n = m.instructions.getFirst(); n != null; ) {
             Block b = blockAt(n, cls, merged);
             if (b == null) {
                 n = n.getNext();
                 continue;
             }
-            if (!inBranch(m, n, b.end)) keepBlock(n, b, isReturnBlock(b, cls, merged) ? tail : head, frames);
+            int enclosure = enclosure(m, n, b.end);
+            if (enclosure != LOOP) keepBlock(n, b, isReturnBlock(b, cls, merged) ? tail : head, frames, enclosure == FORWARD ? cond : null);
             n = b.end.getNext();
         }
     }
@@ -168,10 +172,11 @@ public final class ShellTransformer implements IClassTransformer {
         return callbackNew ? block(n, cls, merged) : nullBlock(n, cls, merged);
     }
 
-    private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames) {
+    private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames, Set<AbstractInsnNode> cond) {
         for (AbstractInsnNode k = start; ; k = k.getNext()) {
             // The frames of the vanilla body do not fit the shell; the cancel check gets its own below.
             if (!(k instanceof FrameNode)) keep.add(k);
+            if (cond != null) cond.add(k);
             if (k == b.end) break;
         }
         if (b.cancelLabel != null) frames.put(b.cancelLabel, b.ci);
@@ -230,22 +235,37 @@ public final class ShellTransformer implements IClassTransformer {
         return new FrameNode(Opcodes.F_NEW, locals.length, locals, 0, new Object[0]);
     }
 
-    /** True when a branch encloses the block {@code first..last}: a jump or switch passes over it (an if, a case) or back to before it (a loop), or it lies in a catch handler. */
-    private static boolean inBranch(MethodNode m, AbstractInsnNode first, AbstractInsnNode last) {
+    private static final int NONE = 0;
+    private static final int FORWARD = 1;
+    private static final int LOOP = 2;
+
+    /** How the block {@code first..last} sits: in a loop (a jump goes back to before it), in an if, a switch case or a catch handler, or in none. */
+    private static int enclosure(MethodNode m, AbstractInsnNode first, AbstractInsnNode last) {
         InsnList list = m.instructions;
         int from = list.indexOf(first);
         int to = list.indexOf(last);
+        int found = NONE;
         for (AbstractInsnNode k = list.getFirst(); k != null; k = k.getNext()) {
-            if (crosses(list, k, from, to)) return true;
+            int at = list.indexOf(k);
+            for (LabelNode label : targets(k)) {
+                int target = list.indexOf(label);
+                if (at > to && target <= from) return LOOP;
+                if (at < from && target > to) found = FORWARD;
+            }
         }
-        return inHandler(m, from);
+        return found == NONE && inHandler(m, from) ? FORWARD : found;
     }
 
-    private static boolean crosses(InsnList list, AbstractInsnNode k, int from, int to) {
-        int at = list.indexOf(k);
-        for (LabelNode label : targets(k)) {
-            int target = list.indexOf(label);
-            if (at < from && target > to || at > to && target <= from) return true;
+    /** A catch handler runs from its label to the target of the goto that ends the try body, or to the end of the method. */
+    @SuppressWarnings("unchecked")
+    private static boolean inHandler(MethodNode m, int from) {
+        InsnList list = m.instructions;
+        for (TryCatchBlockNode t : (List<TryCatchBlockNode>) m.tryCatchBlocks) {
+            int h = list.indexOf(t.handler);
+            AbstractInsnNode prev = t.handler.getPrevious();
+            while (prev != null && prev.getOpcode() < 0) prev = prev.getPrevious();
+            int end = prev != null && prev.getOpcode() == Opcodes.GOTO ? list.indexOf(((JumpInsnNode) prev).label) : list.size();
+            if (from >= h && from < (end > h ? end : list.size())) return true;
         }
         return false;
     }
@@ -263,20 +283,6 @@ public final class ShellTransformer implements IClassTransformer {
             out.addAll(((LookupSwitchInsnNode) k).labels);
         }
         return out;
-    }
-
-    /** A catch handler runs from its label to the target of the goto that ends the try body, or to the end of the method. */
-    @SuppressWarnings("unchecked")
-    private static boolean inHandler(MethodNode m, int from) {
-        InsnList list = m.instructions;
-        for (TryCatchBlockNode t : (List<TryCatchBlockNode>) m.tryCatchBlocks) {
-            int h = list.indexOf(t.handler);
-            AbstractInsnNode prev = t.handler.getPrevious();
-            while (prev != null && prev.getOpcode() < 0) prev = prev.getPrevious();
-            int end = prev != null && prev.getOpcode() == Opcodes.GOTO ? list.indexOf(((JumpInsnNode) prev).label) : list.size();
-            if (from >= h && from < (end > h ? end : list.size())) return true;
-        }
-        return false;
     }
 
     /**

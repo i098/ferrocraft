@@ -9,9 +9,9 @@ import org.objectweb.asm.Opcodes;
 
 /**
  * Runs {@link ShellTransformer} on a class that has the shape Mixin leaves in Minecraft, and runs the result. No FML needed.
- * The class has five handlers: {@code head} (may cancel), {@code body} (a block in the middle of the method), {@code nul}
- * (called with a null CallbackInfo), {@code loop} (inside a loop) and {@code tail} (cannot cancel). The shell must call all
- * but {@code loop} in order, run no vanilla instruction, report {@code loop} as lost, and verify.
+ * The class has eight handlers: {@code head} (may cancel), {@code body} (a block in the middle of the method), {@code nul}
+ * (called with a null CallbackInfo), {@code loop} (inside a loop), {@code cond} (inside an if), {@code sw} (inside a switch case), {@code catch} (inside a catch handler) and {@code tail} (cannot cancel). The shell must call all
+ * but {@code loop} in order (the if and the switch case as conditional), run no vanilla instruction, report {@code loop} as lost, and verify.
  */
 public final class ShellTest implements Opcodes {
     private static final String CI = "org/spongepowered/asm/mixin/injection/callback/CallbackInfo";
@@ -28,7 +28,7 @@ public final class ShellTest implements Opcodes {
         Object o = cls.newInstance();
         cls.getMethod("func_71407_l").invoke(o);
         cls.getMethod("func_71411_J").invoke(o);
-        check(log(cls).toString().equals("[head, body, nul, tail, head]"), "the shell runs the unconditional handlers in order, one handler at head and return twice, and no vanilla code: " + log(cls));
+        check(log(cls).toString().equals("[head, body, nul, cond, sw, tail, head]"), "the shell runs the handlers (the if and the switch case too) in order, one handler at head and return twice, and no vanilla code: " + log(cls));
         // Host order: head part, then the body (here a marker), then the tail part.
         Loader second = new Loader();
         second.define(CI, callbackInfo());
@@ -37,10 +37,11 @@ public final class ShellTest implements Opcodes {
         parts.getMethod("func_71407_l$head").invoke(p);
         log(parts).add("MARK");
         parts.getMethod("func_71407_l$tail").invoke(p);
-        check(log(parts).toString().equals("[head, body, nul, MARK, tail, head]"), "head handlers run before the body, return handlers after: " + log(parts));
-        check(ShellTransformer.kept().size() == 5, "five handler call sites kept: " + ShellTransformer.kept());
+        check(log(parts).toString().equals("[head, body, nul, cond, sw, MARK, tail, head]"), "head handlers run before the body, return handlers after: " + log(parts));
+        String kept = ShellTransformer.kept().toString();
+        check(ShellTransformer.kept().size() == 8 && kept.contains("conditional: Fake.func_71407_l: handler$cond") && kept.contains("conditional: Fake.func_71407_l: handler$sw") && kept.contains("conditional: Fake.func_71384_a: handler$catch") && !kept.contains("handler$loop"), "eight handler call sites kept, the if, the switch case and the catch as conditional: " + kept);
         String lost = ShellTransformer.lost().toString();
-        check(ShellTransformer.lost().size() == 3 && lost.contains("handler$cond") && lost.contains("handler$sw") && lost.contains("handler$loop") && lost.contains("Fake.func_71407_l"), "the handlers in the if, the switch case and the loop are lost: " + lost);
+        check(ShellTransformer.lost().size() == 1 && lost.contains("handler$loop") && lost.contains("Fake.func_71407_l"), "only the handler in the loop is lost: " + lost);
         System.out.println("ShellTest passed");
     }
 
@@ -100,7 +101,7 @@ public final class ShellTest implements Opcodes {
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();
-        for (String h : new String[] {"head", "body", "nul", "cond", "sw", "loop", "tail"}) {
+        for (String h : new String[] {"head", "body", "nul", "cond", "sw", "catch", "loop", "tail"}) {
             m = cw.visitMethod(ACC_PRIVATE, "handler$" + h, "(L" + CI + ";)V", null, null);
             m.visitAnnotation(MERGED, false).visitEnd();
             record(m, h);
@@ -140,6 +141,24 @@ public final class ShellTest implements Opcodes {
         m.visitJumpInsn(IFNE, again);
         block(m, "tail", false);
         block(m, "head", false);
+        m.visitInsn(RETURN);
+        m.visitMaxs(0, 0);
+        m.visitEnd();
+        // startGame: a try body that returns, then a catch handler with a block (no jump passes over the handler).
+        m = cw.visitMethod(ACC_PUBLIC, "func_71384_a", "()V", null, null);
+        m.visitCode();
+        Label start = new Label();
+        Label end = new Label();
+        Label handler = new Label();
+        m.visitTryCatchBlock(start, end, handler, "java/lang/Throwable");
+        m.visitLabel(start);
+        vanilla(m);
+        m.visitLabel(end);
+        m.visitInsn(RETURN);
+        m.visitLabel(handler);
+        m.visitFrame(F_NEW, 1, new Object[] {FAKE}, 1, new Object[] {"java/lang/Throwable"});
+        m.visitInsn(POP);
+        block(m, "catch", false);
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();

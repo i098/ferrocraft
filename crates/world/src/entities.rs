@@ -248,6 +248,8 @@ pub struct Entity {
     pub title: String,
     /// Firework rockets: the explosions of the item at metadata index 8.
     pub explosions: Vec<FireworkExplosion>,
+    /// Slimes and magma cubes: the jump squish.
+    pub squish: crate::squish::Squish,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -394,6 +396,7 @@ impl Entity {
             facing: 0,
             title: String::new(),
             owner: 0,
+            squish: crate::squish::Squish::default(),
         }
     }
 
@@ -556,6 +559,9 @@ impl Entity {
             }
         } else {
             self.swing_ticks = 0;
+        }
+        if let Kind::Mob(id @ (55 | 62)) = self.kind {
+            self.squish.tick(self.on_ground, id == 62);
         }
         if self.hurt_time > 0 {
             self.hurt_time -= 1;

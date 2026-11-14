@@ -1555,6 +1555,7 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            squish: e.squish.factor(p),
             ..Look::default()
         },
     }

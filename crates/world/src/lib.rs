@@ -22,6 +22,7 @@ pub mod motion_sound;
 pub mod place;
 pub mod potion_brew;
 pub mod shape;
+pub mod squish;
 
 use std::sync::LazyLock;
 

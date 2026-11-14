@@ -80,6 +80,13 @@ impl TabList {
         self.entries.retain(|e| e.uuid != uuid);
     }
 
+    /// `NetworkPlayerInfo.getGameType() == SPECTATOR` for the player with `uuid`.
+    pub fn is_spectator(&self, uuid: u128) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.uuid == uuid && e.gamemode == SPECTATOR)
+    }
+
     pub fn entry_mut(&mut self, uuid: u128) -> Option<&mut TabEntry> {
         self.entries.iter_mut().find(|e| e.uuid == uuid)
     }

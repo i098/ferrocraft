@@ -312,6 +312,9 @@ impl App {
         self.sound = None;
         for dir in dirs.into_iter().flatten() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
+                for d in s.dropped() {
+                    crate::log::line(d);
+                }
                 self.sound = Some(s);
                 if let (Some(s), Some(p)) = (&mut self.sound, &self.game.player) {
                     s.set_listener(p.pos);

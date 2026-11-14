@@ -29,6 +29,11 @@ pub struct Sound {
 }
 
 impl Sound {
+    /// Variants with no pack or asset file, named `ns:name` or in a non-`minecraft` domain; the engine writes them to its log.
+    pub fn dropped(&self) -> &[String] {
+        &self.index.dropped
+    }
+
     /// `minecraft_dir` is the launcher dir holding `assets/`. Fails when assets or an output device are missing.
     /// `packs` are the selected resource packs, top first.
     pub fn new(minecraft_dir: &Path, version: &str, packs: &[Pack]) -> Result<Self, String> {

@@ -111,7 +111,7 @@ pub struct InventoryView<'a> {
 }
 
 /// The local player and the cursor position its model turns toward.
-type PlayerModel<'a> = Option<(&'a EntityDraw, [i32; 2])>;
+pub(super) type PlayerModel<'a> = Option<(&'a EntityDraw, [i32; 2])>;
 
 /// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
 fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
@@ -616,7 +616,7 @@ impl ContainerScreen {
         dim_world(c, self.width, self.height);
         let old = std::mem::replace(&mut self.old_mouse, [mx, my]);
         match &self.creative {
-            Some(cr) => cr.draw_background(c, inv, icons, l, t),
+            Some(cr) => cr.draw_background(c, inv, icons, l, t, player.map(|p| (p, [mx, my]))),
             None => self.draw_background(c, inv, l, t, player.map(|p| (p, old))),
         }
         self.extras.draw_back(c, inv, l, t, mx, my);

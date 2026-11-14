@@ -14,7 +14,7 @@ pub(crate) mod fire;
 pub(crate) mod guardian;
 pub mod hanging;
 pub mod item;
-mod mobs;
+pub(crate) mod mobs;
 mod mobs2;
 mod projectile;
 pub(crate) mod shadow;

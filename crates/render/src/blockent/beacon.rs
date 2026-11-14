@@ -18,21 +18,7 @@ const STAINED_GLASS: u16 = 95;
 const STAINED_GLASS_PANE: u16 = 160;
 /// Iron, gold, diamond and emerald blocks, the blocks of the pyramid.
 const BASE_BLOCKS: [u16; 4] = [42, 41, 57, 133];
-/// `ItemDye.dyeColors`, by dye damage.
-const DYE_COLORS: [u32; 16] = [
-    1_973_019, 11_743_532, 3_887_386, 5_320_730, 2_437_522, 8_073_150, 2_651_799, 11_250_603,
-    4_408_131, 14_188_952, 4_312_372, 14_602_026, 6_719_955, 12_801_229, 15_435_844, 15_790_320,
-];
-
-/// `EntitySheep.getDyeRgb` of the stained glass with block metadata `meta`: the dye color
-/// (damage is `15 - meta`) scaled by 0.75, except white.
-fn dye_rgb(meta: u16) -> [f32; 3] {
-    if meta & 15 == 0 {
-        return [0.901_960_8; 3];
-    }
-    let rgb = DYE_COLORS[15 - (meta & 15) as usize];
-    [16, 8, 0].map(|shift| ((rgb >> shift) & 255) as f32 / 255.0 * 0.75)
-}
+use crate::entity::mobs::FLEECE;
 
 /// One run of the beam with a single color (`TileEntityBeacon.BeamSegment`).
 #[derive(Clone, Debug, PartialEq)]
@@ -64,7 +50,7 @@ impl Beacon {
         self.levels = 0;
         self.complete = true;
         let mut segments = vec![Segment {
-            color: dye_rgb(0),
+            color: FLEECE[0],
             height: 1,
         }];
         let mut first = true;
@@ -72,7 +58,7 @@ impl Beacon {
             let state = block(x, h, z);
             let id = state >> 4;
             let color = if matches!(id, STAINED_GLASS | STAINED_GLASS_PANE) {
-                dye_rgb(state & 15)
+                FLEECE[usize::from(state & 15)]
             } else {
                 if light_opacity(state) >= 15 && id != BEDROCK {
                     self.complete = false;
@@ -266,7 +252,7 @@ mod tests {
         assert_eq!(
             b.segments,
             [Segment {
-                color: dye_rgb(0),
+                color: FLEECE[0],
                 height: 192
             }]
         );
@@ -274,17 +260,18 @@ mod tests {
 
     #[test]
     fn glass_tints_and_averages_with_the_color_below() {
-        let red = 14;
-        let blue = 11;
+        let red = 14usize;
+        let blue = 11usize;
         let mut b = Beacon::default();
         b.scan(
             [0, 64, 0],
-            &world(&[(70, (95 << 4) | red), (71, (95 << 4) | blue)]),
+            &world(&[(70, (95 << 4) | red as u16), (71, (95 << 4) | blue as u16)]),
         );
-        let [r, g, bl] = dye_rgb(red);
-        let [r2, g2, b2] = dye_rgb(blue);
+        let [r, g, bl] = FLEECE[red];
+        let [r2, g2, b2] = FLEECE[blue];
         let heights: Vec<u32> = b.segments.iter().map(|s| s.height).collect();
         assert_eq!(heights, [6, 1, 185]);
+        assert_eq!(b.segments[1].color, [0.6, 0.2, 0.2]);
         assert_eq!(b.segments[1].color, [r, g, bl]);
         assert_eq!(
             b.segments[2].color,

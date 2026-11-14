@@ -315,7 +315,7 @@ const SHEEP_LEGS: [[f32; 3]; 4] = [
 ];
 
 /// `EntitySheep.fleeceColorTable`, by dye meta.
-const FLEECE: [[f32; 3]; 16] = [
+pub(crate) const FLEECE: [[f32; 3]; 16] = [
     [1.0, 1.0, 1.0],
     [0.85, 0.5, 0.2],
     [0.7, 0.3, 0.85],

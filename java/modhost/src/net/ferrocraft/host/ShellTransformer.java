@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -14,11 +15,13 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -36,7 +39,7 @@ import org.objectweb.asm.tree.VarInsnNode;
  * everything else, so that the host calls the method and the handlers run with no hand-made copy.
  *
  * <p>A handler that reads a local of the vanilla body, and a redirect or a modified variable, needs the state of the vanilla
- * instructions around it, and loses its place. {@link #lost()} lists each such handler call. A handler call in an if or a switch case is kept without its guard and logged as conditional; one in a loop is lost. Registered after
+ * instructions around it, and loses its place. {@link #lost()} lists each such handler call. A handler call in an if keeps the vanilla test when it reads only fields, statics and constants of the host that no earlier instruction of the method writes (the shell runs the handler only when the test lets the vanilla code reach it) and is logged as conditional. One in a switch case, an else branch or a catch handler, or under another test, is kept and runs unguarded (logged as unguarded). One in a loop is lost. Registered after
  * {@link HookIndex.Scanner}, so that the hook table still sees the hooks of the whole method.
  */
 public final class ShellTransformer implements IClassTransformer {
@@ -100,7 +103,7 @@ public final class ShellTransformer implements IClassTransformer {
         List<AbstractInsnNode> head = new ArrayList<>();
         List<AbstractInsnNode> tail = new ArrayList<>();
         Map<LabelNode, Integer> frames = new HashMap<>();
-        Set<AbstractInsnNode> cond = new HashSet<>();
+        Map<AbstractInsnNode, String> cond = new HashMap<>();
         collect(m, cls, merged, head, tail, frames, cond);
         List<AbstractInsnNode> all = new ArrayList<>(head);
         all.addAll(tail);
@@ -118,18 +121,18 @@ public final class ShellTransformer implements IClassTransformer {
             lost.addAll(gone);
         }
         for (String s : here) Host.log("shell: kept " + s);
-        for (String s : gone) Host.log("shell: lost, inside a loop: " + s);
+        for (String s : gone) Host.log("shell: lost, in a loop: " + s);
         return parts;
     }
 
     /** Splits the handler calls of the vanilla body into those the shell keeps and those it loses. */
-    private static void sortCalls(InsnList old, ClassNode cls, String method, Set<String> merged, Set<AbstractInsnNode> keptSet, Set<AbstractInsnNode> cond, List<String> here, List<String> gone) {
+    private static void sortCalls(InsnList old, ClassNode cls, String method, Set<String> merged, Set<AbstractInsnNode> keptSet, Map<AbstractInsnNode, String> cond, List<String> here, List<String> gone) {
         for (AbstractInsnNode n = old.getFirst(); n != null; n = n.getNext()) {
             if (!isHandlerCall(n, cls, merged)) continue;
             MethodInsnNode call = (MethodInsnNode) n;
             String what = cls.name + "." + method + ": " + call.name + call.desc;
             if (!keptSet.contains(n)) gone.add(what);
-            else here.add(cond.contains(n) ? "conditional: " + what : what);
+            else here.add(cond.getOrDefault(n, "") + what);
         }
     }
 
@@ -140,10 +143,10 @@ public final class ShellTransformer implements IClassTransformer {
     }
 
     /**
-     * Picks the instructions of the blocks that no loop encloses; those in an if or a switch case go to {@code cond} as well. A block the method returns right after is a return block
+     * Picks the instructions of the blocks that no loop encloses; those in an if go to {@code cond} as well. A block the method returns right after is a return block
      * and goes to {@code tail}; the others go to {@code head}. The cancel-check frame labels go to {@code frames}.
      */
-    private static void collect(MethodNode m, ClassNode cls, Set<String> merged, List<AbstractInsnNode> head, List<AbstractInsnNode> tail, Map<LabelNode, Integer> frames, Set<AbstractInsnNode> cond) {
+    private static void collect(MethodNode m, ClassNode cls, Set<String> merged, List<AbstractInsnNode> head, List<AbstractInsnNode> tail, Map<LabelNode, Integer> frames, Map<AbstractInsnNode, String> cond) {
         for (AbstractInsnNode n = m.instructions.getFirst(); n != null; ) {
             Block b = blockAt(n, cls, merged);
             if (b == null) {
@@ -151,7 +154,19 @@ public final class ShellTransformer implements IClassTransformer {
                 continue;
             }
             int enclosure = enclosure(m, n, b.end);
-            if (enclosure != LOOP) keepBlock(n, b, isReturnBlock(b, cls, merged) ? tail : head, frames, enclosure == FORWARD ? cond : null);
+            if (enclosure == LOOP) {
+                n = b.end.getNext();
+                continue;
+            }
+            List<AbstractInsnNode> into = isReturnBlock(b, cls, merged) ? tail : head;
+            LabelNode skip = new LabelNode();
+            List<AbstractInsnNode> guards = enclosure == FORWARD ? guards(m, n, b.end, skip) : null;
+            if (guards != null) into.addAll(guards);
+            keepBlock(n, b, into, frames, enclosure != FORWARD ? null : guards != null ? "conditional: " : "unguarded: ", cond);
+            if (guards != null) {
+                into.add(skip);
+                frames.put(skip, -1);
+            }
             n = b.end.getNext();
         }
     }
@@ -172,11 +187,11 @@ public final class ShellTransformer implements IClassTransformer {
         return callbackNew ? block(n, cls, merged) : nullBlock(n, cls, merged);
     }
 
-    private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames, Set<AbstractInsnNode> cond) {
+    private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames, String tag, Map<AbstractInsnNode, String> cond) {
         for (AbstractInsnNode k = start; ; k = k.getNext()) {
             // The frames of the vanilla body do not fit the shell; the cancel check gets its own below.
             if (!(k instanceof FrameNode)) keep.add(k);
-            if (cond != null) cond.add(k);
+            if (tag != null) cond.put(k, tag);
             if (k == b.end) break;
         }
         if (b.cancelLabel != null) frames.put(b.cancelLabel, b.ci);
@@ -226,18 +241,95 @@ public final class ShellTransformer implements IClassTransformer {
         }
     }
 
-    /** The frame at the end of a cancel check: the host and the CallbackInfo are set, every other local is not. */
+    /** The frame at the end of a cancel check: the host and the CallbackInfo (none when {@code ci} is -1, at the end of a condition) are set, every other local is not. */
     private static FrameNode frame(String owner, int ci) {
-        Object[] locals = new Object[ci + 1];
+        Object[] locals = new Object[Math.max(ci, 0) + 1];
         Arrays.fill(locals, Opcodes.TOP);
         locals[0] = owner;
-        locals[ci] = CALLBACK;
+        if (ci > 0) locals[ci] = CALLBACK;
         return new FrameNode(Opcodes.F_NEW, locals.length, locals, 0, new Object[0]);
     }
 
     private static final int NONE = 0;
     private static final int FORWARD = 1;
     private static final int LOOP = 2;
+
+    /**
+     * The vanilla condition of a block in an if: for each jump that skips the block, a copy of the instructions that read its
+     * operands, then the jump to {@code skip}. The shell can run only a test of fields, statics and constants that no earlier
+     * instruction of the method writes. Null (the block is kept unguarded) for a switch, an else branch, a catch handler, an or-test, a test of a local or a call, or a field that is written earlier.
+     */
+    private static List<AbstractInsnNode> guards(MethodNode m, AbstractInsnNode first, AbstractInsnNode last, LabelNode skip) {
+        InsnList list = m.instructions;
+        int from = list.indexOf(first);
+        int to = list.indexOf(last);
+        List<AbstractInsnNode> out = new ArrayList<>();
+        for (AbstractInsnNode k = list.getFirst(); k != null; k = k.getNext()) {
+            int at = list.indexOf(k);
+            for (LabelNode label : targets(k)) {
+                int target = list.indexOf(label);
+                if (at >= from || target <= to) continue;
+                List<AbstractInsnNode> test = k instanceof JumpInsnNode ? test((JumpInsnNode) k, at, from, list) : null;
+                if (test == null || writtenBefore(list, from, test)) return null;
+                out.addAll(test);
+                out.add(new JumpInsnNode(k.getOpcode(), skip));
+            }
+        }
+        return out.isEmpty() && inHandler(m, from) ? null : out;
+    }
+
+    private static boolean writtenBefore(InsnList list, int from, List<AbstractInsnNode> test) {
+        for (AbstractInsnNode t : test) {
+            if (!(t instanceof FieldInsnNode)) continue;
+            FieldInsnNode read = (FieldInsnNode) t;
+            for (AbstractInsnNode k = list.getFirst(); k != null && list.indexOf(k) < from; k = k.getNext()) {
+                int op = k.getOpcode();
+                if (op != Opcodes.PUTFIELD && op != Opcodes.PUTSTATIC) continue;
+                FieldInsnNode w = (FieldInsnNode) k;
+                if (w.owner.equals(read.owner) && w.name.equals(read.name)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** The instructions that push the operands of {@code jump}, or null when one is not a field, a static or a constant, or another jump enters between the test and the block. */
+    private static List<AbstractInsnNode> test(JumpInsnNode jump, int at, int from, InsnList list) {
+        int op = jump.getOpcode();
+        int need = op >= Opcodes.IFEQ && op <= Opcodes.IFLE || op == Opcodes.IFNULL || op == Opcodes.IFNONNULL ? 1
+                : op >= Opcodes.IF_ICMPEQ && op <= Opcodes.IF_ACMPNE ? 2 : 0;
+        if (need == 0) return null;
+        for (AbstractInsnNode k = list.getFirst(); k != null; k = k.getNext()) {
+            for (LabelNode label : targets(k)) {
+                int target = list.indexOf(label);
+                if (list.indexOf(k) < at && target > at && target <= from) return null;
+            }
+        }
+        LinkedList<AbstractInsnNode> out = new LinkedList<>();
+        for (AbstractInsnNode p = jump.getPrevious(); need > 0; p = p.getPrevious()) {
+            if (p == null) return null;
+            if (p.getOpcode() < 0) continue;
+            int delta = pushes(p);
+            if (delta == 0) return null;
+            need -= delta == 1 ? 1 : 0;
+            out.addFirst(p.clone(new HashMap<LabelNode, LabelNode>()));
+        }
+        return out;
+    }
+
+    /** 1 for a one-slot push with no side effect and no local (this, a static, a constant), 2 for a field read (it swaps its object for the value), 0 for any other instruction. */
+    private static int pushes(AbstractInsnNode p) {
+        int op = p.getOpcode();
+        if (op == Opcodes.ALOAD) return ((VarInsnNode) p).var == 0 ? 1 : 0;
+        if (op == Opcodes.GETSTATIC) return wide(((FieldInsnNode) p).desc) ? 0 : 1;
+        if (op == Opcodes.GETFIELD) return wide(((FieldInsnNode) p).desc) ? 0 : 2;
+        if (op == Opcodes.LDC) return ((LdcInsnNode) p).cst instanceof Long || ((LdcInsnNode) p).cst instanceof Double ? 0 : 1;
+        boolean constant = op == Opcodes.ACONST_NULL || op >= Opcodes.ICONST_M1 && op <= Opcodes.ICONST_5 || op == Opcodes.BIPUSH || op == Opcodes.SIPUSH;
+        return constant ? 1 : 0;
+    }
+
+    private static boolean wide(String desc) {
+        return desc.equals("J") || desc.equals("D");
+    }
 
     /** How the block {@code first..last} sits: in a loop (a jump goes back to before it), in an if, a switch case or a catch handler, or in none. */
     private static int enclosure(MethodNode m, AbstractInsnNode first, AbstractInsnNode last) {

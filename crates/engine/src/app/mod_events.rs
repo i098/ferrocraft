@@ -43,8 +43,10 @@ impl App {
             NetEvent::JoinGame { entity_id, .. } => {
                 if self.ui.in_world {
                     mods.post_event(ModEvent::WorldUnload);
+                } else {
+                    mods.post_event(ModEvent::Connect);
                 }
-                for e in [ModEvent::Connect, ModEvent::WorldLoad, own(*entity_id)] {
+                for e in [ModEvent::WorldLoad, own(*entity_id)] {
                     mods.post_event(e);
                 }
             }

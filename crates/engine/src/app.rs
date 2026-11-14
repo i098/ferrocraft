@@ -1562,6 +1562,10 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            eat_timer: e.sheep_timer,
+            golem_attack: e.anim.golem_attack,
+            golem_rose: e.anim.golem_rose,
+            partial: p,
             ..Look::default()
         },
     }

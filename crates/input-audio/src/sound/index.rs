@@ -577,4 +577,72 @@ mod tests {
             );
         }
     }
+
+    fn vanilla(mc: &Path) {
+        write(mc, "assets/objects/ab/abcdef", b"vanilla");
+        write(
+            mc,
+            "assets/objects/ab/abcdef2",
+            br#"{"random.click":{"sounds":["random/click"]},"random.pop":{"sounds":["random/pop"]}}"#,
+        );
+        write(
+            mc,
+            "assets/indexes/1.8.json",
+            br#"{"objects":{"minecraft/sounds.json":{"hash":"abcdef2"},
+            "minecraft/sounds/random/click.ogg":{"hash":"abcdef"},
+            "minecraft/sounds/random/pop.ogg":{"hash":"abcdef"}}}"#,
+        );
+    }
+
+    fn bytes(i: &SoundIndex, n: &str) -> Vec<Vec<u8>> {
+        i.event(n).unwrap().variants.iter()
+            .map(|v| v.file.read().unwrap().into_inner())
+            .collect()
+    }
+
+    #[test]
+    fn zip_pack_replaces_and_event_entry_appends() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("fc-snd-zip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mc = dir.join("mc");
+        vanilla(&mc);
+        let zp = dir.join("pack.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        w.start_file("assets/minecraft/sounds/random/zclick.ogg", o).unwrap();
+        w.write_all(b"zipclick").unwrap();
+        w.start_file("assets/minecraft/sounds.json", o).unwrap();
+        w.write_all(
+            br#"{"random.click":{"replace":true,"sounds":["random/zclick"]},
+            "random.pop":{"sounds":[{"name":"random.click","type":"event"}]}}"#,
+        )
+        .unwrap();
+        w.finish().unwrap();
+        let i = SoundIndex::load(&mc, "1.8.9", &[Pack::new(zp)]).unwrap();
+        assert_eq!(bytes(&i, "random.click"), [b"zipclick".to_vec()]);
+        assert_eq!(bytes(&i, "random.pop"), [b"vanilla".to_vec(), b"zipclick".to_vec()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_pack_keeps_vanilla() {
+        let dir = std::env::temp_dir().join(format!("fc-snd-miss-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mc = dir.join("mc");
+        vanilla(&mc);
+        let i = SoundIndex::load(&mc, "1.8.9", &[Pack::new(dir.join("nope.zip"))]).unwrap();
+        assert_eq!(bytes(&i, "random.click"), [b"vanilla".to_vec()]);
+        // unreadable zip, and a folder pack whose sounds.json is malformed
+        write(&dir, "bad.zip", b"not a zip");
+        let folder = dir.join("folder");
+        write(&folder, "assets/minecraft/sounds/random/click.ogg", b"custom");
+        write(&folder, "assets/minecraft/sounds.json", br#"{"random.click":{"sounds":[{}]}}"#);
+        let packs = [Pack::new(dir.join("bad.zip")), Pack::new(folder)];
+        let i = SoundIndex::load(&mc, "1.8.9", &packs).unwrap();
+        // bad sounds.json skipped whole (pop untouched); the pack's click.ogg still overrides the file
+        assert_eq!(bytes(&i, "random.click"), [b"custom".to_vec()]);
+        assert_eq!(bytes(&i, "random.pop"), [b"vanilla".to_vec()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

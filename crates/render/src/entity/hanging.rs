@@ -7,8 +7,8 @@
 use super::item::{dir, point, ItemModel, Items, Models, Stack};
 use super::{Class, EntityDraw, V3};
 use crate::hand::{chain, ident, rotate, scale, translate, DialTurns, Mat};
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub const PAINTING_SHEET: &str = "textures/painting/paintings_kristoffer_zetterstrand.png";
 pub const FILLED_MAP: i16 = 358;
@@ -157,7 +157,9 @@ pub type Compasses = HashMap<(i16, i16, u64), Option<ItemModel>>;
 
 /// The key of the compass model frame `d` shows, and the turns it is drawn with.
 pub fn compass(d: &EntityDraw, dials: &DialTurns) -> Option<((i16, i16, u64), DialTurns)> {
-    let s = d.stack.filter(|s| is_frame(d) && s.id == DialTurns::COMPASS)?;
+    let s = d
+        .stack
+        .filter(|s| is_frame(d) && s.id == DialTurns::COMPASS)?;
     let turns = dials.framed([d.pos[0], d.pos[2]], d.hang.facing);
     Some(((s.id, s.damage, turns.compass.to_bits()), turns))
 }

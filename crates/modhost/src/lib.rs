@@ -635,6 +635,7 @@ fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
             s.input.events.clear();
             (input, s.mirror.take(), s.lists.take(), std::mem::take(&mut s.events))
         };
+        events::write_all(&mut stream, &events)?;
         write_hud(&mut stream, mirror.as_ref(), lists.as_ref())?;
         wire::write_input(&mut stream, &input)?;
         let (screen, cmds) = wire::read_frame(&mut stream)?;

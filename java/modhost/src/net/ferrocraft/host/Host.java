@@ -61,17 +61,6 @@ public final class Host {
         R.call(R.get(R.cls("net.minecraftforge.common.MinecraftForge"), "EVENT_BUS"), "register", handler);
     }
 
-    /**
-     * OneConfig starts from mixins in Minecraft.startGame, which the host does not run. This does the same:
-     * the start event, then OneConfig.init and the initialization event that registers its HUD.
-     */
-    private static void startOneConfig() {
-        Object events = R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE");
-        R.call(events, "post", R.neu("cc.polyfrost.oneconfig.events.event.StartEvent"));
-        R.call(R.get(R.cls("cc.polyfrost.oneconfig.internal.OneConfig"), "INSTANCE"), "init");
-        R.call(events, "post", R.neu("cc.polyfrost.oneconfig.events.event.InitializationEvent"));
-    }
-
     /** FML's security manager traps every exit except the one from its own handler. */
     static void halt(int code) {
         R.call(R.call(R.cls("net.minecraftforge.fml.common.FMLCommonHandler"), "instance"), "exitJava", code, true);
@@ -85,7 +74,8 @@ public final class Host {
         log("mods loaded");
         HookIndex.settle();
         registerAs(new OverlayFilter());
-        startOneConfig();
+        R.set(mc, "field_71428_T", R.neu("net.minecraft.util.Timer", 20f)); // timer: the hooks of mods read it
+        R.call(mc, "func_71384_a"); // Minecraft.startGame, a shell: the hooks that mods put in it (OneConfig starts here)
 
         Host host = new Host(mc);
         String bridge = System.getProperty("ferro.bridge");
@@ -166,7 +156,7 @@ public final class Host {
         lastTick += ticks * TICK_NANOS;
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
-            postTick("START");
+            R.call(mc, "func_71407_l"); // Minecraft.runTick, a shell: the hooks that mods put in it
             R.call(fml, "onPreClientTick");
             Object modScreen = Minecraft.modScreen(mc);
             if (modScreen != null) {
@@ -177,7 +167,6 @@ public final class Host {
                 pollKeyboard();
             }
             R.call(fml, "onPostClientTick");
-            postTick("END");
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
         renderOverlay(partial);
@@ -217,12 +206,6 @@ public final class Host {
         }
     }
 
-    /** OneConfig's TickEvent, which its mixin posts at the head and the return of runTick; its TickDelay, and so GuiUtils.displayScreen, waits for it. */
-    private static void postTick(String stage) {
-        Object start = R.get(R.cls("cc.polyfrost.oneconfig.events.event.Stage"), stage);
-        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu("cc.polyfrost.oneconfig.events.event.TickEvent", start));
-    }
-
     /** KeyBinding.setKeyBindState, and KeyBinding.onTick on a press; mouse buttons are code - 100. */
     private static void keyBind(int code, boolean down) {
         Class<?> keyBinding = R.cls("net.minecraft.client.settings.KeyBinding");
@@ -244,21 +227,15 @@ public final class Host {
         R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu(cls, args));
     }
 
-    /** OneConfig's RenderEvent, which its mixin posts around each frame; GuiUtils reads the mouse button and the frame time from it. */
-    private static void postRender(String stage, float partial) {
-        Object s = R.get(R.cls("cc.polyfrost.oneconfig.events.event.Stage"), stage);
-        R.call(R.get(R.cls("cc.polyfrost.oneconfig.events.EventManager"), "INSTANCE"), "post", R.neu("cc.polyfrost.oneconfig.events.event.RenderEvent", s, partial));
-    }
-
     /** GuiIngameForge.renderGameOverlay, which posts the overlay events and runs mixins hooked into it. */
     private void renderOverlay(float partial) {
-        postRender("START", partial);
+        R.set(R.get(mc, "field_71428_T"), "field_74281_c", partial); // Timer.renderPartialTicks, read by the hooks of mods
+        R.call(mc, "func_71411_J"); // Minecraft.runGameLoop, a shell: the hooks that mods put in it
         R.call(fml, "onRenderTickStart", partial);
         chat.renderOverlay(mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(fml, "onRenderTickEnd", partial);
-        postRender("END", partial);
     }
 
     /** Called in place of Minecraft.displayGuiScreen, see {@link BridgeTransformer}. */

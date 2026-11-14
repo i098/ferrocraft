@@ -104,6 +104,12 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             level: p.level.0,
             total: p.total.0,
         },
+        P::Statistics(p) => NetEvent::Statistics(
+            p.stats
+                .iter()
+                .map(|s| (s.name.clone(), s.value.0))
+                .collect(),
+        ),
         P::TabComplete(p) => NetEvent::TabComplete(p.matches.clone()),
         P::HeldItemChange(p) => NetEvent::HeldItem(p.slot as u8),
         _ => return container_event(packet),

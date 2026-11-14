@@ -179,6 +179,8 @@ pub enum NetEvent {
     SignEditorOpen {
         pos: [i32; 3],
     },
+    /// S37: each statistic name with its value, such as `("achievement.mineWood", 1)`.
+    Statistics(Vec<(String, i32)>),
     /// S31.
     WindowProperty {
         window: u8,
@@ -409,6 +411,16 @@ impl Session {
             sb::Packet::from(sb::TabComplete {
                 text: text.to_owned(),
                 looked_at: ferrocraft_protocol::codec::Opt(None),
+            }),
+        )
+    }
+
+    /// `C16PacketClientStatus(REQUEST_STATS)`: the server answers with S37.
+    pub fn request_stats(&mut self) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::ClientStatus {
+                action_id: VarInt(1),
             }),
         )
     }

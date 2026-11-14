@@ -2,7 +2,10 @@ package net.ferrocraft.fabric;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;
@@ -11,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.ProtectionDomain;
+import java.util.jar.JarFile;
 import net.ferrocraft.host.BridgeTransformer;
 import net.ferrocraft.host.HookIndex;
 import net.ferrocraft.host.MinecraftBridgeTransformer;
@@ -39,6 +43,14 @@ public final class Agent {
         names.toFile().deleteOnExit();
         flatten(Paths.get(System.getProperty("ferro.tiny")), names);
         System.setProperty("ferro.names", names.toString());
+        // Loader 0.20 lets Knot read only the class path jars it knows; this jar holds the host classes the swapped Main starts.
+        try {
+            String self = Paths.get(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
+            String libs = System.getProperty("fabric.systemLibraries");
+            System.setProperty("fabric.systemLibraries", libs == null ? self : libs + java.io.File.pathSeparator + self);
+        } catch (java.net.URISyntaxException e) {
+            throw new IOException(e);
+        }
         inst.addTransformer(new Dispatch(), false);
         log("installed");
     }
@@ -104,7 +116,23 @@ public final class Agent {
         private static final BridgeTransformer MINECRAFT = new MinecraftBridgeTransformer();
         private static final ShellTransformer SHELL = new ShellTransformer();
 
+        private static final String DISPLAY = "org/lwjgl/opengl/Display";
+
         private Knot() {}
+
+        private static byte[] standIn(String cn) {
+            try {
+                File jar = new File(Knot.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+                try (JarFile j = new JarFile(jar); InputStream in = j.getInputStream(j.getEntry(cn + ".class"))) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buf = new byte[4096];
+                    for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                    return out.toByteArray();
+                }
+            } catch (Exception e) {
+                throw new IllegalStateException("no stand-in for " + cn + " in the host jar", e);
+            }
+        }
 
         /** The new bytes of the class, or null to leave it. */
         public static byte[] transform(String cn, byte[] bytes) {
@@ -112,6 +140,8 @@ public final class Agent {
                 log("swap Main");
                 return mainStub();
             }
+            // LWJGL 2's Display loads a native library and needs a display at class load: the host owns the window, and its jar holds a stand-in.
+            if (cn.equals(DISPLAY)) return standIn(cn);
             String dotted = cn.replace('/', '.');
             byte[] out = bytes;
             boolean game = cn.startsWith(MC);
@@ -125,20 +155,14 @@ public final class Agent {
     }
 
     /**
-     * {@code Main} with one method: {@code Launch.minecraftHome = new File(System.getProperty("ferro.gameDir")); Host.run(args);}.
-     * The host reads the game directory from LaunchWrapper's field, which no one else sets under Knot.
+     * {@code Main} with one method: {@code FabricGlue.initEntrypoints(); Host.run(args);}.
      */
     static byte[] mainStub() {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC, MAIN, null, "java/lang/Object", null);
         MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "main", "([Ljava/lang/String;)V", null, null);
         mv.visitCode();
-        mv.visitTypeInsn(Opcodes.NEW, "java/io/File");
-        mv.visitInsn(Opcodes.DUP);
-        mv.visitLdcInsn("ferro.gameDir");
-        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperty", "(Ljava/lang/String;)Ljava/lang/String;", false);
-        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/io/File", "<init>", "(Ljava/lang/String;)V", false);
-        mv.visitFieldInsn(Opcodes.PUTSTATIC, "net/minecraft/launchwrapper/Launch", "minecraftHome", "Ljava/io/File;");
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/FabricGlue", "initEntrypoints", "()V", false);
         mv.visitVarInsn(Opcodes.ALOAD, 0);
         mv.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/Host", "run", "([Ljava/lang/String;)V", false);
         mv.visitInsn(Opcodes.RETURN);

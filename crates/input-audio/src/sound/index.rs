@@ -85,6 +85,28 @@ impl Pack {
         Self { path, zip }
     }
 
+    /// Resource domains of this pack: the folders directly under `assets/`.
+    fn domains(&self) -> Vec<String> {
+        let Some(zip) = &self.zip else {
+            let Ok(rd) = std::fs::read_dir(self.path.join("assets")) else {
+                return Vec::new();
+            };
+            return rd
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect();
+        };
+        let Ok(z) = zip.lock() else {
+            return Vec::new();
+        };
+        let set: HashSet<&str> = z
+            .file_names()
+            .filter_map(|n| n.strip_prefix("assets/")?.split_once('/').map(|d| d.0))
+            .collect();
+        set.into_iter().map(str::to_owned).collect()
+    }
+
     /// `name` is a path under `assets/`, such as `minecraft/sounds.json`.
     fn locate(&self, name: &str) -> Option<SoundFile> {
         let entry = format!("assets/{name}");
@@ -213,6 +235,16 @@ impl AssetIndex {
         })
     }
 
+    /// Domains that ship a `sounds.json` in the asset index.
+    fn domains(&self) -> Vec<String> {
+        self.objects
+            .keys()
+            .filter_map(|k| k.strip_suffix("/sounds.json"))
+            .filter(|d| !d.contains('/'))
+            .map(str::to_owned)
+            .collect()
+    }
+
     /// The file of asset `name`, such as `minecraft/sounds.json` or `pack.mcmeta`.
     pub fn path(&self, name: &str) -> Option<PathBuf> {
         self.objects
@@ -221,7 +253,25 @@ impl AssetIndex {
     }
 }
 
+/// `ResourceLocation(String)`: `ns:path`, domain defaulting to `minecraft`, both lowercase.
+/// Returns the key an event is stored under: the bare path for `minecraft`, else `ns:path`.
+fn canon(name: &str) -> String {
+    let (domain, path) = name.split_once(':').unwrap_or(("minecraft", name));
+    key(domain, path)
+}
+
+fn key(domain: &str, path: &str) -> String {
+    let (domain, path) = (domain.to_lowercase(), path.to_lowercase());
+    if domain == "minecraft" {
+        path
+    } else {
+        format!("{domain}:{path}")
+    }
+}
+
 pub struct SoundIndex {
+    /// Variants dropped because their `ns:name` file is missing; the caller logs them.
+    pub dropped: Vec<String>,
     events: HashMap<String, Event>,
     /// Events a `"type": "event"` entry points at, per event; folded into `events` by `merge`.
     refs: HashMap<String, Vec<String>>,
@@ -229,32 +279,60 @@ pub struct SoundIndex {
 }
 
 impl SoundIndex {
-    /// `SoundHandler.onResourceManagerReload`: the base `sounds.json`, then each pack's, bottom
-    /// pack first. `packs` is top first. A sound file comes from the topmost layer that has it.
+    /// `SoundHandler.onResourceManagerReload`: for every resource domain, the base `sounds.json`,
+    /// then each pack's, bottom pack first. `packs` is top first. A sound file comes from the
+    /// topmost layer that has it.
     pub fn load(minecraft_dir: &Path, version: &str, packs: &[Pack]) -> Result<Self, String> {
         let assets = AssetIndex::load(minecraft_dir, version)?;
-        let json_path = assets
-            .path("minecraft/sounds.json")
-            .ok_or("sounds.json not in asset index")?;
-        let json = std::fs::read(&json_path).map_err(|e| e.to_string())?;
         let resolve = &|name: &str| {
-            let rel = format!("minecraft/sounds/{name}.ogg");
+            // `ResourceLocation(name)`: `ns:foo` is `ns/sounds/foo.ogg`, a bare name is `minecraft`.
+            let (domain, path) = name.split_once(':').unwrap_or(("minecraft", name));
+            let rel = format!(
+                "{}/sounds/{}.ogg",
+                domain.to_lowercase(),
+                path.to_lowercase()
+            );
             packs
                 .iter()
                 .find_map(|p| p.locate(&rel))
                 .or_else(|| assets.path(&rel).map(SoundFile::Path))
         };
-        let mut index = Self::from_json(&json, resolve)?;
-        for pack in packs.iter().rev() {
-            let Some(bytes) = pack.locate("minecraft/sounds.json").and_then(|f| f.read()) else {
-                continue;
-            };
-            // A broken pack file is skipped, as vanilla logs and skips it.
-            if let Ok(over) = Self::from_json(bytes.get_ref(), resolve) {
-                index.merge(over);
+        let mut domains: Vec<String> = packs.iter().flat_map(Pack::domains).collect();
+        domains.extend(assets.domains());
+        domains.sort();
+        domains.dedup();
+        let mut index = Self::empty();
+        let mut has_base = false;
+        for domain in &domains {
+            let name = format!("{domain}/sounds.json");
+            let base = assets.path(&name).and_then(|p| std::fs::read(p).ok());
+            has_base |= domain == "minecraft" && base.is_some();
+            let layers = base.into_iter().chain(
+                packs
+                    .iter()
+                    .rev()
+                    .filter_map(|p| Some(p.locate(&name)?.read()?.into_inner())),
+            );
+            for bytes in layers {
+                // A broken file is skipped, as vanilla logs and skips it.
+                if let Ok(over) = Self::from_json(&bytes, domain, resolve) {
+                    index.merge(over);
+                }
             }
         }
+        if !has_base {
+            return Err("sounds.json not in asset index".into());
+        }
         Ok(index)
+    }
+
+    fn empty() -> Self {
+        Self {
+            dropped: Vec::new(),
+            events: HashMap::new(),
+            refs: HashMap::new(),
+            replace: HashSet::new(),
+        }
     }
 
     /// `SoundHandler.loadSoundResource`: an event of `over` replaces the old one when it is new
@@ -262,6 +340,7 @@ impl SoundIndex {
     /// reference takes the sounds of the named event, from `over` first, else from the old index.
     /// An event left without sounds keeps its old definition rather than going silent.
     fn merge(&mut self, over: SoundIndex) {
+        self.dropped.extend(over.dropped.iter().cloned());
         let mut merged = Vec::new();
         for (name, ev) in &over.events {
             let mut ev = ev.clone();
@@ -308,16 +387,14 @@ impl SoundIndex {
     /// record is an `Err`, as vanilla's `SoundListSerializer` rejects the whole file.
     pub fn from_json(
         json: &[u8],
+        domain: &str,
         resolve: impl Fn(&str) -> Option<SoundFile>,
     ) -> Result<Self, String> {
         let root: Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
         let root = root.as_object().ok_or("sounds.json is not an object")?;
-        let mut index = Self {
-            events: HashMap::new(),
-            refs: HashMap::new(),
-            replace: HashSet::new(),
-        };
+        let mut index = Self::empty();
         for (name, ev) in root {
+            let name = &key(domain, name);
             let bad = |what: &str| format!("{name}: bad {what}");
             let (category, replace, sounds) = parse_header(ev).map_err(&bad)?;
             if replace {
@@ -328,7 +405,7 @@ impl SoundIndex {
             for s in sounds {
                 let (file, volume, pitch, weight, is_event) = parse_sound(s).map_err(&bad)?;
                 if is_event {
-                    refs.push(file.to_owned());
+                    refs.push(canon(file));
                 } else if let Some(path) = resolve(file) {
                     variants.push(Variant {
                         file: path,
@@ -337,7 +414,9 @@ impl SoundIndex {
                         weight,
                     });
                 } else if file.contains(':') {
-                    eprintln!("input-audio: sound event {name}: dropped variant {file}");
+                    index
+                        .dropped
+                        .push(format!("sound event {name}: dropped variant {file}"));
                 }
             }
             let category = Category::parse(category);
@@ -350,7 +429,7 @@ impl SoundIndex {
     }
 
     pub fn event(&self, name: &str) -> Option<&Event> {
-        self.events.get(name)
+        self.events.get(&canon(name))
     }
 
     /// `SoundHandler.getRandomSoundFromCategories`: one event of `cats`, chosen by `roll`.
@@ -485,7 +564,7 @@ mod tests {
     fn parses_strings_objects_and_weights() {
         let json = br#"{"random.click":{"category":"master","sounds":["random/click"]},
             "mob.pig.say":{"category":"neutral","sounds":[{"name":"mob/pig/say1","weight":3,"volume":0.5},{"name":"mob/pig/say2"},"missing"]}}"#;
-        let idx = SoundIndex::from_json(json, |n| {
+        let idx = SoundIndex::from_json(json, "minecraft", |n| {
             (n != "missing").then(|| SoundFile::Path(PathBuf::from(n)))
         })
         .unwrap();
@@ -509,7 +588,10 @@ mod tests {
     }
 
     fn idx(json: &str) -> SoundIndex {
-        SoundIndex::from_json(json.as_bytes(), |n| Some(SoundFile::Path(PathBuf::from(n)))).unwrap()
+        SoundIndex::from_json(json.as_bytes(), "minecraft", |n| {
+            Some(SoundFile::Path(PathBuf::from(n)))
+        })
+        .unwrap()
     }
 
     fn files(i: &SoundIndex, n: &str) -> Vec<PathBuf> {
@@ -571,7 +653,7 @@ mod tests {
             r#"{"a":{"sounds":[{"name":"x","type":"bogus"}]}}"#,
         ] {
             assert!(
-                SoundIndex::from_json(bad.as_bytes(), |_| None).is_err(),
+                SoundIndex::from_json(bad.as_bytes(), "minecraft", |_| None).is_err(),
                 "{bad}"
             );
         }
@@ -657,6 +739,38 @@ mod tests {
         // bad sounds.json skipped whole (pop untouched); the pack's click.ogg still overrides the file
         assert_eq!(bytes(&i, "random.click"), [b"custom".to_vec()]);
         assert_eq!(bytes(&i, "random.pop"), [b"vanilla".to_vec()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn namespaced_pack_sounds_load() {
+        let dir = std::env::temp_dir().join(format!("fc-snd-ns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mc, pack) = (dir.join("mc"), dir.join("pack"));
+        vanilla(&mc);
+        write(&pack, "assets/mymod/sounds/boom.ogg", b"boom");
+        write(&pack, "assets/mymod/sounds/deep/x.ogg", b"x");
+        write(
+            &pack,
+            "assets/mymod/sounds.json",
+            br#"{"blast":{"sounds":["boom","mymod:deep/x","other:gone"]}}"#,
+        );
+        write(
+            &pack,
+            "assets/minecraft/sounds.json",
+            br#"{"random.pop":{"sounds":["mymod:boom"]}}"#,
+        );
+        let i = SoundIndex::load(&mc, "1.8.9", &[Pack::new(pack)]).unwrap();
+        // "boom" has no ns: it resolves to minecraft/sounds/boom.ogg, which is absent
+        assert_eq!(bytes(&i, "mymod:blast"), [b"x".to_vec()]);
+        assert_eq!(
+            bytes(&i, "random.pop"),
+            [b"vanilla".to_vec(), b"boom".to_vec()]
+        );
+        assert_eq!(
+            i.dropped,
+            ["sound event mymod:blast: dropped variant other:gone"]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -99,6 +99,16 @@ for y in range(110, 530):
 print(n)
 PY
 }
+# The OneConfig sidebar (30-140, 330-470) is dark only while the GUI is open; the world behind it is bright: 1 when its mean is dark.
+panel_dark() {
+  python3 - "$1" <<'PY'
+import subprocess, sys
+a = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", sys.argv[1], "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                   check=True, stdout=subprocess.PIPE).stdout
+px = [a[(y * 800 + x) * 3 + c] for y in range(330, 470, 10) for x in range(30, 140, 10) for c in range(3)]
+print(1 if sum(px) / len(px) < 50 else 0)
+PY
+}
 click() { "$XDO" mousemove "$1" "$2"; sleep 0.2; "$XDO" mousedown 1; sleep 0.15; "$XDO" mouseup 1; }
 tap() { "$XDO" keydown "$1"; sleep 0.2; "$XDO" keyup "$1"; }
 close_gui() { tap Escape; sleep 1.5; }
@@ -136,7 +146,8 @@ while IFS='|' read -r id term note; do
     printf '%s %-20s FAIL  mod host not running (see %s)\n' "$nn" "$id" "$OUT/engine.log" | tee -a "$OUT/sheet.txt"
     echo "mod host stopped: sheet is invalid" >&2; exit 1
   fi
-  if [ "$d" -ge "$DIFF_PX" ]; then v=PASS; else v=FAIL; fails=$((fails+1)); fi
+  # PASS needs the open panel in the frame, not only changed pixels in a live world.
+  if [ "$d" -ge "$DIFF_PX" ] && [ "$(panel_dark "$page")" = 1 ]; then v=PASS; else v=FAIL; fails=$((fails+1)); fi
   printf '%s %-20s %s  changed_px=%s  %s\n' "$nn" "$id" "$v" "$d" "$note" | tee -a "$OUT/sheet.txt"
   # No OneConfig GUI means no mod to prove: stop instead of printing 21 more rows.
   [ "$id" = oneconfig ] && [ "$v" = FAIL ] && { echo "oneconfig GUI did not open: sheet is invalid" >&2; exit 1; }

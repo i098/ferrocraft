@@ -36,6 +36,8 @@ pub struct Beacon {
     pub levels: u32,
     /// The `getTotalWorldTime() / 80` of the last scan; `None` before the first frame.
     period: Option<i64>,
+    /// Set by `receiveClientEvent(1)`: rescan on the next frame.
+    pub(super) dirty: bool,
     /// `field_146016_i`: world time of the last `shouldBeamRender`.
     last_time: i64,
     /// `field_146014_j`: fade-in of the beam, 0 to 1.
@@ -137,7 +139,7 @@ impl super::BlockEntities {
                 continue;
             }
             let beacon = self.beacons.entry(pos).or_default();
-            if beacon.period.is_some_and(|p| p != period) {
+            if std::mem::take(&mut beacon.dirty) || beacon.period.is_some_and(|p| p != period) {
                 beacon.scan(pos, &block);
             }
             beacon.period = Some(period);
@@ -311,5 +313,46 @@ mod tests {
         // 20 ticks without a frame: minus 0.5, plus 0.025.
         let after = b.beam_scale(30);
         assert!((after - 0.025).abs() < 1e-6, "{after}");
+    }
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::super::{BlockEntities, View};
+    use super::*;
+
+    fn frame(be: &mut BlockEntities, time: i64, glass: bool) {
+        let view = View {
+            eye: [0.0, 64.0, 0.0],
+            world_time: time,
+            partial: 0.0,
+        };
+        be.beams(&view, |x, y, z| match (x, y, z) {
+            (-1..=1, 63, -1..=1) => 42 << 4,
+            (0, 70, 0) if glass => (95 << 4) | 14,
+            _ => 0,
+        });
+    }
+
+    fn beacon_with_period_set() -> BlockEntities {
+        let mut be = BlockEntities::default();
+        be.set_state([0, 64, 0], BEACON << 4);
+        frame(&mut be, 0, false);
+        be
+    }
+
+    #[test]
+    fn glass_is_seen_at_once_after_beacon_event_1() {
+        let mut be = beacon_with_period_set();
+        be.block_action([0, 64, 0], BEACON, 1, 0);
+        frame(&mut be, 1, true);
+        assert_eq!(be.beacons[&[0, 64, 0]].segments[1].color, [0.6, 0.2, 0.2]);
+    }
+
+    #[test]
+    fn glass_waits_for_the_next_period_without_the_event() {
+        let mut be = beacon_with_period_set();
+        frame(&mut be, 1, true);
+        assert!(be.beacons[&[0, 64, 0]].segments.is_empty());
     }
 }

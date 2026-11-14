@@ -180,10 +180,14 @@ impl BlockEntities {
         *self = BlockEntities::default();
     }
 
-    /// `S24 BlockAction` for a chest: event 1 carries the number of viewers.
+    /// `S24 BlockAction`: event 1 of a chest carries the number of viewers; event 1 of a beacon
+    /// makes it rescan its beam.
     pub fn block_action(&mut self, pos: [i32; 3], block: u16, event: u8, value: u8) {
         if matches!(block, CHEST | ENDER_CHEST | TRAPPED_CHEST) && event == 1 {
             self.lids.entry(pos).or_default().viewers = value;
+        }
+        if block == BEACON && event == 1 {
+            self.beacons.entry(pos).or_default().dirty = true;
         }
     }
 

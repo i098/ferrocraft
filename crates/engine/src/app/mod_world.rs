@@ -69,7 +69,8 @@ const BLUE: u32 = 0xff00_00ff;
 fn box_edges(lo: [f64; 3], hi: [f64; 3], argb: u32) -> impl Iterator<Item = Segment> {
     let corner = move |c: usize| [0, 1, 2].map(|i| if c >> i & 1 == 0 { lo[i] } else { hi[i] });
     (0..8usize).flat_map(move |a| {
-        (0..3).filter_map(move |i| (a >> i & 1 == 0).then(|| (corner(a), corner(a | 1 << i), argb)))
+        (0..3)
+            .filter_map(move |i| (a >> i & 1 == 0).then_some((corner(a), corner(a | 1 << i), argb)))
     })
 }
 

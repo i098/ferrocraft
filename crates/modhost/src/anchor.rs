@@ -1,5 +1,5 @@
-//! Draws in the world: name tags and the TNT countdown. A mod changes these in vanilla methods that Rust ports
-//! (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`). Once per frame Rust sends the entities in view, and Java
+//! Draws in the world: name tags, the TNT countdown and hitbox lines. A mod changes these in vanilla methods that Rust ports
+//! (`Render.renderLivingLabel`, `RenderTNTPrimed.doRender`, `RenderManager.renderDebugBoundingBox`/`func_85094_b`). Once per frame Rust sends the entities in view, and Java
 //! runs those vanilla methods on stand-in entities at the origin and records the text and plates they draw. Rust
 //! projects them and draws them over the world.
 //!
@@ -10,7 +10,8 @@
 //! Java to Rust: u32 item count, then per item `'L'` (i32 entity id, u16 op count, then per op `'Q'`: four points of
 //! two f32 and i32 ARGB; or `'T'`: f32 right, f32 up, f32 blocks per text pixel, i32 ARGB, u8 shadow, u32 length and
 //! UTF-8); or `'H'` (i32 entity id, u16 segment count, then per segment two points of three f32, blocks from the
-//! feet, and i32 ARGB: the hitbox lines). Label points are blocks to the right of the feet and up from them, facing the camera.
+//! feet, and i32 ARGB: the hitbox lines; count 0 means the mod drew nothing, which hides the vanilla box for that
+//! entity). Label points are blocks to the right of the feet and up from them, facing the camera.
 
 use std::io::{self, Read, Write};
 

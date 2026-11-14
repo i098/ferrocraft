@@ -108,8 +108,9 @@ public final class Nvg {
     /** A line at any angle. A horizontal or vertical one is a rectangle, which keeps the pixel grid. */
     public static void drawLine(long vg, float x0, float y0, float x1, float y1, float width, int argb) {
         if (x0 == x1 || y0 == y1) {
-            float half = width / 2f;
-            drawRect(vg, Math.min(x0, x1) - half, Math.min(y0, y1) - half, Math.abs(x1 - x0) + width, Math.abs(y1 - y0) + width, argb);
+            float px = x0 == x1 ? width / 2f : 0f;
+            float py = y0 == y1 ? width / 2f : 0f;
+            drawRect(vg, Math.min(x0, x1) - px, Math.min(y0, y1) - py, Math.abs(x1 - x0) + 2f * px, Math.abs(y1 - y0) + 2f * py, argb);
             return;
         }
         Sink.matrixMode(MODELVIEW);

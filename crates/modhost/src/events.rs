@@ -109,6 +109,9 @@ mod tests {
         write(&mut out, &Event::WorldUnload).unwrap();
         write(&mut out, &Event::Attack(-3)).unwrap();
         write(&mut out, &Event::Remove(-3)).unwrap();
-        assert_eq!(out, [b'E', b'u', b'E', b'a', 0xff, 0xff, 0xff, 0xfd, b'E', b'r', 0xff, 0xff, 0xff, 0xfd]);
+        assert_eq!(
+            out,
+            [b'E', b'u', b'E', b'a', 0xff, 0xff, 0xff, 0xfd, b'E', b'r', 0xff, 0xff, 0xff, 0xfd]
+        );
     }
 }

@@ -156,7 +156,7 @@ public final class Host {
         lastTick += ticks * TICK_NANOS;
         if (t - lastTick > MAX_TICKS * TICK_NANOS) lastTick = t;
         for (int i = 0; i < ticks; i++) {
-            R.call(mc, "func_71407_l"); // Minecraft.runTick, a shell: the hooks that mods put in it
+            R.call(mc, "func_71407_l$head"); // Minecraft.runTick is a shell: the hooks that mods put at its head and its return are two parts
             R.call(fml, "onPreClientTick");
             Object modScreen = Minecraft.modScreen(mc);
             if (modScreen != null) {
@@ -167,6 +167,7 @@ public final class Host {
                 pollKeyboard();
             }
             R.call(fml, "onPostClientTick");
+            R.call(mc, "func_71407_l$tail"); // the return hooks of Minecraft.runTick, after the tick
         }
         float partial = Math.min(1f, (t - lastTick) / (float) TICK_NANOS);
         renderOverlay(partial);
@@ -230,11 +231,12 @@ public final class Host {
     /** GuiIngameForge.renderGameOverlay, which posts the overlay events and runs mixins hooked into it. */
     private void renderOverlay(float partial) {
         R.set(R.get(mc, "field_71428_T"), "field_74281_c", partial); // Timer.renderPartialTicks, read by the hooks of mods
-        R.call(mc, "func_71411_J"); // Minecraft.runGameLoop, a shell: the hooks that mods put in it
+        R.call(mc, "func_71411_J$head"); // Minecraft.runGameLoop is a shell: the hooks that mods put at its head and its return are two parts
         R.call(fml, "onRenderTickStart", partial);
         chat.renderOverlay(mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
+        R.call(mc, "func_71411_J$tail"); // the return hooks of Minecraft.runGameLoop, after the frame
         R.call(fml, "onRenderTickEnd", partial);
     }
 

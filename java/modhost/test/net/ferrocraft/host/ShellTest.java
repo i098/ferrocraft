@@ -26,15 +26,27 @@ public final class ShellTest implements Opcodes {
         loader.define(CI, callbackInfo());
         Class<?> cls = loader.define(FAKE, shelled);
         Object o = cls.newInstance();
-        Method tick = cls.getMethod("func_71407_l");
-        tick.invoke(o);
+        cls.getMethod("func_71407_l").invoke(o);
         cls.getMethod("func_71411_J").invoke(o);
-        @SuppressWarnings("unchecked")
-        List<String> log = (List<String>) cls.getField("log").get(null);
-        check(log.toString().equals("[head, body, nul, tail, head]"), "the shell runs the unconditional handlers in order, one handler at head and return twice, and no vanilla code: " + log);
+        check(log(cls).toString().equals("[head, body, nul, tail, head]"), "the shell runs the unconditional handlers in order, one handler at head and return twice, and no vanilla code: " + log(cls));
+        // Host order: head part, then the body (here a marker), then the tail part.
+        Loader second = new Loader();
+        second.define(CI, callbackInfo());
+        Class<?> parts = second.define(FAKE, shelled);
+        Object p = parts.newInstance();
+        parts.getMethod("func_71407_l$head").invoke(p);
+        log(parts).add("MARK");
+        parts.getMethod("func_71407_l$tail").invoke(p);
+        check(log(parts).toString().equals("[head, body, nul, MARK, tail, head]"), "head handlers run before the body, return handlers after: " + log(parts));
         check(ShellTransformer.kept().size() == 5, "five handler call sites kept: " + ShellTransformer.kept());
-        check(ShellTransformer.lost().size() == 2 && ShellTransformer.lost().toString().contains("cond") && ShellTransformer.lost().toString().contains("loop"), "the handlers in the if and in the loop are lost: " + ShellTransformer.lost());
+        String lost = ShellTransformer.lost().toString();
+        check(ShellTransformer.lost().size() == 3 && lost.contains("handler$cond") && lost.contains("handler$sw") && lost.contains("handler$loop") && lost.contains("Fake.func_71407_l"), "the handlers in the if, the switch case and the loop are lost: " + lost);
         System.out.println("ShellTest passed");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> log(Class<?> cls) throws Exception {
+        return (List<String>) cls.getField("log").get(null);
     }
 
     private static void check(boolean ok, String what) {
@@ -88,7 +100,7 @@ public final class ShellTest implements Opcodes {
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();
-        for (String h : new String[] {"head", "body", "nul", "cond", "loop", "tail"}) {
+        for (String h : new String[] {"head", "body", "nul", "cond", "sw", "loop", "tail"}) {
             m = cw.visitMethod(ACC_PRIVATE, "handler$" + h, "(L" + CI + ";)V", null, null);
             m.visitAnnotation(MERGED, false).visitEnd();
             record(m, h);
@@ -110,6 +122,15 @@ public final class ShellTest implements Opcodes {
         m.visitJumpInsn(IFEQ, skip);
         block(m, "cond", false);
         m.visitLabel(skip);
+        m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
+        Label inCase = new Label();
+        Label endCase = new Label();
+        m.visitInsn(ICONST_0);
+        m.visitTableSwitchInsn(0, 0, endCase, inCase);
+        m.visitLabel(inCase);
+        m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
+        block(m, "sw", false);
+        m.visitLabel(endCase);
         m.visitFrame(F_NEW, 2, new Object[] {FAKE, CI}, 0, new Object[0]);
         Label again = new Label();
         m.visitLabel(again);

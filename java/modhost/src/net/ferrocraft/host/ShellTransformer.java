@@ -19,8 +19,11 @@ import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
@@ -72,31 +75,41 @@ public final class ShellTransformer implements IClassTransformer {
         }
     }
 
-    /** Turns the loop methods of the class into shells; with no mod hook there, a shell holds only the return. */
+    /**
+     * Turns the loop methods of the class into shells; with no mod hook there, a shell holds only the return. Each shell
+     * {@code name} calls {@code name$head} (the handler blocks before the body) and then {@code name$tail} (the return blocks).
+     */
     static byte[] shell(byte[] bytes) {
         ClassNode cls = new ClassNode();
         new ClassReader(bytes).accept(cls, ClassReader.SKIP_DEBUG);
         Set<String> merged = new HashSet<>();
+        List<MethodNode> shells = new ArrayList<>();
         for (MethodNode m : methods(cls)) {
             if (isMerged(m)) merged.add(m.name + m.desc);
+            if (SHELLS.contains(m.name + m.desc)) shells.add(m);
         }
-        for (MethodNode m : methods(cls)) {
-            if (SHELLS.contains(m.name + m.desc)) shell(cls, m, merged);
-        }
+        for (MethodNode m : shells) methods(cls).addAll(shell(cls, m, merged));
         ClassWriter out = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cls.accept(out);
         return out.toByteArray();
     }
 
-    private static void shell(ClassNode cls, MethodNode m, Set<String> merged) {
+    /** Rewrites {@code m} into a call of its two parts, which it returns. */
+    private static List<MethodNode> shell(ClassNode cls, MethodNode m, Set<String> merged) {
         InsnList old = m.instructions;
-        List<AbstractInsnNode> keep = new ArrayList<>();
+        List<AbstractInsnNode> head = new ArrayList<>();
+        List<AbstractInsnNode> tail = new ArrayList<>();
         Map<LabelNode, Integer> frames = new HashMap<>();
-        collect(old, cls, merged, keep, frames);
+        collect(m, cls, merged, head, tail, frames);
+        List<AbstractInsnNode> all = new ArrayList<>(head);
+        all.addAll(tail);
         List<String> gone = new ArrayList<>();
         List<String> here = new ArrayList<>();
-        sortCalls(old, cls, m.name, merged, new HashSet<>(keep), here, gone);
-        m.instructions = build(old, keep, frames, cls.name);
+        sortCalls(old, cls, m.name, merged, new HashSet<>(all), here, gone);
+        List<MethodNode> parts = new ArrayList<>();
+        parts.add(part(m, "$head", build(old, head, frames, cls.name)));
+        parts.add(part(m, "$tail", build(old, tail, frames, cls.name)));
+        m.instructions = callParts(cls.name, m.name);
         m.tryCatchBlocks.clear();
         m.localVariables = null;
         synchronized (ShellTransformer.kept) {
@@ -105,6 +118,7 @@ public final class ShellTransformer implements IClassTransformer {
         }
         for (String s : here) Host.log("shell: kept " + s);
         for (String s : gone) Host.log("shell: lost, inside the body: " + s);
+        return parts;
     }
 
     /** Splits the handler calls of the vanilla body into those the shell keeps and those it loses. */
@@ -122,17 +136,31 @@ public final class ShellTransformer implements IClassTransformer {
         return c.owner.equals(cls.name) && merged.contains(c.name + c.desc);
     }
 
-    /** Picks the instructions of the blocks that no branch encloses; the cancel-check frame labels go to {@code frames}. */
-    private static void collect(InsnList old, ClassNode cls, Set<String> merged, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames) {
-        for (AbstractInsnNode n = old.getFirst(); n != null; ) {
+    /**
+     * Picks the instructions of the blocks that no branch encloses. A block the method returns right after is a return block
+     * and goes to {@code tail}; the others go to {@code head}. The cancel-check frame labels go to {@code frames}.
+     */
+    private static void collect(MethodNode m, ClassNode cls, Set<String> merged, List<AbstractInsnNode> head, List<AbstractInsnNode> tail, Map<LabelNode, Integer> frames) {
+        for (AbstractInsnNode n = m.instructions.getFirst(); n != null; ) {
             Block b = blockAt(n, cls, merged);
             if (b == null) {
                 n = n.getNext();
                 continue;
             }
-            if (!inBranch(old, n, b.end)) keepBlock(n, b, keep, frames);
+            if (!inBranch(m, n, b.end)) keepBlock(n, b, isReturnBlock(b, cls, merged) ? tail : head, frames);
             n = b.end.getNext();
         }
+    }
+
+    /** A return block is followed by nothing but other blocks before the return of the method. */
+    private static boolean isReturnBlock(Block b, ClassNode cls, Set<String> merged) {
+        AbstractInsnNode next = nextReal(b.end);
+        Block more = next == null ? null : blockAt(next, cls, merged);
+        while (more != null) {
+            next = nextReal(more.end);
+            more = next == null ? null : blockAt(next, cls, merged);
+        }
+        return next != null && next.getOpcode() == Opcodes.RETURN;
     }
 
     private static Block blockAt(AbstractInsnNode n, ClassNode cls, Set<String> merged) {
@@ -160,6 +188,23 @@ public final class ShellTransformer implements IClassTransformer {
         return shell;
     }
 
+    /** The shell body: call the head part, then the tail part. */
+    private static InsnList callParts(String owner, String name) {
+        InsnList list = new InsnList();
+        for (String part : new String[] {"$head", "$tail"}) {
+            list.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, owner, name + part, "()V", false));
+        }
+        list.add(new InsnNode(Opcodes.RETURN));
+        return list;
+    }
+
+    private static MethodNode part(MethodNode m, String suffix, InsnList body) {
+        MethodNode p = new MethodNode(m.access, m.name + suffix, m.desc, null, null);
+        p.instructions = body;
+        return p;
+    }
+
     /**
      * One injector block: from the {@code new CallbackInfo} to the end of the cancel check (or of the handler call), inclusive.
      * {@code ci} is the local of the CallbackInfo; {@code cancelLabel} is the label that ends the cancel check, or null.
@@ -185,20 +230,53 @@ public final class ShellTransformer implements IClassTransformer {
         return new FrameNode(Opcodes.F_NEW, locals.length, locals, 0, new Object[0]);
     }
 
-    /** True when a jump from outside the block {@code first..last} passes over it (an if) or back to before it (a loop). */
-    private static boolean inBranch(InsnList list, AbstractInsnNode first, AbstractInsnNode last) {
+    /** True when a branch encloses the block {@code first..last}: a jump or switch passes over it (an if, a case) or back to before it (a loop), or it lies in a catch handler. */
+    private static boolean inBranch(MethodNode m, AbstractInsnNode first, AbstractInsnNode last) {
+        InsnList list = m.instructions;
         int from = list.indexOf(first);
         int to = list.indexOf(last);
         for (AbstractInsnNode k = list.getFirst(); k != null; k = k.getNext()) {
-            if (k instanceof JumpInsnNode && crosses(list, (JumpInsnNode) k, from, to)) return true;
+            if (crosses(list, k, from, to)) return true;
+        }
+        return inHandler(m, from);
+    }
+
+    private static boolean crosses(InsnList list, AbstractInsnNode k, int from, int to) {
+        int at = list.indexOf(k);
+        for (LabelNode label : targets(k)) {
+            int target = list.indexOf(label);
+            if (at < from && target > to || at > to && target <= from) return true;
         }
         return false;
     }
 
-    private static boolean crosses(InsnList list, JumpInsnNode j, int from, int to) {
-        int at = list.indexOf(j);
-        int target = list.indexOf(j.label);
-        return at < from && target > to || at > to && target <= from;
+    @SuppressWarnings("unchecked")
+    private static List<LabelNode> targets(AbstractInsnNode k) {
+        List<LabelNode> out = new ArrayList<>();
+        if (k instanceof JumpInsnNode) out.add(((JumpInsnNode) k).label);
+        if (k instanceof TableSwitchInsnNode) {
+            out.add(((TableSwitchInsnNode) k).dflt);
+            out.addAll(((TableSwitchInsnNode) k).labels);
+        }
+        if (k instanceof LookupSwitchInsnNode) {
+            out.add(((LookupSwitchInsnNode) k).dflt);
+            out.addAll(((LookupSwitchInsnNode) k).labels);
+        }
+        return out;
+    }
+
+    /** A catch handler runs from its label to the target of the goto that ends the try body, or to the end of the method. */
+    @SuppressWarnings("unchecked")
+    private static boolean inHandler(MethodNode m, int from) {
+        InsnList list = m.instructions;
+        for (TryCatchBlockNode t : (List<TryCatchBlockNode>) m.tryCatchBlocks) {
+            int h = list.indexOf(t.handler);
+            AbstractInsnNode prev = t.handler.getPrevious();
+            while (prev != null && prev.getOpcode() < 0) prev = prev.getPrevious();
+            int end = prev != null && prev.getOpcode() == Opcodes.GOTO ? list.indexOf(((JumpInsnNode) prev).label) : list.size();
+            if (from >= h && from < (end > h ? end : list.size())) return true;
+        }
+        return false;
     }
 
     /**

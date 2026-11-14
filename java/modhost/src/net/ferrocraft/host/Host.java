@@ -15,7 +15,7 @@ import net.minecraft.launchwrapper.Launch;
  * <p>Hello (Java to Rust): 'H', the token, then the brand of ClientBrandRetriever.getClientModName() as writeUTF, then the hook table of {@link HookIndex}.
  * Frame in (Rust to Java): 'F', i32 width, i32 height, i32 guiScale, u8 forceUnicode, u8 screenOpen,
  * i32 mouseX, i32 mouseY, u16 event count, then the key and mouse events of wire.rs. 'P' is a
- * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'O' asks for the world values mods change, see {@link Overrides}. Any other first byte ends the host.
+ * player tick request, see {@link Player}. 'C' is a chat line, see {@link Chat}. 'M' is the HUD state mirror, see {@link Mirror}, which comes before a frame. 'L' is the HUD lists (tab list, scoreboard, boss bar, title, action bar), see {@link HudLists}, which follows the mirror. 'O' asks for the world values mods change, see {@link Overrides}. Any other first byte ends the host.
  * Frame out: the bytes of {@link Sink#take(boolean)}: whether a screen a mod opened is current, then the draw commands.
  */
 public final class Host {
@@ -30,6 +30,7 @@ public final class Host {
     private final Overrides overrides;
     private final Chat chat = new Chat();
     private final Mirror mirror;
+    private final HudLists lists;
     private boolean screenOpen;
 
     private Host(Object mc) {
@@ -39,6 +40,7 @@ public final class Host {
         this.player = new Player(mc, R.get(mc, "field_71439_g"), R.get(mc, "field_71474_y"));
         this.overrides = new Overrides(mc);
         this.mirror = new Mirror(mc, R.get(mc, "field_71439_g"));
+        this.lists = new HudLists(mc, R.get(mc, "field_71439_g"));
     }
 
     /** Entry point; the JVM never exits on its own because mods start non-daemon threads. */
@@ -118,6 +120,10 @@ public final class Host {
             }
             if (tag == 'M') {
                 mirror.apply(in);
+                continue;
+            }
+            if (tag == 'L') {
+                lists.apply(in);
                 continue;
             }
             if (tag != 'F') return;

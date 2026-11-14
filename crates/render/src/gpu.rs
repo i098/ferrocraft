@@ -114,7 +114,7 @@ pub struct Renderer {
     world_group: wgpu::BindGroup,
     env_group: wgpu::BindGroup,
     entity_group: wgpu::BindGroup,
-    entity_skins: Skins,
+    pub(crate) entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
@@ -414,6 +414,7 @@ impl Renderer {
         let snow_group =
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
+        let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -485,7 +486,7 @@ impl Renderer {
             held: None,
             particles: Quads::default(),
             gui_pipes,
-            textures: HashMap::new(),
+            textures: HashMap::from([(entity::gui::ATLAS.to_owned(), entity_atlas)]),
             item_textures: HashMap::new(),
             source,
             mesher: Mesher::new(atlas.clone()),

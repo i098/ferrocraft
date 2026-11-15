@@ -292,6 +292,7 @@ public class Harness {
         s.setPositionAndAngles(0.5, 70, 0.5, Float.parseFloat(t[6]), 0f);
         s.bodyYaw = s.yaw;
         s.lastBodyYaw = s.yaw;
+        s.headYaw = s.yaw;
         System.out.println(s.getNetworkId());
         for (int i = 0; i < Integer.parseInt(t[1]); i++) {
             if (i == 0) {

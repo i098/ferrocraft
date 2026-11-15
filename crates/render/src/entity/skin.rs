@@ -726,6 +726,19 @@ mod tests {
     }
 
     #[test]
+    fn every_slot_has_its_own_rect_inside_the_atlas() {
+        let mut seen = std::collections::HashSet::new();
+        for s in 0..TOTAL {
+            let [x, y] = Skins::origin(s);
+            assert!(
+                x + WIDTH <= Skins::width() && y + SLOT <= Skins::height(),
+                "slot {s}"
+            );
+            assert!(seen.insert([x, y]), "slot {s} shares a rect");
+        }
+    }
+
+    #[test]
     fn offsets_of_the_last_slot_point_into_the_second_column() {
         let last = Skins::uv_offset(((TOTAL - 1) * SLOT) as f32);
         let w = Skins::width() as f32;

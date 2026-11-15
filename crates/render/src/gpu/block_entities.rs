@@ -28,9 +28,16 @@ impl Renderer {
     }
 
     /// The entity, `Delay` and `MinSpawnDelay` of a mob spawner (`S35` action 1).
-    pub fn set_spawner(&mut self, pos: [i32; 3], entity: &str, delay: i16, min_delay: Option<i32>) {
+    /// `difficulty` (the `S41` id) and `world_time` set the `onInitialSpawn` rolls of the mob it shows.
+    pub fn set_spawner(
+        &mut self,
+        pos: [i32; 3],
+        (entity, delay, min_delay): (&str, i16, Option<i32>),
+        difficulty: u8,
+        world_time: i64,
+    ) {
         self.block_entities
-            .set_spawner(pos, entity, delay, min_delay);
+            .set_spawner(pos, (entity, delay, min_delay), difficulty, world_time);
     }
 
     /// One client tick (20 Hz) of the chest lids and enchanting table books; `players` are all player positions.

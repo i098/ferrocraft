@@ -511,6 +511,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         SPIDER | CAVE_SPIDER => vec![eyes(Skin::SpiderEyes)],
         ENDERMAN => vec![eyes(Skin::EndermanEyes)],
         super::horse::HORSE => super::horse::layers(d, m),
+        super::dragon::DRAGON => vec![eyes(Skin::DragonEyes)],
         _ => super::mobs2::layers(d),
     }
 }

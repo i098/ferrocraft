@@ -844,8 +844,11 @@ impl App {
                 )
             })
             .collect();
+        // The guardian's eye looks at the camera entity's eyes (`GuardianModel.setupAnimation`).
+        let viewer = self.view_ray(frac).map_or(cam.pos, |r| r.0);
         for (e, d) in self.game.entities.iter().zip(&mut draws) {
             d.view = [cam.yaw, cam.pitch];
+            d.look.viewer = viewer;
             self.team_tag(e, d);
             self.held_and_line(e, d, frac);
             d.look.leash = self.leash_holder(e, frac);
@@ -1610,7 +1613,7 @@ fn entity_draw(
             skin_parts: e.meta.stand.unwrap_or(0x7F),
             variant: match e.kind {
                 Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
-                Kind::Mob(120) => e.meta.guardian.map_or(0, |p| p as u8),
+                Kind::Mob(120 | 68) => e.meta.guardian.map_or(0, |p| p as u8),
                 _ => 0,
             },
             cape: Some(CapeSway::default()),

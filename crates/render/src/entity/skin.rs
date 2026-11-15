@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 72] = [
+const SKINS: [&str; 73] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -95,7 +95,7 @@ const EYES: [usize; 2] = [43, 44];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Skin; 26] = [
+const SLIME_SLOT_SKINS: [Skin; 27] = [
     Skin::Slime,
     Skin::MagmaCube,
     Skin::Blaze,

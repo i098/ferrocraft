@@ -220,15 +220,30 @@ mod tests {
         assert!((at(700_000) - at(0)).abs() < 1e-6);
     }
 
+    // Hand-worked from vanilla: eye = feet, near = (cam - feet) + look * 0.05, so for the sky layer
+    // (depth 65, scale 1/8, angle 0) at corner (4, 4) with above = 1.25 the coordinates are
+    // u = (-px - 65/1.25 * (px - camx) - 0.5 + 0.5) / 8 = 2.75 and v = 29.075, whatever the feet.
     #[test]
-    fn third_person_camera_shifts_the_star_parallax() {
+    fn star_parallax_follows_the_camera_not_the_view_entity() {
         let be = portal_at([4, 60, 4]);
-        let feet = [4.5, 60.38, 8.5];
-        let first = be.portals(&cam([4.5, 62.0, 8.5]), feet, 0);
-        // Same view entity, camera four blocks behind it.
-        let third = be.portals(&cam([4.5, 62.0, 12.5]), feet, 0);
-        assert_ne!(first.layers.vertices[0].uv, third.layers.vertices[0].uv);
-        // The far layer drifts with the camera offset: sky scale 1/8 times 4 blocks * 65 / above.
-        assert_ne!(first.sky.vertices[0].uv, third.sky.vertices[0].uv);
+        let c = Camera {
+            pos: [4.5, 62.0, 8.5],
+            yaw: 0.0,
+            pitch: 0.0,
+            ..Camera::default()
+        };
+        for feet in [[4.5, 60.38, 8.5], [5.5, 60.38, 6.5]] {
+            let uv = be.portals(&c, feet, 0).sky.vertices[0].uv;
+            assert!((uv[0] - 2.75).abs() < 1e-3 && (uv[1] - 29.075).abs() < 1e-3, "{uv:?}");
+        }
+    }
+
+    #[test]
+    fn range_is_measured_from_the_view_entity_not_the_camera() {
+        let be = portal_at([4, 60, 4]);
+        let far_cam = cam([4.5, 62.0, 90.0]);
+        assert!(!be.portals(&far_cam, [4.5, 60.38, 8.5], 0).sky.vertices.is_empty());
+        let near_cam = cam([4.5, 62.0, 8.5]);
+        assert!(be.portals(&near_cam, [4.5, 60.38, 90.0], 0).sky.vertices.is_empty());
     }
 }

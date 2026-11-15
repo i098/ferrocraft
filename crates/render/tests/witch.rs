@@ -68,6 +68,8 @@ fn witch(x: f64, z: f64, yaw: f32, held: i16) -> EntityDraw {
 }
 
 const POTION: i16 = 373;
+const SWORD: i16 = 276;
+const ROD: i16 = 346;
 
 #[test]
 #[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
@@ -112,6 +114,16 @@ fn witch_draws_its_model_with_hat_and_potion() {
         let frame = alone(&mut r, close);
         let path = std::path::PathBuf::from(dir).join(format!("{name}_potion.png"));
         encode_png(&path, 800, 450, &frame).unwrap();
+    }
+    if let Some(dir) = std::env::var_os("WITCH_PROOF_DIR") {
+        let name = std::env::var("WITCH_PROOF_NAME").unwrap_or_else(|_| "after".into());
+        for (what, id) in [("sword", SWORD), ("rod", ROD)] {
+            let mut close = witch(0.0, 1.6, 180.0, id);
+            close.head_yaw = 150.0;
+            let frame = alone(&mut r, close);
+            let path = std::path::PathBuf::from(&dir).join(format!("{name}_{what}.png"));
+            encode_png(&path, 800, 450, &frame).unwrap();
+        }
     }
     let plain = alone(&mut r, witch(0.0, 5.0, 180.0, 0));
     let mut with_potion = witch(0.0, 5.0, 180.0, POTION);

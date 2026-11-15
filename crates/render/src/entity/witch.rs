@@ -1,11 +1,9 @@
 //! The witch (mob 66), ported from the 1.8.9 `ModelWitch`, `RenderWitch` and `LayerHeldItemWitch`.
 //! Every constant was read from the `WitchModel` and `WitchItemInHandLayer` bytecode; the part
 //! layout is checked against `harness/mobmodels.sh`.
-//!
-//! Not ported: the held-item pose of an item that `Item.isFull3D` reports (swords, tools, rods); a
-//! vanilla witch only holds a potion.
 
 use super::mobs::{model, villager};
+use super::wielded;
 use super::{EntityDraw, Model, Part, Skin};
 use crate::hand::{chain, rotate, scale3, translate, Mat};
 use std::f32::consts::PI;
@@ -131,6 +129,8 @@ fn item_pose(held: i16, block3d: bool) -> Mat {
             rotate(-100.0, 0),
             rotate(-20.0, 1),
         ])
+    } else if wielded::is_wielded(held) {
+        wielded::pose(held)
     } else {
         chain(&[
             translate(0.1875, 0.1875, 0.0),

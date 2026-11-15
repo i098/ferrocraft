@@ -919,7 +919,7 @@ impl Renderer {
         let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);
-        let mut glint = entity::build_glint(draws);
+        let mut glint = entity::build_glint(draws, None);
         let base = glint.vertices.len() as u32;
         glint.vertices.extend(items.vertices);
         glint.indices.extend(items.indices.iter().map(|i| i + base));

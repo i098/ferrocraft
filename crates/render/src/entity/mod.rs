@@ -12,6 +12,7 @@ mod arrows;
 mod baby;
 mod block;
 pub(crate) mod fire;
+mod glint_mask;
 pub(crate) mod guardian;
 pub(crate) mod gui;
 pub mod hanging;
@@ -36,6 +37,7 @@ const PLAYER_LEFT_PANTS: usize = 11;
 use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
 pub use armorstand::StandLook;
+use glint_mask::Mask;
 pub use projectile::Thrower;
 pub use skin::{Skin, Skins, SLOT};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
@@ -834,8 +836,9 @@ pub const ITEM_GLINT_COLOR: [f32; 4] = [0.502, 0.251, 0.8, 1.0];
 
 /// The glint layer: the glowing armor pieces and held items again, once per vanilla pass, with
 /// texture coordinates that scroll over the surface. Blended `SRC_COLOR, ONE` at the same depth as
-/// the model.
-pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
+/// the model. With `masked` (the GUI, which has no equal depth test) the armor glint is cut to the
+/// opaque texels of the armor texture in `skins`.
+pub fn build_glint(draws: &[EntityDraw], masked: Option<&Skins>) -> MeshData {
     let mut out = MeshData::default();
     for d in draws {
         let m = armor_model(d);
@@ -849,18 +852,38 @@ pub fn build_glint(draws: &[EntityDraw]) -> MeshData {
         let xf = Xf::new(d, false);
         let [sw, sh] = skin_dims();
         for pass in 0..2 {
-            let start = out.vertices.len();
             for (slot, parts, grow, layer) in ARMOR_PIECES {
-                if d.armor_glint[slot] && Skin::armor(d.armor[slot], layer, false).is_some() {
-                    for &i in parts {
-                        emit_part(&mut out, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
-                    }
+                let Some(skin) = Skin::armor(d.armor[slot], layer, false) else {
+                    continue;
+                };
+                if !d.armor_glint[slot] {
+                    continue;
                 }
-            }
-            for v in &mut out.vertices[start..] {
-                let uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
-                (v.uv, v.color) = (glint_uv_armor(uv, d.age, pass), ARMOR_GLINT_COLOR);
-                v.light = [1.0; 2];
+                let mut piece = MeshData::default();
+                for &i in parts {
+                    emit_part(&mut piece, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
+                }
+                // Texture coordinates of the 64x32 armor texture itself.
+                for v in &mut piece.vertices {
+                    v.uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
+                    (v.color, v.light) = (ARMOR_GLINT_COLOR, [1.0; 2]);
+                }
+                let map = |uv| glint_uv_armor(uv, d.age, pass);
+                let piece = match masked {
+                    Some(skins) => {
+                        let row = skins.v_offset(skin) as usize;
+                        let mask =
+                            Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32);
+                        glint_mask::split(&piece, &mask, &map)
+                    }
+                    None => {
+                        piece.vertices.iter_mut().for_each(|v| v.uv = map(v.uv));
+                        piece
+                    }
+                };
+                let base = out.vertices.len() as u32;
+                out.vertices.extend(piece.vertices);
+                out.indices.extend(piece.indices.iter().map(|i| i + base));
             }
         }
     }
@@ -1901,13 +1924,13 @@ mod tests {
         let mut d = steve();
         d.armor = [313, 0, 0, 0];
         d.held = 276;
-        assert!(build_glint(&[d.clone()]).is_empty());
+        assert!(build_glint(&[d.clone()], None).is_empty());
         d.armor_glint = [true, false, false, false];
-        let boots = build_glint(&[d.clone()]).vertices.len();
+        let boots = build_glint(&[d.clone()], None).vertices.len();
         assert_eq!(boots, 2 * 2 * 24, "two boot boxes, two passes");
         // The held item's glint is drawn with its model in `item`, not here.
         d.held_glint = true;
-        assert_eq!(build_glint(&[d]).vertices.len(), boots);
+        assert_eq!(build_glint(&[d], None).vertices.len(), boots);
     }
 
     #[test]

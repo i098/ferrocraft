@@ -861,6 +861,14 @@ pub(crate) fn build_unshaded(draws: &[EntityDraw], skins: &Skins) -> MeshData {
     mesh
 }
 
+/// [`item::build`] at full light and without the per-face shade, for the GUI.
+pub(crate) fn build_items_unshaded(d: &EntityDraw, models: &item::Models) -> item::Items {
+    UNSHADED.set(true);
+    let items = item::build(std::slice::from_ref(d), models, |_| [1.0, 1.0]);
+    UNSHADED.set(false);
+    items
+}
+
 /// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
 /// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
 pub fn build(

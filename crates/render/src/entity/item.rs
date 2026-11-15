@@ -216,6 +216,9 @@ pub(super) fn dir(m: &Mat, n: V3) -> V3 {
 /// Face shade of a world-space normal: lit from above like the entity boxes (top 1, side 0.8,
 /// bottom 0.5).
 pub(super) fn shade(n: V3) -> f32 {
+    if super::UNSHADED.get() {
+        return 1.0;
+    }
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
     let y = n[1] / len;
     if y >= 0.0 {

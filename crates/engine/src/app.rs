@@ -1284,7 +1284,11 @@ impl App {
             mods.draw(&mut g, &mut mod_textures);
         }
         textures.extend(mod_textures);
-        (with_entities(r, g), textures, effects)
+        let (entities, quads) = (g.take_entities(), g.into_quads());
+        let Some(r) = &mut self.renderer else {
+            return (quads, textures, effects);
+        };
+        (with_entities(r, entities, quads), textures, effects)
     }
 
     /// The local player for the model of an open container screen.
@@ -1294,9 +1298,11 @@ impl App {
 }
 
 /// The frame's quads with the entity models of `Gui::entity` spliced in at their draw position.
-fn with_entities(r: &render::Renderer, mut g: gui::Gui) -> Vec<render::Quad> {
-    let entities = g.take_entities();
-    let mut quads = g.into_quads();
+fn with_entities(
+    r: &mut render::Renderer,
+    entities: Vec<gui::toolkit::PlacedEntity>,
+    mut quads: Vec<render::Quad>,
+) -> Vec<render::Quad> {
     for e in entities.iter().rev() {
         let model = r.gui_entity(e.origin, e.scale, e.mouse, &e.draw);
         quads.splice(e.at..e.at, model);

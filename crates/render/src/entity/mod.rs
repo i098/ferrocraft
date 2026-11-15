@@ -929,7 +929,7 @@ pub fn build_glint(draws: &[EntityDraw], masked: Option<&Skins>) -> MeshData {
 /// The opaque texels of the armor texture of `skin` in the skin atlas.
 fn armor_mask(skins: &Skins, skin: Skin) -> Mask {
     let row = skins.v_offset(skin) as usize;
-    Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32)
+    Mask::from_rgba(&skins.rgba, Skins::row_width() as usize, row, 64, 32)
 }
 
 /// One vanilla glint pass over the glowing armor pieces of `d`, appended to `out`.
@@ -1540,8 +1540,8 @@ pub(crate) fn add_box(
     let [x2, y2, z2] = [min[0] + size[0], min[1] + size[1], min[2] + size[2]];
     // `ModelBox` lays the texture out by the box size, not by the inflated geometry.
     let [w, h, d] = layout;
-    let v0 = v0 + v_off;
-    let uv = |u: f32, v: f32| [u / tex[0], v / tex[1]];
+    let at = Skins::uv_offset(v_off);
+    let uv = |u: f32, v: f32| [u / tex[0] + at[0], v / tex[1] + at[1]];
     // (corners in model space, texel corners, outward model-space normal, shade)
     let mut faces: [Face; 6] = [
         // +x: u grows with z
@@ -1962,11 +1962,12 @@ pub(crate) mod tests {
                 .vertices
                 .iter()
                 .filter(|p| {
+                    let at = Skins::uv_offset(Skins::flat().v_offset(Skin::White));
                     let (u, v) = (
-                        p.uv[0] * 64.0,
-                        p.uv[1] * Skins::height() as f32 - Skins::flat().v_offset(Skin::White),
+                        (p.uv[0] - at[0]) * Skins::width() as f32,
+                        (p.uv[1] - at[1]) * Skins::height() as f32,
                     );
-                    (48.0..=64.0).contains(&v) && (16.0..=48.0).contains(&u)
+                    (48.0..=64.0).contains(&v) && (32.0..=96.0).contains(&u)
                 })
                 .count()
         };
@@ -2102,11 +2103,13 @@ pub(crate) mod tests {
             d.yaw = yaw;
             d.head_yaw = yaw;
             let m = build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]);
-            let v = |y: f32| (Skins::flat().v_offset(Skin::White) + y) / Skins::height() as f32;
+            let at = Skins::uv_offset(Skins::flat().v_offset(Skin::White));
+            let u = |x: f32| at[0] + x / Skins::width() as f32;
+            let v = |y: f32| at[1] + y / Skins::height() as f32;
             let q: Vec<_> = m
                 .vertices
                 .iter()
-                .filter(|p| (p.uv[0] - 8.0 / 64.0).abs() < 1e-4 && (p.uv[1] - v(8.0)).abs() < 1e-4)
+                .filter(|p| (p.uv[0] - u(16.0)).abs() < 1e-4 && (p.uv[1] - v(8.0)).abs() < 1e-4)
                 .collect();
             (q[0].pos[0] - 10.0, q[0].pos[2] - 10.0)
         };

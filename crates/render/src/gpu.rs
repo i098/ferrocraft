@@ -358,7 +358,7 @@ impl Renderer {
             &queue,
             Skins::width(),
             Skins::height(),
-            &entity_skins.rgba,
+            &entity_skins.atlas(),
         );
         let entity_view = entity_tex.create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1100,22 +1100,22 @@ impl Renderer {
 
     /// Stores the decoded skin of player `key` and uploads its slot.
     pub fn set_player_skin(&mut self, key: u128, img: &Image) {
-        let (row, rgba) = self.entity_skins.set_player(key, img);
+        let ([x, y], rgba) = self.entity_skins.set_player(key, img);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.entity_tex,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
+                origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(Skins::width() * 4),
+                bytes_per_row: Some(Skins::row_width() * 4),
                 rows_per_image: None,
             },
             wgpu::Extent3d {
-                width: Skins::width(),
+                width: Skins::row_width(),
                 height: entity::SLOT,
                 depth_or_array_layers: 1,
             },
@@ -1124,22 +1124,22 @@ impl Renderer {
 
     /// Stores the decoded cape of player `key` and uploads its slot.
     pub fn set_player_cape(&mut self, key: u128, img: &Image) {
-        let (row, rgba) = self.entity_skins.set_cape(key, img);
+        let ([x, y], rgba) = self.entity_skins.set_cape(key, img);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.entity_tex,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
+                origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(Skins::width() * 4),
+                bytes_per_row: Some(Skins::row_width() * 4),
                 rows_per_image: None,
             },
             wgpu::Extent3d {
-                width: Skins::width(),
+                width: Skins::row_width(),
                 height: entity::SLOT,
                 depth_or_array_layers: 1,
             },
@@ -2585,11 +2585,7 @@ async fn request_device(
         }
     }
     let adapter = adapter.expect("no wgpu adapter found");
-    // The entity skin atlas stacks 64 pixel slots and outgrew the default 8192; every desktop adapter reaches 16384.
-    let limits = wgpu::Limits {
-        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384),
-        ..wgpu::Limits::default()
-    };
+    let limits = wgpu::Limits::default();
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {

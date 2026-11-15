@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 const TILE: usize = 16;
 const COLUMNS: usize = 16;
-/// The wgpu default `max_texture_dimension_2d`; the block atlas stays within it.
+/// The wgpu default `max_texture_dimension_2d`, which every adapter offers; the block atlas and the entity skin atlas stay within it.
 const MAX_ATLAS_SIDE: usize = 8192;
 
 pub enum AssetSource {

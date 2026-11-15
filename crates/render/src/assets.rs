@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 const TILE: usize = 16;
 const COLUMNS: usize = 16;
-/// `wgpu::Limits::default().max_texture_dimension_2d`, the limit of the device `request_device` asks for.
+/// The wgpu default `max_texture_dimension_2d`; the block atlas stays within it.
 const MAX_ATLAS_SIDE: usize = 8192;
 
 pub enum AssetSource {

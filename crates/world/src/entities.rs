@@ -548,7 +548,7 @@ impl Entity {
     }
 
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
-    fn tick(&mut self) {
+    fn tick(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
         self.age += 1;
         self.use_ticks =
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
@@ -588,13 +588,25 @@ impl Entity {
             self.squish.tick(self.on_ground, id == 62);
         }
         if self.kind == Kind::Mob(SQUID) {
-            // Water is not queried here: a squid is taken to swim (see `Squid::tick`).
+            let (w, h) = self.size();
+            let (hw, hh) = (f64::from(w) / 2.0 - 0.001, f64::from(h));
+            let min = [
+                self.pos[0] - hw,
+                self.pos[1] + 0.6 + 0.001,
+                self.pos[2] - hw,
+            ];
+            let max = [
+                self.pos[0] + hw,
+                self.pos[1] + hh - 0.6 - 0.001,
+                self.pos[2] + hw,
+            ];
+            let in_water = crate::fluid::water_drag(at, min, max, false).0;
             self.squid.tick(
                 &mut self.vel,
                 [dx, dz],
                 self.yaw,
                 interpolating,
-                true,
+                in_water,
                 &mut self.head_yaw,
             );
         }
@@ -1229,10 +1241,15 @@ impl Entities {
         }
     }
 
-    /// One 20 TPS step for every tracked entity; dead ones leave after their death animation.
+    /// One 20 TPS step for every tracked entity with no water anywhere; dead ones leave after their death animation.
     pub fn tick(&mut self) {
+        self.tick_in(&|_| 0);
+    }
+
+    /// `tick`, with `at` giving the block state (`id << 4 | meta`) at a position, for the squid's `isInWater`.
+    pub fn tick_in(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
         for e in self.map.values_mut() {
-            e.tick();
+            e.tick(at);
         }
         for i in 0..self.emitters.len() {
             self.burst(i);
@@ -1485,6 +1502,31 @@ mod tests {
         });
     }
 
+    /// `EntitySquid.isInWater`: on land the pitch eases toward -90, in a water cell it does not.
+    #[test]
+    fn squid_swims_only_where_its_box_touches_water() {
+        let pitch_after_tick = |at: &dyn Fn([i32; 3]) -> u16| {
+            let mut es = Entities::default();
+            es.apply(EntityEvent::SpawnMob {
+                id: 1,
+                kind: SQUID,
+                pos: [0, 64 * 32, 0],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: SizeMeta::default(),
+            });
+            es.tick_in(at);
+            es.get(1).unwrap().squid.pose(1.0).pitch
+        };
+        assert!(pitch_after_tick(&|_| 0) < -1.0);
+        assert!(pitch_after_tick(&|[_, y, _]| if y == 64 { 9 << 4 } else { 0 }).abs() < 1e-3);
+    }
+
     #[test]
     fn overlapping_mob_pushes_the_player_away_like_apply_entity_collision() {
         let mut es = Entities::default();
@@ -1524,7 +1566,7 @@ mod tests {
         e.yaw = 170.0;
         e.target.yaw = angle(-127);
         e.target.steps = STEPS;
-        e.tick();
+        e.tick(&|_| 0);
         assert!(e.yaw > 170.0, "went the long way: {}", e.yaw);
     }
 
@@ -1537,7 +1579,7 @@ mod tests {
         let (yaw, pitch) = e.lerp_look(0.5);
         assert!((yaw - 180.0).abs() < 1e-4, "went the long way: {yaw}");
         assert!((pitch - 20.0).abs() < 1e-4);
-        e.tick();
+        e.tick(&|_| 0);
         assert_eq!((e.prev_yaw, e.prev_pitch), (-170.0, 30.0));
     }
 

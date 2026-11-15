@@ -25,8 +25,8 @@ mod rabbit;
 pub(crate) mod shadow;
 mod sheep;
 mod skin;
-pub mod vehicle;
 mod squid;
+pub mod vehicle;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
 const PLAYER_JACKET: usize = 7;

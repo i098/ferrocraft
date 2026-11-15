@@ -123,4 +123,22 @@ mod tests {
             "{q:?}"
         );
     }
+
+    /// Hand-derived from the vanilla call sequence for p = (1, 2, 0), roll 90, pitch 90, yaw 90:
+    /// (1, 0.8, 0) -> roll (0, 0.8, -1) -> pitch (0, 1, 0.8) -> yaw (0.8, 1, 0) -> up 0.5.
+    /// Rolling after pitching would give (-1, 0.5, -0.8).
+    #[test]
+    fn corpse_transform_composes_roll_pitch_yaw_in_vanilla_order() {
+        let pose = Pose {
+            roll: 90.0,
+            pitch: 90.0,
+            body_yaw: 90.0,
+            ..Pose::default()
+        };
+        let q = place(&pose, [1.0, 2.0, 0.0]);
+        assert!(
+            (q[0] - 0.8).abs() < 1e-5 && (q[1] - 1.5).abs() < 1e-5 && q[2].abs() < 1e-5,
+            "{q:?}"
+        );
+    }
 }

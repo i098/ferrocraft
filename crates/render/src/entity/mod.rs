@@ -4,7 +4,7 @@
 //! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Held items and dropped items are in [`item`]. Name tags
+//! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
 mod armorstand;
@@ -25,6 +25,7 @@ mod rabbit;
 pub(crate) mod shadow;
 mod sheep;
 mod skin;
+pub mod vehicle;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
 const PLAYER_JACKET: usize = 7;
@@ -170,6 +171,8 @@ pub struct Look {
     pub wolf_shake: [f32; 4],
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
+    /// Boats and minecarts: hit wobble and carried block; see [`vehicle::VehicleLook`].
+    pub vehicle: vehicle::VehicleLook,
 }
 
 impl Default for Look {
@@ -193,6 +196,7 @@ impl Default for Look {
             golem_rose: 0,
             wolf_shake: [0.0; 4],
             partial: 0.0,
+            vehicle: vehicle::VehicleLook::default(),
         }
     }
 }
@@ -1183,6 +1187,10 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
     if let Class::Object(id) = d.class {
         if projectile::handles(id) {
             projectile::build(out, id, d, skins);
+            return true;
+        }
+        if vehicle::handles(id) {
+            vehicle::build(out, d, skins);
             return true;
         }
         // Dropped items draw through `item::build`, TNT and falling blocks through `block::build`, item

@@ -16,7 +16,9 @@ import javax.imageio.ImageIO;
  * uploaded to them, the bound texture, the current color and the blend function. {@link GlPatch} routes the LWJGL
  * calls here. {@link #quad} is {@code Gui.drawScaledCustomSizeModalRect}: it cuts the quad's part out of the bound
  * texture and sends it to {@link Sink} as an image named by the SHA-256 of its pixels, so a {@code DynamicTexture} that
- * a mod draws its HUD with (PolyCrosshair), or a texture that {@code TextureManager} loaded from a {@code ResourceLocation}, reaches Rust (also through {@code Gui.drawTexturedModalRect}). Only level 0 of GL_TEXTURE_2D is kept, in the layout vanilla
+ * a mod draws its HUD with (PolyCrosshair), or a texture that {@code TextureManager} loaded from a
+ * {@code ResourceLocation}, reaches Rust (also through {@code Gui.drawTexturedModalRect}). Only level 0 of
+ * GL_TEXTURE_2D is kept, in the layout vanilla
  * uploads (BGRA, unsigned int 8-8-8-8 reversed: an ARGB int per pixel).
  */
 public final class GlState {

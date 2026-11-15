@@ -98,5 +98,8 @@ fn inventory_glint_is_masked_by_the_model_texels() {
         .zip(glint.chunks(4))
         .filter(|((u, p), g)| u == p && p != g)
         .count();
-    assert_eq!(leaked, 0, "glint drawn over {leaked} pixels outside the opaque texels");
+    assert_eq!(
+        leaked, 0,
+        "glint drawn over {leaked} pixels outside the opaque texels"
+    );
 }

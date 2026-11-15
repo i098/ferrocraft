@@ -44,7 +44,6 @@ impl Kind {
 
     /// `Entity.getMountedYOffset`: where a rider sits above the entity's feet. Boats and minecarts seat it
     /// 0.3 below their feet line; the rest use three quarters of their height.
-    // shortcut: horses use the default; vanilla adds rearing and stand offsets, which need horse metadata.
     pub fn mounted_y_offset(self) -> f64 {
         match self {
             Kind::Object(1 | 10..=12) => f64::from(-0.3f32),
@@ -731,6 +730,20 @@ impl Entity {
             return 0.0;
         }
         (self.swing_ticks as f32 + partial) / 6.0
+    }
+
+    /// Where a rider with `rider_y_offset` (`getYOffset`) sits on this vehicle standing at `pos`: `Entity.updateRiderPosition`, and for a horse the
+    /// `EntityHorse.updateRiderPosition` shift forward and up while it rears.
+    pub fn rider_seat(&self, [x, y, z]: [f64; 3], rider_y_offset: f64) -> [f64; 3] {
+        let mut seat = [x, y + self.kind.mounted_y_offset() + rider_y_offset, z];
+        let rearing = self.anim.horse.prev_rearing();
+        if self.kind == Kind::Mob(100) && rearing > 0.0 {
+            let (s, c) = (self.yaw * std::f32::consts::PI / 180.0).sin_cos();
+            seat[0] += f64::from(0.7 * rearing * s);
+            seat[1] += f64::from(0.15 * rearing);
+            seat[2] -= f64::from(0.7 * rearing * c);
+        }
+        seat
     }
 
     /// Position between the previous and current tick.
@@ -1446,6 +1459,28 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+    /// Oracle: `EntityHorse.updateRiderPosition` worked by hand. The rearing amount of the last tick is 0 after one
+    /// angry tick and 0.45 after two (`0 + (1 - 0) * 0.4 + 0.05`); a horse facing west (yaw 90) shifts the rider
+    /// 0.7 * 0.45 along +x and 0.15 * 0.45 up. The rider rests at 0.75 * 1.6 - 0.35 above the feet.
+    #[test]
+    fn rearing_horse_lifts_and_pushes_its_rider() {
+        let mut horse = Entity::new(1, Kind::Mob(100), [0, 64 * 32, 0], 0, 0);
+        horse.yaw = 90.0;
+        horse.meta.horse_flags = Some(64);
+        let rest = 64.0 + f64::from(1.6f32) * 0.75 - f64::from(0.35f32);
+        horse.anim.horse.tick(64);
+        assert_eq!(
+            horse.rider_seat(horse.pos, -f64::from(0.35f32)),
+            [0.0, rest, 0.0]
+        );
+        horse.anim.horse.tick(64);
+        let [x, y, z] = horse.rider_seat(horse.pos, -f64::from(0.35f32));
+        assert!((x - 0.315).abs() < 1e-6 && (y - rest - 0.0675).abs() < 1e-6 && z.abs() < 1e-6);
+        horse.anim.horse.tick(0);
+        horse.anim.horse.tick(0);
+        assert!(horse.rider_seat(horse.pos, 0.0)[0] < 0.315);
+    }
+
     /// Oracle: `EntityHanging.updateBoundingBox` and `EntityLeashKnot.updateBoundingBox` worked by hand for
     /// blocks at (0, 64, 0): the slab is 1/16 thick on the facing axis and sits 1/32 from the block face.
     #[test]

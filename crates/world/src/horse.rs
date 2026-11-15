@@ -52,6 +52,11 @@ impl HorseAnim {
         }
     }
 
+    /// `prevRearingAmount`: the rearing of the last tick, which `updateRiderPosition` reads.
+    pub fn prev_rearing(&self) -> f32 {
+        self.angry[0]
+    }
+
     /// `getGrassAnimationProgress`, `getAngryAnimationProgress` and `getEatingAnimationProgress`.
     pub fn progress(&self, partial: f32) -> [f32; 3] {
         [self.grass, self.angry, self.mouth].map(|[last, now]| last + (now - last) * partial)

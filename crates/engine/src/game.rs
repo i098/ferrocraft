@@ -708,8 +708,7 @@ impl Game {
         );
         // `Entity.updateRiderPosition`: the rider sits on its vehicle (the player's `getYOffset` is -0.35).
         if let Some(v) = self.vehicle.and_then(|id| self.entities.get(id)) {
-            let off = v.kind.mounted_y_offset() + f64::from(-0.35f32);
-            p.pos = [v.pos[0], v.pos[1] + off, v.pos[2]];
+            p.pos = v.rider_seat(v.pos, f64::from(-0.35f32));
             p.vel = [0.0; 3];
             p.on_ground = false;
             // `Entity.updateRidden`: the view turns with the vehicle.

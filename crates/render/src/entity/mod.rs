@@ -191,6 +191,8 @@ pub struct Look {
     pub wolf_wet: Option<f32>,
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
+    /// `isRiding`: the model sits on its vehicle, which poses the arms and legs of a biped.
+    pub riding: bool,
     /// Boats and minecarts: hit wobble and carried block; see [`vehicle::VehicleLook`].
     pub vehicle: vehicle::VehicleLook,
     /// Ender crystals: `renderTicks`, the tick counter that spins and bobs the cubes.
@@ -227,6 +229,7 @@ impl Default for Look {
             wolf_interested: 0.0,
             wolf_wet: None,
             partial: 0.0,
+            riding: false,
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
             invulnerable: false,
@@ -436,9 +439,16 @@ fn biped(
     let swing = d.swing;
 
     let mut r_arm = [cos(f * 0.6662 + PI) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
-    let l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
+    let mut l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
+    let mut r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
+    let mut l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
+    if d.look.riding {
+        // `ModelBiped.setRotationAngles`, `isRiding`: arms forward, legs straddling the mount.
+        r_arm[0] -= PI / 5.0;
+        l_arm[0] -= PI / 5.0;
+        r_leg = [-2.0 * PI / 5.0, PI / 10.0, 0.0];
+        l_leg = [-2.0 * PI / 5.0, -PI / 10.0, 0.0];
+    }
     let body_rot = [0.0f32; 3];
     let mut r_arm_pivot = [-5.0, 2.0, 0.0];
     let mut l_arm_pivot = [5.0, 2.0, 0.0];

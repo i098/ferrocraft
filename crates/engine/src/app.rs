@@ -8,6 +8,7 @@ macro_rules! metrics {
     };
 }
 
+mod crystal;
 mod events;
 mod input;
 mod mod_boot;
@@ -1605,6 +1606,7 @@ fn entity_draw(
             wolf_shake: [0.0, -0.08, -0.16, -0.2].map(|o| e.anim.shake_angle(p, o)),
             partial: p,
             vehicle: vehicle::look(e, p),
+            crystal_ticks: crystal::ticks(e),
             ..Look::default()
         },
     }

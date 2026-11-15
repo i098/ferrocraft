@@ -281,6 +281,8 @@ pub struct Entity {
     pub squish: crate::squish::Squish,
     /// Squids: the tentacle, roll and body turn animation.
     pub squid: crate::squid::Squid,
+    /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
+    pub dragon: Option<Box<crate::mob_anim::Dragon>>,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -419,7 +421,10 @@ impl Entity {
             hurt_time: 0,
             death_time: 0,
             sheep_timer: 0,
-            anim: Default::default(),
+            anim: crate::mob_anim::MobAnim {
+                guardian: crate::mob_anim::Guardian::new(i64::from(id)),
+                ..Default::default()
+            },
             meta: SizeMeta::default(),
             equipment: [None; EQUIPMENT_SLOTS],
             stack: None,
@@ -434,6 +439,7 @@ impl Entity {
             owner: 0,
             squish: crate::squish::Squish::default(),
             squid: crate::squid::Squid::new(id, yaw),
+            dragon: (kind == Kind::Mob(63)).then(Box::default),
         }
     }
 
@@ -573,6 +579,15 @@ impl Entity {
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
     fn tick(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
         self.age += 1;
+        // `EnderDragonEntity.mobTick` stores yaw and height before the position eases toward the server's.
+        if let Some(dragon) = &mut self.dragon {
+            dragon.tick(
+                self.vel,
+                self.yaw,
+                self.pos[1],
+                self.health.is_some_and(|h| h <= 0.0),
+            );
+        }
         self.use_ticks =
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
         self.prev_pos = self.pos;
@@ -609,6 +624,24 @@ impl Entity {
         }
         if let Kind::Mob(id @ (55 | 62)) = self.kind {
             self.squish.tick(self.on_ground, id == 62);
+        }
+        if self.kind == Kind::Mob(68) {
+            // `Entity.handleWaterMovement`: the box shrunk by 0.4 above and below, as the squid's by 0.6.
+            let (w, h) = self.size();
+            let hw = f64::from(w) / 2.0 - 0.001;
+            let min = [
+                self.pos[0] - hw,
+                self.pos[1] + 0.4 + 0.001,
+                self.pos[2] - hw,
+            ];
+            let max = [
+                self.pos[0] + hw,
+                self.pos[1] + f64::from(h) - 0.4 - 0.001,
+                self.pos[2] + hw,
+            ];
+            let in_water = crate::fluid::water_drag(at, min, max, false).0;
+            let moving = self.meta.guardian.unwrap_or(0) & crate::mob_anim::GUARDIAN_MOVING != 0;
+            self.anim.guardian.tick(in_water, moving);
         }
         if self.kind == Kind::Mob(SQUID) {
             let (w, h) = self.size();

@@ -238,6 +238,8 @@ mod tests {
         assert_eq!(s.mob, Some(94));
         s.read("MushroomCow", 0, None);
         assert_eq!(s.mob, Some(96));
+        s.read("Endermite", 0, None);
+        assert_eq!(s.mob, Some(67));
         s.read("SnowMan", 0, None);
         assert_eq!(s.mob, Some(97));
         s.read("Witch", 0, None);

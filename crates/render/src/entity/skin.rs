@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 82] = [
+const SKINS: [&str; 83] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -96,6 +96,7 @@ const SKINS: [&str; 82] = [
     // The second half of the 64x128 witch texture.
     "",
     "entity/lead_knot.png",
+    "entity/endermite.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -105,7 +106,7 @@ const EYES: [usize; 2] = [43, 44];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Skin; 35] = [
+const SLIME_SLOT_SKINS: [Skin; 36] = [
     Skin::Slime,
     Skin::MagmaCube,
     Skin::Blaze,
@@ -141,6 +142,7 @@ const SLIME_SLOT_SKINS: [Skin; 35] = [
     Skin::Snowman,
     Skin::Witch,
     Skin::LeadKnot,
+    Skin::Endermite,
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -237,6 +239,8 @@ pub enum Skin {
     Witch,
     /// `textures/entity/lead_knot.png` (32x32), the knot of a leash on a fence.
     LeadKnot,
+    /// `textures/entity/endermite.png` (64x32).
+    Endermite,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// `items/fireworks.png`, the rocket icon.

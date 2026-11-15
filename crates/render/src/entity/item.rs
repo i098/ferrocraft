@@ -181,7 +181,9 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
 fn holds(d: &EntityDraw) -> bool {
     matches!(
         d.class,
-        Class::Player { .. } | Class::Mob(54 | 57 | 51 | super::witch::WITCH) | Class::Object(78)
+        Class::Player { .. }
+            | Class::Mob(53 | 54 | 57 | 51 | super::witch::WITCH)
+            | Class::Object(78)
     )
 }
 

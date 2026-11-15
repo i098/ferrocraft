@@ -156,6 +156,10 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         cat: byte(18),
         vehicle: vehicle_meta(meta),
         begging: byte(19),
+        wither_invul: match find(meta, 20) {
+            Some(MetaValue::Int(i)) => Some(*i),
+            _ => None,
+        },
     }
 }
 

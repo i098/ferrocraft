@@ -1599,7 +1599,11 @@ fn entity_draw(
                 Kind::Mob(98 | 101) => e.meta.cat.unwrap_or(0),
                 _ => e.meta.collar.unwrap_or(14),
             },
-            health: e.meta.health.unwrap_or(1.0),
+            // A wither's health is the living health of metadata 6; the wolf tail reads its own float 18.
+            health: match e.kind {
+                Kind::Mob(64) => e.health.unwrap_or(300.0),
+                _ => e.meta.health.unwrap_or(1.0),
+            },
             sprinting: e.sprinting(),
             jump: e.anim.jump_completion(p),
             squid: e.squid.pose(p),
@@ -1615,6 +1619,7 @@ fn entity_draw(
             crystal_ticks: crystal::ticks(e),
             invulnerable: skull::charged(e),
             horse: horse_look(e, p),
+            wither_invul: e.meta.wither_invul.unwrap_or(0),
             ..Look::default()
         },
     }

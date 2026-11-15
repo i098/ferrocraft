@@ -39,6 +39,8 @@ boot MirrorTest
 boot HookIndexTest
 # ShellTest needs no FML: it transforms a class of the same shape as Minecraft after Mixin and runs it.
 "$J/java" -cp "$cp" net.ferrocraft.host.ShellTest
+# GlStateTest needs no FML: the GL calls of a mod that draws a DynamicTexture quad (PolyCrosshair) become one image command.
+"$J/java" -cp "$cp" net.ferrocraft.host.GlStateTest
 # Optional: FERRO_MODS is a folder with the public mod jars listed in java/modhost-accept/mods.txt.
 if [ -n "${FERRO_MODS:-}" ]; then
     mkdir -p "$game/mods" && cp "$FERRO_MODS"/*.jar "$game/mods/"

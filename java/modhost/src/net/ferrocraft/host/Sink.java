@@ -14,12 +14,16 @@ import java.util.Set;
  * <p>Wire: a frame is u8 mod screen open, u32 count, then per command a tag byte. 'R' rect: 4 f32 (x0 y0 x1 y1) i32 argb.
  * 'G' gradient: 4 f32, i32 top, i32 bottom. 'T' text: f32 x y, i32 argb, u8 shadow, f32 tx ty scale,
  * u32 byte length, UTF-8 bytes. 'D' define: u32 length and UTF-8 name, u32 length and bytes of a PNG or SVG file;
- * sent once per name. 'I' image: the name as in 'D', 4 f32, i32 argb, u8 recolor (an SVG takes the color of argb).
+ * sent once per name. 'I' image: the name as in 'D', 4 f32, i32 argb, u8 recolor (an SVG takes the color of argb), u8 blend (0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds).
  * 'C' clip: u8 on, then 4 f32 when on; later commands are cut to it. 'S' shape: u8 kind; kind 0 a rounded rect: 4 f32
  * box, 4 f32 radii (top left, top right, bottom right, bottom left), i32 argb; kind 1 a line: 4 f32 (x0 y0 x1 y1), f32 width,
  * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
+    /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
+    private static final int CROSSHAIR = 1 << 4;
+    private static boolean crosshair;
+    private static boolean textured;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
     private static final float[][] STACK = new float[DEPTH][3];
@@ -156,8 +160,23 @@ public final class Sink {
         }
     }
 
+    /** Whether {@link #image} sent {@code name} as a define command already, so its {@code data} may be null. */
+    static synchronized boolean defined(String name) {
+        return DEFINED.contains(name);
+    }
+
     /** The image {@code name} (defined with {@code data} the first time) in the box x0 y0 x1 y1. */
     public static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor) {
+        emit(name, data, x0, y0, x1, y1, argb, recolor, 0);
+    }
+
+    /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
+    static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
+        textured = true;
+        emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
+    }
+
+    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
         float[] m = STACK[top];
         try {
             if (DEFINED.add(name)) {
@@ -172,6 +191,7 @@ public final class Sink {
             quad(m, x0, y0, x1, y1);
             out.writeInt(argb);
             out.writeByte(recolor ? 1 : 0);
+            out.writeByte(blend);
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -200,6 +220,15 @@ public final class Sink {
 
     /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */
     static synchronized void hud(int bits) {
+        if ((bits & CROSSHAIR) != 0) {
+            crosshair = true;
+            bits &= ~CROSSHAIR;
+            if (bits == 0) return;
+        }
+        writeHud(bits);
+    }
+
+    private static void writeHud(int bits) {
         try {
             out.writeByte('H');
             out.writeInt(bits);
@@ -224,6 +253,9 @@ public final class Sink {
 
     /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
     static synchronized byte[] take(boolean modScreen) {
+        if (crosshair && textured) writeHud(CROSSHAIR);
+        crosshair = false;
+        textured = false;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {

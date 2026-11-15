@@ -920,6 +920,7 @@ dependencies = [
  "gui",
  "png",
  "portablemc",
+ "render",
  "resvg",
  "sha1 0.10.7",
  "ureq",

@@ -25,29 +25,24 @@ pub(super) fn build(d: &EntityDraw, id: u8) -> Option<Model> {
     (id == ENDERMITE).then(|| endermite(d))
 }
 
-/// `ModelEndermite`: segment `i` sits at z = the sum of the half depths before it, from -3.5, and
-/// wiggles about its own pivot with the age.
+/// Pivot z of each segment: -3.5, then the half depths of the segment and the next one added.
+const ZS: [f32; 4] = [-3.5, 0.0, 3.0, 4.0];
+
+/// `ModelEndermite`: each segment wiggles about its own pivot with the age.
 fn endermite(d: &EntityDraw) -> Model {
-    let mut z = -3.5;
-    let parts = (0..SIZES.len())
-        .map(|i| {
-            let [w, h, depth] = SIZES[i];
-            let phase = d.age * 0.9 + i as f32 * 0.15 * PI;
-            let spread = (i as f32 - 2.0).abs();
-            let part = Part::new(
-                [phase.sin() * PI * 0.1 * spread, 24.0 - h, z],
-                [w * -0.5, 0.0, depth * -0.5],
-                SIZES[i],
-                UV[i],
-            )
-            .rot([0.0, phase.cos() * PI * 0.01 * (1.0 + spread), 0.0]);
-            if let Some(next) = SIZES.get(i + 1) {
-                z += (depth + next[2]) * 0.5;
-            }
-            part
-        })
-        .collect();
-    model(Skin::Endermite, parts)
+    let segment = |i: usize| {
+        let [w, h, depth] = SIZES[i];
+        let phase = d.age * 0.9 + i as f32 * 0.15 * PI;
+        let spread = (i as f32 - 2.0).abs();
+        Part::new(
+            [phase.sin() * PI * 0.1 * spread, 24.0 - h, ZS[i]],
+            [w * -0.5, 0.0, depth * -0.5],
+            SIZES[i],
+            UV[i],
+        )
+        .rot([0.0, phase.cos() * PI * 0.01 * (1.0 + spread), 0.0])
+    };
+    model(Skin::Endermite, (0..SIZES.len()).map(segment).collect())
 }
 
 #[cfg(test)]

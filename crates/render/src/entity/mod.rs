@@ -799,6 +799,15 @@ fn tint_of(class: Class) -> [f32; 3] {
     }
 }
 
+/// `getDeathMaxRotation` in radians: 90 degrees, 180 for the endermite.
+fn death_max_rotation(class: Class) -> f32 {
+    if class == Class::Mob(endermite::ENDERMITE) {
+        endermite::DEATH_YAW.to_radians()
+    } else {
+        FRAC_PI_2
+    }
+}
+
 /// A single tinted box of the hitbox size, standing on the feet position.
 fn generic(d: &EntityDraw) -> Model {
     let (w, h) = (d.size.0 * 16.0, d.size.1 * 16.0);
@@ -1088,11 +1097,7 @@ impl Xf {
         let (st, ct) = (180.0 - body_yaw).to_radians().sin_cos();
         // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees, 180 for
         // the endermite).
-        let max_fall = if d.class == Class::Mob(endermite::ENDERMITE) {
-            endermite::DEATH_YAW.to_radians()
-        } else {
-            FRAC_PI_2
-        };
+        let max_fall = death_max_rotation(d.class);
         let fall = if d.death_time > 0.0 {
             ((d.death_time - 1.0).max(0.0) / 20.0 * 1.6).sqrt().min(1.0) * max_fall
         } else {
@@ -1489,7 +1494,6 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Blaze => [0.9, 0.7, 0.1],
         Skin::Ghast | Skin::GhastShooting => [0.92; 3],
         Skin::Bat => [0.3, 0.22, 0.15],
-        Skin::Endermite => [0.2, 0.15, 0.25],
         _ => return None,
     })
 }

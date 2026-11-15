@@ -14,6 +14,7 @@ import net.minecraft.flat.Model;
 import net.minecraft.flat.ModelPart;
 import net.minecraft.flat.OcelotEntity;
 import net.minecraft.flat.OcelotModel;
+import net.minecraft.flat.EndermiteModel;
 import net.minecraft.flat.RabbitEntity;
 import net.minecraft.flat.RabbitModel;
 import net.minecraft.flat.SheepEntity;
@@ -25,7 +26,7 @@ import net.minecraft.flat.WitchModel;
 import net.minecraft.flat.WolfModel;
 
 /**
- * Prints the part tree of the slime, magma cube, blaze, ghast, bat, ender crystal, wolf, ocelot, rabbit, squid, snow golem and witch models of the
+ * Prints the part tree of the slime, magma cube, blaze, ghast, bat, ender crystal, wolf, ocelot, rabbit, endermite, squid, snow golem and witch models of the
  * real 1.8.9 client: texture offset, pivot, rotation, mirror flag and box corners of every part. The
  * blaze, ghast and magma cube models are also run through setupAnimation (the bat one reads entity
  * metadata, which needs a world, so only its constructor runs). The wolf and ocelot models run in each
@@ -177,6 +178,10 @@ public class MobModels {
         model("EnderCrystalModel(0, true)", new EnderCrystalModel(0.0f, true));
         wolfAndOcelot();
         rabbit();
+        EndermiteModel mite = new EndermiteModel();
+        model("EndermiteModel", mite);
+        mite.setupAnimation(1.3f, 0.6f, 10.0f, 30.0f, 15.0f, 0.0625f, new net.minecraft.flat.EndermiteEntity(null));
+        model("EndermiteModel after setupAnimation(swing 1.3, amount 0.6, age 10)", mite);
         SquidModel squid = new SquidModel();
         model("SquidModel", squid);
         squid.setupAnimation(0f, 0f, 0.4f, 0f, 0f, 0.0625f, null);

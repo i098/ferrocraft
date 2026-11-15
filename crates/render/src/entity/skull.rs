@@ -93,9 +93,28 @@ mod tests {
         assert!(lo[1].abs() < 1e-5 && (hi[1] - 0.5).abs() < 1e-5);
     }
 
-    /// Yaw and pitch turn the head about its origin, so the bounds change.
+    fn at(yaw: f32, pitch: f32, p: V3) -> V3 {
+        let mut d = steve();
+        d.class = Class::Object(66);
+        d.yaw = yaw;
+        d.pitch = pitch;
+        place(&d, p)
+    }
+
+    fn close(a: V3, b: V3) {
+        assert!((0..3).all(|i| (a[i] - b[i]).abs() < 1e-5), "{a:?} != {b:?}");
+    }
+
+    /// Hand-computed from vanilla `glRotatef(yaw, 0, 1, 0)` then pitch about X, then
+    /// `scale(-1, -1, 1)`: yaw 90 sends (-4, -8, -4) px to (-4, -8, +4) px, then to (+4, +8, +4).
     #[test]
-    fn the_skull_turns_with_yaw_and_pitch() {
-        assert_ne!(bounds(0.0, 0.0), bounds(45.0, 30.0));
+    fn yaw_turns_about_y_before_the_flip() {
+        close(at(90.0, 0.0, [-4.0, -8.0, -4.0]), [0.25, 0.5, 0.25]);
+    }
+
+    /// `glRotatef(90, 1, 0, 0)` sends (0, -8, 0) px to (0, 0, -8) px, flipped in x and y only.
+    #[test]
+    fn pitch_turns_about_x() {
+        close(at(0.0, 90.0, [0.0, -8.0, 0.0]), [0.0, 0.0, -0.5]);
     }
 }

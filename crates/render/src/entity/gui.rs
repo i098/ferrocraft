@@ -4,12 +4,15 @@
 //! `enableStandardItemLighting`, so it joins the overlay quad list in draw order.
 
 use super::{build_items_unshaded, build_unshaded, item, EntityDraw, Skins};
+use crate::entity;
 use crate::mesh::MeshData;
 use crate::{Blend, Quad};
 use std::borrow::Cow;
 
 /// Name under which the renderer registers the entity texture atlas as an overlay texture.
 pub(crate) const ATLAS: &str = "<entity atlas>";
+/// Name of the block atlas at level 0, which held blocks sample (`RenderItem` binds it unblurred).
+pub(crate) const BLOCK_ATLAS: &str = "<block atlas>";
 
 /// One `drawEntityOnScreen` call, in window pixels.
 #[derive(Clone, Debug)]
@@ -93,22 +96,57 @@ fn posed(e: &GuiEntity) -> EntityDraw {
     draw
 }
 
+/// How [`project`] draws one mesh.
+struct Pass {
+    tex: Cow<'static, str>,
+    blend: Blend,
+    /// Every quad faces the viewer: a sprite is a slab seen from either side.
+    two_sided: bool,
+    /// Takes the two lights of `enableStandardItemLighting`; glint and flash draw with lighting off.
+    lit: bool,
+}
+
 /// The overlay quads of `e`, back to front: the body, then the held item (`LayerHeldItem`) in the
-/// same transform and lighting. Quads that face away are culled.
+/// same transform and lighting, then the glint and flash over them. Quads that face away are culled.
 pub(crate) fn quads(e: &GuiEntity, skins: &Skins, models: &item::Models) -> Vec<Quad> {
     let draw = posed(e);
-    let pitch = draw.pitch;
     let body = build_unshaded(std::slice::from_ref(&draw), skins);
     let items = build_items_unshaded(&draw, models);
     // `rotate(-atan(mouseY / 40) * 20, 1, 0, 0)` is the pitch turn above.
-    let (st, ct) = pitch.to_radians().sin_cos();
+    let (st, ct) = draw.pitch.to_radians().sin_cos();
     let tilt = |p: V3| [p[0], p[1] * ct - p[2] * st, p[1] * st + p[2] * ct];
     let mut out: Vec<(f32, Quad)> = Vec::new();
-    project(&mut out, &body, Cow::Borrowed(ATLAS), e, &tilt, false);
-    // Block faces sample the block atlas, which the overlay does not hold: only sprites are drawn.
-    for ((_, path), mesh) in items.sprites {
-        project(&mut out, &mesh, Cow::Owned(path), e, &tilt, true);
+    let mut put = |mesh: &MeshData, tex: Cow<'static, str>, blend, two_sided, lit| {
+        let pass = Pass {
+            tex,
+            blend,
+            two_sided,
+            lit,
+        };
+        project(&mut out, mesh, &pass, e, &tilt);
+    };
+    put(&body, Cow::Borrowed(ATLAS), Blend::Alpha, false, true);
+    put(
+        &items.atlas,
+        Cow::Borrowed(BLOCK_ATLAS),
+        Blend::Alpha,
+        false,
+        true,
+    );
+    for ((_, path), mesh) in &items.sprites {
+        put(mesh, Cow::Owned(path.clone()), Blend::Alpha, true, true);
     }
+    // The glint of sprite items is `items.glint_flat`: it needs the item's texel mask, see its docs.
+    let glint = Cow::Borrowed(entity::GLINT_TEXTURE);
+    put(
+        &entity::build_glint(std::slice::from_ref(&draw)),
+        glint.clone(),
+        Blend::Add,
+        false,
+        false,
+    );
+    put(&items.glint, glint, Blend::Add, false, false);
+    put(&items.flash, Cow::Borrowed(""), Blend::Add, false, false);
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out.into_iter().map(|(_, q)| q).collect()
 }
@@ -117,10 +155,9 @@ pub(crate) fn quads(e: &GuiEntity, skins: &Skins, models: &item::Models) -> Vec<
 fn project(
     out: &mut Vec<(f32, Quad)>,
     mesh: &MeshData,
-    tex: Cow<'static, str>,
+    pass: &Pass,
     e: &GuiEntity,
     tilt: &dyn Fn(V3) -> V3,
-    two_sided: bool,
 ) {
     for tri in mesh.indices.as_chunks::<6>().0 {
         let base = tri[0] as usize;
@@ -128,7 +165,7 @@ fn project(
         let p = [0, 1, 2, 3].map(|i| tilt(v[i].pos));
         let mut n = cross(sub(p[1], p[0]), sub(p[2], p[0]));
         // A sprite is a thin slab drawn as both faces and its edges; each takes the lit side toward the viewer.
-        if two_sided && n[2] < 0.0 {
+        if pass.two_sided && n[2] < 0.0 {
             n = n.map(|c| -c);
         }
         let len = dot(n, n).sqrt();
@@ -136,17 +173,33 @@ fn project(
         if len == 0.0 || n[2] <= 0.0 {
             continue;
         }
-        let light = brightness([n[0] / len, -n[1] / len, n[2] / len]);
+        let light = if pass.lit {
+            brightness([n[0] / len, -n[1] / len, n[2] / len])
+        } else {
+            1.0
+        };
         let depth = p.iter().map(|q| q[2]).sum::<f32>();
+        // `SRC_ALPHA, ONE` of the flash is `SRC_COLOR, ONE` with the alpha folded into the color.
+        let alpha = |i: usize| {
+            if pass.blend == Blend::Add {
+                v[i].color[3]
+            } else {
+                1.0
+            }
+        };
         out.push((
             depth,
             Quad {
-                tex: tex.clone(),
-                blend: Blend::Alpha,
+                tex: pass.tex.clone(),
+                blend: pass.blend,
                 pos: p.map(|q| [e.origin[0] + e.scale * q[0], e.origin[1] - e.scale * q[1]]),
                 uv: [0, 1, 2, 3].map(|i| v[i].uv),
-                color: [0, 1, 2, 3]
-                    .map(|i| argb([v[i].color[0], v[i].color[1], v[i].color[2]], light)),
+                color: [0, 1, 2, 3].map(|i| {
+                    argb(
+                        [v[i].color[0], v[i].color[1], v[i].color[2]].map(|c| c * alpha(i)),
+                        light,
+                    )
+                }),
             },
         ));
     }

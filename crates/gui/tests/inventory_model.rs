@@ -53,11 +53,10 @@ fn player(held: i16) -> EntityDraw {
 }
 
 /// The quads of one frame of the screen, with the model quads spliced in at their draw position.
-fn frame(r: &mut Renderer, icons: &Icons, with_model: bool, held: i16) -> Vec<render::Quad> {
+fn frame(r: &mut Renderer, icons: &Icons, with_model: bool, me: EntityDraw) -> Vec<render::Quad> {
     let inv = Inventory::default();
     let mut screen = ContainerScreen::new(&inv, 427, 240);
     let effects = Effects::default();
-    let me = player(held);
     let view = InventoryView {
         inv: &inv,
         icons,
@@ -98,9 +97,9 @@ fn inventory_screen_draws_the_player_model() {
     };
     let icons = Icons::new(read);
     let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
-    let quads = frame(&mut r, &icons, false, 0);
+    let quads = frame(&mut r, &icons, false, player(0));
     let before = r.render_to_rgba(&Camera::default(), &quads);
-    let quads = frame(&mut r, &icons, true, 0);
+    let quads = frame(&mut r, &icons, true, player(0));
     let after = r.render_to_rgba(&Camera::default(), &quads);
     // The 26..75 x 8..77 box of the window: GUI scale 2, window at (116, 52) in a 427x240 screen.
     let (x0, y0, x1, y1) = (2 * (116 + 26), 2 * (52 + 8), 2 * (116 + 75), 2 * (52 + 77));
@@ -135,9 +134,9 @@ fn inventory_model_shows_the_held_item() {
     });
     let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
     const IRON_SWORD: i16 = 267;
-    let quads = frame(&mut r, &icons, true, 0);
+    let quads = frame(&mut r, &icons, true, player(0));
     let empty = r.render_to_rgba(&Camera::default(), &quads);
-    let quads = frame(&mut r, &icons, true, IRON_SWORD);
+    let quads = frame(&mut r, &icons, true, player(IRON_SWORD));
     let armed = r.render_to_rgba(&Camera::default(), &quads);
     let n = empty
         .2
@@ -150,5 +149,56 @@ fn inventory_model_shows_the_held_item() {
         let dir = std::path::Path::new(&dir);
         encode_png(&dir.join("held_before.png"), empty.0, empty.1, &empty.2).unwrap();
         encode_png(&dir.join("held_after.png"), armed.0, armed.1, &armed.2).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn inventory_model_shows_held_block_and_glint() {
+    let jar =
+        std::path::PathBuf::from(std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client jar"));
+    let icons = Icons::new(|p: &str| -> Option<Vec<u8>> {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(&jar).ok()?).ok()?;
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(
+            &mut z.by_name(&format!("assets/minecraft/{p}")).ok()?,
+            &mut out,
+        )
+        .ok()?;
+        Some(out)
+    });
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    const STONE: i16 = 1;
+    const DIAMOND_CHESTPLATE: i16 = 311;
+    let mut render = |me: EntityDraw| {
+        let quads = frame(&mut r, &icons, true, me);
+        r.render_to_rgba(&Camera::default(), &quads)
+    };
+    let empty = render(player(0));
+    let stone = render(player(STONE));
+    let mut worn = player(0);
+    worn.armor[2] = DIAMOND_CHESTPLATE;
+    let plain = render(worn.clone());
+    worn.armor_glint[2] = true;
+    let glowing = render(worn);
+    let differ = |a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>)| {
+        a.2.chunks(4)
+            .zip(b.2.chunks(4))
+            .filter(|(x, y)| x != y)
+            .count()
+    };
+    let n = differ(&empty, &stone);
+    assert!(n > 100, "only {n} pixels changed with a stone in hand");
+    let n = differ(&plain, &glowing);
+    assert!(n > 200, "only {n} pixels changed with enchanted armor");
+    if let Some(dir) = std::env::var_os("INVENTORY_PROOF_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, img) in [
+            ("stone", &stone),
+            ("glint_off", &plain),
+            ("glint_on", &glowing),
+        ] {
+            encode_png(&dir.join(format!("{name}.png")), img.0, img.1, &img.2).unwrap();
+        }
     }
 }

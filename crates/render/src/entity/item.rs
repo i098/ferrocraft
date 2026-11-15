@@ -188,12 +188,9 @@ fn holds(d: &EntityDraw) -> bool {
 /// `WornSkullLayer`: a block worn as a helmet by an armor stand, as its id and damage; or the
 /// pumpkin of `LayerSnowmanHead`.
 fn worn_block(d: &EntityDraw) -> Option<(i16, i16)> {
-    if let Some(pumpkin) = super::snowman::wanted(d) {
-        return Some(pumpkin);
-    }
-    let id = d.armor[3];
-    (d.class == Class::Object(78) && (1..256).contains(&id))
-        .then_some((id, d.look.stand.head_damage))
+    let stand = (d.class == Class::Object(78) && (1..256).contains(&d.armor[3]))
+        .then_some((d.armor[3], d.look.stand.head_damage));
+    super::snowman::wanted(d).or(stand)
 }
 
 fn dropped(d: &EntityDraw) -> Option<Stack> {
@@ -417,11 +414,6 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     } else {
         ident()
     };
-    let drop = if d.class == Class::Mob(super::snowman::SNOW_GOLEM) {
-        super::snowman::HEAD_DROP
-    } else {
-        -0.25
-    };
     let prepare = if m.gui3d { scale(2.0) } else { ident() };
     let mat = chain(&[
         stance,
@@ -433,7 +425,7 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         rotate(head.rot[2].to_degrees(), 2),
         rotate(head.rot[1].to_degrees(), 1),
         rotate(head.rot[0].to_degrees(), 0),
-        translate(0.0, drop, 0.0),
+        translate(0.0, super::snowman::head_drop(d), 0.0),
         rotate(180.0, 1),
         scale3([0.625, -0.625, -0.625]),
         prepare,

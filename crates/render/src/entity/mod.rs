@@ -729,6 +729,16 @@ fn model(d: &EntityDraw) -> Model {
     m
 }
 
+/// The model of a mob whose renderer is ported, in the module that ports it.
+fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
+    mobs::build(d, id)
+        .or_else(|| mobs2::build(d, id))
+        .or_else(|| mobs3::build(d, id))
+        .or_else(|| rabbit::build(d, id))
+        .or_else(|| squid::build(d, id))
+        .or_else(|| snowman::build(d, id))
+}
+
 fn adult_model(d: &EntityDraw) -> Model {
     match d.class {
         Class::Player { slim } => {
@@ -749,13 +759,7 @@ fn adult_model(d: &EntityDraw) -> Model {
             skin: Skin::Mooshroom,
             ..cow(d)
         },
-        Class::Mob(id) => mobs::build(d, id)
-            .or_else(|| mobs2::build(d, id))
-            .or_else(|| mobs3::build(d, id))
-            .or_else(|| rabbit::build(d, id))
-            .or_else(|| squid::build(d, id))
-            .or_else(|| snowman::build(d, id))
-            .unwrap_or_else(|| generic(d)),
+        Class::Mob(id) => ported_mob(d, id).unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
     }
@@ -1449,7 +1453,7 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Villager(_) => [0.7, 0.55, 0.45],
         Skin::IronGolem => [0.75, 0.75, 0.7],
         Skin::Silverfish => [0.5, 0.5, 0.52],
-        Skin::Chicken => [0.95; 3],
+        Skin::Chicken | Skin::Snowman => [0.95; 3],
         Skin::Sheep | Skin::SheepFur => [0.9; 3],
         Skin::Spider | Skin::CaveSpider => [0.25, 0.22, 0.2],
         Skin::Enderman => [0.1, 0.08, 0.12],
@@ -1459,7 +1463,6 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Blaze => [0.9, 0.7, 0.1],
         Skin::Ghast | Skin::GhastShooting => [0.92; 3],
         Skin::Bat => [0.3, 0.22, 0.15],
-        Skin::Snowman => [0.95; 3],
         _ => return None,
     })
 }

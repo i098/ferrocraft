@@ -9,8 +9,16 @@ use std::f32::consts::PI;
 pub(super) const SNOW_GOLEM: u8 = 97;
 /// `Blocks.pumpkin` as the item `LayerSnowmanHead` renders on the head.
 pub(super) const PUMPKIN: (i16, i16) = (86, 0);
-/// `LayerSnowmanHead` lowers the pumpkin by 0.34375 blocks from the head pivot.
-pub(super) const HEAD_DROP: f32 = -0.343_75;
+
+/// How far a worn block sits below the head pivot, in blocks: `LayerSnowmanHead` uses -0.34375,
+/// `LayerCustomHead` (armor stand) -0.25.
+pub(super) fn head_drop(d: &EntityDraw) -> f32 {
+    if d.class == super::Class::Mob(SNOW_GOLEM) {
+        -0.343_75
+    } else {
+        -0.25
+    }
+}
 
 pub(super) fn build(d: &EntityDraw, id: u8) -> Option<Model> {
     (id == SNOW_GOLEM).then(|| snow_golem(d))

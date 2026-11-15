@@ -215,7 +215,10 @@ fn boats_and_minecarts_render() {
         let px = diff(&empty, &alone);
         assert!(px.len() > 200, "entity {i} draws almost nothing");
         if i == 0 {
-            assert!(share(&px, |p| p[0] > p[1] && p[1] > p[2]), "boat is not planks");
+            assert!(
+                share(&px, |p| p[0] > p[1] && p[1] > p[2]),
+                "boat is not planks"
+            );
         } else if i == 1 {
             assert!(
                 share(&px, |p| (p[0] - p[2]).abs() < 40),

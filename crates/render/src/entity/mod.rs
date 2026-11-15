@@ -4,7 +4,7 @@
 //! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Held items and dropped items are in [`item`]. Name tags
+//! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
 mod armorstand;

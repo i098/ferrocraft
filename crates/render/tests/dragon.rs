@@ -123,3 +123,86 @@ fn dragon_draws_its_model_texture_and_eyes() {
         .count();
     assert!(purple > 5, "eye pixels {purple}");
 }
+
+/// A live dragon (turning, bobbing flight for 80 ticks) and a live guardian (40 ticks in water,
+/// spikes out; 40 ticks moving, spikes in) beside a zombie, against the never-ticked draw the client
+/// gave before. `DRAGON_PROOF_DIR` keeps `dragon_before.png`, `dragon_after.png`, `guardian_before.png`
+/// and `guardian_after.png`.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn live_dragon_and_guardian_move_their_parts() {
+    use world::mob_anim::{Dragon, Guardian};
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(800, 450, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 72.0, 0.0],
+        pitch: 22.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -2..=1 {
+        for cz in -1..=3 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let mut shot = |name: &str, draws: &[EntityDraw]| {
+        r.set_entities(draws);
+        let img = r.render_to_rgba(&cam, &[]).2;
+        if let Some(dir) = std::env::var_os("DRAGON_PROOF_DIR") {
+            let path = std::path::PathBuf::from(dir).join(name);
+            encode_png(&path, 800, 450, &img).unwrap();
+        }
+        img
+    };
+    let zombie = mob(54, (0.6, 1.95), [5.0, 63.0, 10.0], 180.0);
+
+    // A skin shows from the second set of draws that names it: draw each once before the shots.
+    let still = mob(DRAGON, (16.0, 8.0), [0.0, 63.0, 22.0], 0.0);
+    shot(
+        "warm.png",
+        &[
+            still.clone(),
+            zombie.clone(),
+            mob(68, (0.85, 0.85), [0.0, 64.0, 9.0], 180.0),
+        ],
+    );
+    let mut live = still.clone();
+    let mut dragon = Dragon::default();
+    for t in 0..80 {
+        dragon.tick(
+            [0.2, 0.05, 0.1],
+            10.0 + 6.0 * t as f32,
+            70.0 + 3.0 * (0.3 * f64::from(t)).sin(),
+            false,
+        );
+    }
+    live.look.dragon = Some(Box::new(dragon.pose(0.5, false)));
+    let before = shot("dragon_before.png", &[still, zombie.clone()]);
+    let after = shot("dragon_after.png", &[live, zombie.clone()]);
+    assert_ne!(
+        before, after,
+        "the live dragon must differ from the still one"
+    );
+
+    let at = |x: f64| mob(68, (0.85, 0.85), [x, 64.0, 9.0], 180.0);
+    let (mut out, mut retracted) = (Guardian::new(1), Guardian::new(1));
+    for _ in 0..40 {
+        out.tick(true, false);
+        retracted.tick(true, true);
+    }
+    let live = |g: &Guardian, x: f64| {
+        let mut d = at(x);
+        (d.look.guardian_spikes, d.look.guardian_tail) =
+            (g.spikes_extension(0.5), g.tail_angle(0.5));
+        d
+    };
+    let before = shot("guardian_before.png", &[at(-2.0), at(0.0), zombie.clone()]);
+    let after = shot(
+        "guardian_after.png",
+        &[live(&retracted, -2.0), live(&out, 0.0), zombie],
+    );
+    assert_ne!(
+        before, after,
+        "the live guardians must differ from the still one"
+    );
+}

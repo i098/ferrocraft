@@ -327,7 +327,7 @@ impl BlockEntities {
             let level = light(center);
             if state >> 4 == MOB_SPAWNER {
                 // The mob keeps its own full-bright layers, so the tile light is set by the mesh.
-                self.spawner_mob(&mut out, pos, view.partial, skins, level);
+                self.spawner_mob(&mut out, pos, view, skins, level);
                 continue;
             }
             let mark = out.mark();
@@ -341,13 +341,13 @@ impl BlockEntities {
         &self,
         out: &mut Batches,
         pos: [i32; 3],
-        partial: f32,
+        view: &View,
         skins: &Skins,
         level: [f32; 2],
     ) {
         let at = Mat::at(pos.map(f64::from));
         let mob = self.spawners.get(&pos).cloned().unwrap_or_default();
-        if let Some(mesh) = mob.mob_mesh(at, partial, skins, level) {
+        if let Some(mesh) = mob.mob_mesh(at, view.partial, view.eye, skins, level) {
             out.mesh(Tex::Atlas).append(mesh);
         }
     }

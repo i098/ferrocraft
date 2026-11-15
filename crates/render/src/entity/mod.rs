@@ -216,6 +216,9 @@ pub struct Look {
     /// Eye position of the camera entity (`Minecraft.getCamera`), the target the guardian's eye
     /// looks at. The origin by default.
     pub viewer: [f64; 3],
+    /// Ender dragon: the wing clock and ring buffer of the frame. `None` is a dragon that never
+    /// ticked (a spawner's): all offsets 0 and the wing clock 0.
+    pub dragon: Option<Box<world::mob_anim::DragonPose>>,
 }
 
 impl Default for Look {
@@ -252,6 +255,7 @@ impl Default for Look {
             guardian_spikes: 0.0,
             guardian_tail: 0.0,
             viewer: [0.0; 3],
+            dragon: None,
         }
     }
 }
@@ -1118,6 +1122,8 @@ struct Xf {
     generic: bool,
     /// `RenderSquid.rotateCorpse`: the squid turns about its own center instead of its feet.
     squid: Option<world::squid::Pose>,
+    /// `RenderDragon.rotateCorpse`: the pitch of the body in radians, after the yaw.
+    pitch: f32,
 }
 
 /// Vertical drop of the model: `RenderPlayer` lowers a sneaking player (a stand sneaks through its own
@@ -1167,8 +1173,12 @@ impl Xf {
         let body_yaw = if spinning {
             (d.age * 0.1).to_degrees()
         } else if d.class == Class::Mob(dragon::DRAGON) {
-            // `RenderDragon.rotateCorpse` turns by `-yaw`, not by `180 - yaw`.
-            d.yaw + 180.0
+            // `RenderDragon.rotateCorpse` turns by `-yaw` of the ring buffer, not by `180 - yaw`.
+            d.look
+                .dragon
+                .as_ref()
+                .map_or(d.yaw, |p| p.offsets[7][0] as f32)
+                + 180.0
         } else {
             d.yaw
         };
@@ -1197,6 +1207,12 @@ impl Xf {
             scale: model_scale(d),
             generic,
             squid: (d.class == Class::Mob(squid::SQUID)).then_some(d.look.squid),
+            pitch: match (&d.look.dragon, d.class) {
+                (Some(p), Class::Mob(dragon::DRAGON)) => {
+                    ((p.offsets[5][1] - p.offsets[10][1]) as f32 * 10.0).to_radians()
+                }
+                _ => 0.0,
+            },
         }
     }
 
@@ -1228,6 +1244,12 @@ impl Xf {
             (x * cf - y * sf, x * sf + y * cf)
         } else {
             (x, y)
+        };
+        let (y, z) = if self.pitch != 0.0 {
+            let (sp, cp) = self.pitch.sin_cos();
+            (y * cp - z * sp, y * sp + z * cp)
+        } else {
+            (y, z)
         };
         self.yaw(x, y, z, -self.sneak_drop)
     }

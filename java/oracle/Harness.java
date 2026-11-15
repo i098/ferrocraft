@@ -28,6 +28,8 @@ import net.minecraft.flat.WorldChunk;
 import net.minecraft.flat.Dimension;
 import net.minecraft.flat.ProtoChunk;
 import net.minecraft.flat.SquidEntity;
+import net.minecraft.flat.GuardianEntity;
+import net.minecraft.flat.EnderDragonEntity;
 import net.minecraft.flat.EmptyWorldStorage;
 import net.minecraft.flat.MagmaCubeEntity;
 import net.minecraft.flat.SlimeEntity;
@@ -60,6 +62,9 @@ import net.minecraft.flat.SlimeEntity;
  *                                 at the kick tick; per tick: onGround, stretch and lastStretch as float bits in hex; needs "start"
  *   squid <ticks> <water 0/1> <vx> <vy> <vz> <yaw> <status tick>  a client squid given that velocity at tick 0 and
  *                                 the status 19 at the status tick; per tick: see squidCommand; needs "start"
+ *   guardian <ticks> <water 0/1> <moving 0/1> <seed> <switch tick>  a client guardian; per tick: see guardianCommand;
+ *                                 needs "start"
+ *   dragon <ticks> <vx> <vy> <vz> <yaw0> <dyaw> <y0> <dy>  a client ender dragon; per tick: see dragonCommand; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -308,6 +313,77 @@ public class Harness {
                 + bits(s.velocityX) + " " + bits(s.velocityY) + " " + bits(s.velocityZ) + " "
                 + bits(s.bodyPitch) + " " + bits(s.bodyRoll) + " " + bits(s.tentacleMovement) + " "
                 + bits(s.tentacleRotation) + " " + bits(s.bodyYaw) + " " + bits(s.lastBodyYaw) + " " + bits(s.headYaw));
+        }
+    }
+
+    /**
+     * `GuardianEntity.mobTick` as a client runs it, with `isInWater` and `isMoving` given and the water
+     * flipped at the switch tick; the entity's `random` is seeded after the constructor drew the tail phase.
+     * Line 1: the tail phase. Then per tick: getTailAngle(0), getTailAngle(1), getSpikesExtension(0),
+     * getSpikesExtension(1) as float bits.
+     */
+    static void guardianCommand(String[] t) throws Exception {
+        Field client = net.minecraft.flat.World.class.getField("isClient");
+        client.setAccessible(true);
+        client.setBoolean(world, true);
+        final boolean[] water = {t[2].equals("1")};
+        final boolean moving = t[3].equals("1");
+        final long seed = Long.parseLong(t[4]);
+        GuardianEntity g = new GuardianEntity(world) {
+            {
+                random = new java.util.Random(seed);
+            }
+
+            @Override
+            public boolean isInWater() {
+                return water[0];
+            }
+
+            @Override
+            public boolean isMoving() {
+                return moving;
+            }
+        };
+        g.setPositionAndAngles(0.5, 70, 0.5, 0f, 0f);
+        System.out.println(bits(g.getTailAngle(0f)));
+        for (int i = 0; i < Integer.parseInt(t[1]); i++) {
+            if (i == Integer.parseInt(t[5])) {
+                water[0] = !water[0];
+            }
+            g.mobTick();
+            System.out.println(bits(g.getTailAngle(0f)) + " " + bits(g.getTailAngle(1f)) + " "
+                + bits(g.getSpikesExtension(0f)) + " " + bits(g.getSpikesExtension(1f)));
+        }
+    }
+
+    /**
+     * `EnderDragonEntity.mobTick` as a client runs it: yaw and height are set before every tick to
+     * yaw0 + dyaw * i and y0 + dy * sin(0.3 i), the velocity is given. Per tick: wingPosition, lastWingPosition
+     * as float bits, then yaw and height of getSegmentProperties(k, 0.25) for k 0..23 as double bits.
+     */
+    static void dragonCommand(String[] t) throws Exception {
+        Field client = net.minecraft.flat.World.class.getField("isClient");
+        client.setAccessible(true);
+        client.setBoolean(world, true);
+        EnderDragonEntity d = new EnderDragonEntity(world);
+        float yaw0 = Float.parseFloat(t[5]);
+        float dyaw = Float.parseFloat(t[6]);
+        double y0 = Double.parseDouble(t[7]);
+        double dy = Double.parseDouble(t[8]);
+        d.setPositionAndAngles(0.5, y0, 0.5, yaw0, 0f);
+        for (int i = 0; i < Integer.parseInt(t[1]); i++) {
+            d.yaw = yaw0 + dyaw * i;
+            d.y = y0 + dy * Math.sin(0.3 * i);
+            d.velocityX = Double.parseDouble(t[2]);
+            d.velocityY = Double.parseDouble(t[3]);
+            d.velocityZ = Double.parseDouble(t[4]);
+            d.mobTick();
+            StringBuilder line = new StringBuilder(bits(d.wingPosition) + " " + bits(d.lastWingPosition));
+            for (int k = 0; k < 24; k++) {
+                double[] p = d.getSegmentProperties(k, 0.25f);
+                line.append(' ').append(bits(p[0])).append(' ').append(bits(p[1]));
+            }
+            System.out.println(line);
         }
     }
 
@@ -637,6 +713,12 @@ public class Harness {
                     break;
                 case "squid":
                     squidCommand(t);
+                    break;
+                case "guardian":
+                    guardianCommand(t);
+                    break;
+                case "dragon":
+                    dragonCommand(t);
                     break;
                 case "mip":
                     mipLines(t);

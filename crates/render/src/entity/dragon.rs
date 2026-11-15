@@ -2,10 +2,10 @@
 //! `render`, which poses the neck and tail chains from `getMovementOffsets`) and
 //! `RenderDragon.rotateCorpse`. The eye layer `LayerEnderDragonEyes` is in [`super::mobs::layers`].
 //!
-//! The client does not keep the dragon's ring buffer of past yaws and heights or its wing clock
-//! (`animTime`) yet. [`build`] uses a steady buffer (every entry is the current yaw at one
-//! height, a dragon in level flight) and `animTime` 0. A spawner dragon never ticked, so its buffer
-//! is all zero and its `animTime` is 0: that draw is exact.
+//! A live dragon carries its ring buffer of past yaws and heights and its wing clock in
+//! `Look::dragon` (`world::mob_anim::Dragon`, ported from `EnderDragonEntity.mobTick`). Without it
+//! [`build`] draws a dragon that never ticked, as a spawner does: an all-zero buffer at yaw 0 and
+//! `animTime` 0, which is exact for that draw.
 //!
 //! Not ported: the death dissolve (`dragon_exploding.png`), the red hit overlay of `renderModel`
 //! and the crystal beam; the client does not track `deathTicks` or the connected crystal.
@@ -30,13 +30,14 @@ type Parent = ([f32; 3], [f32; 3]);
 type BoxSpec = ([f32; 3], [f32; 3], (f32, f32), bool);
 
 fn dragon(d: &EntityDraw) -> Model {
+    let live = d.look.dragon.as_deref();
     let steady = |_| [f64::from(d.yaw), 0.0];
-    let mut parts = render(0.0, &steady);
+    let live_off = |i| live.map_or_else(|| steady(i), |p| p.offsets[i]);
+    let mut parts = render(live.map_or(0.0, |p| p.wing), &live_off);
     // `RenderDragon.rotateCorpse`: `translate(0, 0, 1)` after the yaw, which `Xf` applies. The
     // block becomes 16 model pixels; z keeps its sign under the `scale(-1, -1, 1)` of
     // `RendererLivingEntity`.
-    // shortcut: the pitch `rotate((y5 - y10) * 10, x)` is 0 for the steady ring buffer; port it
-    // with the buffer.
+    // The pitch `rotate((y5 - y10) * 10, x)` is applied by `Xf`, with the yaw.
     for p in &mut parts {
         p.parents.push(([0.0, 0.0, 16.0], [0.0; 3]));
     }

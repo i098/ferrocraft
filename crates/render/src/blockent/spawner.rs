@@ -85,10 +85,12 @@ impl Spawner {
     }
 
     /// The mesh of the mob, in the world, for the block whose corner is `at`; `None` without one.
+    /// `viewer` is the eye of the camera entity, which a guardian's pupil follows.
     pub fn mob_mesh(
         &self,
         at: Mat,
         partial: f32,
+        viewer: [f64; 3],
         skins: &Skins,
         light: [f32; 2],
     ) -> Option<MeshData> {
@@ -96,7 +98,8 @@ impl Spawner {
         let spin = self.prev_mob_rotation
             + (self.mob_rotation - self.prev_mob_rotation) * f64::from(partial);
         let size = world::entities::Kind::Mob(mob).size();
-        let draw = still_mob(mob, size, partial, &self.initial);
+        let mut draw = still_mob(mob, size, partial, &self.initial);
+        draw.look.viewer = viewer;
         let mut mesh = entity::build(&[draw], skins, 0, |_| light);
         let m = at
             .translate([0.5, 0.0, 0.5])

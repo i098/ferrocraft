@@ -1633,6 +1633,12 @@ fn entity_draw(
             jump: e.anim.jump_completion(p),
             squid: e.squid.pose(p),
             squish: e.squish.factor(p),
+            guardian_spikes: e.anim.guardian.spikes_extension(p),
+            guardian_tail: e.anim.guardian.tail_angle(p),
+            dragon: e
+                .dragon
+                .as_ref()
+                .map(|d| Box::new(d.pose(p, e.health.is_some_and(|h| h <= 0.0)))),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,

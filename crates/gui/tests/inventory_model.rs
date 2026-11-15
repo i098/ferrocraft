@@ -202,3 +202,73 @@ fn inventory_model_shows_held_block_and_glint() {
         }
     }
 }
+
+/// The horse window of one frame, with a player model beside the horse for scale; the horse model
+/// quads are spliced in only when `with_model`.
+fn horse_frame(r: &mut Renderer, icons: &Icons, with_model: bool) -> Vec<render::Quad> {
+    let mut inv = Inventory::default();
+    assert!(inv.open_window(4, "EntityHorse", "Horse".into(), 2));
+    let mut screen = ContainerScreen::new(&inv, 427, 240);
+    let effects = Effects::default();
+    let mut horse = player(0);
+    horse.class = Class::Mob(100);
+    horse.size = (1.4, 1.6);
+    let view = InventoryView {
+        inv: &inv,
+        icons,
+        advanced_tooltips: false,
+        effects: &effects,
+        player: Some(&horse),
+    };
+    let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
+    screen.draw(&mut GuiCanvas::new(&mut g), &view, 300, 60);
+    let scale = player(0);
+    g.entity(380.0, 120.0, 30.0, [0.0, 0.0], &scale);
+    let entities = g.take_entities();
+    assert_eq!(entities.len(), 2, "the horse and the player for scale");
+    let mut quads = g.into_quads();
+    for e in entities.iter().rev().filter(|_| with_model) {
+        quads.splice(
+            e.at..e.at,
+            r.gui_entity(e.origin, e.scale, e.mouse, &e.draw),
+        );
+    }
+    quads
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn horse_window_draws_the_horse() {
+    let jar =
+        std::path::PathBuf::from(std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client jar"));
+    let icons = Icons::new(|p: &str| -> Option<Vec<u8>> {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(&jar).ok()?).ok()?;
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(
+            &mut z.by_name(&format!("assets/minecraft/{p}")).ok()?,
+            &mut out,
+        )
+        .ok()?;
+        Some(out)
+    });
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    let quads = horse_frame(&mut r, &icons, false);
+    let before = r.render_to_rgba(&Camera::default(), &quads);
+    let quads = horse_frame(&mut r, &icons, true);
+    let after = r.render_to_rgba(&Camera::default(), &quads);
+    // The 26..78 x 18..70 horse box of the window at (116, 52), GUI scale 2.
+    let (x0, y0, x1, y1) = (2 * (116 + 26), 2 * (52 + 18), 2 * (116 + 78), 2 * (52 + 70));
+    let n = (y0..y1)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let i = ((y * before.0 + x) * 4) as usize;
+            before.2[i..i + 4] != after.2[i..i + 4]
+        })
+        .count();
+    if let Some(dir) = std::env::var_os("INVENTORY_PROOF_DIR") {
+        let dir = std::path::Path::new(&dir);
+        encode_png(&dir.join("horse_before.png"), before.0, before.1, &before.2).unwrap();
+        encode_png(&dir.join("horse_after.png"), after.0, after.1, &after.2).unwrap();
+    }
+    assert!(n > 1000, "only {n} pixels of the horse box changed");
+}

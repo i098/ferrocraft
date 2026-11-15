@@ -106,11 +106,11 @@ pub struct InventoryView<'a> {
     pub icons: &'a Icons,
     pub advanced_tooltips: bool,
     pub effects: &'a Effects,
-    /// The local player, for the model in the inventory screens.
+    /// The model the screen draws: the local player in the inventory screens, the horse in a horse window.
     pub player: Option<&'a EntityDraw>,
 }
 
-/// The local player and the cursor position its model turns toward.
+/// The model of the screen and the cursor position it turns toward.
 pub(super) type PlayerModel<'a> = Option<(&'a EntityDraw, [i32; 2])>;
 
 /// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
@@ -617,7 +617,15 @@ impl ContainerScreen {
         let old = std::mem::replace(&mut self.old_mouse, [mx, my]);
         match &self.creative {
             Some(cr) => cr.draw_background(c, inv, icons, l, t, player.map(|p| (p, [mx, my]))),
-            None => self.draw_background(c, inv, l, t, player.map(|p| (p, old))),
+            // The horse window follows the cursor of this frame, the player window the one before.
+            None => {
+                let at = if matches!(inv.kind(), Kind::Horse(_)) {
+                    [mx, my]
+                } else {
+                    old
+                };
+                self.draw_background(c, inv, l, t, player.map(|p| (p, at)));
+            }
         }
         self.extras.draw_back(c, inv, l, t, mx, my);
         self.hovered = self.slot_at(mx, my);
@@ -816,6 +824,16 @@ impl ContainerScreen {
                 modal(c, lay.texture, l + 79, t + 34, 176, 14, cook + 1, 16);
             }
             _ => modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height),
+        }
+        if let (Kind::Horse(_), Some((h, [mx, my]))) = (inv.kind(), player) {
+            // GuiScreenHorseInventory: drawEntityOnScreen(i + 51, j + 60, 17, i + 51 - mouseX, j + 25 - mouseY)
+            c.entity(
+                (l + 51) as f32,
+                (t + 60) as f32,
+                17.0,
+                [(l + 51 - mx) as f32, (t + 75 - 50 - my) as f32],
+                h,
+            );
         }
         if let (Kind::Player, Some((p, [mx, my]))) = (inv.kind(), player) {
             let (x, y) = (l + 51, t + 75);

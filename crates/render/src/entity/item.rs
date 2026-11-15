@@ -124,40 +124,42 @@ fn geometry(
     turns: &DialTurns,
     dial: &mut Option<(usize, usize)>,
 ) -> Option<Vec<Layer>> {
-    let sprites = name.and_then(|name| {
-        let (textures, _) = hand::flat_model(read, name)?;
-        let layers: Vec<Layer> = textures
-            .into_iter()
-            .filter_map(|texture| {
-                let image = decode_png(&read(&texture)?)?;
-                let frames = hand::strip_frames(&image);
-                let frame = turns.frame(id, frames);
-                if frames > 1 && DialTurns::is_dial(id) {
-                    *dial = Some((frames, frame));
-                }
-                let flat = hand::Flat::new(&image, ident(), frame);
-                let mut mesh = flat.mesh;
-                // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
-                for v in &mut mesh.vertices {
-                    v.pos = v.pos.map(|c| c - 0.5);
-                }
-                Some(Layer {
-                    tex: ItemTex::Sprite(texture),
-                    mesh,
-                    normals: Some(flat.normals),
-                    mask: Some(Mask::of(&image)),
+    let sprites = name
+        .filter(|_| damage != super::mooshroom::BLOCK_FORM)
+        .and_then(|name| {
+            let (textures, _) = hand::flat_model(read, name)?;
+            let layers: Vec<Layer> = textures
+                .into_iter()
+                .filter_map(|texture| {
+                    let image = decode_png(&read(&texture)?)?;
+                    let frames = hand::strip_frames(&image);
+                    let frame = turns.frame(id, frames);
+                    if frames > 1 && DialTurns::is_dial(id) {
+                        *dial = Some((frames, frame));
+                    }
+                    let flat = hand::Flat::new(&image, ident(), frame);
+                    let mut mesh = flat.mesh;
+                    // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
+                    for v in &mut mesh.vertices {
+                        v.pos = v.pos.map(|c| c - 0.5);
+                    }
+                    Some(Layer {
+                        tex: ItemTex::Sprite(texture),
+                        mesh,
+                        normals: Some(flat.normals),
+                        mask: Some(Mask::of(&image)),
+                    })
                 })
-            })
-            .collect();
-        (!layers.is_empty()).then_some(layers)
-    });
+                .collect();
+            (!layers.is_empty()).then_some(layers)
+        });
     if sprites.is_some() {
         return sprites;
     }
     if !(1..256).contains(&id) {
         return None;
     }
-    let state = ((id as u16) << 4) | (damage as u16 & 15);
+    let state = ((id as u16) << 4) | (damage.max(0) as u16 & 15);
     Some(vec![Layer {
         tex: ItemTex::Atlas,
         mesh: hand::held_mesh(state, atlas),
@@ -173,6 +175,7 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
         .chain(worn_block(d))
         .chain(dropped(d).map(|s| (s.id, s.damage)))
         .chain(super::block::wanted(d))
+        .chain(super::mooshroom::wanted(d))
 }
 
 fn holds(d: &EntityDraw) -> bool {
@@ -377,7 +380,22 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
     }
     out.dye = None;
     super::block::build(&mut out, draws, models, &light);
+    for d in draws {
+        mushrooms(&mut out, d, models, light_level(d, &light, false));
+    }
     out
+}
+
+/// `LayerMooshroomMushroom`: the red mushroom block at each frame of the layer.
+fn mushrooms(out: &mut Items, d: &EntityDraw, models: &Models, level: [f32; 2]) {
+    let Some(Some(m)) = models.get(&super::mooshroom::RED_MUSHROOM) else {
+        return;
+    };
+    let xf = Xf::new(d, false);
+    for mat in super::mooshroom::frames(d) {
+        let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
+        out.piece(m, &to_world, &|n| n, level, false, None);
+    }
 }
 
 /// `WornSkullLayer` for a block helmet: from the head's pivot and rotation (`ModelPart.transform`),

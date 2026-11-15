@@ -1,5 +1,5 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
-//! and `ModelCow` and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
+//! and `ModelCow` (also the mooshroom, with its mushrooms in [`mooshroom`]) and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
 //! [`mobs2`], and from the squid model in [`squid`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
@@ -21,6 +21,7 @@ pub mod item;
 pub(crate) mod mobs;
 mod mobs2;
 mod mobs3;
+mod mooshroom;
 pub(crate) mod outline;
 mod projectile;
 mod rabbit;
@@ -710,9 +711,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 23] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 98, 99, 101,
-        120,
+    const MODELED: [u8; 24] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 98, 99,
+        101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -739,6 +740,10 @@ fn adult_model(d: &EntityDraw) -> Model {
         Class::Mob(50) => creeper(d),
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
+        Class::Mob(96) => Model {
+            skin: Skin::Mooshroom,
+            ..cow(d)
+        },
         Class::Mob(id) => mobs::build(d, id)
             .or_else(|| mobs2::build(d, id))
             .or_else(|| mobs3::build(d, id))
@@ -1411,6 +1416,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         Skin::Creeper => [0.3, 0.7, 0.25],
         Skin::Pig => [0.95, 0.65, 0.65],
         Skin::Cow => [0.4, 0.3, 0.25],
+        Skin::Mooshroom => [0.6, 0.15, 0.15],
         Skin::Armor(_) | Skin::GuardianElder => [0.7; 3],
         Skin::ArmorStand => [0.65, 0.5, 0.35],
         Skin::Arrow

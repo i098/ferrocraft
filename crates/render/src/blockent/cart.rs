@@ -77,9 +77,19 @@ mod tests {
         let ys = || v.iter().map(|p| p.pos[1]);
         let min = ys().fold(f32::MAX, f32::min);
         let max = ys().fold(f32::MIN, f32::max);
-        assert!((max - min - 0.875 * 0.75).abs() < 1e-4, "height {}", max - min);
-        assert!(ys().any(|y| (y - min - 0.625 * 0.75).abs() < 1e-4), "body top");
-        assert!(!ys().any(|y| (y - min - 0.25 * 0.75).abs() < 1e-4), "inverted body");
+        assert!(
+            (max - min - 0.875 * 0.75).abs() < 1e-4,
+            "height {}",
+            max - min
+        );
+        assert!(
+            ys().any(|y| (y - min - 0.625 * 0.75).abs() < 1e-4),
+            "body top"
+        );
+        assert!(
+            !ys().any(|y| (y - min - 0.25 * 0.75).abs() < 1e-4),
+            "inverted body"
+        );
     }
 
     /// Vanilla frame at yaw 0: rotate 180 about Y, scale 0.75, rotate 90 about Y, chest z flipped.
@@ -95,7 +105,11 @@ mod tests {
 
     #[test]
     fn carried_chest_uses_its_own_texture() {
-        let tex = |id: u16| build_cart_chests(&[cart(10, id << 4)], |_| [1.0, 0.0])[0].0.clone();
+        let tex = |id: u16| {
+            build_cart_chests(&[cart(10, id << 4)], |_| [1.0, 0.0])[0]
+                .0
+                .clone()
+        };
         let named = |n: &str| Tex::Named(format!("textures/entity/chest/{n}.png"));
         assert_eq!(tex(CHEST), named("normal"));
         assert_eq!(tex(ENDER_CHEST), named("ender"));

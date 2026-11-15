@@ -711,6 +711,15 @@ mod tests {
     }
 
     #[test]
+    fn multi_slot_textures_stay_in_one_atlas_column() {
+        for (skin, slots) in [(Skin::Witch, 2), (Skin::Dragon, 4), (Skin::DragonEyes, 4)] {
+            let first = slot(skin).unwrap();
+            let col = |s: u32| Skins::origin(s)[0];
+            assert!((first..first + slots).all(|s| col(s) == col(first)), "{skin:?}");
+        }
+    }
+
+    #[test]
     fn mob_slots_hold_their_own_textures() {
         let index = |path: &str| SKINS.iter().position(|&n| n == path).unwrap() as u32;
         assert_eq!(slot(Skin::Witch), Some(index("entity/witch.png")));

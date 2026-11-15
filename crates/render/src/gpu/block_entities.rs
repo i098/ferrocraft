@@ -162,6 +162,12 @@ impl Renderer {
         self.head_meshes = self.upload_batches(batches);
     }
 
+    /// The chests that minecarts carry, for the next frames (`MinecartRenderer`).
+    pub(super) fn set_cart_chests(&mut self, draws: &[EntityDraw]) {
+        let batches = crate::blockent::build_cart_chests(draws, |p| self.light_at(p));
+        self.cart_meshes = self.upload_batches(batches);
+    }
+
     fn upload_batches(&mut self, batches: Vec<(Tex, MeshData)>) -> Vec<(Tex, GpuMesh)> {
         let mut out = Vec::new();
         for (tex, mesh) in batches {
@@ -177,7 +183,12 @@ impl Renderer {
 
     /// Draws the block entity and worn head meshes, then restores the world bind group.
     pub(super) fn draw_tiles<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        for (tex, m) in self.tile_meshes.iter().chain(&self.head_meshes) {
+        for (tex, m) in self
+            .tile_meshes
+            .iter()
+            .chain(&self.head_meshes)
+            .chain(&self.cart_meshes)
+        {
             pass.set_bind_group(0, self.tile_group(tex), &[]);
             draw_mesh(pass, m);
         }

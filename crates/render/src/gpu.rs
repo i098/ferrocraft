@@ -120,6 +120,7 @@ pub struct Renderer {
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
     tile_meshes: Vec<(Tex, GpuMesh)>,
+    cart_meshes: Vec<(Tex, GpuMesh)>,
     /// Beacon beams: inner, then outer (`beacon.rs`).
     beam_meshes: [Option<GpuMesh>; 2],
     /// End portal star field: layer 0, then layers 1 to 15 (`portal.rs`).
@@ -445,6 +446,7 @@ impl Renderer {
             entity_mesh: None,
             block_entities: BlockEntities::default(),
             tile_meshes: Vec::new(),
+            cart_meshes: Vec::new(),
             beam_meshes: [None, None],
             portal_meshes: [None, None],
             head_meshes: Vec::new(),
@@ -920,6 +922,7 @@ impl Renderer {
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);
         let mut glint = entity::build_glint(draws, None);
+        self.set_cart_chests(draws);
         let base = glint.vertices.len() as u32;
         glint.vertices.extend(items.vertices);
         glint.indices.extend(items.indices.iter().map(|i| i + base));

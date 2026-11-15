@@ -3,9 +3,8 @@
 //! (`BoatModel`: 5 parts, `MinecartModel`: 6 parts, both on a 64x32 texture). The block a cart carries
 //! is placed by [`block_frame`] and meshed by `block::build`; the rail snap is
 //! `world::vehicle::on_rail`, applied to the draw by the caller.
-//!
-//! shortcut: a cart carrying a chest, ender chest or trapped chest shows no block. Vanilla draws it
-//! through `AnimatedBlockEntityRenderer`; the chest model of `blockent` is not wired to carts yet.
+//! A cart carrying a chest, ender chest or trapped chest shows the chest model of
+//! `blockent::build_cart_chests`, not `block::build`.
 
 use super::{add_box, rotate, skin_dims, Class, EntityDraw, Skin, Skins, V3};
 use crate::hand::{chain, point, scale3, translate, Mat};
@@ -115,6 +114,23 @@ pub fn block_frame(d: &EntityDraw) -> Mat {
         translate(0.0, lift, 0.0),
         turn(90.0, 1),
     ])
+}
+
+/// The id of the chest, ender chest or trapped chest a cart carries: `blockent::build_cart_chests`
+/// draws it, not `block::build`.
+pub fn carried_chest(d: &EntityDraw) -> Option<u16> {
+    let id = d.look.vehicle.block >> 4;
+    (is_cart_class(d) && matches!(id, 54 | 130 | 146)).then_some(id)
+}
+
+fn is_cart_class(d: &EntityDraw) -> bool {
+    matches!(d.class, Class::Object(id) if is_cart(id))
+}
+
+/// The block model `block::build` meshes for the block a cart carries.
+pub fn block_model(d: &EntityDraw) -> Option<(i16, i16)> {
+    let b = d.look.vehicle.block;
+    (b != 0 && carried_chest(d).is_none()).then_some(((b >> 4) as i16, (b & 15) as i16))
 }
 
 /// The boat or cart model, textured and placed in the world.

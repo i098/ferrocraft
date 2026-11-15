@@ -17,7 +17,9 @@ use std::f32::consts::FRAC_PI_2;
 mod beacon;
 use beacon::Beacon;
 pub use beacon::{Beams, BEAM_TEXTURE};
+mod cart;
 mod portal;
+pub use cart::build_cart_chests;
 mod spawner;
 pub use portal::{PORTAL_TEXTURE, SKY_TEXTURE};
 use spawner::Spawner;
@@ -386,7 +388,6 @@ impl BlockEntities {
             return;
         }
         let double = x_pos || z_pos;
-        let name = chest_texture(id, double);
         let turn = wall_turn(meta);
         let lid = self.lids.get(&pos).copied().unwrap_or_default();
         let open = lid.prev + (lid.now - lid.prev) * partial;
@@ -403,24 +404,31 @@ impl BlockEntities {
         }
         m = m.rotate_y(turn).translate([-0.5, -0.5, -0.5]);
 
-        let (width, tex) = if double {
-            (30.0, [128.0, 64.0])
-        } else {
-            (14.0, [64.0, 64.0])
-        };
-        let knob_x = if double { 15.0 } else { 8.0 };
-        let target = out.mesh(Tex::Named(format!("textures/entity/chest/{name}.png")));
-        let lid_rot = [angle, 0.0, 0.0];
-        for part in [
-            Cube::new([0.0, -5.0, -14.0], [width, 5.0, 14.0], (0.0, 0.0))
-                .at([1.0, 7.0, 15.0], lid_rot),
-            Cube::new([-1.0, -2.0, -15.0], [2.0, 4.0, 1.0], (0.0, 0.0))
-                .at([knob_x, 7.0, 15.0], lid_rot),
-            Cube::new([0.0, 0.0, 0.0], [width, 10.0, 14.0], (0.0, 19.0))
-                .at([1.0, 6.0, 1.0], [0.0; 3]),
-        ] {
-            part.emit(target, &m, tex, 0.0);
-        }
+        emit_chest(out, id, double, &m, angle);
+    }
+}
+
+/// The three boxes of `ModelChest` under `m`, textured by `chest_texture`; `angle` is the lid's
+/// rotation about x in radians.
+fn emit_chest(out: &mut Batches, id: u16, double: bool, m: &Mat, angle: f32) {
+    let (width, tex) = if double {
+        (30.0, [128.0, 64.0])
+    } else {
+        (14.0, [64.0, 64.0])
+    };
+    let knob_x = if double { 15.0 } else { 8.0 };
+    let target = out.mesh(Tex::Named(format!(
+        "textures/entity/chest/{}.png",
+        chest_texture(id, double)
+    )));
+    let lid_rot = [angle, 0.0, 0.0];
+    for part in [
+        Cube::new([0.0, -5.0, -14.0], [width, 5.0, 14.0], (0.0, 0.0)).at([1.0, 7.0, 15.0], lid_rot),
+        Cube::new([-1.0, -2.0, -15.0], [2.0, 4.0, 1.0], (0.0, 0.0))
+            .at([knob_x, 7.0, 15.0], lid_rot),
+        Cube::new([0.0, 0.0, 0.0], [width, 10.0, 14.0], (0.0, 19.0)).at([1.0, 6.0, 1.0], [0.0; 3]),
+    ] {
+        part.emit(target, m, tex, 0.0);
     }
 }
 

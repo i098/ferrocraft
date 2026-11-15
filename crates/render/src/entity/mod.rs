@@ -950,7 +950,11 @@ pub fn build(
 }
 
 /// `[sky, block]` light of one entity; `flash` adds the hurt flag of a flashing body.
-fn light_level(d: &EntityDraw, light: &impl Fn([f64; 3]) -> [f32; 2], flash: bool) -> [f32; 2] {
+pub(crate) fn light_level(
+    d: &EntityDraw,
+    light: &impl Fn([f64; 3]) -> [f32; 2],
+    flash: bool,
+) -> [f32; 2] {
     let level = if d.burning || mobs2::glows(d) {
         [1.0, 1.0]
     } else {
@@ -1678,7 +1682,7 @@ impl TagView<'_> {
 const BELOW_NAME_LIFT: f64 = 9.0 * 1.15 * 0.026_666_67;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn steve() -> EntityDraw {

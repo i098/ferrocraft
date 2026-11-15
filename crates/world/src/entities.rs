@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+pub mod vehicle;
+
 /// What an entity is. Ids are the 1.8.9 mob and object type ids of the spawn packets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -149,6 +151,8 @@ pub struct SizeMeta {
     pub health: Option<f32>,
     /// Ocelot: metadata byte 18, the cat type (`getTameSkin`).
     pub cat: Option<u8>,
+    /// Boats and minecarts; see [`crate::entities::vehicle::VehicleMeta`].
+    pub vehicle: crate::entities::vehicle::VehicleMeta,
 }
 
 impl SizeMeta {
@@ -170,6 +174,7 @@ impl SizeMeta {
         self.collar = new.collar.or(self.collar);
         self.health = new.health.or(self.health);
         self.cat = new.cat.or(self.cat);
+        self.vehicle.merge(new.vehicle);
     }
 }
 
@@ -1114,6 +1119,7 @@ impl Entities {
                     e.facing = data as u8 & 3;
                 }
                 e.vel = velocity(vel);
+                e.meta.vehicle.cart = crate::entities::vehicle::cart_type(kind, data);
                 if kind == 90 {
                     e.owner = data;
                 }

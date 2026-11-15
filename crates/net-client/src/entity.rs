@@ -6,6 +6,7 @@ use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
 use ferrocraft_protocol::play::clientbound as cb;
 use ferrocraft_protocol::play::{serverbound as sb, PlayerListAction, UseAction};
 use std::io;
+use world::entities::vehicle::VehicleMeta;
 use world::entities::{EntityEvent, FireworkExplosion, ItemRef, SizeMeta};
 
 fn item(slot: &Slot) -> Option<ItemRef> {
@@ -147,6 +148,32 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
             _ => None,
         },
         cat: byte(18),
+        vehicle: vehicle_meta(meta),
+    }
+}
+
+/// Metadata 17 to 22 of a boat or minecart, and the furnace cart's fuel flag (16).
+fn vehicle_meta(meta: &Metadata) -> VehicleMeta {
+    let int = |index| match find(meta, index) {
+        Some(MetaValue::Int(i)) => Some(*i),
+        _ => None,
+    };
+    let byte = |index| match find(meta, index) {
+        Some(MetaValue::Byte(b)) => Some(*b as u8),
+        _ => None,
+    };
+    VehicleMeta {
+        hit_timer: int(17),
+        hit_direction: int(18),
+        damage: match find(meta, 19) {
+            Some(MetaValue::Float(f)) => Some(*f),
+            _ => None,
+        },
+        tile: int(20),
+        tile_offset: int(21),
+        custom_tile: byte(22),
+        powered: byte(16),
+        cart: None,
     }
 }
 

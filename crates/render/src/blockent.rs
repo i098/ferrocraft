@@ -209,11 +209,29 @@ impl BlockEntities {
         }
     }
 
-    pub fn set_spawner(&mut self, pos: [i32; 3], entity: &str, delay: i16, min_delay: Option<i32>) {
-        self.spawners
-            .entry(pos)
-            .or_default()
-            .read(entity, delay, min_delay);
+    /// `difficulty` and `world_time` feed `World.getLocalDifficulty` for `onInitialSpawn`. The roll
+    /// uses a fresh `Random` per packet: the shared `World.rand` stream is not reproducible.
+    pub fn set_spawner(
+        &mut self,
+        pos: [i32; 3],
+        (entity, delay, min_delay): (&str, i16, Option<i32>),
+        difficulty: u8,
+        world_time: i64,
+    ) {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |t| t.as_nanos() as i64);
+        let local = spawner::Local {
+            difficulty,
+            world_time,
+        };
+        self.spawners.entry(pos).or_default().read(
+            entity,
+            delay,
+            min_delay,
+            local,
+            &mut JavaRandom::new(seed),
+        );
     }
 
     /// One client tick of every mob spawner in the loaded chunks; returns the smoke and flame

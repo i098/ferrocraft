@@ -12,10 +12,12 @@ mod arrows;
 mod baby;
 mod block;
 pub mod crystal;
+mod dragon;
 mod endermite;
 pub(crate) mod fire;
 mod glint_mask;
 pub(crate) mod guardian;
+mod guardian_body;
 pub(crate) mod gui;
 pub mod hanging;
 mod horse;
@@ -206,6 +208,14 @@ pub struct Look {
     pub leash: Option<leash::Holder>,
     /// Horses: type, coat, armor and the animation of the frame; see [`horse::HorseLook`].
     pub horse: horse::HorseLook,
+    /// Guardian: `getSpikesExtension`, 0 retracted to 1 out. The client simulates it in `mobTick`;
+    /// 0 is the value of a guardian that never ticked (a spawner's).
+    pub guardian_spikes: f32,
+    /// Guardian: `getTailAngle`, the phase of the tail wag. 0 for a guardian that never ticked.
+    pub guardian_tail: f32,
+    /// Eye position of the camera entity (`Minecraft.getCamera`), the target the guardian's eye
+    /// looks at. The origin by default.
+    pub viewer: [f64; 3],
 }
 
 impl Default for Look {
@@ -239,6 +249,9 @@ impl Default for Look {
             wither_invul: 0,
             leash: None,
             horse: horse::HorseLook::default(),
+            guardian_spikes: 0.0,
+            guardian_tail: 0.0,
+            viewer: [0.0; 3],
         }
     }
 }
@@ -757,9 +770,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 30] = [
-        50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 90, 91, 92, 93, 94, 95,
-        96, 97, 98, 99, 100, 101, 120,
+    const MODELED: [u8; 32] = [
+        50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 90, 91, 92, 93,
+        94, 95, 96, 97, 98, 99, 100, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -782,6 +795,8 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
         .or_else(|| snowman::build(d, id))
         .or_else(|| witch::build(d, id))
         .or_else(|| wither::build(d, id))
+        .or_else(|| guardian_body::build(d, id))
+        .or_else(|| dragon::build(d, id))
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
@@ -1139,6 +1154,7 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
         Class::Mob(mobs3::OCELOT) if d.look.variant & mobs3::TAMED != 0 => 0.8,
         Class::Mob(mobs2::BAT) => 0.35,
+        Class::Mob(guardian_body::GUARDIAN) => guardian_body::scale(d.look.variant),
         Class::Mob(horse::HORSE) => horse::scale(&d.look.horse),
         _ => 1.0,
     };
@@ -1150,6 +1166,9 @@ impl Xf {
         let spinning = matches!(d.class, Class::Orb);
         let body_yaw = if spinning {
             (d.age * 0.1).to_degrees()
+        } else if d.class == Class::Mob(dragon::DRAGON) {
+            // `RenderDragon.rotateCorpse` turns by `-yaw`, not by `180 - yaw`.
+            d.yaw + 180.0
         } else {
             d.yaw
         };

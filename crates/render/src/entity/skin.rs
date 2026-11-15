@@ -9,14 +9,14 @@ pub(super) mod horse;
 
 /// Height of one slot; most textures are 64 wide, so they fill the left half of a row.
 pub const SLOT: u32 = 64;
-/// Width of the atlas, for the 128 wide iron golem texture.
-const WIDTH: u32 = 128;
+/// Width of the atlas, for the 256 wide ender dragon texture.
+const WIDTH: u32 = 256;
 /// The largest side of the atlas texture; 8192 is the limit every GPU has to offer.
 const MAX_SIDE: u32 = 8192;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 83] = [
+const SKINS: [&str; 92] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -102,16 +102,26 @@ const SKINS: [&str; 83] = [
     "",
     "entity/lead_knot.png",
     "entity/endermite.png",
+    "entity/guardian.png",
+    "entity/enderdragon/dragon.png",
+    // The other three slots of the 256x256 dragon texture.
+    "",
+    "",
+    "",
+    "entity/enderdragon/dragon_eyes.png",
+    "",
+    "",
+    "",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
 /// Slots of the eye layer textures; their black counts as transparent (additive blending).
-const EYES: [usize; 2] = [43, 44];
+const EYES: [usize; 3] = [43, 44, 88];
 /// Slot of `slime.png` and the size of its outer gel region (top left, texels): the entity pass has
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Option<Skin>; 37] = [
+const SLIME_SLOT_SKINS: [Option<Skin>; 46] = [
     Some(Skin::Slime),
     Some(Skin::MagmaCube),
     Some(Skin::Blaze),
@@ -150,6 +160,16 @@ const SLIME_SLOT_SKINS: [Option<Skin>; 37] = [
     None,
     Some(Skin::LeadKnot),
     Some(Skin::Endermite),
+    Some(Skin::Guardian),
+    Some(Skin::Dragon),
+    // The other three slots of the 256x256 dragon texture.
+    None,
+    None,
+    None,
+    Some(Skin::DragonEyes),
+    None,
+    None,
+    None,
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -248,6 +268,12 @@ pub enum Skin {
     LeadKnot,
     /// `textures/entity/endermite.png` (64x32).
     Endermite,
+    /// `textures/entity/guardian.png` (64x64).
+    Guardian,
+    /// `textures/entity/enderdragon/dragon.png` (256x256, four slots).
+    Dragon,
+    /// `textures/entity/enderdragon/dragon_eyes.png` (256x256, four slots), the additive eye layer.
+    DragonEyes,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// A horse texture (128x128), by index into [`horse`]'s table.
@@ -481,7 +507,7 @@ impl Skins {
             } else if (FIRST_SPRITE..ARMOR_FIRST as usize).contains(&i) || i >= MOBS_FIRST {
                 s.blit_plain(i as u32, &img);
                 if EYES.contains(&i) {
-                    s.clear_black(i as u32);
+                    s.clear_black(i as u32, img.height);
                 }
                 if i == SLIME_SLOT {
                     s.screen_door(i as u32, SLIME_GEL);
@@ -520,11 +546,11 @@ impl Skins {
         }
     }
 
-    /// Makes the black texels of a slot transparent: an eye layer is drawn additively in vanilla,
-    /// where black adds nothing.
-    fn clear_black(&mut self, slot: u32) {
+    /// Makes the black texels of a slot, and of the `rows` texel rows from it, transparent: an eye layer
+    /// is drawn additively in vanilla, where black adds nothing.
+    fn clear_black(&mut self, slot: u32, rows: usize) {
         let base = (slot * SLOT) as usize * WIDTH as usize * 4;
-        for px in self.rgba[base..base + (SLOT * WIDTH * 4) as usize]
+        for px in self.rgba[base..base + rows.max(SLOT as usize) * WIDTH as usize * 4]
             .as_chunks_mut::<4>()
             .0
         {
@@ -682,6 +708,18 @@ mod tests {
             slot(Skin::XpBottle),
             Some(index("items/experience_bottle.png"))
         );
+    }
+
+    #[test]
+    fn multi_slot_textures_stay_in_one_atlas_column() {
+        for (skin, slots) in [(Skin::Witch, 2), (Skin::Dragon, 4), (Skin::DragonEyes, 4)] {
+            let first = slot(skin).unwrap();
+            let col = |s: u32| Skins::origin(s)[0];
+            assert!(
+                (first..first + slots).all(|s| col(s) == col(first)),
+                "{skin:?}"
+            );
+        }
     }
 
     #[test]

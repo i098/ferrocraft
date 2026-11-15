@@ -667,7 +667,7 @@ impl App {
             }
             Effect::Tile(t) => {
                 if let Some(r) = &mut self.renderer {
-                    mirror_tile(r, t);
+                    mirror_tile(r, t, self.game.difficulty, self.game.world_time);
                 }
             }
             Effect::Died => {
@@ -800,7 +800,7 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
 }
 
 /// Hands chest, sign, skull and banner data to the renderer.
-fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
+fn mirror_tile(r: &mut Renderer, tile: TileEvent, difficulty: u8, world_time: i64) {
     match tile {
         TileEvent::Action {
             pos,
@@ -830,7 +830,7 @@ fn mirror_tile(r: &mut Renderer, tile: TileEvent) {
             entity,
             delay,
             min_delay,
-        } => r.set_spawner(pos, &entity, delay, min_delay),
+        } => r.set_spawner(pos, (&entity, delay, min_delay), difficulty, world_time),
     }
 }
 

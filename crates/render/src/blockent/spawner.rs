@@ -2,14 +2,18 @@
 //! spawner puffs one smoke and one flame particle at a random point inside its block every tick,
 //! and turns the mob it shows inside the cage.
 //!
-//! The mob is the entity type the server names, drawn without `onInitialSpawn`'s random choices
-//! (baby zombies, sheep colors, slime sizes). Mobs with no ported model (see `entity::has_model`)
-//! show no mob.
+//! The mob is the entity type the server names, with the random choices of `onInitialSpawn` that
+//! change how it looks (see [`Initial`]). Mobs with no ported model (see `entity::has_model`) show
+//! no mob.
+
+mod initial;
 
 use super::Mat;
-use crate::entity::{self, Class, EntityDraw, Look, Skins, TeamTag};
+use crate::entity::{self, Class, EntityDraw, HorseLook, Look, Skins, TeamTag};
 use crate::jrandom::JavaRandom;
 use crate::mesh::MeshData;
+pub use initial::Local;
+use initial::{Initial, MAGMA_CUBE, RABBIT, SHEEP, SLIME, VILLAGER};
 
 /// `requiredPlayerRange` of a fresh spawner.
 const REQUIRED_PLAYER_RANGE: f64 = 16.0;
@@ -18,12 +22,13 @@ const MIN_SPAWN_DELAY: i32 = 200;
 const START_DELAY: i32 = 20;
 /// `TileEntityMobSpawnerRenderer`: the mob is drawn at this scale.
 const MOB_SCALE: f32 = 0.4375;
-const BOW: i16 = 261;
 
 /// The animation state of one spawner (fields by their MCP names).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spawner {
     mob: Option<u8>,
+    /// The random choices of `onInitialSpawn`, rolled again with each data packet (`cachedEntity`).
+    initial: Initial,
     spawn_delay: i32,
     min_spawn_delay: i32,
     mob_rotation: f64,
@@ -34,6 +39,7 @@ impl Default for Spawner {
     fn default() -> Spawner {
         Spawner {
             mob: None,
+            initial: Initial::default(),
             spawn_delay: START_DELAY,
             min_spawn_delay: MIN_SPAWN_DELAY,
             mob_rotation: 0.0,
@@ -43,9 +49,20 @@ impl Default for Spawner {
 }
 
 impl Spawner {
-    /// `readFromNBT` of the data packet: the entity, `Delay` and, when sent, `MinSpawnDelay`.
-    pub fn read(&mut self, entity: &str, delay: i16, min_delay: Option<i32>) {
+    /// `readFromNBT` of the data packet: the entity, `Delay` and, when sent, `MinSpawnDelay`. A
+    /// new entity name drops `cachedEntity`, so the mob is created and `onInitialSpawn` rolled again.
+    pub fn read(
+        &mut self,
+        entity: &str,
+        delay: i16,
+        min_delay: Option<i32>,
+        local: Local,
+        rng: &mut JavaRandom,
+    ) {
         self.mob = mob_id(entity).filter(|&id| entity::has_model(id));
+        if let Some(id) = self.mob {
+            self.initial = Initial::roll(id, local, rng);
+        }
         self.spawn_delay = i32::from(delay);
         if let Some(min) = min_delay {
             self.min_spawn_delay = min;
@@ -79,7 +96,7 @@ impl Spawner {
         let spin = self.prev_mob_rotation
             + (self.mob_rotation - self.prev_mob_rotation) * f64::from(partial);
         let size = world::entities::Kind::Mob(mob).size();
-        let draw = still_mob(mob, size, partial);
+        let draw = still_mob(mob, size, partial, &self.initial);
         let mut mesh = entity::build(&[draw], skins, 0, |_| light);
         let m = at
             .translate([0.5, 0.0, 0.5])
@@ -95,8 +112,28 @@ impl Spawner {
     }
 }
 
+fn hitbox(id: u8, size: (f32, f32), it: &Initial) -> (f32, f32) {
+    match id {
+        SLIME | MAGMA_CUBE => {
+            let side = 0.51000005 * f32::from(it.slime_size);
+            (side, side)
+        }
+        _ => size,
+    }
+}
+
+fn variant(id: u8, it: &Initial) -> u8 {
+    match id {
+        SHEEP => it.fleece,
+        VILLAGER => it.variant,
+        _ => 0,
+    }
+}
+
 /// An entity that never ticked, at the origin and yaw 0 (`renderEntityWithPosYaw(.., 0, 0, 0, 0, ..)`).
-fn still_mob(id: u8, size: (f32, f32), partial: f32) -> EntityDraw {
+fn still_mob(id: u8, size: (f32, f32), partial: f32, it: &Initial) -> EntityDraw {
+    // `EntitySlime.setSlimeSize` sizes the hitbox by 0.51000005 per size step.
+    let size = hitbox(id, size, it);
     EntityDraw {
         class: Class::Mob(id),
         pos: [0.0; 3],
@@ -113,12 +150,11 @@ fn still_mob(id: u8, size: (f32, f32), partial: f32) -> EntityDraw {
         death_time: 0.0,
         invisible: false,
         size,
-        // `EntitySkeleton.onInitialSpawn` in the overworld.
-        held: if id == 51 { BOW } else { 0 },
-        armor: [0; 4],
+        held: it.held,
+        armor: it.armor,
         armor_dye: [None; 4],
-        armor_glint: [false; 4],
-        held_glint: false,
+        armor_glint: it.armor_glint,
+        held_glint: it.held_glint,
         held_damage: 0,
         held_dye: None,
         stack: None,
@@ -132,12 +168,25 @@ fn still_mob(id: u8, size: (f32, f32), partial: f32) -> EntityDraw {
         pointed: false,
         team_tag: TeamTag::default(),
         ridden: false,
-        child: false,
+        child: it.child,
         using: None,
         view: [0.0; 2],
         line: None,
         look: Look {
             partial,
+            riding: it.riding,
+            // Sheep fleece color, villager profession and rabbit type.
+            variant: variant(id, it),
+            collar: if id == RABBIT {
+                it.variant
+            } else {
+                Look::default().collar
+            },
+            horse: HorseLook {
+                kind: it.horse_kind,
+                variant: it.horse_variant,
+                ..HorseLook::default()
+            },
             ..Look::default()
         },
     }
@@ -201,6 +250,10 @@ pub fn particle(pos: [i32; 3], rng: &mut JavaRandom) -> [f64; 3] {
 mod tests {
     use super::*;
 
+    fn read(s: &mut Spawner, name: &str) {
+        s.read(name, 0, None, Local::default(), &mut JavaRandom::new(1));
+    }
+
     #[test]
     fn only_a_spawner_with_a_player_within_16_blocks_is_activated() {
         assert!(activated([0, 64, 0], &[[10.0, 64.0, 0.0]]));
@@ -218,7 +271,7 @@ mod tests {
         assert_eq!(s.spawn_delay, 19);
         assert!((s.mob_rotation - f64::from(1000.0_f32 / 219.0)).abs() < 1e-9);
         let mut late = Spawner::default();
-        late.read("Pig", 0, None);
+        late.read("Pig", 0, None, Local::default(), &mut JavaRandom::new(1));
         late.tick();
         assert!((late.mob_rotation - 5.0).abs() < 1e-9);
         late.delay_to_min();
@@ -228,27 +281,41 @@ mod tests {
     #[test]
     fn only_mobs_with_a_model_show() {
         let mut s = Spawner::default();
-        s.read("Zombie", 0, None);
+        read(&mut s, "Zombie");
         assert_eq!(s.mob, Some(54));
-        s.read("Wolf", 0, None);
+        read(&mut s, "Wolf");
         assert_eq!(s.mob, Some(95));
-        s.read("Rabbit", 0, None);
+        read(&mut s, "Rabbit");
         assert_eq!(s.mob, Some(101));
-        s.read("EntityHorse", 0, None);
+        read(&mut s, "EntityHorse");
         assert_eq!(s.mob, Some(100));
-        s.read("Squid", 0, None);
+        read(&mut s, "Squid");
         assert_eq!(s.mob, Some(94));
-        s.read("MushroomCow", 0, None);
+        read(&mut s, "MushroomCow");
         assert_eq!(s.mob, Some(96));
-        s.read("Endermite", 0, None);
+        read(&mut s, "Endermite");
         assert_eq!(s.mob, Some(67));
-        s.read("SnowMan", 0, None);
+        read(&mut s, "SnowMan");
         assert_eq!(s.mob, Some(97));
-        s.read("Witch", 0, None);
+        read(&mut s, "Witch");
         assert_eq!(s.mob, Some(66));
-        s.read("Giant", 0, None);
+        read(&mut s, "Giant");
         assert_eq!(s.mob, Some(53));
-        s.read("XPOrb", 0, None);
+        read(&mut s, "XPOrb");
         assert_eq!(s.mob, None);
+    }
+
+    #[test]
+    fn re_rolled_horse_spawners_draw_different_species_and_coats() {
+        let mut rng = JavaRandom::new(4);
+        let mut looks = std::collections::HashSet::new();
+        for _ in 0..40 {
+            let mut s = Spawner::default();
+            s.read("EntityHorse", 0, None, Local::default(), &mut rng);
+            let d = still_mob(100, (1.4, 1.6), 0.0, &s.initial);
+            looks.insert((d.look.horse.kind, d.look.horse.variant));
+        }
+        assert!(looks.iter().any(|l| l.0 == 1), "a donkey");
+        assert!(looks.iter().filter(|l| l.0 == 0).count() > 5, "coats vary");
     }
 }

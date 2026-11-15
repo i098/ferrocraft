@@ -1,7 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
 //! and `ModelCow` (also the mooshroom, with its mushrooms in [`mooshroom`]) and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
-//! [`mobs2`], and from the squid model in [`squid`] the snow golem model in [`snowman`] and the witch model in [`witch`]: box geometry, texture layout and limb animation. Mobs without a
+//! [`mobs2`], and from the squid model in [`squid`] the snow golem model in [`snowman`] and the witch model in [`witch`] and the wither in [`wither`] (the giant zombie is a zombie scaled 6): box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
 //! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags

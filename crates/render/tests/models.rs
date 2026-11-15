@@ -169,3 +169,43 @@ fn downloaded_skins_and_capes_upload_and_draw() {
         .unwrap();
     }
 }
+
+/// A boat, an empty minecart and a TNT minecart draw more than the empty scene; `MODELS_PROOF_DIR`
+/// keeps the picture.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn boats_and_minecarts_render() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(480, 240, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=1 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let empty = r.render_to_rgba(&cam, &[]).2;
+    let mut tnt = draw(Class::Object(10), 1.6, (0.98, 0.7));
+    tnt.look.vehicle.block = 46 << 4;
+    tnt.look.vehicle.block_offset = 6;
+    let draws = [
+        draw(Class::Object(1), -1.6, (1.5, 0.6)),
+        draw(Class::Object(10), 0.0, (0.98, 0.7)),
+        tnt,
+    ];
+    r.set_entities(&draws);
+    let image = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(empty, image);
+    if let Some(dir) = std::env::var_os("MODELS_PROOF_DIR") {
+        encode_png(
+            &std::path::PathBuf::from(dir).join("vehicles.png"),
+            480,
+            240,
+            &image,
+        )
+        .unwrap();
+    }
+}

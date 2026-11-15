@@ -254,6 +254,8 @@ pub struct Entity {
     pub stack: Option<ItemRef>,
     /// Entity id of the vehicle, if riding.
     pub vehicle: Option<i32>,
+    /// Mobs: entity id of the holder of the leash (`getLeashedToEntity`).
+    pub leash: Option<i32>,
     pub age: u32,
     /// Metadata index 7: the mixed colour of the active potion effects, 0 for none.
     pub potion_color: i32,
@@ -414,6 +416,7 @@ impl Entity {
             equipment: [None; EQUIPMENT_SLOTS],
             stack: None,
             vehicle: None,
+            leash: None,
             age: 0,
             potion_color: 0,
             potion_ambient: false,
@@ -493,10 +496,19 @@ impl Entity {
         match self.kind {
             Kind::Player => 1.62 - if self.sneaking() { 0.08 } else { 0.0 },
             Kind::Object(78) => self.size().1 * if self.is_child() { 0.5 } else { 0.9 },
+            Kind::Object(77) => -0.0625,
             Kind::Mob(52) => 0.65,
             Kind::Mob(59) => 0.45,
             Kind::Mob(58) => 2.55,
             _ => self.size().1 * 0.85,
+        }
+    }
+
+    /// `handleEntityAttach` with the leash flag: only a mob (`EntityLiving`) can be leashed, and a negative
+    /// holder id unties it.
+    fn set_leash(&mut self, holder: i32) {
+        if matches!(self.kind, Kind::Mob(_)) {
+            self.leash = (holder >= 0).then_some(holder);
         }
     }
 
@@ -866,6 +878,11 @@ pub enum EntityEvent {
         id: i32,
         vehicle: i32,
     },
+    /// `S1B` with the leash flag: the mob is tied to `holder`, or untied when `holder` is negative.
+    Leash {
+        id: i32,
+        holder: i32,
+    },
     /// Player list entry: names for `SpawnPlayer` uuids.
     PlayerName {
         uuid: u128,
@@ -1206,6 +1223,7 @@ impl Entities {
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
+            E::Leash { id, holder } => self.with(id, |e| e.set_leash(holder)),
             E::PlayerName {
                 uuid,
                 name,
@@ -2071,5 +2089,23 @@ mod tests {
             }
             assert!(es.get(1).unwrap().squish.factor(1.0).abs() < 1e-3);
         }
+    }
+
+    /// `handleEntityAttach` with the leash flag ties a mob to its holder and a negative id unties it; an
+    /// object cannot be leashed.
+    #[test]
+    fn a_leash_packet_ties_a_mob_and_a_negative_holder_unties_it() {
+        let mut es = Entities::default();
+        es.map
+            .insert(1, Entity::new(1, Kind::Mob(92), [0, 0, 0], 0, 0));
+        es.map
+            .insert(2, Entity::new(2, Kind::Object(1), [0, 0, 0], 0, 0));
+        for id in [1, 2] {
+            es.apply(EntityEvent::Leash { id, holder: 9 });
+        }
+        assert_eq!(es.get(1).unwrap().leash, Some(9));
+        assert_eq!(es.get(2).unwrap().leash, None);
+        es.apply(EntityEvent::Leash { id: 1, holder: -1 });
+        assert_eq!(es.get(1).unwrap().leash, None);
     }
 }

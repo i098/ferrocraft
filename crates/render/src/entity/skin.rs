@@ -584,7 +584,10 @@ mod tests {
     fn thrown_item_sprites_use_the_slots_of_their_vanilla_textures() {
         let index = |path: &str| SKINS.iter().position(|&n| n == path).unwrap() as u32;
         assert_eq!(slot(Skin::EnderEye), Some(index("items/ender_eye.png")));
-        assert_eq!(slot(Skin::XpBottle), Some(index("items/experience_bottle.png")));
+        assert_eq!(
+            slot(Skin::XpBottle),
+            Some(index("items/experience_bottle.png"))
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use crate::World;
 
 /// Metadata a boat or minecart sends: hit timer (17), hit direction (18), damage taken (19), the
-/// display tile as `id | meta << 16` (20), its offset (21) and the custom tile flag (22), plus the
+/// display tile as `id | meta << 12` (20), its offset (21) and the custom tile flag (22), plus the
 /// minecart type of the spawn packet and the furnace flag (16).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct VehicleMeta {
@@ -36,7 +36,7 @@ impl VehicleMeta {
     pub fn display_block(&self) -> (u16, i32) {
         if self.custom_tile == Some(1) {
             let tile = self.tile.unwrap_or(0);
-            let state = (tile & 0xFFFF) << 4 | (tile >> 16 & 15);
+            let state = (tile & 4095) << 4 | (tile >> 12 & 15);
             return (state as u16, self.tile_offset.unwrap_or(0));
         }
         match self.cart {
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(chest.display_block(), (54 << 4 | 2, 8));
         let custom = VehicleMeta {
             custom_tile: Some(1),
-            tile: Some(3 | 2 << 16),
+            tile: Some(3 | 2 << 12),
             tile_offset: Some(4),
             cart: Some(1),
             ..Default::default()

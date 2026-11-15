@@ -715,7 +715,10 @@ mod tests {
         for (skin, slots) in [(Skin::Witch, 2), (Skin::Dragon, 4), (Skin::DragonEyes, 4)] {
             let first = slot(skin).unwrap();
             let col = |s: u32| Skins::origin(s)[0];
-            assert!((first..first + slots).all(|s| col(s) == col(first)), "{skin:?}");
+            assert!(
+                (first..first + slots).all(|s| col(s) == col(first)),
+                "{skin:?}"
+            );
         }
     }
 

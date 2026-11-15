@@ -216,8 +216,6 @@ pub struct Look {
     /// Eye position of the camera entity (`Minecraft.getCamera`), the target the guardian's eye
     /// looks at. The origin by default.
     pub viewer: [f64; 3],
-    /// `isRiding`: a biped sits with its legs astride (a baby zombie on a chicken).
-    pub riding: bool,
 }
 
 impl Default for Look {
@@ -254,7 +252,6 @@ impl Default for Look {
             guardian_spikes: 0.0,
             guardian_tail: 0.0,
             viewer: [0.0; 3],
-            riding: false,
         }
     }
 }
@@ -1157,10 +1154,8 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
         Class::Mob(mobs3::OCELOT) if d.look.variant & mobs3::TAMED != 0 => 0.8,
         Class::Mob(mobs2::BAT) => 0.35,
+        Class::Mob(guardian_body::GUARDIAN) => guardian_body::scale(d.look.variant),
         Class::Mob(horse::HORSE) => horse::scale(&d.look.horse),
-        Class::Mob(guardian_body::GUARDIAN) if d.look.variant & guardian_body::ELDER != 0 => {
-            guardian_body::ELDER_SCALE
-        }
         _ => 1.0,
     };
     [s, s]

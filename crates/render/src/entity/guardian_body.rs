@@ -2,7 +2,10 @@
 //! `setupAnimation`) and `GuardianRenderer` (texture, `applyScale`). The box layout and the pose were
 //! read from the 1.8.9 classes: `GuardianModel.setupAnimation` was run on a `GuardianEntity` with a
 //! camera entity set in `Minecraft`.
+//!
+//! Live guardians draw with spikes retracted and a still tail until `mobTick` state is tracked.
 
+use super::guardian::ELDER_SCALE;
 use super::mobs::{head_rot, model};
 use super::{EntityDraw, Model, Part, Skin};
 use std::f32::consts::PI;
@@ -12,8 +15,14 @@ pub(super) const GUARDIAN: u8 = 68;
 /// Metadata int 16 bit 4: `GuardianEntity.isElder`.
 pub(super) const ELDER: u8 = 4;
 
-/// `GuardianRenderer.applyScale` of an elder guardian.
-pub(super) const ELDER_SCALE: f32 = 2.35;
+/// `GuardianRenderer.applyScale`: an elder guardian is drawn at [`ELDER_SCALE`].
+pub(super) fn scale(variant: u8) -> f32 {
+    if variant & ELDER != 0 {
+        ELDER_SCALE
+    } else {
+        1.0
+    }
+}
 
 /// Spike rotation about x, y and z in half turns.
 const SPIKE_ROT: [[f32; 12]; 3] = [

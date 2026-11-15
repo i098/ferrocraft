@@ -12,7 +12,7 @@ pub const LIFETIME: u32 = 30;
 /// `MobAppearanceParticle` scale of the whole model.
 const SCALE: f32 = 0.425_531_92;
 /// `GuardianRenderer.applyScale` of an elder guardian.
-const ELDER_SCALE: f32 = 2.35;
+pub(super) const ELDER_SCALE: f32 = 2.35;
 /// `RendererLivingEntity.doRender` lifts the model by this much (`BODY_OFFSET` of the other models).
 const BODY_OFFSET: f32 = 1.507_812_5;
 /// `EntityPlayer.getEyeHeight`, the camera above the feet.

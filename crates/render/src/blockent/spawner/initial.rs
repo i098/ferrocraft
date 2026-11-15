@@ -95,35 +95,31 @@ impl Initial {
         };
         let multiplier = local.multiplier();
         match id {
-            ZOMBIE | PIG_ZOMBIE => {
-                it.roll_baby(rng);
-                if id == PIG_ZOMBIE {
-                    // `EntityPigZombie.addRandomEquipment` does not call the zombie one.
-                    it.held = GOLDEN_SWORD;
-                } else {
-                    it.roll_armor(local, multiplier, rng);
-                    it.roll_sword(local, rng);
-                }
-                it.roll_enchantments(multiplier, rng);
-            }
+            ZOMBIE | PIG_ZOMBIE => it.roll_zombie(id, local, multiplier, rng),
             SKELETON => {
                 it.roll_armor(local, multiplier, rng);
                 it.held = BOW;
                 it.roll_enchantments(multiplier, rng);
             }
-            SLIME | MAGMA_CUBE => {
-                let mut exponent = rng.next_int(3);
-                if exponent < 2 && rng.next_float() < 0.5 * multiplier {
-                    exponent += 1;
-                }
-                it.slime_size = 1 << exponent;
-            }
+            SLIME | MAGMA_CUBE => it.slime_size = slime_size(multiplier, rng),
             SHEEP => it.fleece = fleece(rng),
             VILLAGER => it.variant = rng.next_int(5) as u8,
             RABBIT => it.variant = rng.next_int(6) as u8,
             _ => {}
         }
         it
+    }
+
+    fn roll_zombie(&mut self, id: u8, local: Local, multiplier: f32, rng: &mut JavaRandom) {
+        self.roll_baby(rng);
+        if id == PIG_ZOMBIE {
+            // `EntityPigZombie.addRandomEquipment` does not call the zombie one.
+            self.held = GOLDEN_SWORD;
+        } else {
+            self.roll_armor(local, multiplier, rng);
+            self.roll_sword(local, rng);
+        }
+        self.roll_enchantments(multiplier, rng);
     }
 
     /// `EntityZombie.onInitialSpawn`: the `GroupData` rolls and the chicken jockey. A baby that
@@ -185,6 +181,14 @@ impl Initial {
             }
         }
     }
+}
+
+fn slime_size(multiplier: f32, rng: &mut JavaRandom) -> u8 {
+    let mut exponent = rng.next_int(3);
+    if exponent < 2 && rng.next_float() < 0.5 * multiplier {
+        exponent += 1;
+    }
+    1 << exponent
 }
 
 /// `EntitySheep.getRandomSheepColor`: the dye metadata of the fleece.

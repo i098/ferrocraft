@@ -112,16 +112,28 @@ impl Spawner {
     }
 }
 
-/// An entity that never ticked, at the origin and yaw 0 (`renderEntityWithPosYaw(.., 0, 0, 0, 0, ..)`).
-fn still_mob(id: u8, size: (f32, f32), partial: f32, it: &Initial) -> EntityDraw {
-    // `EntitySlime.setSlimeSize` sizes the hitbox by 0.51000005 per size step.
-    let size = match id {
+fn hitbox(id: u8, size: (f32, f32), it: &Initial) -> (f32, f32) {
+    match id {
         SLIME | MAGMA_CUBE => {
             let side = 0.51000005 * f32::from(it.slime_size);
             (side, side)
         }
         _ => size,
-    };
+    }
+}
+
+fn variant(id: u8, it: &Initial) -> u8 {
+    match id {
+        SHEEP => it.fleece,
+        VILLAGER => it.variant,
+        _ => 0,
+    }
+}
+
+/// An entity that never ticked, at the origin and yaw 0 (`renderEntityWithPosYaw(.., 0, 0, 0, 0, ..)`).
+fn still_mob(id: u8, size: (f32, f32), partial: f32, it: &Initial) -> EntityDraw {
+    // `EntitySlime.setSlimeSize` sizes the hitbox by 0.51000005 per size step.
+    let size = hitbox(id, size, it);
     EntityDraw {
         class: Class::Mob(id),
         pos: [0.0; 3],
@@ -164,13 +176,7 @@ fn still_mob(id: u8, size: (f32, f32), partial: f32, it: &Initial) -> EntityDraw
             partial,
             riding: it.riding,
             // Sheep fleece color, villager profession and rabbit type.
-            variant: if id == SHEEP {
-                it.fleece
-            } else if id == VILLAGER {
-                it.variant
-            } else {
-                0
-            },
+            variant: variant(id, it),
             collar: if id == RABBIT {
                 it.variant
             } else {

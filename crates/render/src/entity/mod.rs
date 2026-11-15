@@ -1,10 +1,10 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
-//! and `ModelCow` here and from the villager, golem, silverfish, chicken, sheep, spider and
+//! and `ModelCow` and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
 //! [`mobs2`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
-//! Not ported yet: villagers. Held items and dropped items are in [`item`]. Name tags
+//! Held items and dropped items are in [`item`]. Name tags
 //! are laid out by [`nametags`].
 
 mod armorstand;

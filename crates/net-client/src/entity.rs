@@ -149,6 +149,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         },
         cat: byte(18),
         vehicle: vehicle_meta(meta),
+        begging: byte(19),
     }
 }
 

@@ -35,14 +35,19 @@ impl Renderer {
             .map(|l| (l * 15.0).round() as i32)
     }
 
+    /// `World.skylightSubtracted` of this frame.
+    pub(super) fn skylight_subtracted(&self) -> i32 {
+        let env = self.environment;
+        entity::shadow::skylight_subtracted(env.world_time, env.rain, env.thunder)
+    }
+
     /// The shadow blobs of this frame's entities (`Render.renderShadow`); `None` when off or none are cast.
     pub(super) fn prepare_shadows(&mut self, cam: &Camera) -> Option<GpuMesh> {
         if !self.entity_shadows || self.shadows.is_empty() {
             return None;
         }
         self.load_texture(entity::shadow::TEXTURE);
-        let env = self.environment;
-        let subtracted = entity::shadow::skylight_subtracted(env.world_time, env.rain, env.thunder);
+        let subtracted = self.skylight_subtracted();
         let view = self.view_feet(cam);
         let mesh = entity::shadow::build(
             &self.shadows,

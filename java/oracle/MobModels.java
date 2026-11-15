@@ -117,6 +117,14 @@ public class MobModels {
             System.out.println("shake angle partial 0.5 offset " + off + "=" + wolf.getShakeAngle(0.5f, off));
         }
         call(wolf, "setSitting", false);
+        java.lang.reflect.Field headNow = wc.getDeclaredField("headRollAngle");
+        java.lang.reflect.Field headLast = wc.getDeclaredField("lastHeadRollAngle");
+        headNow.setAccessible(true);
+        headLast.setAccessible(true);
+        headLast.setFloat(wolf, 0.64f);
+        headNow.setFloat(wolf, 0.84f);
+        System.out.println("head roll angle partial 0.5=" + wolf.getHeadRollAngle(0.5f));
+        System.out.println("shake progress partial 0.5 (shading while wet)=" + wolf.getShakeProgress(0.5f));
         pose("WolfModel tame shaking (prev 0.8, now 0.85, partial 1.0)", new WolfModel(), wolf, wolf.getTailBob());
         model("OcelotModel", new OcelotModel());
         OcelotEntity cat = new OcelotEntity(null);

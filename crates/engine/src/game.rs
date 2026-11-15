@@ -1,7 +1,7 @@
 //! Window-free game state: chunks, the local player and the 20 TPS step.
 
 use crate::swing::Swing;
-use crate::weather::Weather;
+use crate::weather::{raining_at, Weather};
 use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled, TileEvent};
 use std::collections::HashMap;
 use world::border::WorldBorder;
@@ -687,6 +687,9 @@ impl Game {
             (self.death_ticks + 1).min(20)
         };
         let store = &self.store;
+        let rained_on = raining_at(store, self.weather.strengths(1.0).0);
+        self.entities
+            .update_wet(|x, y, z| store.get_block(x, y, z), rained_on);
         self.entities
             .tick_in(&|p| store.get_block(p[0], p[1], p[2]));
         if self.ticks.is_multiple_of(20) {

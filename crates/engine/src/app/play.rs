@@ -2,6 +2,7 @@
 
 use super::{boxed, App, View, MAX_TICKS_PER_FRAME, TICK};
 use crate::game::{Attack, Effect};
+use crate::weather::{precipitation_top, raining_at};
 use gui::inventory::dials::DialWorld;
 use gui::inventory::ContainerScreen;
 use gui::scoreboard::Scoreboard;
@@ -582,14 +583,7 @@ impl App {
             return;
         };
         let store = &self.game.store;
-        let top = precipitation_top(store);
-        let (rain, _) = self.game.weather.strengths(1.0);
-        // `World.isRaining(pos)`; shortcut: the precipitation height stands in for `canSeeSky`.
-        let raining = |x: i32, y: i32, z: i32| {
-            rain > 0.2
-                && top(x, z)
-                    .is_some_and(|(height, biome)| height <= y && render::splashes(biome, x, y, z))
-        };
+        let raining = raining_at(store, self.game.weather.strengths(1.0).0);
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |t| t.as_nanos() as i64);
@@ -1493,23 +1487,6 @@ fn sprint_dust_state(
     (state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block))
         .then_some(state)
 }
-/// Per column: the precipitation height (the y above the highest rain-stopping block) and the biome id;
-/// `None` for an unloaded column.
-fn precipitation_top(
-    store: &world::chunk::ChunkStore,
-) -> impl Fn(i32, i32) -> Option<(i32, u8)> + '_ {
-    move |x, z| {
-        let biome = store
-            .get(x >> 4, z >> 4)?
-            .biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
-        let y = (0..256)
-            .rev()
-            .find(|&y| render::stops_rain(store.get_block(x, y, z)))
-            .map_or(0, |y| y + 1);
-        Some((y, biome))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, outline_draws, sprint_dust_state, App, ContainerScreen};

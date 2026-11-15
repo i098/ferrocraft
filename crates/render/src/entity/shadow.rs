@@ -74,8 +74,13 @@ pub fn skylight_subtracted(world_time: i64, rain: f32, thunder: f32) -> i32 {
 
 /// `OverworldProvider.lightBrightnessTable` at a light level `0..=15`.
 fn brightness(level: i32) -> f64 {
+    f64::from(light_brightness(level))
+}
+
+/// The same table as `f32`, the color factor of `Entity.getBrightness`.
+pub(super) fn light_brightness(level: i32) -> f32 {
     let f = 1.0 - level.clamp(0, 15) as f32 / 15.0;
-    f64::from((1.0 - f) / (f * 3.0 + 1.0))
+    (1.0 - f) / (f * 3.0 + 1.0)
 }
 
 /// The alpha of the shadow on the top face of the block at height `block_y`, or `None` below zero:

@@ -918,7 +918,9 @@ impl Renderer {
         for key in draws.iter().filter_map(|d| d.skin) {
             self.entity_skins.touch(key);
         }
-        let mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
+        let mesh = entity::build(draws, &self.entity_skins, self.skylight_subtracted(), |p| {
+            self.light_at(p)
+        });
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);
         let mut glint = entity::build_glint(draws, None);

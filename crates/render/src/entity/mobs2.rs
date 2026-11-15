@@ -374,7 +374,7 @@ mod tests {
         let height = |id: u8, size: u8| {
             let mut d = mob(id);
             d.look.variant = size;
-            let m = super::super::build(std::slice::from_ref(&d), &Skins::flat(), |_| [1.0; 2]);
+            let m = super::super::build(std::slice::from_ref(&d), &Skins::flat(), 0, |_| [1.0; 2]);
             let (lo, hi) = m.vertices.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
                 (lo.min(v.pos[1]), hi.max(v.pos[1]))
             });

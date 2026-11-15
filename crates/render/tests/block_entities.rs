@@ -301,7 +301,7 @@ fn spawner_shows_its_mob_and_turns_it_near_a_player() {
     }
     let turned = frame(&mut r, &c, "spawner_turned");
     assert!(differs(&zombie, &turned) > 100, "the mob turns");
-    r.set_spawner([0, 64, 4], ("Giant", 20, None), 1, 6000);
+    r.set_spawner([0, 64, 4], ("NotAMob", 20, None), 1, 6000);
     let wolf = frame(&mut r, &c, "spawner_unported");
     assert_eq!(differs(&cage, &wolf), 0, "a mob with no model shows none");
     // The guardian and the ender dragon were unported: the spawner showed an empty cage.

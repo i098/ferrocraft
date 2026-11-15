@@ -415,6 +415,16 @@ impl Session {
         )
     }
 
+    /// `C18PacketSpectate`: teleport the spectator to this player.
+    pub fn send_spectate(&mut self, target: u128) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::Spectate {
+                target: ferrocraft_protocol::codec::Uuid(target),
+            }),
+        )
+    }
+
     /// `C16PacketClientStatus(REQUEST_STATS)`: the server answers with S37.
     pub fn request_stats(&mut self) -> io::Result<()> {
         send(

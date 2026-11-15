@@ -78,7 +78,7 @@ fn glyph_index(c: char) -> Option<usize> {
 }
 
 /// `FontRenderer.colorCode`: 16 colors, then their shadows at a quarter brightness.
-fn color_code(i: usize) -> u32 {
+pub(crate) fn color_code(i: usize) -> u32 {
     let i = i as u32;
     let j = (i >> 3 & 1) * 85;
     let mut r = (i >> 2 & 1) * 170 + j;

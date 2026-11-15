@@ -4,7 +4,10 @@ use super::{boxed, App, View, MAX_TICKS_PER_FRAME, TICK};
 use crate::game::{Attack, Effect};
 use gui::inventory::dials::DialWorld;
 use gui::inventory::ContainerScreen;
+use gui::scoreboard::Scoreboard;
 use gui::screens::Pause;
+use gui::spectator::{Pick, SpectatorGui};
+use gui::tablist::TabList;
 use input_audio::{apply_cursor_grab, scroll_slot, Action, DebugCombo};
 use std::time::Instant;
 use world::dig::{self, look_vector, Action as DigAction};
@@ -1199,6 +1202,9 @@ impl App {
     }
 
     fn game_action(&mut self, action: Action) {
+        if self.spectator_action(action) {
+            return;
+        }
         match action {
             Action::Attack => self.attack_presses += 1,
             Action::Use => {
@@ -1346,6 +1352,66 @@ impl App {
             let m = metrics!(self);
             let q = self.ui.open(&m, boxed(Pause::default()));
             self.run_effects(q);
+        }
+    }
+
+    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar.
+    fn spectator_action(&mut self, action: Action) -> bool {
+        if self.game.gamemode != 3 {
+            return false;
+        }
+        match action {
+            Action::PickBlock => {
+                self.spectator_menu(|g, now, tab, sb| g.middle_click(now, tab, sb))
+            }
+            Action::Hotbar(n) => {
+                self.spectator_menu(|g, now, tab, sb| g.select_slot(i32::from(n), now, tab, sb));
+            }
+            Action::HotbarScroll(step) => self.spectator_scroll(step),
+            _ => return false,
+        }
+        true
+    }
+
+    /// `SpectatorGui` input: the menu reads the tab list and the teams as they are when it opens, and a
+    /// chosen player goes out as `C18PacketSpectate`.
+    fn spectator_menu(
+        &mut self,
+        f: impl FnOnce(&mut SpectatorGui, i64, &TabList, &Scoreboard) -> Pick,
+    ) {
+        let keys = std::array::from_fn(|i| {
+            let desc = format!("key.hotbar.{}", i + 1);
+            let key = self.ui.settings.keys.iter().find(|k| k.desc == desc);
+            key.map_or(String::new(), |k| {
+                gui::screens::key_name(k.code, &self.ui.texts)
+            })
+        });
+        let hud = &mut self.hud;
+        hud.spectator.set_keys(keys);
+        let outcome = f(
+            &mut hud.spectator,
+            crate::game::now_ms(),
+            &hud.tablist,
+            &hud.scoreboard,
+        );
+        if let Pick::Spectate(uuid) = outcome {
+            let r = self.session_send(|s| s.send_spectate(uuid));
+            self.send_result(r);
+        }
+    }
+
+    /// `Minecraft.runTick` wheel in spectator mode: the menu moves; without one the wheel sets the fly
+    /// speed in steps of 0.005 up to 0.2.
+    fn spectator_scroll(&mut self, step: i32) {
+        let step = step.signum();
+        if self.hud.spectator.is_active() {
+            self.spectator_menu(|g, now, _, _| {
+                g.scroll(-step, now);
+                Pick::None
+            });
+        } else {
+            let g = &mut self.game;
+            g.fly_speed = (g.fly_speed + step as f32 * 0.005).clamp(0.0, 0.2);
         }
     }
 

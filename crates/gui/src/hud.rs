@@ -8,6 +8,7 @@ use crate::inventory::{icons::Icons, tooltip};
 use crate::overlay::{self, Portal};
 use crate::scoreboard::Scoreboard;
 use crate::screens::TextField;
+use crate::spectator::SpectatorGui;
 use crate::status::{self, Status, StatusState};
 use crate::tablist::{Clock, TabList};
 use crate::title::TitleState;
@@ -27,6 +28,7 @@ pub struct Hud {
     pub selected_slot: i32,
     pub status_state: StatusState,
     pub tablist: TabList,
+    pub spectator: SpectatorGui,
     pub scoreboard: Scoreboard,
     pub title: TitleState,
     pub boss: BossStatus,
@@ -142,11 +144,9 @@ impl Hud {
         if !f.nausea && portal > 0.0 {
             overlay::draw_portal(gui, portal, self.update_counter);
         }
-        if f.player_view {
-            self.draw_hotbar(gui, f);
-        }
-        gui.set_color(0xFFFF_FFFF);
         let spectator = f.status.is_some_and(|s| s.spectator);
+        self.draw_bar(gui, f, spectator);
+        gui.set_color(0xFFFF_FFFF);
         if (f.debug.is_none() || f.reduced_debug) && !spectator {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
@@ -157,9 +157,7 @@ impl Hud {
         if let Some(s) = f.status {
             self.draw_status(gui, s);
         }
-        if f.held_item_tooltips && !spectator {
-            self.draw_selected_item(gui, survival);
-        }
+        self.draw_bar_tooltip(gui, f, spectator, survival);
         if let Some((left, right)) = f.debug {
             debug::draw(gui, left, right);
         }
@@ -183,6 +181,24 @@ impl Hud {
             chat::draw_input(gui, field);
         }
         gui.set_color(0xFFFF_FFFF);
+    }
+
+    /// The hotbar, or the spectator menu in its place.
+    fn draw_bar(&mut self, gui: &mut Gui, f: &Frame, spectator: bool) {
+        if spectator {
+            self.spectator.draw_hotbar(gui, f.now_ms);
+        } else if f.player_view {
+            self.draw_hotbar(gui, f);
+        }
+    }
+
+    /// The held item name, or the spectator menu tooltip in its place.
+    fn draw_bar_tooltip(&mut self, gui: &mut Gui, f: &Frame, spectator: bool, survival: bool) {
+        if spectator {
+            self.spectator.draw_tooltip(gui, f.now_ms);
+        } else if f.held_item_tooltips {
+            self.draw_selected_item(gui, survival);
+        }
     }
 
     fn draw_hotbar(&self, gui: &mut Gui, f: &Frame) {

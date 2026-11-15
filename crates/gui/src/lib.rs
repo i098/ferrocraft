@@ -12,6 +12,7 @@ pub mod inventory;
 pub mod overlay;
 pub mod scoreboard;
 pub mod screens;
+pub mod spectator;
 pub mod status;
 pub mod tablist;
 pub mod title;

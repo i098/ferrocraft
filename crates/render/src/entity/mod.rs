@@ -26,6 +26,7 @@ pub(crate) mod shadow;
 mod sheep;
 mod skin;
 pub mod vehicle;
+mod squid;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
 const PLAYER_JACKET: usize = 7;
@@ -160,6 +161,8 @@ pub struct Look {
     pub sprinting: bool,
     /// Rabbit: `getJumpCompletion`, 0 at rest and 0 to 1 over a jump.
     pub jump: f32,
+    /// Squid: body roll, pitch and tentacle angle of the frame; see [`world::squid::Pose`].
+    pub squid: world::squid::Pose,
     /// Slimes and magma cubes: `prevSquishFactor` eased to `squishFactor` by the partial tick.
     pub squish: f32,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
@@ -190,6 +193,7 @@ impl Default for Look {
             health: 1.0,
             sprinting: false,
             jump: 0.0,
+            squid: world::squid::Pose::default(),
             squish: 0.0,
             eat_timer: 0,
             golem_attack: 0,
@@ -693,8 +697,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 22] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 95, 98, 99, 101, 120,
+    const MODELED: [u8; 23] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 98, 99, 101,
+        120,
     ];
     MODELED.contains(&id)
 }
@@ -725,6 +730,7 @@ fn adult_model(d: &EntityDraw) -> Model {
             .or_else(|| mobs2::build(d, id))
             .or_else(|| mobs3::build(d, id))
             .or_else(|| rabbit::build(d, id))
+            .or_else(|| squid::build(d, id))
             .unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
@@ -956,6 +962,8 @@ struct Xf {
     scale: [f32; 2],
     /// The generic box is built y-up from the feet, so it skips the body offset.
     generic: bool,
+    /// `RenderSquid.rotateCorpse`: the squid turns about its own center instead of its feet.
+    squid: Option<world::squid::Pose>,
 }
 
 /// Vertical drop of the model: `RenderPlayer` lowers a sneaking player (a stand sneaks through its own
@@ -1023,6 +1031,7 @@ impl Xf {
             fall,
             scale: model_scale(d),
             generic,
+            squid: (d.class == Class::Mob(squid::SQUID)).then_some(d.look.squid),
         }
     }
 
@@ -1044,6 +1053,10 @@ impl Xf {
         let [sx, sy] = self.scale;
         let (x, y) = (-q[0] / 16.0 * sx, (BODY_OFFSET - q[1] / 16.0) * sy);
         let z = q[2] / 16.0 * sx;
+        if let Some(pose) = &self.squid {
+            let p = squid::place(pose, [x, y, z]);
+            return [0, 1, 2].map(|i| (self.pos[i] + f64::from(p[i])) as f32);
+        }
         let (x, y) = if self.fall != 0.0 {
             // `LivingRenderer.applyRotation`: a z rotation about the feet origin.
             let (sf, cf) = self.fall.sin_cos();

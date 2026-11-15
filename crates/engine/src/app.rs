@@ -1597,6 +1597,7 @@ fn entity_draw(
             health: e.meta.health.unwrap_or(1.0),
             sprinting: e.sprinting(),
             jump: e.anim.jump_completion(p),
+            squid: e.squid.pose(p),
             squish: e.squish.factor(p),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,

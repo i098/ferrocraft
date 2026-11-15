@@ -13,6 +13,8 @@ import net.minecraft.flat.Model;
 import net.minecraft.flat.ModelPart;
 import net.minecraft.flat.OcelotEntity;
 import net.minecraft.flat.OcelotModel;
+import net.minecraft.flat.RabbitEntity;
+import net.minecraft.flat.RabbitModel;
 import net.minecraft.flat.SheepEntity;
 import net.minecraft.flat.SlimeModel;
 import net.minecraft.flat.WolfEntity;
@@ -117,6 +119,24 @@ public class MobModels {
         pose("OcelotModel sitting and sneaking", new OcelotModel(), cat, 0.0f);
     }
 
+    private static void setInt(Object o, String name, int v) throws Exception {
+        Field f = RabbitEntity.class.getDeclaredField(name);
+        f.setAccessible(true);
+        f.setInt(o, v);
+    }
+
+    /** The rabbit model at rest and at three points of a jump (`getJumpCompletion` is ticks + partial over 10). */
+    private static void rabbit() throws Exception {
+        model("RabbitModel", new RabbitModel());
+        RabbitEntity rabbit = new RabbitEntity(null);
+        pose("RabbitModel idle", new RabbitModel(), rabbit, 0.0f);
+        setInt(rabbit, "jumpDuration", 10);
+        for (int ticks : new int[] {2, 5, 8}) {
+            setInt(rabbit, "jumpTicks", ticks);
+            pose("RabbitModel jump tick " + ticks + " partial 0", new RabbitModel(), rabbit, 0.0f);
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         model("SlimeModel(16)", new SlimeModel(16));
         model("SlimeModel(0)", new SlimeModel(0));
@@ -131,5 +151,6 @@ public class MobModels {
         model("GhastModel after setupAnimation(age 10)", ghast);
         model("BatModel", new BatModel());
         wolfAndOcelot();
+        rabbit();
     }
 }

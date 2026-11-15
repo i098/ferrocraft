@@ -18,6 +18,7 @@ pub(crate) mod guardian;
 pub(crate) mod gui;
 pub mod hanging;
 pub mod item;
+pub mod leash;
 pub(crate) mod mobs;
 mod mobs2;
 mod mobs3;
@@ -191,6 +192,8 @@ pub struct Look {
     pub crystal_ticks: i32,
     /// Wither skulls: metadata byte 10, the blue skull.
     pub invulnerable: bool,
+    /// Leashed mobs: the holder the rope runs to.
+    pub leash: Option<leash::Holder>,
 }
 
 impl Default for Look {
@@ -220,6 +223,7 @@ impl Default for Look {
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
             invulnerable: false,
+            leash: None,
         }
     }
 }
@@ -1258,7 +1262,9 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     if other_drawer(out, d, skins) {
         return out.vertices.len();
     }
-    draw_body(out, d, skins)
+    let bright = draw_body(out, d, skins);
+    leash::rope(out, d, skins);
+    bright
 }
 
 /// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
@@ -1275,6 +1281,10 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
         }
         if id == skull::ID {
             skull::build(out, d, skins);
+            return true;
+        }
+        if id == leash::KNOT {
+            leash::knot(out, d, skins);
             return true;
         }
         if vehicle::handles(id) {

@@ -661,6 +661,7 @@ impl App {
         d.team_tag = TeamTag {
             shown: sb.name_tag_shown(name, &self.args.username),
             below: sb.below_name(name),
+            outline: gui::spectator::outline_color(sb, name),
         };
     }
 
@@ -939,6 +940,9 @@ impl App {
         );
         r.set_mod_look(hurt, glint);
         r.set_entities(&draws);
+        // `WorldRenderer.shouldRenderEntityOutlines`: the local player is a spectator and holds the key.
+        let outlines = self.game.gamemode == 3 && self.input.spectator_outlines_held();
+        r.set_entity_outlines(outlines.then_some(&draws[..]));
         r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));

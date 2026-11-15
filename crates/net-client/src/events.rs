@@ -207,6 +207,10 @@ fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
         P::Teams(p) => NetEvent::Team {
             name: p.name.clone(),
             mode: p.mode as u8,
+            display_name: p
+                .info
+                .as_ref()
+                .map_or_else(String::new, |i| i.display_name.clone()),
             prefix: p
                 .info
                 .as_ref()
@@ -539,6 +543,7 @@ mod tests {
             [NetEvent::Team {
                 name: "red".into(),
                 mode: 0,
+                display_name: "Red".into(),
                 prefix: "§c".into(),
                 suffix: "§r".into(),
                 visibility: "always".into(),

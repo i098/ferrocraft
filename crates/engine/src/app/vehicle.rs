@@ -3,8 +3,8 @@
 
 use render::{vehicle::VehicleLook, EntityDraw};
 use world::chunk::ChunkStore;
-use world::entities::vehicle::{on_rail, CartPose};
 use world::entities::{Entity, Kind};
+use world::vehicle::{hit_wobble, on_rail, CartPose};
 use world::World;
 
 struct Blocks<'a>(&'a ChunkStore);
@@ -17,13 +17,16 @@ impl World for Blocks<'_> {
 
 /// `getDamagedTimer`, `getDamagedSwingDirection`, `getDamage` and the display block of `e`; a boat
 /// sends no display block, and its direction starts at 1 as `BoatEntity` sets it.
-pub fn look(e: &Entity) -> VehicleLook {
+pub fn look(e: &Entity, partial: f32) -> VehicleLook {
     let m = &e.meta.vehicle;
     let (block, block_offset) = m.display_block();
     VehicleLook {
-        hit_timer: m.hit_timer.unwrap_or(0),
-        hit_direction: m.hit_direction.unwrap_or(1),
-        damage: m.damage.unwrap_or(0.0),
+        wobble: hit_wobble(
+            m.hit_timer.unwrap_or(0),
+            m.damage.unwrap_or(0.0),
+            m.hit_direction.unwrap_or(1),
+            partial,
+        ),
         block,
         block_offset,
     }

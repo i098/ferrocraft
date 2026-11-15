@@ -206,10 +206,7 @@ pub struct Items {
     dye: Option<i32>,
 }
 
-/// `p` through `m`, a column-major affine matrix.
-pub(super) fn point(m: &Mat, p: V3) -> V3 {
-    std::array::from_fn(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
-}
+pub(super) use crate::hand::point;
 
 /// The direction `n` through the linear part of `m`.
 pub(super) fn dir(m: &Mat, n: V3) -> V3 {

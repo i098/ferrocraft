@@ -121,6 +121,11 @@ pub(crate) fn rotate(deg: f32, axis: usize) -> Mat {
     m
 }
 
+/// `p` through `m`, a column-major affine matrix.
+pub(crate) fn point(m: &Mat, p: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
+}
+
 pub(crate) fn chain(ms: &[Mat]) -> Mat {
     ms.iter().fold(ident(), |acc, m| mul(acc, *m))
 }

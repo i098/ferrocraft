@@ -24,6 +24,7 @@ pub mod place;
 pub mod potion_brew;
 pub mod shape;
 pub mod squish;
+pub mod vehicle;
 
 use std::sync::LazyLock;
 
@@ -54,7 +55,7 @@ static SIN_TABLE: LazyLock<Vec<f32>> = LazyLock::new(|| {
         .collect()
 });
 
-pub fn sin(v: f32) -> f32 {
+fn sin(v: f32) -> f32 {
     SIN_TABLE[((v * 10430.378_f32) as i32 & 65535) as usize]
 }
 

@@ -6,8 +6,8 @@ use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
 use ferrocraft_protocol::play::clientbound as cb;
 use ferrocraft_protocol::play::{serverbound as sb, PlayerListAction, UseAction};
 use std::io;
-use world::entities::vehicle::VehicleMeta;
 use world::entities::{EntityEvent, FireworkExplosion, ItemRef, SizeMeta};
+use world::vehicle::VehicleMeta;
 
 fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {

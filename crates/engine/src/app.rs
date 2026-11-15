@@ -1602,7 +1602,7 @@ fn entity_draw(
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,
             partial: p,
-            vehicle: vehicle::look(e),
+            vehicle: vehicle::look(e, p),
             ..Look::default()
         },
     }

@@ -61,6 +61,18 @@ impl VehicleMeta {
     }
 }
 
+/// The hit wobble of `BoatRenderer.render` and `MinecartRenderer.render`, in degrees about x:
+/// `sin(t) * t * damage / 10 * direction` while `t`, the hit timer less the partial tick, is above 0,
+/// with the damage taken less the partial tick floored at 0.
+pub fn hit_wobble(timer: i32, damage: f32, direction: i32, partial: f32) -> f32 {
+    let t = timer as f32 - partial;
+    if t > 0.0 {
+        crate::sin(t) * t * (damage - partial).max(0.0) / 10.0 * direction as f32
+    } else {
+        0.0
+    }
+}
+
 /// The minecart type of a `SpawnObject`: object 10 carries it in `data`; the old ids 11 and 12 are
 /// the chest and furnace carts.
 pub fn cart_type(kind: i8, data: i32) -> Option<u8> {
@@ -268,6 +280,15 @@ mod tests {
             pitch: 7.0,
         };
         assert_eq!(on_rail(&world, off), off);
+    }
+
+    #[test]
+    fn the_hit_wobble_runs_only_while_the_timer_does() {
+        assert_eq!(hit_wobble(0, 30.0, 1, 0.0), 0.0);
+        assert_eq!(hit_wobble(2, 30.0, 1, 2.0), 0.0);
+        let w = hit_wobble(8, 20.0, -1, 0.5);
+        assert!((w - -(crate::sin(7.5) * 7.5 * 19.5 / 10.0)).abs() < 1e-6 && w != 0.0);
+        assert_eq!(hit_wobble(8, 0.25, 1, 0.5), 0.0);
     }
 
     #[test]

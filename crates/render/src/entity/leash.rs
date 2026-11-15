@@ -126,10 +126,10 @@ fn push_strip(out: &mut MeshData, pts: &[(V3, V3, [f32; 3])], uv: [f32; 2]) {
 pub fn rope(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
     let Some(h) = d.look.leash else { return };
     let (start, delta) = rope_ends(d, &h);
-    let white = skins.v_offset(Skin::White);
+    let at = Skins::uv_offset(skins.v_offset(Skin::White));
     let uv = [
-        0.5 / Skins::width() as f32,
-        (white + 0.5) / Skins::height() as f32,
+        at[0] + 0.5 / Skins::width() as f32,
+        at[1] + 0.5 / Skins::height() as f32,
     ];
     for strip in 0..2 {
         push_strip(out, &strip_points(start, delta, strip), uv);

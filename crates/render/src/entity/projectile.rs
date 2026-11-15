@@ -80,7 +80,7 @@ fn push_quad(out: &mut MeshData, quad: [Vertex; 4]) {
 /// A unit-square sprite (`size` blocks wide) centred `rise` above the feet, turned to the viewer as
 /// `rotatef(180 - cameraYaw, y)` then `rotatef(-cameraPitch, x)` do.
 fn billboard(out: &mut MeshData, d: &EntityDraw, skins: &Skins, skin: Skin, size: f32, rise: f32) {
-    let v_off = skins.v_offset(skin);
+    let at = Skins::uv_offset(skins.v_offset(skin));
     let texels = match skin {
         Skin::Bobber => 8.0,
         _ => 16.0,
@@ -98,7 +98,7 @@ fn billboard(out: &mut MeshData, d: &EntityDraw, skins: &Skins, skin: Skin, size
                 (d.pos[1] + f64::from(p[1])) as f32,
                 (d.pos[2] + f64::from(p[2])) as f32,
             ],
-            [u * texels / tex[0], (v * texels + v_off) / tex[1]],
+            [u * texels / tex[0] + at[0], v * texels / tex[1] + at[1]],
         )
     };
     push_quad(
@@ -147,9 +147,9 @@ pub(super) fn arrow_model(
     pitch: f32,
     at: impl Fn(V3) -> V3,
 ) {
-    let v_off = skins.v_offset(Skin::Arrow);
+    let base = Skins::uv_offset(skins.v_offset(Skin::Arrow));
     let tex = [Skins::width() as f32, Skins::height() as f32];
-    let uv = |u: f32, v: f32| [u * 32.0 / tex[0], (v * 32.0 + v_off) / tex[1]];
+    let uv = |u: f32, v: f32| [u * 32.0 / tex[0] + base[0], v * 32.0 / tex[1] + base[1]];
     let place = |p: V3, spin: f32| -> V3 {
         let s = 0.056_25;
         let p = [(p[0] - 4.0) * s, p[1] * s, p[2] * s];
@@ -194,10 +194,10 @@ pub(super) fn arrow_model(
 /// `FishingBobberRenderer`: 16 segments of a sagging line from the rod tip to the bobber, drawn as
 /// thin black ribbons that face the viewer.
 fn line(out: &mut MeshData, d: &EntityDraw, hand: [f64; 3], eye: f32, skins: &Skins) {
-    let white = skins.v_offset(Skin::White);
+    let at = Skins::uv_offset(skins.v_offset(Skin::White));
     let uv = [
-        0.5 / Skins::width() as f32,
-        (white + 0.5) / Skins::height() as f32,
+        at[0] + 0.5 / Skins::width() as f32,
+        at[1] + 0.5 / Skins::height() as f32,
     ];
     let dx = (hand[0] - d.pos[0]) as f32;
     let dy = (hand[1] - d.pos[1]) as f32 - 0.25 + eye;

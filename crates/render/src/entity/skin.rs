@@ -1,6 +1,7 @@
-//! One texture for every entity model: 128x64 slots stacked vertically (the iron golem texture is 128x128 and
-//! takes two). The fixed slots come first, then one plain white slot, then [`PLAYER_SLOTS`] slots for downloaded
-//! player skins and [`CAPE_SLOTS`] for downloaded capes.
+//! One texture for every entity model: 128x64 slots (the iron golem and horse textures are 128x128 and
+//! take two). The fixed slots come first, then one plain white slot, then [`PLAYER_SLOTS`] slots for downloaded
+//! player skins and [`CAPE_SLOTS`] for downloaded capes. [`Skins::rgba`] stacks them in one column; the
+//! texture itself cuts that column into several, so that no side passes 8192 texels.
 
 use crate::assets::{decode_png, AssetSource, Image};
 
@@ -10,6 +11,8 @@ pub(super) mod horse;
 pub const SLOT: u32 = 64;
 /// Width of the atlas, for the 128 wide iron golem texture.
 const WIDTH: u32 = 128;
+/// The largest side of the atlas texture; 8192 is the limit every GPU has to offer.
+const MAX_SIDE: u32 = 8192;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
@@ -268,6 +271,14 @@ pub const PLAYER_SLOTS: usize = 32;
 /// Downloaded capes kept at once.
 pub const CAPE_SLOTS: usize = 8;
 const TOTAL: u32 = SLOTS + (PLAYER_SLOTS + CAPE_SLOTS) as u32;
+/// Columns of the atlas texture, so that none of its sides passes [`MAX_SIDE`].
+const COLUMNS: u32 = (TOTAL * SLOT).div_ceil(MAX_SIDE);
+/// Slots in one column. The horse textures take two slots each from slot `SKINS.len()` on, so the
+/// column ends where such a pair ends: its length has the parity of `SKINS.len()`.
+const COLUMN_SLOTS: u32 = {
+    let odd = SKINS.len() as u32 % 2;
+    (TOTAL.div_ceil(COLUMNS) - odd).next_multiple_of(2) + odd
+};
 
 pub struct Skins {
     pub rgba: Vec<u8>,
@@ -298,12 +309,50 @@ impl Skin {
 }
 
 impl Skins {
+    /// Width of the atlas texture in texels.
     pub fn width() -> u32 {
+        WIDTH * COLUMNS
+    }
+
+    /// Height of the atlas texture in texels.
+    pub fn height() -> u32 {
+        SLOT * COLUMN_SLOTS
+    }
+
+    /// Texels in one row of [`Skins::rgba`], which keeps the slots stacked in one column.
+    pub fn row_width() -> u32 {
         WIDTH
     }
 
-    pub fn height() -> u32 {
-        SLOT * TOTAL
+    /// Top-left texel of `slot` in the atlas texture. This is the only place that maps slots to the
+    /// columns of the texture.
+    fn origin(slot: u32) -> [u32; 2] {
+        [slot / COLUMN_SLOTS * WIDTH, slot % COLUMN_SLOTS * SLOT]
+    }
+
+    /// Position of the slot of [`Skins::v_offset`] in the atlas texture, as a fraction of its size.
+    /// Texture coordinates of a model texture add it to their own fractions.
+    pub fn uv_offset(v_off: f32) -> [f32; 2] {
+        let [x, y] = Self::origin(v_off as u32 / SLOT);
+        [
+            x as f32 / Self::width() as f32,
+            y as f32 / Self::height() as f32,
+        ]
+    }
+
+    /// [`Skins::rgba`] laid out as the atlas texture.
+    pub fn atlas(&self) -> Vec<u8> {
+        let (w, row) = (Self::width() as usize * 4, WIDTH as usize * 4);
+        let mut out = vec![0; w * Self::height() as usize];
+        for slot in 0..TOTAL {
+            let [x, y] = Self::origin(slot);
+            for r in 0..SLOT as usize {
+                let from = (slot as usize * SLOT as usize + r) * row;
+                let to = (y as usize + r) * w + x as usize * 4;
+                out[to..to + row].copy_from_slice(&self.rgba[from..from + row]);
+            }
+        }
+        out
     }
 
     /// All slots white: models draw flat-colored.
@@ -320,7 +369,7 @@ impl Skins {
 
     /// Stores the skin of player `key` in its slot, or in a free or the least recently used one.
     /// Returns the texel rows of the slot that changed.
-    pub fn set_player(&mut self, key: u128, img: &Image) -> (u32, &[u8]) {
+    pub fn set_player(&mut self, key: u128, img: &Image) -> ([u32; 2], &[u8]) {
         let i = self
             .players
             .iter()
@@ -336,11 +385,11 @@ impl Skins {
         let slot = SLOTS + i as u32;
         self.blit(slot, img);
         self.fix_alpha(slot);
-        (slot * SLOT, self.slot_rows(slot))
+        (Self::origin(slot), self.slot_rows(slot))
     }
 
     /// Stores the cape of player `key`, like [`Skins::set_player`]; no skin fixes apply to a cape.
-    pub fn set_cape(&mut self, key: u128, img: &Image) -> (u32, &[u8]) {
+    pub fn set_cape(&mut self, key: u128, img: &Image) -> ([u32; 2], &[u8]) {
         let i = self
             .capes
             .iter()
@@ -355,7 +404,7 @@ impl Skins {
         self.capes[i] = Some((key, self.clock));
         let slot = SLOTS + (PLAYER_SLOTS + i) as u32;
         self.blit_plain(slot, img);
-        (slot * SLOT, self.slot_rows(slot))
+        (Self::origin(slot), self.slot_rows(slot))
     }
 
     /// The cape slot of player `key`, when one is stored.
@@ -540,7 +589,8 @@ impl Skins {
         }
     }
 
-    /// Row offset in texels of the slot to sample for `skin`.
+    /// Key of the slot to sample for `skin`: its row in a column of all slots. Pass it as `v_off`
+    /// to `add_box`, or to [`Skins::uv_offset`], never add it to a texel row.
     pub fn v_offset(&self, skin: Skin) -> f32 {
         let s = match slot(skin) {
             Some(s) if s >= SLOTS || self.loaded(s) => s,
@@ -658,6 +708,42 @@ mod tests {
         assert!(skins.player(0).is_some());
         assert!(skins.player(1).is_none());
         assert_eq!(skins.player(99), Some(Skin::Player(1)));
+    }
+
+    #[test]
+    fn atlas_stays_within_the_gpu_limit_with_all_dynamic_slots() {
+        assert!(Skins::width() <= MAX_SIDE && Skins::height() <= MAX_SIDE);
+        const { assert!(COLUMNS * COLUMN_SLOTS >= TOTAL) };
+    }
+
+    #[test]
+    fn two_slot_textures_stay_in_one_column() {
+        let golem = slot(Skin::IronGolem).unwrap();
+        let horses = (0..horse::COUNT as u32).map(|i| SKINS.len() as u32 + 2 * i);
+        for s in std::iter::once(golem).chain(horses) {
+            assert_eq!(Skins::origin(s)[0], Skins::origin(s + 1)[0], "slot {s}");
+        }
+    }
+
+    #[test]
+    fn every_slot_has_its_own_rect_inside_the_atlas() {
+        let mut seen = std::collections::HashSet::new();
+        for s in 0..TOTAL {
+            let [x, y] = Skins::origin(s);
+            assert!(
+                x + WIDTH <= Skins::width() && y + SLOT <= Skins::height(),
+                "slot {s}"
+            );
+            assert!(seen.insert([x, y]), "slot {s} shares a rect");
+        }
+    }
+
+    #[test]
+    fn offsets_of_the_last_slot_point_into_the_second_column() {
+        let last = Skins::uv_offset(((TOTAL - 1) * SLOT) as f32);
+        let w = Skins::width() as f32;
+        assert_eq!(last[0], WIDTH as f32 / w);
+        assert_eq!(Skins::uv_offset(0.0), [0.0, 0.0]);
     }
 
     #[test]

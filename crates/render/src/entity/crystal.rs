@@ -81,8 +81,8 @@ pub fn build(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
         [0.8, 0.45, 0.85]
     };
     // The texture is 128x64 but the model lays it out on 64x32, so every texel of the model is 2x2
-    // atlas texels: halve the atlas size and the row offset to match.
-    let v_off = skins.v_offset(skin) / 2.0;
+    // atlas texels: halve the atlas size to match.
+    let v_off = skins.v_offset(skin);
     let [tw, th] = skin_dims();
     let (base, glass) = layers(d);
     for (m, c) in std::iter::once((base, &BASE)).chain(glass) {

@@ -99,6 +99,29 @@ fn strip_points(start: [f64; 3], delta: [f64; 3], strip: u8) -> Vec<(V3, V3, [f3
         .collect()
 }
 
+/// One strip as quads, `(a0, b0, b1, a1)` per step, with both windings as the culling is off.
+fn push_strip(out: &mut MeshData, pts: &[(V3, V3, [f32; 3])], uv: [f32; 2]) {
+    const ORDER: [u32; 12] = [0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0];
+    for w in pts.windows(2) {
+        let base = out.vertices.len() as u32;
+        for (pos, c) in [
+            (w[0].0, w[0].2),
+            (w[0].1, w[0].2),
+            (w[1].1, w[1].2),
+            (w[1].0, w[1].2),
+        ] {
+            let color = [c[0], c[1], c[2], 1.0];
+            out.vertices.push(Vertex {
+                pos,
+                uv,
+                color,
+                light: [1.0, 1.0],
+            });
+        }
+        out.indices.extend(ORDER.map(|i| base + i));
+    }
+}
+
 /// `renderLeash`: the rope of a leashed mob, appended in world space. It is unlit and unculled.
 pub fn rope(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
     let Some(h) = d.look.leash else { return };
@@ -109,38 +132,7 @@ pub fn rope(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
         (white + 0.5) / Skins::height() as f32,
     ];
     for strip in 0..2 {
-        let pts = strip_points(start, delta, strip);
-        let vert = |pos: V3, c: [f32; 3]| Vertex {
-            pos,
-            uv,
-            color: [c[0], c[1], c[2], 1.0],
-            light: [1.0, 1.0],
-        };
-        for w in pts.windows(2) {
-            // Triangle strip `(a0, b0, a1, b1)`, both windings as the culling is off.
-            let quad = [
-                (w[0].0, w[0].2),
-                (w[0].1, w[0].2),
-                (w[1].1, w[1].2),
-                (w[1].0, w[1].2),
-            ];
-            let base = out.vertices.len() as u32;
-            out.vertices.extend(quad.map(|(p, c)| vert(p, c)));
-            out.indices.extend_from_slice(&[
-                base,
-                base + 1,
-                base + 2,
-                base,
-                base + 2,
-                base + 3,
-                base + 2,
-                base + 1,
-                base,
-                base + 3,
-                base + 2,
-                base,
-            ]);
-        }
+        push_strip(out, &strip_points(start, delta, strip), uv);
     }
 }
 

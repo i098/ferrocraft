@@ -504,6 +504,14 @@ impl Entity {
         }
     }
 
+    /// `handleEntityAttach` with the leash flag: only a mob (`EntityLiving`) can be leashed, and a negative
+    /// holder id unties it.
+    fn set_leash(&mut self, holder: i32) {
+        if matches!(self.kind, Kind::Mob(_)) {
+            self.leash = (holder >= 0).then_some(holder);
+        }
+    }
+
     /// `isChild`: a small armor stand, a baby zombie or a baby ageable mob.
     pub fn is_child(&self) -> bool {
         match self.kind {
@@ -1215,14 +1223,7 @@ impl Entities {
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
-            E::Leash { id, holder } => {
-                // `NetHandlerPlayClient.handleEntityAttach`: only a mob (`EntityLiving`) can be leashed.
-                self.with(id, |e| {
-                    if matches!(e.kind, Kind::Mob(_)) {
-                        e.leash = (holder >= 0).then_some(holder);
-                    }
-                });
-            }
+            E::Leash { id, holder } => self.with(id, |e| e.set_leash(holder)),
             E::PlayerName {
                 uuid,
                 name,

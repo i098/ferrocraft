@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 79] = [
+const SKINS: [&str; 80] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",

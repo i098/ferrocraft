@@ -19,6 +19,7 @@ mod own_sounds;
 mod pack;
 mod play;
 mod screen;
+mod skull;
 mod vehicle;
 
 use crate::args::Args;
@@ -1526,12 +1527,13 @@ fn entity_draw(
         Kind::Painting => Class::Painting,
     };
     let p = partial as f32;
+    let (yaw, pitch) = skull::look(e, p);
     EntityDraw {
         class,
         pos: e.lerp_pos(partial),
-        yaw: e.yaw,
+        yaw,
         head_yaw: e.head_yaw,
-        pitch: e.pitch,
+        pitch,
         limb_swing: e.limb_swing - e.limb_swing_amount * (1.0 - p),
         limb_swing_amount: e.prev_limb_swing_amount
             + (e.limb_swing_amount - e.prev_limb_swing_amount) * p,
@@ -1609,6 +1611,7 @@ fn entity_draw(
             partial: p,
             vehicle: vehicle::look(e, p),
             crystal_ticks: crystal::ticks(e),
+            invulnerable: skull::charged(e),
             ..Look::default()
         },
     }

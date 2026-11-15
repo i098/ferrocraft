@@ -28,6 +28,7 @@ mod rabbit;
 pub(crate) mod shadow;
 mod sheep;
 mod skin;
+pub mod skull;
 mod squid;
 pub mod vehicle;
 
@@ -187,6 +188,8 @@ pub struct Look {
     pub vehicle: vehicle::VehicleLook,
     /// Ender crystals: `renderTicks`, the tick counter that spins and bobs the cubes.
     pub crystal_ticks: i32,
+    /// Wither skulls: metadata byte 10, the blue skull.
+    pub invulnerable: bool,
 }
 
 impl Default for Look {
@@ -215,6 +218,7 @@ impl Default for Look {
             partial: 0.0,
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
+            invulnerable: false,
         }
     }
 }
@@ -1261,6 +1265,10 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
         }
         if crystal::handles(id) {
             crystal::build(out, d, skins);
+            return true;
+        }
+        if id == skull::ID {
+            skull::build(out, d, skins);
             return true;
         }
         if vehicle::handles(id) {

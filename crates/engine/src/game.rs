@@ -686,7 +686,9 @@ impl Game {
         } else {
             (self.death_ticks + 1).min(20)
         };
-        self.entities.tick();
+        let store = &self.store;
+        self.entities
+            .tick_in(&|p| store.get_block(p[0], p[1], p[2]));
         if self.ticks.is_multiple_of(20) {
             // `RenderGlobal.updateDamagedBlocks`: a stage nobody refreshed for 400 ticks goes.
             let now = self.ticks;

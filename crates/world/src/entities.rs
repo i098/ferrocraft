@@ -1245,11 +1245,25 @@ impl Entities {
         }
     }
 
-    /// Sets `Entity.isWet()` (in water) of every wolf for the next [`Entities::tick`]; `block` gives block states.
-    pub fn update_wet(&mut self, block: impl Fn(i32, i32, i32) -> u16) {
+    /// Sets `Entity.isWet()` of every wolf for the next [`Entities::tick`]: in water, or rained on at the feet or
+    /// the head (`canLightningStrike`, given by `rained_on`); `block` gives block states.
+    pub fn update_wet(
+        &mut self,
+        block: impl Fn(i32, i32, i32) -> u16,
+        rained_on: impl Fn(i32, i32, i32) -> bool,
+    ) {
         for e in self.map.values_mut().filter(|e| e.kind == Kind::Mob(95)) {
             let height = f64::from(e.size().1);
-            e.anim.in_water = crate::motion_sound::in_water(e.pos, height, &block);
+            let at = |y: f64| {
+                rained_on(
+                    e.pos[0].floor() as i32,
+                    y.floor() as i32,
+                    e.pos[2].floor() as i32,
+                )
+            };
+            e.anim.in_water = crate::motion_sound::in_water(e.pos, height, &block)
+                || at(e.pos[1])
+                || at(e.pos[1] + height);
         }
     }
 
@@ -1767,6 +1781,20 @@ mod tests {
         assert!(!es.get(1).unwrap().anim.shaking);
         assert_eq!(es.get(1).unwrap().anim.shake_time, 0.0);
         assert!(!status_of(99, 8).get(1).unwrap().anim.shaking);
+    }
+
+    #[test]
+    fn rain_at_the_wolfs_head_wets_it() {
+        let mut es = status_of(95, 8);
+        es.with(1, |e| e.pos[1] = 0.5);
+        let (y, h) = (0.5, f64::from(Kind::Mob(95).size().1));
+        let head = (y + h).floor() as i32;
+        let feet = y.floor() as i32;
+        assert_ne!(head, feet);
+        es.update_wet(|_, _, _| 0, |_, by, _| by == head);
+        assert!(es.get(1).unwrap().anim.in_water);
+        es.update_wet(|_, _, _| 0, |_, _, _| false);
+        assert!(!es.get(1).unwrap().anim.in_water);
     }
 
     #[test]

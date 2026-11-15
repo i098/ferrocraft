@@ -52,13 +52,14 @@ fn wolf_tail_angle(d: &EntityDraw) -> f32 {
 }
 
 /// `RenderWolf.doRender`: a wet wolf is drawn with the color `getBrightness * getShadingWhileWet`; `light` is
-/// the `[sky, block]` level at the wolf. `None` for every other entity and for a dry wolf.
-pub(super) fn wet_color(d: &EntityDraw, light: [f32; 2]) -> Option<f32> {
+/// the `[sky, block]` level at the wolf, whose sky part loses `subtracted` (`World.skylightSubtracted`). `None` for every other entity and for a dry wolf.
+pub(super) fn wet_color(d: &EntityDraw, light: [f32; 2], subtracted: i32) -> Option<f32> {
     let shade = d
         .look
         .wolf_wet
         .filter(|_| d.class == super::Class::Mob(WOLF))?;
-    let level = (light[0].max(light[1]) * 15.0).round() as i32;
+    let [sky, block] = light.map(|l| (l * 15.0).round() as i32);
+    let level = (sky - subtracted).max(block);
     Some(super::shadow::light_brightness(level) * shade)
 }
 
@@ -310,13 +311,18 @@ mod tests {
         // Ears and nose roll with the head.
         assert!((0..4).all(|i| near(m.parts[i].rot[2], 0.448_716_83)));
         assert_eq!(dry.parts[0].rot[2], 0.0);
-        assert_eq!(wet_color(&d, [1.0, 1.0]), None);
+        assert_eq!(wet_color(&d, [1.0, 1.0], 0), None);
         d.look.wolf_wet = Some(0.853_125);
-        assert!(near(wet_color(&d, [1.0, 0.0]).unwrap(), 0.853_125));
+        assert!(near(wet_color(&d, [1.0, 0.0], 0).unwrap(), 0.853_125));
         // Light level 7 reads 0.179 in the brightness table.
-        assert!(wet_color(&d, [0.0, 7.0 / 15.0]).unwrap() < 0.2);
+        assert!(wet_color(&d, [0.0, 7.0 / 15.0], 0).unwrap() < 0.2);
+        // Open sky at midnight (11 subtracted) leaves level 4, 0.0833 in the table.
+        assert!(near(
+            wet_color(&d, [1.0, 0.0], 11).unwrap(),
+            0.083_333 * 0.853_125
+        ));
         d.class = Class::Mob(98);
-        assert_eq!(wet_color(&d, [1.0, 1.0]), None);
+        assert_eq!(wet_color(&d, [1.0, 1.0], 0), None);
     }
 
     #[test]

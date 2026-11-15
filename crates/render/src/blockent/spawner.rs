@@ -80,7 +80,7 @@ impl Spawner {
             + (self.mob_rotation - self.prev_mob_rotation) * f64::from(partial);
         let size = world::entities::Kind::Mob(mob).size();
         let draw = still_mob(mob, size, partial);
-        let mut mesh = entity::build(&[draw], skins, |_| light);
+        let mut mesh = entity::build(&[draw], skins, 0, |_| light);
         let m = at
             .translate([0.5, 0.0, 0.5])
             .translate([0.0, 0.4, 0.0])

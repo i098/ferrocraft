@@ -58,6 +58,36 @@ impl Weather {
     }
 }
 
+/// Per column: the precipitation height (the y above the highest rain-stopping block) and the biome id;
+/// `None` for an unloaded column.
+pub(crate) fn precipitation_top(
+    store: &world::chunk::ChunkStore,
+) -> impl Fn(i32, i32) -> Option<(i32, u8)> + '_ {
+    move |x, z| {
+        let biome = store
+            .get(x >> 4, z >> 4)?
+            .biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize);
+        let y = (0..256)
+            .rev()
+            .find(|&y| render::stops_rain(store.get_block(x, y, z)))
+            .map_or(0, |y| y + 1);
+        Some((y, biome))
+    }
+}
+
+/// `World.isRaining(pos)` with `canSeeSky` shortcut as the precipitation height: raining, open above and a rainy warm biome.
+pub(crate) fn raining_at(
+    store: &world::chunk::ChunkStore,
+    rain: f32,
+) -> impl Fn(i32, i32, i32) -> bool + '_ {
+    let top = precipitation_top(store);
+    move |x, y, z| {
+        rain > 0.2
+            && top(x, z)
+                .is_some_and(|(height, biome)| height <= y && render::splashes(biome, x, y, z))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

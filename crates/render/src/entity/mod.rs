@@ -916,7 +916,7 @@ thread_local! {
 /// [`build`] at full light and without the per-face shade, for the GUI, which lights the model itself.
 pub(crate) fn build_unshaded(draws: &[EntityDraw], skins: &Skins) -> MeshData {
     UNSHADED.set(true);
-    let mesh = build(draws, skins, |_| [1.0, 1.0]);
+    let mesh = build(draws, skins, 0, |_| [1.0, 1.0]);
     UNSHADED.set(false);
     mesh
 }
@@ -930,10 +930,12 @@ pub(crate) fn build_items_unshaded(d: &EntityDraw, models: &item::Models) -> ite
 }
 
 /// Skin or flat color of one draw, meshes appended to `out`. `light` gives the `[sky, block]` level
-/// (`0..=1`) at a world position; burning entities skip it and stay full-bright.
+/// (`0..=1`) at a world position; burning entities skip it and stay full-bright. `subtracted` is
+/// `World.skylightSubtracted`, which `Entity.getBrightness` takes off the sky level.
 pub fn build(
     draws: &[EntityDraw],
     skins: &Skins,
+    subtracted: i32,
     light: impl Fn([f64; 3]) -> [f32; 2],
 ) -> MeshData {
     let mut out = MeshData::default();
@@ -941,7 +943,7 @@ pub fn build(
         let start = out.vertices.len();
         let level = light_level(d, &light, true);
         let shaded;
-        let d = match mobs3::wet_color(d, level) {
+        let d = match mobs3::wet_color(d, level, subtracted) {
             Some(color) => {
                 shaded = EntityDraw {
                     look: Look {
@@ -1771,7 +1773,7 @@ mod tests {
     }
 
     fn mesh(d: &EntityDraw) -> MeshData {
-        build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
+        build(std::slice::from_ref(d), &Skins::flat(), 0, |_| [1.0, 1.0])
     }
 
     fn extent(m: &MeshData, axis: usize) -> f32 {
@@ -1832,7 +1834,7 @@ mod tests {
         let mut d = steve();
         d.skin = Some(1);
         let count = |skins: &Skins, d: &EntityDraw| {
-            build(std::slice::from_ref(d), skins, |_| [1.0, 1.0])
+            build(std::slice::from_ref(d), skins, 0, |_| [1.0, 1.0])
                 .vertices
                 .len()
         };
@@ -1851,7 +1853,7 @@ mod tests {
     #[test]
     fn invisible_player_keeps_armor_but_not_the_body() {
         let count = |d: &EntityDraw| {
-            build(std::slice::from_ref(d), &Skins::flat(), |_| [1.0, 1.0])
+            build(std::slice::from_ref(d), &Skins::flat(), 0, |_| [1.0, 1.0])
                 .vertices
                 .len()
         };
@@ -1872,7 +1874,7 @@ mod tests {
     fn skeleton_left_limbs_sample_the_mirrored_right_limb_regions() {
         // Rows 48..64 of the 64x64 layout hold the player's left arm (u 32..48) and leg (u 16..32).
         let in_left_limb_rows = |d: EntityDraw| {
-            build(&[d], &Skins::flat(), |_| [1.0, 1.0])
+            build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0])
                 .vertices
                 .iter()
                 .filter(|p| {
@@ -1928,7 +1930,7 @@ mod tests {
                 using,
                 ..steve()
             };
-            build(&[d], &Skins::flat(), |_| [1.0, 1.0]).vertices
+            build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]).vertices
         };
         let idle = verts(261, None);
         assert_ne!(idle, verts(261, Some(UseAction::Bow)));
@@ -1941,7 +1943,9 @@ mod tests {
         let count = |armor: [i16; 4]| {
             let mut d = steve();
             d.armor = armor;
-            build(&[d], &Skins::flat(), |_| [1.0, 1.0]).vertices.len()
+            build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0])
+                .vertices
+                .len()
         };
         let bare = count([0; 4]);
         // boots 2 boxes, leggings 3, chestplate 3, helmet 1; a box has 24 vertices.
@@ -1995,7 +1999,7 @@ mod tests {
 
     #[test]
     fn standing_player_spans_the_hitbox_height() {
-        let m = build(&[steve()], &Skins::flat(), |_| [1.0, 1.0]);
+        let m = build(&[steve()], &Skins::flat(), 0, |_| [1.0, 1.0]);
         let ys = m.vertices.iter().map(|v| v.pos[1]);
         let (lo, hi) = (
             ys.clone().fold(f32::MAX, f32::min),
@@ -2013,7 +2017,7 @@ mod tests {
             let mut d = steve();
             d.yaw = yaw;
             d.head_yaw = yaw;
-            let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
+            let m = build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]);
             let v = |y: f32| (Skins::flat().v_offset(Skin::White) + y) / Skins::height() as f32;
             let q: Vec<_> = m
                 .vertices
@@ -2033,7 +2037,7 @@ mod tests {
         let mut d = steve();
         d.class = Class::Object(100);
         d.size = (1.0, 1.0);
-        let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
+        let m = build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]);
         let center = [10.0, 64.5, 10.0];
         assert_eq!(m.indices.len(), 36);
         for tri in m.indices.chunks(3) {
@@ -2049,8 +2053,8 @@ mod tests {
         let mut d = steve();
         d.limb_swing = 1.0;
         d.limb_swing_amount = 1.0;
-        let walking = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
-        let idle = build(&[steve()], &Skins::flat(), |_| [1.0, 1.0]);
+        let walking = build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]);
+        let idle = build(&[steve()], &Skins::flat(), 0, |_| [1.0, 1.0]);
         assert_ne!(walking.vertices.len(), 0);
         assert_ne!(walking.vertices[100].pos, idle.vertices[100].pos);
     }
@@ -2085,7 +2089,7 @@ mod tests {
         let mut d = steve();
         d.class = Class::Mob(54);
         d.death_time = 20.0;
-        let m = build(&[d], &Skins::flat(), |_| [1.0, 1.0]);
+        let m = build(&[d], &Skins::flat(), 0, |_| [1.0, 1.0]);
         let top = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
         // Lying on its side the highest point is the half-width of the model, not the 1.8 block height.
         assert!(top < 64.0 + 0.6, "{top}");
@@ -2100,11 +2104,11 @@ mod tests {
         };
         let mut d = steve();
         d.eye_height = 1.62;
-        let m = build(&[d.clone()], &Skins::flat(), probe);
+        let m = build(&[d.clone()], &Skins::flat(), 0, probe);
         assert!(m.vertices.iter().all(|v| v.light == [0.2, 0.0]));
         assert!((seen.get()[1] - 65.62).abs() < 1e-3);
         d.burning = true;
-        let m = build(&[d], &Skins::flat(), |_| [0.2, 0.0]);
+        let m = build(&[d], &Skins::flat(), 0, |_| [0.2, 0.0]);
         assert!(m.vertices.iter().all(|v| v.light == [1.0, 1.0]));
     }
 

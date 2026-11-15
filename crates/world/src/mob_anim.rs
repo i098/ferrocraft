@@ -21,7 +21,7 @@ pub struct MobAnim {
     pub prev_shake_time: f32,
     /// Wolf `isWet`: set while the wolf is in water, cleared when a shake ends.
     pub wet: bool,
-    /// Input of the tick: `Entity.isWet()` (in water) of the wolf, set by `Entities::update_wet`.
+    /// Input of the tick: `Entity.isWet()` of the wolf, set by `Entities::update_wet`.
     pub in_water: bool,
     /// Input of the tick: `EntityWolf.isBegging` (metadata byte 19).
     pub begging: bool,

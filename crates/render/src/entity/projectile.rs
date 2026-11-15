@@ -316,6 +316,14 @@ mod tests {
     }
 
     #[test]
+    fn eye_of_ender_and_xp_bottle_draw_the_snowball_sprite_quad() {
+        let sprite = count(draw(SNOWBALL, None));
+        assert!(sprite > 0);
+        assert_eq!(count(draw(ENDER_EYE, None)), sprite);
+        assert_eq!(count(draw(XP_BOTTLE, None)), sprite);
+    }
+
+    #[test]
     fn the_first_person_rod_tip_sits_to_the_right_of_the_eye() {
         let t = Thrower {
             pos: [0.0, 64.0, 0.0],

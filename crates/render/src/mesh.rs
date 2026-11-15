@@ -30,7 +30,7 @@ pub struct Vertex {
     pub light: [f32; 2],
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,

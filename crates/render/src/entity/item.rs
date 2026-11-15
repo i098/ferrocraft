@@ -6,6 +6,7 @@
 //! and sorted by texture: block faces sample the block atlas, sprites their own texture.
 //!
 
+use super::glint_mask::{self, Mask};
 use super::{
     glint_uv_item, light_level, model, Class, EntityDraw, Xf, ITEM_GLINT_COLOR, ITEM_UV_SCALE, V3,
 };
@@ -42,6 +43,8 @@ struct Layer {
     mesh: MeshData,
     /// One normal per quad of a sprite; block meshes carry their shade in the vertex color.
     normals: Option<Vec<V3>>,
+    /// The opaque texels of a sprite, for the GUI glint.
+    mask: Option<Mask>,
 }
 
 /// A resolved item model.
@@ -142,6 +145,7 @@ fn geometry(
                     tex: ItemTex::Sprite(texture),
                     mesh,
                     normals: Some(flat.normals),
+                    mask: Some(Mask::of(&image)),
                 })
             })
             .collect();
@@ -158,6 +162,7 @@ fn geometry(
         tex: ItemTex::Atlas,
         mesh: hand::held_mesh(state, atlas),
         normals: None,
+        mask: None,
     }])
 }
 
@@ -197,8 +202,8 @@ pub struct Items {
     pub sprites: BTreeMap<(u8, String), MeshData>,
     /// Two passes per glowing block piece, over the glint texture; same positions as the pieces.
     pub glint: MeshData,
-    /// The same for sprite pieces. Vanilla masks it to the opaque texels with an equal depth test,
-    /// which the quad list of a GUI cannot do, so the GUI leaves it out.
+    /// The same for sprite pieces. Vanilla masks it to the opaque texels with an equal depth test;
+    /// the GUI build cuts it to those texels (see `glint_mask`).
     pub glint_flat: MeshData,
     /// The white flash of primed TNT, drawn additively over the white texel.
     pub flash: MeshData,
@@ -308,7 +313,7 @@ impl Items {
                 }
             }
             if let Some(ms) = glint {
-                self.add_glint(&layer.tex, &vertices, &layer.mesh.indices, ms);
+                self.add_glint(layer, &vertices, ms);
             }
             let target = self.mesh(&layer.tex, i);
             let base = target.vertices.len() as u32;
@@ -319,21 +324,30 @@ impl Items {
         }
     }
 
-    /// The two glint passes over a placed layer.
-    fn add_glint(&mut self, tex: &ItemTex, vertices: &[Vertex], indices: &[u32], ms: f32) {
-        let (scale, glint) = match tex {
+    /// The two glint passes over a placed layer. The GUI has no equal depth test, so it gets the
+    /// sprite glint cut to the opaque texels.
+    fn add_glint(&mut self, layer: &Layer, vertices: &[Vertex], ms: f32) {
+        let (scale, glint) = match layer.tex {
             ItemTex::Atlas => (1.0, &mut self.glint),
             ItemTex::Sprite(_) => (ITEM_UV_SCALE, &mut self.glint_flat),
         };
+        let mut placed = MeshData {
+            vertices: vertices.to_vec(),
+            indices: layer.mesh.indices.clone(),
+        };
+        for v in &mut placed.vertices {
+            (v.color, v.light) = (ITEM_GLINT_COLOR, [1.0; 2]);
+        }
+        let mask = layer.mask.as_ref().filter(|_| super::UNSHADED.get());
         for pass in 0..2 {
+            let map = |uv: [f32; 2]| glint_uv_item(uv.map(|c| c * scale), ms, pass);
+            let mut mesh = match mask {
+                Some(mask) => glint_mask::split(&placed, mask, &map),
+                None => glint_mask::remap(placed.clone(), &map),
+            };
             let base = glint.vertices.len() as u32;
-            glint.vertices.extend(vertices.iter().map(|v| Vertex {
-                uv: glint_uv_item(v.uv.map(|c| c * scale), ms, pass),
-                color: ITEM_GLINT_COLOR,
-                light: [1.0; 2],
-                ..*v
-            }));
-            glint.indices.extend(indices.iter().map(|i| i + base));
+            glint.vertices.append(&mut mesh.vertices);
+            glint.indices.extend(mesh.indices.iter().map(|i| i + base));
         }
     }
 }

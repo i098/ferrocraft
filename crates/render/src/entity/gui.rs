@@ -136,16 +136,13 @@ pub(crate) fn quads(e: &GuiEntity, skins: &Skins, models: &item::Models) -> Vec<
     for ((_, path), mesh) in &items.sprites {
         put(mesh, Cow::Owned(path.clone()), Blend::Alpha, true, true);
     }
-    // The glint of sprite items is `items.glint_flat`: it needs the item's texel mask, see its docs.
+    // Vanilla draws the glint with an equal depth test: it shows on opaque texels only. The glint
+    // meshes are cut to those texels, see `glint_mask`.
     let glint = Cow::Borrowed(entity::GLINT_TEXTURE);
-    put(
-        &entity::build_glint(std::slice::from_ref(&draw)),
-        glint.clone(),
-        Blend::Add,
-        false,
-        false,
-    );
-    put(&items.glint, glint, Blend::Add, false, false);
+    let armor = entity::build_glint(std::slice::from_ref(&draw), Some(skins));
+    for mesh in [&armor, &items.glint, &items.glint_flat] {
+        put(mesh, glint.clone(), Blend::Add, false, false);
+    }
     put(&items.flash, Cow::Borrowed(""), Blend::Add, false, false);
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out.into_iter().map(|(_, q)| q).collect()

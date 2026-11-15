@@ -195,8 +195,11 @@ pub struct Items {
     /// Sprite meshes by `(layer, texture)`: drawn layer by layer, so an overlay lands over the
     /// coplanar layer below it as `LessEqual` depth tests need.
     pub sprites: BTreeMap<(u8, String), MeshData>,
-    /// Two passes per glowing piece, over the glint texture; same positions as the pieces.
+    /// Two passes per glowing block piece, over the glint texture; same positions as the pieces.
     pub glint: MeshData,
+    /// The same for sprite pieces. Vanilla masks it to the opaque texels with an equal depth test,
+    /// which the quad list of a GUI cannot do, so the GUI leaves it out.
+    pub glint_flat: MeshData,
     /// The white flash of primed TNT, drawn additively over the white texel.
     pub flash: MeshData,
     /// `display.color` of the leather armor the next sprite pieces show.
@@ -321,19 +324,19 @@ impl Items {
 
     /// The two glint passes over a placed layer.
     fn add_glint(&mut self, tex: &ItemTex, vertices: &[Vertex], indices: &[u32], ms: f32) {
-        let scale = match tex {
-            ItemTex::Atlas => 1.0,
-            ItemTex::Sprite(_) => ITEM_UV_SCALE,
+        let (scale, glint) = match tex {
+            ItemTex::Atlas => (1.0, &mut self.glint),
+            ItemTex::Sprite(_) => (ITEM_UV_SCALE, &mut self.glint_flat),
         };
         for pass in 0..2 {
-            let base = self.glint.vertices.len() as u32;
-            self.glint.vertices.extend(vertices.iter().map(|v| Vertex {
+            let base = glint.vertices.len() as u32;
+            glint.vertices.extend(vertices.iter().map(|v| Vertex {
                 uv: glint_uv_item(v.uv.map(|c| c * scale), ms, pass),
                 color: ITEM_GLINT_COLOR,
                 light: [1.0; 2],
                 ..*v
             }));
-            self.glint.indices.extend(indices.iter().map(|i| i + base));
+            glint.indices.extend(indices.iter().map(|i| i + base));
         }
     }
 }

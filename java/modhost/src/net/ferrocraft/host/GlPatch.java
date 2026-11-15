@@ -7,7 +7,7 @@ import org.objectweb.asm.tree.MethodNode;
 
 /**
  * The bodies {@link BridgeTransformer} gives to the LWJGL calls and the {@code Gui} quad methods that {@link GlState}
- * answers: texture upload, bind, color, blend, and the two textured quads. Keys are name plus descriptor; LWJGL names
+ * answers: texture upload, bind, color, blend, and the three textured quads. Keys are name plus descriptor; LWJGL names
  * are plain, {@code Gui} names are the SRG ones.
  */
 final class GlPatch {
@@ -28,6 +28,7 @@ final class GlPatch {
         GL.put("glBlendFunc(II)V", "blendFunc");
         GL.put("glBlendFuncSeparate(IIII)V", "blendFuncSeparate");
         GUI.put("func_152125_a(IIFFIIIIFF)V", "quad"); // Gui.drawScaledCustomSizeModalRect
+        GUI.put("func_73729_b(IIIIII)V", "quad256"); // Gui.drawTexturedModalRect
         GUI.put("func_146110_a(IIFFIIFF)V", "quadSized"); // Gui.drawModalRectWithCustomSizedTexture
     }
 

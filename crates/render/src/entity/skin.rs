@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 80] = [
+const SKINS: [&str; 82] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -92,6 +92,9 @@ const SKINS: [&str; 80] = [
     "entity/wither/wither.png",
     "entity/wither/wither_invulnerable.png",
     "entity/snowman.png",
+    "entity/witch.png",
+    // The second half of the 64x128 witch texture.
+    "",
     "entity/lead_knot.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
@@ -102,7 +105,7 @@ const EYES: [usize; 2] = [43, 44];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Skin; 34] = [
+const SLIME_SLOT_SKINS: [Skin; 35] = [
     Skin::Slime,
     Skin::MagmaCube,
     Skin::Blaze,
@@ -136,6 +139,7 @@ const SLIME_SLOT_SKINS: [Skin; 34] = [
     Skin::Wither,
     Skin::WitherInvulnerable,
     Skin::Snowman,
+    Skin::Witch,
     Skin::LeadKnot,
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
@@ -229,6 +233,8 @@ pub enum Skin {
     WitherInvulnerable,
     /// `textures/entity/snowman.png` (64x64).
     Snowman,
+    /// `textures/entity/witch.png` (64x128).
+    Witch,
     /// `textures/entity/lead_knot.png` (32x32), the knot of a leash on a fence.
     LeadKnot,
     /// `textures/entity/armorstand/wood.png` (64x64).

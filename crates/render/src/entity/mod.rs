@@ -1,7 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
 //! and `ModelCow` (also the mooshroom, with its mushrooms in [`mooshroom`]) and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
-//! [`mobs2`], and from the squid model in [`squid`] and the snow golem model in [`snowman`]: box geometry, texture layout and limb animation. Mobs without a
+//! [`mobs2`], and from the squid model in [`squid`] the snow golem model in [`snowman`] and the witch model in [`witch`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
 //! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags
@@ -33,6 +33,7 @@ pub mod skull;
 mod snowman;
 mod squid;
 pub mod vehicle;
+mod witch;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
 const PLAYER_JACKET: usize = 7;
@@ -720,9 +721,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 25] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
-        101, 120,
+    const MODELED: [u8; 26] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 90, 91, 92, 93, 94, 95, 96, 97, 98,
+        99, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -741,6 +742,7 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
         .or_else(|| rabbit::build(d, id))
         .or_else(|| squid::build(d, id))
         .or_else(|| snowman::build(d, id))
+        .or_else(|| witch::build(d, id))
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
@@ -1061,7 +1063,8 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         Class::Mob(mobs::CAVE_SPIDER) => 0.7,
         // `RenderVillager.preRenderCallback`: 15/16, halved for a child.
         Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
-        Class::Mob(mobs::VILLAGER) => 0.9375,
+        // `RenderWitch.preRenderCallback` is the same 15/16.
+        Class::Mob(mobs::VILLAGER | witch::WITCH) => 0.9375,
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
         // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
@@ -1465,7 +1468,7 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
 /// Flat color of a mob texture that has no vertex tint of its own.
 fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
     Some(match skin {
-        Skin::Villager(_) => [0.7, 0.55, 0.45],
+        Skin::Villager(_) | Skin::Witch => [0.7, 0.55, 0.45],
         Skin::IronGolem => [0.75, 0.75, 0.7],
         Skin::Silverfish => [0.5, 0.5, 0.52],
         Skin::Chicken | Skin::Snowman => [0.95; 3],

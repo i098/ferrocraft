@@ -181,7 +181,7 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
 fn holds(d: &EntityDraw) -> bool {
     matches!(
         d.class,
-        Class::Player { .. } | Class::Mob(54 | 57 | 51) | Class::Object(78)
+        Class::Player { .. } | Class::Mob(54 | 57 | 51 | super::witch::WITCH) | Class::Object(78)
     )
 }
 
@@ -444,12 +444,14 @@ fn is_torch(id: i16) -> bool {
     matches!(id, 50 | 75 | 76)
 }
 
-/// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
-/// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
-fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
+/// Where the hand puts the item, before the display transform: the witch's nose layer, else the
+/// right arm's pivot and rotation (`translateRightArm`).
+fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
+    if d.class == Class::Mob(super::witch::WITCH) {
+        return Some(super::witch::hand(d, m.gui3d && d.held < 256));
+    }
     let parts = model(d).parts;
-    let Some(arm) = parts.get(3) else { return };
-    let xf = Xf::new(d, false);
+    let arm = parts.get(3)?;
     // A small holder first shrinks and tilts the item (`LayerHeldItem`, `isChild`).
     let child = if d.child {
         chain(&[translate(0.0, 0.625, 0.0), rotate(20.0, 0), scale(0.5)])
@@ -480,6 +482,14 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     if d.sneaking {
         mat = mul(mat, translate(0.0, 0.203_125, 0.0));
     }
+    Some(mat)
+}
+
+/// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
+/// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
+fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
+    let xf = Xf::new(d, false);
+    let Some(mat) = hand_matrix(d, m) else { return };
     // `renderItemInHand` scales flat models by 2 before the display transform.
     let prepare = if m.gui3d { ident() } else { scale(2.0) };
     let mat = chain(&[mat, prepare, m.third, scale(0.5)]);

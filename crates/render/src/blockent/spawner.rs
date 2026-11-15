@@ -240,6 +240,8 @@ mod tests {
         assert_eq!(s.mob, Some(96));
         s.read("SnowMan", 0, None);
         assert_eq!(s.mob, Some(97));
+        s.read("Witch", 0, None);
+        assert_eq!(s.mob, Some(66));
         s.read("Giant", 0, None);
         assert_eq!(s.mob, None);
         s.read("XPOrb", 0, None);

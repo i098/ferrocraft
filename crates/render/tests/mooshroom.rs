@@ -89,14 +89,34 @@ fn mooshroom_draws_the_cow_model_with_its_skin_and_mushrooms() {
         mob(92, 3.6, 7.0, 180.0, false),
     ];
     let empty = r.render_to_rgba(&cam, &[]).2;
+    let red = |f: &[u8]| {
+        f.chunks(4)
+            .filter(|p| p[0] > 140 && p[1] < 80 && p[2] < 80)
+            .count()
+    };
+    let alone = |r: &mut Renderer, e: EntityDraw| {
+        r.set_entities(&[e]);
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let back = alone(&mut r, mob(96, 0.0, 7.0, 0.0, false));
+    let cow = alone(&mut r, mob(92, 0.0, 7.0, 0.0, false));
+    let differs = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(x, y)| x != y).count();
+    assert!(differs(&back, &empty) > 2000, "the mooshroom must draw");
+    assert!(differs(&cow, &empty) > 2000, "the cow must draw");
+    assert!(
+        red(&back) > 3 * red(&cow) + 200,
+        "the mooshroom skin and the red mushrooms must show: {} vs cow {}",
+        red(&back),
+        red(&cow)
+    );
+    let baby = alone(&mut r, mob(96, 0.0, 7.0, 0.0, true));
+    let baby_cow = alone(&mut r, mob(92, 0.0, 7.0, 0.0, true));
+    assert!(
+        red(&baby) < 3 * red(&baby_cow) + 200,
+        "a baby mooshroom has no mushrooms"
+    );
     r.set_entities(&scene);
     let frame = r.render_to_rgba(&cam, &[]).2;
-    let covered = frame
-        .chunks(4)
-        .zip(empty.chunks(4))
-        .filter(|(a, b)| a != b)
-        .count();
-    assert!(covered > 2000, "the mooshrooms must draw");
     if let Some(dir) = std::env::var_os("MOOSH_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         let name = std::env::var("MOOSH_PROOF_NAME").unwrap_or_else(|_| "after".into());

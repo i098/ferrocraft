@@ -99,4 +99,20 @@ mod tests {
         d.invisible = false;
         assert_eq!(wanted(&d).count(), 0);
     }
+
+    /// Oracle: 1.8.9 `RenderMooshroom` uses `mooshroom.png` on the cow model; `LayerMooshroomMushroom`
+    /// draws three red mushrooms on an adult and none on a baby.
+    #[test]
+    fn the_mooshroom_wears_its_skin_and_three_mushrooms_unless_baby() {
+        let mut d = steve();
+        d.class = Class::Mob(MOOSHROOM);
+        assert_eq!(model(&d).skin, super::super::Skin::Mooshroom);
+        d.class = Class::Mob(92);
+        assert_ne!(model(&d).skin, super::super::Skin::Mooshroom);
+        d.class = Class::Mob(MOOSHROOM);
+        assert_eq!(frames(&d).len(), 3);
+        d.child = true;
+        assert_eq!(model(&d).skin, super::super::Skin::Mooshroom);
+        assert!(frames(&d).is_empty());
+    }
 }

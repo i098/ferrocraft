@@ -247,7 +247,7 @@ mod tests {
         s.read("Witch", 0, None);
         assert_eq!(s.mob, Some(66));
         s.read("Giant", 0, None);
-        assert_eq!(s.mob, None);
+        assert_eq!(s.mob, Some(53));
         s.read("XPOrb", 0, None);
         assert_eq!(s.mob, None);
     }

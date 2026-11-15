@@ -157,6 +157,8 @@ pub struct SizeMeta {
     pub vehicle: crate::vehicle::VehicleMeta,
     /// Wolf: metadata byte 19, 1 while begging (`isBegging`).
     pub begging: Option<u8>,
+    /// Wither: metadata int 20, `getInvulTime`, the ticks left of the spawn charge.
+    pub wither_invul: Option<i32>,
 }
 
 impl SizeMeta {
@@ -182,6 +184,7 @@ impl SizeMeta {
         self.cat = new.cat.or(self.cat);
         self.vehicle.merge(new.vehicle);
         self.begging = new.begging.or(self.begging);
+        self.wither_invul = new.wither_invul.or(self.wither_invul);
     }
 }
 

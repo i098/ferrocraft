@@ -23,6 +23,7 @@ import net.minecraft.flat.SnowGolemModel;
 import net.minecraft.flat.SquidModel;
 import net.minecraft.flat.WolfEntity;
 import net.minecraft.flat.WitchModel;
+import net.minecraft.flat.WitherModel;
 import net.minecraft.flat.WolfModel;
 
 /**
@@ -192,5 +193,11 @@ public class MobModels {
         model("SnowGolemModel after setupAnimation(head yaw 30, pitch 15)", golem);
         WitchModel witch = new WitchModel(0.0f);
         model("WitchModel", witch);
+        WitherModel wither = new WitherModel(0.0f);
+        model("WitherModel", wither);
+        wither.setupAnimation(0f, 0f, 15.7f, 30f, 15f, 0.0625f, null);
+        model("WitherModel after setupAnimation(age 15.7, head yaw 30, pitch 15)", wither);
+        wither.setupAnimation(0f, 0f, 31.4f, 0f, 0f, 0.0625f, null);
+        model("WitherModel after setupAnimation(age 31.4)", wither);
     }
 }

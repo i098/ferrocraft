@@ -127,6 +127,8 @@ pub struct Renderer {
     portal_meshes: [Option<GpuMesh>; 2],
     head_meshes: Vec<(Tex, GpuMesh)>,
     glint_mesh: Option<GpuMesh>,
+    /// The wither armor aura, drawn additively over the wither model.
+    aura_mesh: Option<GpuMesh>,
     /// The additive white flash of primed TNT.
     flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
@@ -175,6 +177,8 @@ pub struct Renderer {
     /// End portal star field: layer 0 alpha blended, layers 1 to 15 added; both unlit, depth tested, back faces culled.
     portal_sky_pipe: wgpu::RenderPipeline,
     portal_add_pipe: wgpu::RenderPipeline,
+    /// `LayerWitherAura`: `blendFunc(ONE, ONE)`, depth tested, no depth write.
+    aura_pipe: wgpu::RenderPipeline,
     border_pipe: wgpu::RenderPipeline,
     /// The world border to draw, if any.
     border: Option<crate::Border>,
@@ -424,7 +428,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -451,6 +455,7 @@ impl Renderer {
             portal_meshes: [None, None],
             head_meshes: Vec::new(),
             glint_mesh: None,
+            aura_mesh: None,
             flash_mesh: None,
             item_models: HashMap::new(),
             dials: hand::DialTurns::default(),
@@ -482,6 +487,7 @@ impl Renderer {
             beam_glow_pipe,
             portal_sky_pipe,
             portal_add_pipe,
+            aura_pipe,
             border_pipe,
             border: None,
             hand_glint_pipe,
@@ -933,6 +939,11 @@ impl Renderer {
         }
         self.mod_look.recolor_glint(&mut glint);
         self.glint_mesh = self.upload_mesh(glint, [0.0; 3]);
+        let aura = entity::build_aura(draws);
+        if !aura.is_empty() {
+            self.load_texture(entity::WITHER_ARMOR_TEXTURE);
+        }
+        self.aura_mesh = self.upload_mesh(aura, [0.0; 3]);
         self.shadows.clear();
         self.shadows
             .extend(draws.iter().filter_map(entity::shadow::caster));
@@ -1818,6 +1829,13 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
+            if let Some(m) = &self.aura_mesh {
+                pass.set_pipeline(&self.aura_pipe);
+                pass.set_bind_group(0, &self.textures[entity::WITHER_ARMOR_TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_pipeline(&self.opaque_pipe);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
             self.draw_items(&mut pass);
             self.draw_tiles(&mut pass);
             self.draw_beams(&mut pass);
@@ -2180,7 +2198,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 19] {
+) -> [wgpu::RenderPipeline; 20] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2499,6 +2517,23 @@ fn build_pipelines(
         true,
         true,
     );
+    let aura_pipe = pipe(
+        "vs_world",
+        "fs_sky",
+        stride,
+        &world_attrs,
+        Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        }),
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -2519,6 +2554,7 @@ fn build_pipelines(
         beam_glow_pipe,
         portal_sky_pipe,
         portal_add_pipe,
+        aura_pipe,
     ]
 }
 

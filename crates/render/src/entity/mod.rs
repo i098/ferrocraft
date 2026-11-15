@@ -1,7 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
 //! and `ModelCow` (also the mooshroom, with its mushrooms in [`mooshroom`]) and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
-//! [`mobs2`], and from the squid model in [`squid`] the snow golem model in [`snowman`] and the witch model in [`witch`]: box geometry, texture layout and limb animation. Mobs without a
+//! [`mobs2`], and from the squid model in [`squid`] the snow golem model in [`snowman`] and the witch model in [`witch`] and the wither in [`wither`] (the giant zombie is a zombie scaled 6): box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
 //! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags
@@ -38,6 +38,7 @@ mod squid;
 pub mod vehicle;
 mod wielded;
 mod witch;
+mod wither;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.
 const PLAYER_JACKET: usize = 7;
@@ -197,6 +198,8 @@ pub struct Look {
     pub crystal_ticks: i32,
     /// Wither skulls: metadata byte 10, the blue skull.
     pub invulnerable: bool,
+    /// Wither: `getInvulTime` (metadata int 20), the ticks left of the spawn charge.
+    pub wither_invul: i32,
     /// Leashed mobs: the holder the rope runs to.
     pub leash: Option<leash::Holder>,
     /// Horses: type, coat, armor and the animation of the frame; see [`horse::HorseLook`].
@@ -230,6 +233,7 @@ impl Default for Look {
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
             invulnerable: false,
+            wither_invul: 0,
             leash: None,
             horse: horse::HorseLook::default(),
         }
@@ -735,9 +739,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 28] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 67, 90, 91, 92, 93, 94, 95, 96, 97,
-        98, 99, 100, 101, 120,
+    const MODELED: [u8; 30] = [
+        50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 90, 91, 92, 93, 94, 95,
+        96, 97, 98, 99, 100, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -759,6 +763,7 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
         .or_else(|| squid::build(d, id))
         .or_else(|| snowman::build(d, id))
         .or_else(|| witch::build(d, id))
+        .or_else(|| wither::build(d, id))
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
@@ -771,7 +776,8 @@ fn adult_model(d: &EntityDraw) -> Model {
             };
             biped(d, skin, [1.0; 3], arm, 4.0, false)
         }
-        Class::Mob(54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
+        // `RenderGiantZombie` draws a `ModelZombie` of the zombie skin, scaled 6 by `model_scale`.
+        Class::Mob(53 | 54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(57) => biped(d, Skin::PigZombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 2.0, 2.0, true),
         Class::Mob(50) => creeper(d),
@@ -866,6 +872,21 @@ pub(crate) fn rotate(p: V3, rot: V3) -> V3 {
     [x, y, z]
 }
 
+/// `LayerWitherAura.WITHER_ARMOR`, a repeating texture outside the skin atlas.
+pub const WITHER_ARMOR_TEXTURE: &str = "textures/entity/wither/wither_armor.png";
+
+/// Mob id of the giant zombie.
+const GIANT: u8 = 53;
+
+/// The wither armor aura of every wither in `draws` that is below half health, blended additively over the model.
+pub fn build_aura(draws: &[EntityDraw]) -> MeshData {
+    let mut out = MeshData::default();
+    for d in draws {
+        wither::aura(&mut out, d);
+    }
+    out
+}
+
 /// Texture of the enchantment glint, `RenderItem.renderEffect` and `LayerArmorBase.renderGlint`.
 pub const GLINT_TEXTURE: &str = "textures/misc/enchanted_item_glint.png";
 
@@ -915,7 +936,7 @@ pub fn build_glint(draws: &[EntityDraw], masked: Option<&Skins>) -> MeshData {
     for d in draws {
         let holds = matches!(
             d.class,
-            Class::Player { .. } | Class::Mob(54 | 57 | 51) | Class::Object(78)
+            Class::Player { .. } | Class::Mob(53 | 54 | 57 | 51) | Class::Object(78)
         );
         if holds {
             for pass in 0..2 {
@@ -1092,6 +1113,9 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         Class::Mob(mobs::VILLAGER) if d.child => 0.46875,
         // `RenderWitch.preRenderCallback` is the same 15/16.
         Class::Mob(mobs::VILLAGER | witch::WITCH) => 0.9375,
+        // `RenderGiantZombie` is built with scale 6; `RenderWither.preRenderCallback` scales by 2 and more while it charges.
+        Class::Mob(GIANT) => 6.0,
+        Class::Mob(wither::WITHER) => wither::scale(d),
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
         // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
@@ -1367,7 +1391,10 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
         let _ = i;
         emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
     }
-    let holds = matches!(d.class, Class::Player { .. } | Class::Mob(54 | 57 | 51));
+    let holds = matches!(
+        d.class,
+        Class::Player { .. } | Class::Mob(53 | 54 | 57 | 51)
+    );
     if holds {
         emit_armor(out, &xf, &m, d, skins);
     }

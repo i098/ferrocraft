@@ -7,8 +7,10 @@ use super::{EntityDraw, Model, Part, Skin};
 use std::f32::consts::PI;
 
 pub(super) const SNOW_GOLEM: u8 = 97;
-/// `Blocks.pumpkin` as the item `LayerSnowmanHead` renders on the head.
-pub(super) const PUMPKIN: (i16, i16) = (86, 0);
+/// `Blocks.pumpkin` as the item `LayerSnowmanHead` renders on the head. The item model
+/// (`block/pumpkin`) carries the carved face on its north side, which is the model front after the
+/// layer's half turn. Block meta 2 is the north-facing state; meta 0 would face south.
+pub(super) const PUMPKIN: (i16, i16) = (86, 2);
 
 /// How far a worn block sits below the head pivot, in blocks: `LayerSnowmanHead` uses -0.34375,
 /// `LayerCustomHead` (armor stand) -0.25.
@@ -147,6 +149,14 @@ mod tests {
         near(m.parts[4].pivot[0], -4.957_245_3);
         near(m.parts[4].pivot[2], 0.652_472_5);
         near(m.parts[4].rot[1], 3.272_492_4);
+    }
+
+    /// The carved face is on the model front (north, -z), the side of the body buttons.
+    #[test]
+    fn the_pumpkin_face_is_on_the_front_with_the_buttons() {
+        let t = crate::blocks::look((PUMPKIN.0 as u16) << 4 | PUMPKIN.1 as u16).tex;
+        assert_eq!(t[crate::blocks::NORTH], "pumpkin_face_off");
+        assert_eq!(t[crate::blocks::SOUTH], "pumpkin_side");
     }
 
     #[test]

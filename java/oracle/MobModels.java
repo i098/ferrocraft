@@ -21,10 +21,11 @@ import net.minecraft.flat.SlimeModel;
 import net.minecraft.flat.SnowGolemModel;
 import net.minecraft.flat.SquidModel;
 import net.minecraft.flat.WolfEntity;
+import net.minecraft.flat.WitchModel;
 import net.minecraft.flat.WolfModel;
 
 /**
- * Prints the part tree of the slime, magma cube, blaze, ghast, bat, ender crystal, wolf, ocelot, rabbit, squid and snow golem models of the
+ * Prints the part tree of the slime, magma cube, blaze, ghast, bat, ender crystal, wolf, ocelot, rabbit, squid, snow golem and witch models of the
  * real 1.8.9 client: texture offset, pivot, rotation, mirror flag and box corners of every part. The
  * blaze, ghast and magma cube models are also run through setupAnimation (the bat one reads entity
  * metadata, which needs a world, so only its constructor runs). The wolf and ocelot models run in each
@@ -184,5 +185,7 @@ public class MobModels {
         model("SnowGolemModel", golem);
         golem.setupAnimation(0f, 0f, 0f, 30f, 15f, 0.0625f, null);
         model("SnowGolemModel after setupAnimation(head yaw 30, pitch 15)", golem);
+        WitchModel witch = new WitchModel(0.0f);
+        model("WitchModel", witch);
     }
 }

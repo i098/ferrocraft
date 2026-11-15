@@ -4,7 +4,8 @@
 //! each copy. Every copy here is one quad whose texture coordinates are that transform applied per
 //! corner. `q` is the same on all four corners, so the per-corner result equals GL's divide.
 //!
-//! Not ported: a camera that is not at the view entity (third person) is treated as at it.
+//! `rendererDispatcher.entityX/Z` is the view entity's feet and `ActiveRenderInfo.getPosition` is
+//! the near plane centre relative to them, so an F5 camera offsets the star parallax.
 
 use super::{in_range, END_PORTAL};
 use crate::jrandom::JavaRandom;
@@ -76,19 +77,19 @@ fn layers() -> Vec<Layer> {
 }
 
 impl super::BlockEntities {
-    /// Builds the star field of every end portal in range for the camera `cam` at wall-clock time
-    /// `now_ms`.
-    pub fn portals(&self, cam: &Camera, now_ms: u64) -> Portals {
+    /// Builds the star field of every end portal in range for the camera `cam` and the interpolated
+    /// view entity's feet `view`, at wall-clock time `now_ms`.
+    pub fn portals(&self, cam: &Camera, view: [f64; 3], now_ms: u64) -> Portals {
         let look = look(cam);
         let frame = Frame {
-            eye: [cam.pos[0] as f32, cam.pos[2] as f32],
-            near: [(look[0] * NEAR) as f32, (look[2] * NEAR) as f32],
+            eye: [view[0] as f32, view[2] as f32],
+            near: [0, 2].map(|i| (cam.pos[i] - view[i] + look[i] * NEAR) as f32),
             scroll: (now_ms % SCROLL_MS) as f32 / SCROLL_MS as f32,
         };
         let layers = layers();
         let mut out = Portals::default();
         for (&pos, &state) in &self.blocks {
-            if state >> 4 != END_PORTAL || !in_range(&pos, cam.pos) {
+            if state >> 4 != END_PORTAL || !in_range(&pos, view) {
                 continue;
             }
             // `f8`: the eye height above the plane, the near plane included.
@@ -99,7 +100,7 @@ impl super::BlockEntities {
                 } else {
                     &mut out.layers
                 };
-                quad(target, pos, layer, &frame, above as f32, cam.pos);
+                quad(target, pos, layer, &frame, above as f32, view);
             }
         }
         out
@@ -199,14 +200,14 @@ mod tests {
 
     #[test]
     fn one_portal_gives_one_sky_quad_and_fifteen_added_quads_at_three_quarters() {
-        let p = portal_at([4, 60, 4]).portals(&cam([4.5, 62.0, 8.5]), 0);
+        let p = portal_at([4, 60, 4]).portals(&cam([4.5, 62.0, 8.5]), [4.5, 60.38, 8.5], 0);
         assert_eq!((p.sky.vertices.len(), p.layers.vertices.len()), (4, 60));
         assert!(p.sky.vertices.iter().all(|v| v.pos[1] == 60.75));
     }
 
     #[test]
     fn portals_beyond_64_blocks_are_skipped() {
-        let p = portal_at([100, 60, 0]).portals(&cam([0.5, 62.0, 0.5]), 0);
+        let p = portal_at([100, 60, 0]).portals(&cam([0.5, 62.0, 0.5]), [0.5, 60.38, 0.5], 0);
         assert!(p.sky.vertices.is_empty() && p.layers.vertices.is_empty());
     }
 
@@ -214,8 +215,20 @@ mod tests {
     fn texture_scrolls_by_a_700000th_of_a_period_per_millisecond() {
         let be = portal_at([4, 60, 4]);
         let c = cam([4.5, 62.0, 8.5]);
-        let at = |ms| be.portals(&c, ms).sky.vertices[0].uv[1];
+        let at = |ms| be.portals(&c, [4.5, 60.38, 8.5], ms).sky.vertices[0].uv[1];
         assert!((at(350_000) - at(0) - 0.5).abs() < 1e-5);
         assert!((at(700_000) - at(0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn third_person_camera_shifts_the_star_parallax() {
+        let be = portal_at([4, 60, 4]);
+        let feet = [4.5, 60.38, 8.5];
+        let first = be.portals(&cam([4.5, 62.0, 8.5]), feet, 0);
+        // Same view entity, camera four blocks behind it.
+        let third = be.portals(&cam([4.5, 62.0, 12.5]), feet, 0);
+        assert_ne!(first.layers.vertices[0].uv, third.layers.vertices[0].uv);
+        // The far layer drifts with the camera offset: sky scale 1/8 times 4 blocks * 65 / above.
+        assert_ne!(first.sky.vertices[0].uv, third.sky.vertices[0].uv);
     }
 }

@@ -8,9 +8,15 @@ impl Renderer {
         self.entity_shadows = on;
     }
 
-    /// The interpolated view entity's feet, before the third-person camera offset.
+    /// The interpolated view entity's feet, before the third-person camera offset (shadows and end portals).
     pub fn set_shadow_view(&mut self, pos: Option<[f64; 3]>) {
         self.shadow_view = pos;
+    }
+
+    /// The view entity's feet: the engine's value, else the first-person camera below the eye.
+    pub(super) fn view_feet(&self, cam: &Camera) -> [f64; 3] {
+        self.shadow_view
+            .unwrap_or([cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]])
     }
 
     /// Block state at a world position; air outside the world and in unloaded chunks.
@@ -37,9 +43,7 @@ impl Renderer {
         self.load_texture(entity::shadow::TEXTURE);
         let env = self.environment;
         let subtracted = entity::shadow::skylight_subtracted(env.world_time, env.rain, env.thunder);
-        let view = self
-            .shadow_view
-            .unwrap_or([cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]]);
+        let view = self.view_feet(cam);
         let mesh = entity::shadow::build(
             &self.shadows,
             view,

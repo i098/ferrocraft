@@ -129,7 +129,7 @@ impl Renderer {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
-        let portals = self.block_entities.portals(cam, now);
+        let portals = self.block_entities.portals(cam, self.view_feet(cam), now);
         for name in [SKY_TEXTURE, PORTAL_TEXTURE] {
             if !portals.sky.is_empty() {
                 self.load_texture(name);

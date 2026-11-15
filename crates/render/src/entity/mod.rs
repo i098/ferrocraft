@@ -18,6 +18,7 @@ pub(crate) mod guardian;
 pub(crate) mod gui;
 pub mod hanging;
 pub mod item;
+pub mod leash;
 pub(crate) mod mobs;
 mod mobs2;
 mod mobs3;
@@ -191,6 +192,8 @@ pub struct Look {
     pub crystal_ticks: i32,
     /// Wither skulls: metadata byte 10, the blue skull.
     pub invulnerable: bool,
+    /// Leashed mobs: the holder the rope runs to.
+    pub leash: Option<leash::Holder>,
 }
 
 impl Default for Look {
@@ -220,6 +223,7 @@ impl Default for Look {
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
             invulnerable: false,
+            leash: None,
         }
     }
 }
@@ -1258,7 +1262,9 @@ fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     if other_drawer(out, d, skins) {
         return out.vertices.len();
     }
-    draw_body(out, d, skins)
+    let bright = draw_body(out, d, skins);
+    leash::rope(out, d, skins);
+    bright
 }
 
 /// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
@@ -1273,8 +1279,7 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
             crystal::build(out, d, skins);
             return true;
         }
-        if id == skull::ID {
-            skull::build(out, d, skins);
+        if box_object(out, id, d, skins) {
             return true;
         }
         if vehicle::handles(id) {
@@ -1288,6 +1293,16 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
         }
     }
     d.class == Class::Painting
+}
+
+/// Objects that are one box model: the wither skull and the leash knot.
+fn box_object(out: &mut MeshData, id: i8, d: &EntityDraw, skins: &Skins) -> bool {
+    match id {
+        skull::ID => skull::build(out, d, skins),
+        leash::KNOT => leash::knot(out, d, skins),
+        _ => return false,
+    }
+    true
 }
 
 /// The body model, its armor and layers; returns where the full-bright layers start.

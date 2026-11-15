@@ -11,6 +11,7 @@ macro_rules! metrics {
 mod crystal;
 mod events;
 mod input;
+mod leash;
 mod mod_boot;
 mod mod_events;
 mod mod_lists;
@@ -833,6 +834,7 @@ impl App {
             d.view = [cam.yaw, cam.pitch];
             self.team_tag(e, d);
             self.held_and_line(e, d, frac);
+            d.look.leash = self.leash_holder(e, frac);
             vehicle::snap(&self.game.store, e, d);
         }
         self.mod_drawn = mod_world::Drawn::ask(

@@ -316,6 +316,10 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             id: p.entity_id,
             vehicle: p.vehicle_id,
         },
+        P::AttachEntity(p) => EntityEvent::Leash {
+            id: p.entity_id,
+            holder: p.vehicle_id,
+        },
         _ => return None,
     })
 }

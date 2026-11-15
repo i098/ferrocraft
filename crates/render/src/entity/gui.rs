@@ -3,7 +3,8 @@
 //! `translate(x, y, 50) scale(-s, s, s) rotateZ(180) rotateX(tilt)` and lit with the two lights of
 //! `enableStandardItemLighting`, so it joins the overlay quad list in draw order.
 
-use super::{build_unshaded, EntityDraw, Skins};
+use super::{build_items_unshaded, build_unshaded, item, EntityDraw, Skins};
+use crate::mesh::MeshData;
 use crate::{Blend, Quad};
 use std::borrow::Cow;
 
@@ -62,8 +63,9 @@ fn argb(rgb: [f32; 3], light: f32) -> u32 {
 
 impl crate::Renderer {
     /// Overlay quads of one `drawEntityOnScreen` call, to splice into the quad list in draw order.
+    /// Resolves the model of the held item first, so it takes the renderer mutably.
     pub fn gui_entity(
-        &self,
+        &mut self,
         origin: [f32; 2],
         scale: f32,
         mouse: [f32; 2],
@@ -76,26 +78,59 @@ impl crate::Renderer {
             mouse,
             draw,
         };
-        quads(&e, &self.entity_skins)
+        let posed = posed(&e);
+        self.resolve_items(std::slice::from_ref(&posed));
+        quads(&e, &self.entity_skins, &self.item_models)
     }
 }
 
-/// The overlay quads of `e`, back to front. Quads that face away are culled.
-pub(crate) fn quads(e: &GuiEntity, skins: &Skins) -> Vec<Quad> {
+/// The entity of `e` at the origin, turned by the cursor offset.
+fn posed(e: &GuiEntity) -> EntityDraw {
     let (yaw, head_yaw, pitch) = turns(e.mouse);
     let mut draw = e.draw.clone();
     draw.pos = [0.0; 3];
     (draw.yaw, draw.head_yaw, draw.pitch) = (yaw, head_yaw, pitch);
-    let mesh = build_unshaded(&[draw], skins);
+    draw
+}
+
+/// The overlay quads of `e`, back to front: the body, then the held item (`LayerHeldItem`) in the
+/// same transform and lighting. Quads that face away are culled.
+pub(crate) fn quads(e: &GuiEntity, skins: &Skins, models: &item::Models) -> Vec<Quad> {
+    let draw = posed(e);
+    let pitch = draw.pitch;
+    let body = build_unshaded(std::slice::from_ref(&draw), skins);
+    let items = build_items_unshaded(&draw, models);
     // `rotate(-atan(mouseY / 40) * 20, 1, 0, 0)` is the pitch turn above.
     let (st, ct) = pitch.to_radians().sin_cos();
     let tilt = |p: V3| [p[0], p[1] * ct - p[2] * st, p[1] * st + p[2] * ct];
     let mut out: Vec<(f32, Quad)> = Vec::new();
+    project(&mut out, &body, Cow::Borrowed(ATLAS), e, &tilt, false);
+    // Block faces sample the block atlas, which the overlay does not hold: only sprites are drawn.
+    for ((_, path), mesh) in items.sprites {
+        project(&mut out, &mesh, Cow::Owned(path), e, &tilt, true);
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.into_iter().map(|(_, q)| q).collect()
+}
+
+/// Projects every quad of `mesh` that faces the viewer (or, `two_sided`, every quad), with its depth.
+fn project(
+    out: &mut Vec<(f32, Quad)>,
+    mesh: &MeshData,
+    tex: Cow<'static, str>,
+    e: &GuiEntity,
+    tilt: &dyn Fn(V3) -> V3,
+    two_sided: bool,
+) {
     for tri in mesh.indices.as_chunks::<6>().0 {
         let base = tri[0] as usize;
         let v = &mesh.vertices[base..base + 4];
         let p = [0, 1, 2, 3].map(|i| tilt(v[i].pos));
-        let n = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+        let mut n = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+        // A sprite is a thin slab drawn as both faces and its edges; each takes the lit side toward the viewer.
+        if two_sided && n[2] < 0.0 {
+            n = n.map(|c| -c);
+        }
         let len = dot(n, n).sqrt();
         // Eye z is the tilted z; eye y is the tilted y turned upside down by `rotateZ(180)`.
         if len == 0.0 || n[2] <= 0.0 {
@@ -106,7 +141,7 @@ pub(crate) fn quads(e: &GuiEntity, skins: &Skins) -> Vec<Quad> {
         out.push((
             depth,
             Quad {
-                tex: Cow::Borrowed(ATLAS),
+                tex: tex.clone(),
                 blend: Blend::Alpha,
                 pos: p.map(|q| [e.origin[0] + e.scale * q[0], e.origin[1] - e.scale * q[1]]),
                 uv: [0, 1, 2, 3].map(|i| v[i].uv),
@@ -115,8 +150,6 @@ pub(crate) fn quads(e: &GuiEntity, skins: &Skins) -> Vec<Quad> {
             },
         ));
     }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    out.into_iter().map(|(_, q)| q).collect()
 }
 
 fn sub(a: V3, b: V3) -> V3 {

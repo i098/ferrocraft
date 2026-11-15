@@ -4,17 +4,26 @@ import java.lang.reflect.Method;
 import java.util.List;
 import net.minecraft.flat.BatModel;
 import net.minecraft.flat.BlazeModel;
+import net.minecraft.flat.Bootstrap;
+import net.minecraft.flat.DyeColor;
 import net.minecraft.flat.GhastModel;
+import net.minecraft.flat.LivingEntity;
 import net.minecraft.flat.MagmaCubeModel;
 import net.minecraft.flat.Model;
 import net.minecraft.flat.ModelPart;
+import net.minecraft.flat.OcelotEntity;
+import net.minecraft.flat.OcelotModel;
+import net.minecraft.flat.SheepEntity;
 import net.minecraft.flat.SlimeModel;
+import net.minecraft.flat.WolfEntity;
+import net.minecraft.flat.WolfModel;
 
 /**
- * Prints the part tree of the slime, magma cube, blaze, ghast and bat models of the real 1.8.9
- * client: texture offset, pivot, rotation, mirror flag and box corners of every part. The blaze,
- * ghast and magma cube models are also run through setupAnimation (the bat one reads entity
- * metadata, which needs a world, so only its constructor runs). Java 8 source level.
+ * Prints the part tree of the slime, magma cube, blaze, ghast, bat, wolf and ocelot models of the
+ * real 1.8.9 client: texture offset, pivot, rotation, mirror flag and box corners of every part. The
+ * blaze, ghast and magma cube models are also run through setupAnimation (the bat one reads entity
+ * metadata, which needs a world, so only its constructor runs). The wolf and ocelot models run in each
+ * pose through prepare and setupAnimation, on entities built with no world. Java 8 source level.
  *
  * Run: harness/mobmodels.sh
  */
@@ -55,6 +64,59 @@ public class MobModels {
         }
     }
 
+    private static void call(Object o, String name, boolean v) throws Exception {
+        Method m = null;
+        for (Class<?> c = o.getClass(); c != null && m == null; c = c.getSuperclass()) {
+            try {
+                m = c.getDeclaredMethod(name, boolean.class);
+            } catch (NoSuchMethodException e) {
+                // keep looking in the superclass
+            }
+        }
+        m.setAccessible(true);
+        m.invoke(o, v);
+    }
+
+    private static void pose(String label, Model m, LivingEntity e, float age) throws Exception {
+        m.prepare(e, 1.3f, 0.6f, 0.0f);
+        m.setupAnimation(1.3f, 0.6f, age, 30.0f, 15.0f, 0.0625f, e);
+        model(label + " (swing 1.3, amount 0.6, head yaw 30, pitch 15)", m);
+    }
+
+    private static void wolfAndOcelot() throws Exception {
+        Bootstrap.init();
+        for (int b = 0; b < 16; b++) {
+            DyeColor c = DyeColor.byMetadata(b);
+            float[] rgb = SheepEntity.getColorRgb(c);
+            System.out.println("collar byte " + b + " -> " + c + " rgb=" + rgb[0] + "," + rgb[1] + "," + rgb[2]);
+        }
+        model("WolfModel", new WolfModel());
+        WolfEntity wolf = new WolfEntity(null);
+        System.out.println("tail angle wild=" + wolf.getTailBob());
+        pose("WolfModel wild", new WolfModel(), wolf, wolf.getTailBob());
+        wolf.setAngry(true);
+        System.out.println("tail angle angry=" + wolf.getTailBob());
+        pose("WolfModel angry", new WolfModel(), wolf, wolf.getTailBob());
+        wolf.setAngry(false);
+        wolf.setTamed(true);
+        call(wolf, "setSitting", true);
+        System.out.println("tail angle tame, metadata health 1=" + wolf.getTailBob());
+        pose("WolfModel tame sitting", new WolfModel(), wolf, wolf.getTailBob());
+        model("OcelotModel", new OcelotModel());
+        OcelotEntity cat = new OcelotEntity(null);
+        pose("OcelotModel walking", new OcelotModel(), cat, 0.0f);
+        call(cat, "setSneaking", true);
+        pose("OcelotModel sneaking", new OcelotModel(), cat, 0.0f);
+        call(cat, "setSneaking", false);
+        call(cat, "setSprinting", true);
+        pose("OcelotModel sprinting", new OcelotModel(), cat, 0.0f);
+        call(cat, "setSprinting", false);
+        call(cat, "setSitting", true);
+        pose("OcelotModel sitting", new OcelotModel(), cat, 0.0f);
+        call(cat, "setSneaking", true);
+        pose("OcelotModel sitting and sneaking", new OcelotModel(), cat, 0.0f);
+    }
+
     public static void main(String[] args) throws Exception {
         model("SlimeModel(16)", new SlimeModel(16));
         model("SlimeModel(0)", new SlimeModel(0));
@@ -68,5 +130,6 @@ public class MobModels {
         ghast.setupAnimation(0f, 0f, 10f, 0f, 0f, 0f, null);
         model("GhastModel after setupAnimation(age 10)", ghast);
         model("BatModel", new BatModel());
+        wolfAndOcelot();
     }
 }

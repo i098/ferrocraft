@@ -129,7 +129,7 @@ pub struct Renderer {
     /// The additive white flash of primed TNT.
     flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
-    item_models: entity::item::Models,
+    pub(crate) item_models: entity::item::Models,
     dials: hand::DialTurns,
     frame_compasses: entity::hanging::Compasses,
     /// Wood models of item frames, read the first time one is drawn.
@@ -1042,7 +1042,7 @@ impl Renderer {
     }
 
     /// Resolves the model of every held and dropped item that is new.
-    fn resolve_items(&mut self, draws: &[EntityDraw]) {
+    pub(crate) fn resolve_items(&mut self, draws: &[EntityDraw]) {
         for key in draws
             .iter()
             .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))

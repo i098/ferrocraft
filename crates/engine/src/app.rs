@@ -1284,7 +1284,11 @@ impl App {
             mods.draw(&mut g, &mut mod_textures);
         }
         textures.extend(mod_textures);
-        (with_entities(r, g), textures, effects)
+        let (entities, quads) = (g.take_entities(), g.into_quads());
+        let Some(r) = &mut self.renderer else {
+            return (quads, textures, effects);
+        };
+        (with_entities(r, entities, quads), textures, effects)
     }
 
     /// The local player for the model of an open container screen.
@@ -1294,9 +1298,11 @@ impl App {
 }
 
 /// The frame's quads with the entity models of `Gui::entity` spliced in at their draw position.
-fn with_entities(r: &render::Renderer, mut g: gui::Gui) -> Vec<render::Quad> {
-    let entities = g.take_entities();
-    let mut quads = g.into_quads();
+fn with_entities(
+    r: &mut render::Renderer,
+    entities: Vec<gui::toolkit::PlacedEntity>,
+    mut quads: Vec<render::Quad>,
+) -> Vec<render::Quad> {
     for e in entities.iter().rev() {
         let model = r.gui_entity(e.origin, e.scale, e.mouse, &e.draw);
         quads.splice(e.at..e.at, model);
@@ -1572,7 +1578,7 @@ fn entity_draw(
             // villager its profession in int 16. A server that never sent the byte shows every part.
             skin_parts: e.meta.stand.unwrap_or(0x7F),
             variant: match e.kind {
-                Kind::Mob(91 | 55 | 62 | 56 | 65) => e.meta.slime.unwrap_or(0),
+                Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
                 Kind::Mob(120) => e.meta.guardian.map_or(0, |p| p as u8),
                 _ => 0,
             },
@@ -1580,6 +1586,12 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            collar: match e.kind {
+                Kind::Mob(98) => e.meta.cat.unwrap_or(0),
+                _ => e.meta.collar.unwrap_or(14),
+            },
+            health: e.meta.health.unwrap_or(1.0),
+            sprinting: e.sprinting(),
             squish: e.squish.factor(p),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,

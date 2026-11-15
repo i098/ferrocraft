@@ -141,6 +141,12 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         arrow: byte(16),
         rotation: byte(9),
         arrows: byte(9),
+        collar: byte(20),
+        health: match find(meta, 18) {
+            Some(MetaValue::Float(f)) => Some(*f),
+            _ => None,
+        },
+        cat: byte(18),
     }
 }
 

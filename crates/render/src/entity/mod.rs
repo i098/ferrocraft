@@ -18,6 +18,7 @@ pub mod hanging;
 pub mod item;
 pub(crate) mod mobs;
 mod mobs2;
+mod mobs3;
 mod projectile;
 pub(crate) mod shadow;
 mod sheep;
@@ -132,7 +133,7 @@ pub struct Look {
     /// 16 left pants, 32 right pants, 64 hat. A player with no byte shows every part.
     pub skin_parts: u8,
     /// Villager: profession (metadata 16), 0 farmer to 4 butcher. Sheep: metadata 16, dye in the low
-    /// four bits and 16 when sheared.
+    /// four bits and 16 when sheared. Wolf and ocelot: metadata 16, 1 sitting, 2 angry, 4 tamed.
     pub variant: u8,
     /// Enderman: id of the carried block (metadata 16), 0 for none.
     pub carried: u16,
@@ -146,6 +147,12 @@ pub struct Look {
     pub id: i32,
     /// Living entities: metadata 9, arrows stuck in the body.
     pub arrows: u8,
+    /// Wolf: metadata byte 20, the collar dye damage value. Ocelot: metadata byte 18, the cat type.
+    pub collar: u8,
+    /// Wolf: metadata float 18, the health that sets the tail angle of a tame wolf.
+    pub health: f32,
+    /// Ocelot: the sprinting flag (metadata 0 bit 3), which picks the run pose.
+    pub sprinting: bool,
     /// Slimes and magma cubes: `prevSquishFactor` eased to `squishFactor` by the partial tick.
     pub squish: f32,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
@@ -168,6 +175,9 @@ impl Default for Look {
             stand: StandLook::default(),
             id: 0,
             arrows: 0,
+            collar: 14,
+            health: 1.0,
+            sprinting: false,
             squish: 0.0,
             eat_timer: 0,
             golem_attack: 0,
@@ -669,8 +679,8 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 19] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 99, 120,
+    const MODELED: [u8; 21] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 95, 98, 99, 120,
     ];
     MODELED.contains(&id)
 }
@@ -699,6 +709,7 @@ fn adult_model(d: &EntityDraw) -> Model {
         Class::Mob(92) => cow(d),
         Class::Mob(id) => mobs::build(d, id)
             .or_else(|| mobs2::build(d, id))
+            .or_else(|| mobs3::build(d, id))
             .unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
@@ -951,6 +962,8 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         Class::Mob(mobs::VILLAGER) => 0.9375,
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
+        // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
+        Class::Mob(mobs3::OCELOT) if d.look.variant & mobs3::TAMED != 0 => 0.8,
         Class::Mob(mobs2::BAT) => 0.35,
         _ => 1.0,
     };
@@ -1215,7 +1228,8 @@ fn emit_layers(
         emit_carried(out, xf, d.look.carried, white);
     }
     let mut bright = None;
-    for layer in mobs::layers(d, m).iter().filter(|l| skins.has(l.skin)) {
+    let layers = mobs::layers(d, m).into_iter().chain(mobs3::layers(d, m));
+    for layer in layers.filter(|l| skins.has(l.skin)) {
         if layer.bright {
             bright.get_or_insert(out.vertices.len());
         }

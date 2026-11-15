@@ -143,6 +143,12 @@ pub struct SizeMeta {
     pub rotation: Option<u8>,
     /// Living entities: metadata index 9, the arrows stuck in the body (`getArrowCountInEntity`).
     pub arrows: Option<u8>,
+    /// Wolf: metadata byte 20, the collar dye (`getCollarColor`, a dye damage value).
+    pub collar: Option<u8>,
+    /// Wolf: metadata float 18, the health the tail angle reads (`getTailRotation`).
+    pub health: Option<f32>,
+    /// Ocelot: metadata byte 18, the cat type (`getTameSkin`).
+    pub cat: Option<u8>,
 }
 
 impl SizeMeta {
@@ -161,6 +167,9 @@ impl SizeMeta {
         self.arrow = new.arrow.or(self.arrow);
         self.rotation = new.rotation.or(self.rotation);
         self.arrows = new.arrows.or(self.arrows);
+        self.collar = new.collar.or(self.collar);
+        self.health = new.health.or(self.health);
+        self.cat = new.cat.or(self.cat);
     }
 }
 

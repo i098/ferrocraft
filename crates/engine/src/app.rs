@@ -1572,7 +1572,7 @@ fn entity_draw(
             // villager its profession in int 16. A server that never sent the byte shows every part.
             skin_parts: e.meta.stand.unwrap_or(0x7F),
             variant: match e.kind {
-                Kind::Mob(91 | 55 | 62 | 56 | 65) => e.meta.slime.unwrap_or(0),
+                Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
                 Kind::Mob(120) => e.meta.guardian.map_or(0, |p| p as u8),
                 _ => 0,
             },
@@ -1580,6 +1580,12 @@ fn entity_draw(
             stand: stand_look(e),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
+            collar: match e.kind {
+                Kind::Mob(98) => e.meta.cat.unwrap_or(0),
+                _ => e.meta.collar.unwrap_or(14),
+            },
+            health: e.meta.health.unwrap_or(1.0),
+            sprinting: e.sprinting(),
             squish: e.squish.factor(p),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,

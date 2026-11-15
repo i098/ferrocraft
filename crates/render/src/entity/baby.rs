@@ -36,6 +36,13 @@ const CHICKEN: Split = Split {
     rest: (0.5, [0.0, 24.0, 0.0]),
 };
 
+/// `ModelOcelot`: the head scales by 1.5 / 2 and moves by (0, 10, 4); the rest halves.
+const OCELOT: Split = Split {
+    heads: 4,
+    head: (0.75, [0.0, 10.0, 4.0]),
+    rest: (0.5, [0.0, 24.0, 0.0]),
+};
+
 fn split(d: &EntityDraw) -> Option<Split> {
     Some(match d.class {
         Class::Mob(54 | 57) => BIPED,
@@ -43,6 +50,9 @@ fn split(d: &EntityDraw) -> Option<Split> {
         Class::Mob(90) => quadruped(2, 4.0, 4.0),
         Class::Mob(92) => quadruped(3, 8.0, 6.0),
         Class::Mob(91) => quadruped(1, 8.0, 4.0),
+        // `ModelWolf`: head, two ears and nose move by (0, 5, 2); the rest halves.
+        Class::Mob(95) => quadruped(4, 5.0, 2.0),
+        Class::Mob(98) => OCELOT,
         Class::Mob(93) => CHICKEN,
         _ => return None,
     })

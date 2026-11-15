@@ -287,7 +287,8 @@ mod tests {
         assert_eq!(hit_wobble(0, 30.0, 1, 0.0), 0.0);
         assert_eq!(hit_wobble(2, 30.0, 1, 2.0), 0.0);
         let w = hit_wobble(8, 20.0, -1, 0.5);
-        assert!((w - -(crate::sin(7.5) * 7.5 * 19.5 / 10.0)).abs() < 1e-6 && w != 0.0);
+        // vanilla: sin(7.5) = 0.938 (radians), so -0.938 * 7.5 * 19.5 / 10 = -13.718
+        assert!((w - -13.718).abs() < 0.01);
         assert_eq!(hit_wobble(8, 0.25, 1, 0.5), 0.0);
     }
 

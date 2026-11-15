@@ -199,6 +199,41 @@ fn boats_and_minecarts_render() {
     r.set_entities(&draws);
     let image = r.render_to_rgba(&cam, &[]).2;
     assert_ne!(empty, image);
+    let diff = |a: &[u8], b: &[u8]| -> Vec<[i32; 3]> {
+        a.chunks(4)
+            .zip(b.chunks(4))
+            .filter(|(x, y)| x != y)
+            .map(|(_, y)| [y[0] as i32, y[1] as i32, y[2] as i32])
+            .collect()
+    };
+    let share = |px: &[[i32; 3]], f: fn(&[i32; 3]) -> bool| {
+        px.iter().filter(|p| f(p)).count() * 2 > px.len()
+    };
+    for (i, d) in draws.iter().enumerate() {
+        r.set_entities(std::slice::from_ref(d));
+        let alone = r.render_to_rgba(&cam, &[]).2;
+        let px = diff(&empty, &alone);
+        assert!(px.len() > 200, "entity {i} draws almost nothing");
+        if i == 0 {
+            assert!(share(&px, |p| p[0] > p[1] && p[1] > p[2]), "boat is not planks");
+        } else if i == 1 {
+            assert!(
+                share(&px, |p| (p[0] - p[2]).abs() < 40),
+                "empty cart is not grey iron"
+            );
+        }
+    }
+    let cart_only = [draw(Class::Object(10), 1.6, (0.98, 0.7))];
+    r.set_entities(&cart_only);
+    let plain = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&draws[2..]);
+    let carrying = r.render_to_rgba(&cam, &[]).2;
+    let tnt_px = diff(&plain, &carrying);
+    assert!(tnt_px.len() > 50, "carried TNT block missing");
+    assert!(
+        tnt_px.iter().filter(|p| p[0] > p[1] + 30).count() > 20,
+        "carried block is not red TNT"
+    );
     if let Some(dir) = std::env::var_os("MODELS_PROOF_DIR") {
         encode_png(
             &std::path::PathBuf::from(dir).join("vehicles.png"),

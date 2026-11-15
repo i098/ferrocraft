@@ -3,8 +3,8 @@
 //! tile: a single chest facing the default way with its lid shut (the ender chest and the trapped
 //! chest take their own texture). The block frame is that of any carried block, `vehicle::block_frame`.
 
-use super::{emit_chest, Batches, Mat, Tex, CHEST, ENDER_CHEST, TRAPPED_CHEST};
-use crate::entity::{vehicle, Class, EntityDraw};
+use super::{emit_chest, Batches, Mat, Tex};
+use crate::entity::{vehicle, EntityDraw};
 use crate::hand;
 use crate::mesh::MeshData;
 
@@ -15,13 +15,9 @@ pub fn build_cart_chests(
 ) -> Vec<(Tex, MeshData)> {
     let mut out = Batches::default();
     for d in draws {
-        let Class::Object(kind) = d.class else {
+        let Some(id) = vehicle::carried_chest(d) else {
             continue;
         };
-        let id = d.look.vehicle.block >> 4;
-        if !vehicle::is_cart(kind) || !is_chest(id) {
-            continue;
-        }
         // `block_frame` maps a model centred on the origin; the chest model is in block
         // coordinates, with the corner at the origin.
         let frame = hand::chain(&[vehicle::block_frame(d), hand::translate(-0.5, -0.5, -0.5)]);
@@ -35,11 +31,6 @@ pub fn build_cart_chests(
         out.light_since(mark, crate::entity::light_level(d, &light, false));
     }
     out.0
-}
-
-/// Block ids whose carried block is a chest model instead of chunk geometry.
-pub fn is_chest(id: u16) -> bool {
-    matches!(id, CHEST | ENDER_CHEST | TRAPPED_CHEST)
 }
 
 /// A column-major `hand::Mat` as a matrix placed in the world at `origin`.
@@ -58,7 +49,8 @@ fn from_hand(m: &hand::Mat, origin: [f64; 3]) -> Mat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::tests::steve;
+    use crate::blockent::{CHEST, ENDER_CHEST};
+    use crate::entity::{tests::steve, Class};
 
     fn cart(kind: i8, block: u16) -> EntityDraw {
         let mut d = steve();

@@ -19,7 +19,7 @@ use beacon::Beacon;
 pub use beacon::{Beams, BEAM_TEXTURE};
 mod cart;
 mod portal;
-pub use cart::{build_cart_chests, is_chest as is_cart_chest};
+pub use cart::build_cart_chests;
 mod spawner;
 pub use portal::{PORTAL_TEXTURE, SKY_TEXTURE};
 use spawner::Spawner;

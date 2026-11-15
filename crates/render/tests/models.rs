@@ -247,3 +247,66 @@ fn boats_and_minecarts_render() {
         .unwrap();
     }
 }
+
+/// Minecarts carrying each block of 1.8.9 (issues 381 and 385); `CART_PROOF_DIR` keeps the pictures.
+/// Carried states with their offsets: chest, ender chest, trapped chest, furnace, hopper, spawner,
+/// command block and a custom display block (diamond block).
+const BLOCKS: [(&str, u16, i32); 8] = [
+    ("chest", 54 << 4 | 2, 8),
+    ("ender", 130 << 4 | 2, 8),
+    ("trapped", 146 << 4 | 2, 8),
+    ("furnace", 61 << 4 | 2, 6),
+    ("hopper", 154 << 4, 1),
+    ("spawner", 52 << 4, 6),
+    ("command", 137 << 4, 6),
+    ("custom", 57 << 4, 6),
+];
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn every_carried_block_draws() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(480, 240, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.2, 6.2],
+        pitch: 35.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=1 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let cart = |x: f64, block: u16, offset: i32| {
+        let mut d = draw(Class::Object(10), x, (0.98, 0.7));
+        d.look.vehicle.block = block;
+        d.look.vehicle.block_offset = offset;
+        d
+    };
+    let plain = {
+        r.set_entities(&[cart(0.0, 0, 6)]);
+        r.render_to_rgba(&cam, &[]).2
+    };
+    if let Some(dir) = std::env::var_os("CART_PROOF_DIR") {
+        let path = std::path::PathBuf::from(dir).join("cart_none.png");
+        encode_png(&path, 480, 240, &plain).unwrap();
+    }
+    for (name, state, offset) in BLOCKS.iter() {
+        r.set_entities(&[cart(0.0, *state, *offset)]);
+        let with = r.render_to_rgba(&cam, &[]);
+        let changed = plain
+            .chunks(4)
+            .zip(with.2.chunks(4))
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            changed > 100,
+            "{name}: carried block missing ({changed} px)"
+        );
+        if let Some(dir) = std::env::var_os("CART_PROOF_DIR") {
+            let path = std::path::PathBuf::from(dir).join(format!("cart_{name}.png"));
+            encode_png(&path, with.0, with.1, &with.2).unwrap();
+        }
+    }
+}

@@ -29,6 +29,7 @@ pub(crate) mod shadow;
 mod sheep;
 mod skin;
 pub mod skull;
+mod snowman;
 mod squid;
 pub mod vehicle;
 
@@ -715,8 +716,8 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 24] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 98, 99,
+    const MODELED: [u8; 25] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
         101, 120,
     ];
     MODELED.contains(&id)
@@ -753,6 +754,7 @@ fn adult_model(d: &EntityDraw) -> Model {
             .or_else(|| mobs3::build(d, id))
             .or_else(|| rabbit::build(d, id))
             .or_else(|| squid::build(d, id))
+            .or_else(|| snowman::build(d, id))
             .unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
@@ -1457,6 +1459,7 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Blaze => [0.9, 0.7, 0.1],
         Skin::Ghast | Skin::GhastShooting => [0.92; 3],
         Skin::Bat => [0.3, 0.22, 0.15],
+        Skin::Snowman => [0.95; 3],
         _ => return None,
     })
 }

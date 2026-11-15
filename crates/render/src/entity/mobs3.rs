@@ -3,8 +3,7 @@
 //! constant was read from the 1.8.9 classes with `harness/mobmodels.sh`, which runs both models in
 //! each pose.
 //!
-//! Not ported: the wolf shake and wet shading (they need client-side water tracking), the begging
-//! head tilt (`getInterestedAngle` eases a timer), and the cat sit-on-block pose is the sit flag only.
+//! Not ported: the wet shading (it needs client-side water tracking), the begging head tilt (`getInterestedAngle` eases a timer), and the cat sit-on-block pose is the sit flag only.
 
 use super::mobs::{head_rot, model, Layer, FLEECE};
 use super::{cos, EntityDraw, Model, Part, Skin};
@@ -55,7 +54,9 @@ fn wolf_tail_angle(d: &EntityDraw) -> f32 {
 /// `ModelWolf`: head with two ears and a nose, body, mane, four legs and the tail.
 fn wolf(d: &EntityDraw) -> Model {
     let flags = d.look.variant;
+    let [head_roll, mane_roll, body_roll, tail_roll] = d.look.wolf_shake;
     let hr = head_rot(d);
+    let hr = [hr[0], hr[1], head_roll];
     let (f, amount) = (d.limb_swing, d.limb_swing_amount);
     let walk = |phase: f32| cos(f * 0.6662 + phase) * 1.4 * amount;
     let head_at = [-1.0, 13.5, -7.0];
@@ -98,8 +99,9 @@ fn wolf(d: &EntityDraw) -> Model {
         Part::new(head_at, [1.0, -5.0, 0.0], [2.0, 2.0, 1.0], (16.0, 14.0)).rot(hr),
         Part::new(head_at, [-1.5, 0.0, -5.0], [3.0, 3.0, 4.0], (0.0, 10.0)).rot(hr),
         Part::new(body.0, [-4.0, -2.0, -3.0], [6.0, 9.0, 6.0], (18.0, 14.0))
-            .rot([body.1, 0.0, 0.0]),
-        Part::new(mane.0, [-4.0, -3.0, -3.0], [8.0, 6.0, 7.0], (21.0, 0.0)).rot([mane.1, 0.0, 0.0]),
+            .rot([body.1, 0.0, body_roll]),
+        Part::new(mane.0, [-4.0, -3.0, -3.0], [8.0, 6.0, 7.0], (21.0, 0.0))
+            .rot([mane.1, 0.0, mane_roll]),
         leg(legs[0], rx[0]),
         leg(legs[1], rx[1]),
         leg(legs[2], rx[2]),
@@ -107,7 +109,7 @@ fn wolf(d: &EntityDraw) -> Model {
         Part::new(tail, [-1.0, 0.0, -1.0], [2.0, 8.0, 2.0], (9.0, 18.0)).rot([
             wolf_tail_angle(d),
             tail_sway,
-            0.0,
+            tail_roll,
         ]),
     ];
     let skin = if flags & TAMED != 0 {
@@ -308,6 +310,21 @@ mod tests {
         assert!(near(m.parts[10].rot[0], 0.534_070_8));
         d.look.health = 20.0;
         assert!(near(build(&d, WOLF).unwrap().parts[10].rot[0], 0.55 * PI));
+    }
+
+    #[test]
+    fn shaking_wolf_rolls_head_mane_body_and_tail_like_the_oracle() {
+        let mut d = mob(WOLF);
+        d.look.variant = TAMED;
+        // `getShakeAngle` at partial 1.0 for offsets 0, -0.08, -0.16, -0.2 in the oracle run.
+        d.look.wolf_shake = [0.158_727_78, 0.426_234_28, -0.116_751_96, -0.353_422_64];
+        let m = build(&d, WOLF).unwrap();
+        for head in &m.parts[0..4] {
+            assert!(near(head.rot[2], 0.158_727_78));
+        }
+        assert!(near(m.parts[5].rot[2], 0.426_234_28));
+        assert!(near(m.parts[4].rot[2], -0.116_751_96));
+        assert!(near(m.parts[10].rot[2], -0.353_422_64));
     }
 
     #[test]

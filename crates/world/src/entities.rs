@@ -149,6 +149,8 @@ pub struct SizeMeta {
     pub health: Option<f32>,
     /// Ocelot: metadata byte 18, the cat type (`getTameSkin`).
     pub cat: Option<u8>,
+    /// Boats and minecarts; see [`crate::vehicle::VehicleMeta`].
+    pub vehicle: crate::vehicle::VehicleMeta,
 }
 
 impl SizeMeta {
@@ -170,6 +172,7 @@ impl SizeMeta {
         self.collar = new.collar.or(self.collar);
         self.health = new.health.or(self.health);
         self.cat = new.cat.or(self.cat);
+        self.vehicle.merge(new.vehicle);
     }
 }
 
@@ -1114,6 +1117,7 @@ impl Entities {
                     e.facing = data as u8 & 3;
                 }
                 e.vel = velocity(vel);
+                e.meta.vehicle.cart = crate::vehicle::cart_type(kind, data);
                 if kind == 90 {
                     e.owner = data;
                 }

@@ -53,6 +53,8 @@ import net.minecraft.flat.SlimeEntity;
  *   stats                         Stats: G|key|formatter, M|item id|key, U|item id|key, A<m|c|u|b>|id|key per array slot, I|item id|registry name|translation key, E|entity key|kill key|killed-by key
  *   statfmt <kind> <ints...>      Stat.format of the formatter (number, time, distance, tenth): one line per int
  *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
+ *   rail <x> <y> <z> <offset|none>  MinecartEntity.snapPositionToRail (or ...WithOffset) of a minecart there: "null" or three doubles as
+ *                                 16 hex digits each; needs "start"
  *   squish <magma 0/1> <ticks> <kick tick>  a slime or magma cube dropped from y 66 onto the floor, which gets a jump
  *                                 at the kick tick; per tick: onGround, stretch and lastStretch as float bits in hex; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
@@ -245,6 +247,17 @@ public class Harness {
             System.out.println((s.onGround ? 1 : 0) + " " + Integer.toHexString(Float.floatToRawIntBits(s.stretch))
                 + " " + Integer.toHexString(Float.floatToRawIntBits(s.lastStretch)));
         }
+    }
+
+    /** `rail <x> <y> <z> <offset|none>`: where a real minecart snaps to the rail under that point. */
+    static void railCommand(String[] t) {
+        net.minecraft.flat.RideableMinecartEntity cart = new net.minecraft.flat.RideableMinecartEntity(world);
+        double x = Double.parseDouble(t[1]);
+        double y = Double.parseDouble(t[2]);
+        double z = Double.parseDouble(t[3]);
+        net.minecraft.flat.Vec3d v = t[4].equals("none") ? cart.snapPositionToRail(x, y, z)
+            : cart.snapPositionToRailWithOffset(x, y, z, Double.parseDouble(t[4]));
+        System.out.println(v == null ? "null" : hex(v.x) + " " + hex(v.y) + " " + hex(v.z));
     }
 
     /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
@@ -564,6 +577,9 @@ public class Harness {
                 }
                 case "shadow":
                     shadowCommand(t);
+                    break;
+                case "rail":
+                    railCommand(t);
                     break;
                 case "squish":
                     squishCommand(t);

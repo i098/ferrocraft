@@ -24,6 +24,7 @@ pub mod place;
 pub mod potion_brew;
 pub mod shape;
 pub mod squish;
+pub mod vehicle;
 
 use std::sync::LazyLock;
 

@@ -141,3 +141,38 @@ fn wolves_and_ocelots_draw_their_models_and_textures() {
         encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
     }
 }
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn shaking_wolf_differs_from_a_still_wolf() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(800, 450, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 64.2, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=1 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let still = pet(95, 0.0, 4, 14, false);
+    let mut shaking = still.clone();
+    // `getShakeAngle` for head, mane, body and tail, a quarter into the shake.
+    shaking.look.wolf_shake = [0.158_727_78, 0.426_234_28, -0.116_751_96, -0.353_422_64];
+    r.set_entities(std::slice::from_ref(&still));
+    // The skins load on first use; draw once with the roll, then back to the still wolf.
+    r.set_entities(std::slice::from_ref(&shaking));
+    r.render_to_rgba(&cam, &[]);
+    r.set_entities(std::slice::from_ref(&still));
+    let before = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(std::slice::from_ref(&shaking));
+    let after = r.render_to_rgba(&cam, &[]).2;
+    assert_ne!(before, after, "the shake rolls the wolf");
+    if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("shake_before.png"), 800, 450, &before).unwrap();
+        encode_png(&dir.join("shake_after.png"), 800, 450, &after).unwrap();
+    }
+}

@@ -21,6 +21,10 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let key = match d.class {
         Class::Object(50) => Some((TNT, 0)),
         Class::Object(70) => d.stack.map(|s| (s.id, s.damage)),
+        Class::Object(id) if super::vehicle::is_cart(id) => {
+            let b = d.look.vehicle.block;
+            (b != 0).then_some(((b >> 4) as i16, (b & 15) as i16))
+        }
         _ => None,
     };
     key.into_iter()
@@ -71,6 +75,13 @@ pub fn build(
                 ]
             }
         };
+        if let Class::Object(id) = d.class {
+            if super::vehicle::is_cart(id) {
+                let mat = super::vehicle::block_frame(d);
+                out.piece(m, &to(mat), &|n| n, level, false, None);
+                continue;
+            }
+        }
         if d.class == Class::Object(70) {
             out.piece(m, &to(translate(0.0, 0.5, 0.0)), &|n| n, level, false, None);
             continue;

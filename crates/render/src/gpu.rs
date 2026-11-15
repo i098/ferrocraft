@@ -422,6 +422,7 @@ impl Renderer {
             snow_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
+        let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
         let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -496,7 +497,10 @@ impl Renderer {
             held: None,
             particles: Quads::default(),
             gui_pipes,
-            textures: HashMap::from([(entity::gui::ATLAS.to_owned(), entity_atlas)]),
+            textures: HashMap::from([
+                (entity::gui::ATLAS.to_owned(), entity_atlas),
+                (entity::gui::BLOCK_ATLAS.to_owned(), block_atlas),
+            ]),
             item_textures: HashMap::new(),
             source,
             mesher: Mesher::new(atlas.clone()),
@@ -985,7 +989,13 @@ impl Renderer {
             }
         }
         self.flash_mesh = self.upload_mesh(items.flash, [0.0; 3]);
-        items.glint
+        let mut glint = items.glint;
+        let base = glint.vertices.len() as u32;
+        glint.vertices.extend(items.glint_flat.vertices);
+        glint
+            .indices
+            .extend(items.glint_flat.indices.iter().map(|i| i + base));
+        glint
     }
 
     /// Reads the item frame models when a frame is first drawn.
@@ -1255,6 +1265,10 @@ impl Renderer {
         let group =
             |globals, view| bind_group(&self.device, &self.layout_bg, globals, &self.sampler, view);
         self.world_group = group(&self.globals, &view);
+        self.textures.insert(
+            entity::gui::BLOCK_ATLAS.to_owned(),
+            group(&self.globals, &flat),
+        );
         self.item_group = group(&self.globals, &flat);
         self.hand_atlas_group = group(&self.hand_globals, &flat);
     }

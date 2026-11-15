@@ -27,18 +27,25 @@ impl Renderer {
         self.block_entities.set_banner(pos, banner);
     }
 
+    /// The entity, `Delay` and `MinSpawnDelay` of a mob spawner (`S35` action 1).
+    pub fn set_spawner(&mut self, pos: [i32; 3], entity: &str, delay: i16, min_delay: Option<i32>) {
+        self.block_entities
+            .set_spawner(pos, entity, delay, min_delay);
+    }
+
     /// One client tick (20 Hz) of the chest lids and enchanting table books; `players` are all player positions.
     pub fn tick_block_entities(&mut self, players: &[[f64; 3]]) {
         self.block_entities.tick(players);
     }
 
-    /// Smoke and flame positions of this tick's activated mob spawners (`MobSpawnerBaseLogic.updateSpawner`).
+    /// One client tick of every mob spawner (`MobSpawnerBaseLogic.updateSpawner`): turns the
+    /// display mob of the activated ones and returns their smoke and flame positions.
     pub fn spawner_particles(
-        &self,
+        &mut self,
         players: &[[f64; 3]],
         rng: &mut crate::jrandom::JavaRandom,
     ) -> Vec<[f64; 3]> {
-        crate::spawner::spawner_particles(self.block_entities.spawners(), players, rng)
+        self.block_entities.tick_spawners(players, rng)
     }
 
     /// Meshes the block entities in range for the next frames. `world_time` is the total world

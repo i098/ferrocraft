@@ -40,6 +40,14 @@ impl MeshData {
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
+
+    /// Adds the triangles of `other` after this mesh's own.
+    pub fn append(&mut self, other: MeshData) {
+        let base = self.vertices.len() as u32;
+        self.vertices.extend(other.vertices);
+        self.indices
+            .extend(other.indices.into_iter().map(|i| i + base));
+    }
 }
 
 #[derive(Default)]

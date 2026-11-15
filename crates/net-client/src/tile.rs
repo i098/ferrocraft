@@ -29,6 +29,14 @@ pub enum TileEvent {
         base: u8,
         layers: Vec<(String, u8)>,
     },
+    /// `MobSpawnerBaseLogic.readFromNBT`: the entity it shows (`SpawnData.id`, else `EntityId`),
+    /// `Delay` and `MinSpawnDelay`.
+    Spawner {
+        pos: [i32; 3],
+        entity: String,
+        delay: i16,
+        min_delay: Option<i32>,
+    },
 }
 
 /// The event of a block entity packet; `None` for every other packet.
@@ -53,10 +61,11 @@ pub(crate) fn event(packet: &cb::Packet) -> Option<NetEvent> {
     Some(NetEvent::Tile(tile))
 }
 
-/// `TileEntity.onDataPacket` of the sign (9), skull (4) and banner (6) block entities.
+/// `TileEntity.onDataPacket` of the spawner (1), sign (9), skull (4) and banner (6) block entities.
 fn update(pos: [i32; 3], action: u8, nbt: &Nbt) -> Option<TileEvent> {
     let root = &nbt.root;
     match action {
+        1 => Some(spawner(pos, root)),
         9 => Some(TileEvent::Sign {
             pos,
             lines: ["Text1", "Text2", "Text3", "Text4"]
@@ -73,6 +82,28 @@ fn update(pos: [i32; 3], action: u8, nbt: &Nbt) -> Option<TileEvent> {
             base: int(root, "Base").map_or(0, |v| v as u8),
             layers: patterns(root),
         }),
+        _ => None,
+    }
+}
+
+/// `MobSpawnerBaseLogic.readFromNBT`; an empty entity name is a pig (`WeightedRandomMinecart`).
+fn spawner(pos: [i32; 3], root: &Compound) -> TileEvent {
+    let data = match tag(root, "SpawnData") {
+        Some(Tag::Compound(data)) => string(data, "id"),
+        _ => None,
+    };
+    let name = data.or(string(root, "EntityId")).unwrap_or_default();
+    TileEvent::Spawner {
+        pos,
+        entity: if name.is_empty() { "Pig" } else { name }.to_owned(),
+        delay: short(root, "Delay").unwrap_or(0),
+        min_delay: short(root, "MinSpawnDelay").map(i32::from),
+    }
+}
+
+fn short(c: &Compound, key: &str) -> Option<i16> {
+    match tag(c, key)? {
+        Tag::Short(v) => Some(*v),
         _ => None,
     }
 }
@@ -192,6 +223,38 @@ mod tests {
         assert_eq!(lines[0], "\u{a7}9a\u{a7}r");
         assert_eq!(lines[3], "\u{a7}9d\u{a7}r");
         assert_eq!(lines[2], "");
+    }
+
+    #[test]
+    fn update_block_entity_sets_the_spawner_entity() {
+        let send = |entries: &[(&str, Tag)]| {
+            wire(cb::UpdateBlockEntity {
+                location: pos(),
+                action: 1,
+                nbt: Some(tags(entries)),
+            })
+        };
+        let spawner = |entity: &str, delay, min_delay| {
+            Some(TileEvent::Spawner {
+                pos: [-3, 64, 12],
+                entity: entity.into(),
+                delay,
+                min_delay,
+            })
+        };
+        let zombie = [
+            ("EntityId", Tag::String("Zombie".into())),
+            ("Delay", Tag::Short(37)),
+            ("MinSpawnDelay", Tag::Short(100)),
+        ];
+        assert_eq!(send(&zombie), spawner("Zombie", 37, Some(100)));
+        assert_eq!(send(&[]), spawner("Pig", 0, None));
+        let data = Tag::Compound(vec![("id".into(), Tag::String("Spider".into()))]);
+        let with_data = [
+            ("EntityId", Tag::String("Zombie".into())),
+            ("SpawnData", data),
+        ];
+        assert_eq!(send(&with_data), spawner("Spider", 0, None));
     }
 
     #[test]

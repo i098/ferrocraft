@@ -10,7 +10,6 @@ mod biome;
 mod blockent;
 mod blocks;
 mod border;
-mod spawner;
 pub use border::Border;
 mod crack;
 mod entity;
@@ -45,7 +44,6 @@ pub use entity::{
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 pub use post::SHADERS;
-pub use spawner::spawner_particles;
 pub use weather::{rain_particles, stops_rain};
 
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips

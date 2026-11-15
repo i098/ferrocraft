@@ -1597,6 +1597,7 @@ fn entity_draw(
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,
+            wolf_shake: [0.0, -0.08, -0.16, -0.2].map(|o| e.anim.shake_angle(p, o)),
             partial: p,
             ..Look::default()
         },

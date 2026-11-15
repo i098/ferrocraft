@@ -1,7 +1,7 @@
 //! Entity models of 1.8.9, ported from `ModelBiped`, `ModelQuadruped`, `ModelCreeper`, `ModelPig`
 //! and `ModelCow` (also the mooshroom, with its mushrooms in [`mooshroom`]) and `ModelRabbit` here and from the villager, golem, silverfish, chicken, sheep, spider and
 //! enderman models in [`mobs`], and from the slime, magma cube, blaze, ghast and bat models in
-//! [`mobs2`], and from the squid model in [`squid`]: box geometry, texture layout and limb animation. Mobs without a
+//! [`mobs2`], and from the squid model in [`squid`] and the snow golem model in [`snowman`]: box geometry, texture layout and limb animation. Mobs without a
 //! ported model draw as a tinted box of their hitbox size.
 //!
 //! Boats and minecarts are in [`vehicle`]. Held items and dropped items are in [`item`]. Name tags
@@ -29,6 +29,7 @@ pub(crate) mod shadow;
 mod sheep;
 mod skin;
 pub mod skull;
+mod snowman;
 mod squid;
 pub mod vehicle;
 
@@ -715,8 +716,8 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 24] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 98, 99,
+    const MODELED: [u8; 25] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
         101, 120,
     ];
     MODELED.contains(&id)
@@ -726,6 +727,16 @@ fn model(d: &EntityDraw) -> Model {
     let mut m = adult_model(d);
     baby::apply(&mut m.parts, d);
     m
+}
+
+/// The model of a mob whose renderer is ported, in the module that ports it.
+fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
+    mobs::build(d, id)
+        .or_else(|| mobs2::build(d, id))
+        .or_else(|| mobs3::build(d, id))
+        .or_else(|| rabbit::build(d, id))
+        .or_else(|| squid::build(d, id))
+        .or_else(|| snowman::build(d, id))
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
@@ -748,12 +759,7 @@ fn adult_model(d: &EntityDraw) -> Model {
             skin: Skin::Mooshroom,
             ..cow(d)
         },
-        Class::Mob(id) => mobs::build(d, id)
-            .or_else(|| mobs2::build(d, id))
-            .or_else(|| mobs3::build(d, id))
-            .or_else(|| rabbit::build(d, id))
-            .or_else(|| squid::build(d, id))
-            .unwrap_or_else(|| generic(d)),
+        Class::Mob(id) => ported_mob(d, id).unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),
     }
@@ -1447,7 +1453,7 @@ fn mob_tint(skin: Skin) -> Option<[f32; 3]> {
         Skin::Villager(_) => [0.7, 0.55, 0.45],
         Skin::IronGolem => [0.75, 0.75, 0.7],
         Skin::Silverfish => [0.5, 0.5, 0.52],
-        Skin::Chicken => [0.95; 3],
+        Skin::Chicken | Skin::Snowman => [0.95; 3],
         Skin::Sheep | Skin::SheepFur => [0.9; 3],
         Skin::Spider | Skin::CaveSpider => [0.25, 0.22, 0.2],
         Skin::Enderman => [0.1, 0.08, 0.12],

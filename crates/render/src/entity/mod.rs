@@ -841,53 +841,45 @@ pub const ITEM_GLINT_COLOR: [f32; 4] = [0.502, 0.251, 0.8, 1.0];
 pub fn build_glint(draws: &[EntityDraw], masked: Option<&Skins>) -> MeshData {
     let mut out = MeshData::default();
     for d in draws {
-        let m = armor_model(d);
         let holds = matches!(
             d.class,
             Class::Player { .. } | Class::Mob(54 | 57 | 51) | Class::Object(78)
         );
-        if !holds {
-            continue;
-        }
-        let xf = Xf::new(d, false);
-        let [sw, sh] = skin_dims();
-        for pass in 0..2 {
-            for (slot, parts, grow, layer) in ARMOR_PIECES {
-                let Some(skin) = Skin::armor(d.armor[slot], layer, false) else {
-                    continue;
-                };
-                if !d.armor_glint[slot] {
-                    continue;
-                }
-                let mut piece = MeshData::default();
-                for &i in parts {
-                    emit_part(&mut piece, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
-                }
-                // Texture coordinates of the 64x32 armor texture itself.
-                for v in &mut piece.vertices {
-                    v.uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
-                    (v.color, v.light) = (ARMOR_GLINT_COLOR, [1.0; 2]);
-                }
-                let map = |uv| glint_uv_armor(uv, d.age, pass);
-                let piece = match masked {
-                    Some(skins) => {
-                        let row = skins.v_offset(skin) as usize;
-                        let mask =
-                            Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32);
-                        glint_mask::split(&piece, &mask, &map)
-                    }
-                    None => {
-                        piece.vertices.iter_mut().for_each(|v| v.uv = map(v.uv));
-                        piece
-                    }
-                };
-                let base = out.vertices.len() as u32;
-                out.vertices.extend(piece.vertices);
-                out.indices.extend(piece.indices.iter().map(|i| i + base));
+        if holds {
+            for pass in 0..2 {
+                armor_glint_pass(&mut out, d, masked, pass);
             }
         }
     }
     out
+}
+
+/// One vanilla glint pass over the glowing armor pieces of `d`, appended to `out`.
+fn armor_glint_pass(out: &mut MeshData, d: &EntityDraw, masked: Option<&Skins>, pass: usize) {
+    let m = armor_model(d);
+    let xf = Xf::new(d, false);
+    for (slot, parts, grow, layer) in ARMOR_PIECES {
+        let skin = Skin::armor(d.armor[slot], layer, false).filter(|_| d.armor_glint[slot]);
+        let Some(skin) = skin else { continue };
+        let mut piece = MeshData::default();
+        for &i in parts {
+            emit_part(&mut piece, &xf, &m.parts[i], grow, [1.0; 3], 0.0);
+        }
+        // Texture coordinates of the 64x32 armor texture itself.
+        let [sw, sh] = skin_dims();
+        for v in &mut piece.vertices {
+            v.uv = [v.uv[0] * sw / 64.0, v.uv[1] * sh / 32.0];
+            (v.color, v.light) = (ARMOR_GLINT_COLOR, [1.0; 2]);
+        }
+        let map = |uv| glint_uv_armor(uv, d.age, pass);
+        let piece = match masked {
+            Some(skins) => glint_mask::split(&piece, &Mask::armor(skins, skin), &map),
+            None => glint_mask::remap(piece, &map),
+        };
+        let base = out.vertices.len() as u32;
+        out.vertices.extend(piece.vertices);
+        out.indices.extend(piece.indices.iter().map(|i| i + base));
+    }
 }
 
 thread_local! {

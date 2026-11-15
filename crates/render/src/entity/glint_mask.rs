@@ -3,6 +3,7 @@
 //! texture, so the glint quads are cut here along the texel grid of the model texture and the
 //! transparent texels are dropped.
 
+use super::{Skin, Skins};
 use crate::mesh::{MeshData, Vertex};
 
 /// Alpha test of `GL_GREATER, 0.1`: a texel of alpha 26 or more is drawn.
@@ -22,6 +23,12 @@ impl Mask {
             .map(|i| rgba[((row0 + i / w) * stride + i % w) * 4 + 3] >= ALPHA_MIN)
             .collect();
         Mask { w, h, opaque }
+    }
+
+    /// The armor texture of `skin` in the skin atlas.
+    pub fn armor(skins: &Skins, skin: Skin) -> Mask {
+        let row = skins.v_offset(skin) as usize;
+        Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32)
     }
 
     fn at(&self, x: usize, y: usize) -> bool {
@@ -59,58 +66,89 @@ pub(crate) fn split(mesh: &MeshData, mask: &Mask, map: &dyn Fn(V2) -> V2) -> Mes
     out
 }
 
+/// One quad seen in texture space: the parallelogram its corners span and the range it covers.
+struct QuadTex {
+    uv: [V2; 4],
+    pos: [[f32; 3]; 4],
+    du: V2,
+    dv: V2,
+    lo: V2,
+    hi: V2,
+}
+
+fn dot(a: V2, b: V2) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+impl QuadTex {
+    fn new(q: &[Vertex]) -> QuadTex {
+        let uv: [V2; 4] = std::array::from_fn(|i| q[i].uv);
+        let range = |f: fn(f32, f32) -> f32, init: f32| {
+            std::array::from_fn(|axis| uv.iter().map(|c| c[axis]).fold(init, f))
+        };
+        QuadTex {
+            uv,
+            pos: std::array::from_fn(|i| q[i].pos),
+            du: [uv[1][0] - uv[0][0], uv[1][1] - uv[0][1]],
+            dv: [uv[3][0] - uv[0][0], uv[3][1] - uv[0][1]],
+            lo: range(f32::min, f32::MAX),
+            hi: range(f32::max, f32::MIN),
+        }
+    }
+
+    /// The part of the quad over texel `(i, j)` of a `w` x `h` texture.
+    fn texel(&self, (i, j): (usize, usize), (w, h): (f32, f32)) -> ([[f32; 3]; 4], [V2; 4]) {
+        let cu = [
+            self.lo[0].max(i as f32 / w),
+            self.hi[0].min((i + 1) as f32 / w),
+        ];
+        let cv = [
+            self.lo[1].max(j as f32 / h),
+            self.hi[1].min((j + 1) as f32 / h),
+        ];
+        // A corner of the piece lies on the high side of an axis when the quad's corner does.
+        let pick = |k: usize, c: V2, axis: usize| {
+            c[usize::from(self.uv[k][axis] * 2.0 > self.lo[axis] + self.hi[axis])]
+        };
+        let sub: [V2; 4] = std::array::from_fn(|k| [pick(k, cu, 0), pick(k, cv, 1)]);
+        let (uu, vv) = (dot(self.du, self.du), dot(self.dv, self.dv));
+        let corners = sub.map(|c| {
+            let d = [c[0] - self.uv[0][0], c[1] - self.uv[0][1]];
+            let (s, t) = (dot(d, self.du) / uu, dot(d, self.dv) / vv);
+            lerp3(self.pos[0], self.pos[1], self.pos[3], s, t)
+        });
+        (corners, sub)
+    }
+}
+
+/// The texels of an `n`-texel axis a range covers; coordinates snap to the grid up to float noise.
+fn span(lo: f32, hi: f32, n: usize) -> std::ops::Range<usize> {
+    let n = n as f32;
+    (lo * n + 1e-3).floor() as usize..(hi * n - 1e-3).ceil() as usize
+}
+
 /// The positions and texture coordinates of the opaque texel pieces of one quad.
 fn cells(q: &[Vertex], mask: &Mask) -> Vec<([[f32; 3]; 4], [V2; 4])> {
-    let uv: [V2; 4] = std::array::from_fn(|i| q[i].uv);
-    let pos: [[f32; 3]; 4] = std::array::from_fn(|i| q[i].pos);
-    let du = [uv[1][0] - uv[0][0], uv[1][1] - uv[0][1]];
-    let dv = [uv[3][0] - uv[0][0], uv[3][1] - uv[0][1]];
-    let (uu, vv) = (du[0] * du[0] + du[1] * du[1], dv[0] * dv[0] + dv[1] * dv[1]);
-    if uu == 0.0 || vv == 0.0 {
-        return vec![(pos, uv)];
+    let quad = QuadTex::new(q);
+    if dot(quad.du, quad.du) == 0.0 || dot(quad.dv, quad.dv) == 0.0 {
+        return vec![(quad.pos, quad.uv)];
     }
-    let bound = |axis: usize| {
-        let lo = uv.iter().map(|c| c[axis]).fold(f32::MAX, f32::min);
-        let hi = uv.iter().map(|c| c[axis]).fold(f32::MIN, f32::max);
-        (lo, hi)
-    };
-    let ((ulo, uhi), (vlo, vhi)) = (bound(0), bound(1));
-    let (w, h) = (mask.w as f32, mask.h as f32);
-    // Texel coordinates are snapped to the grid up to float noise.
-    let span = |lo: f32, hi: f32, n: f32| {
-        (
-            (lo * n + 1e-3).floor() as usize,
-            (hi * n - 1e-3).ceil() as usize,
-        )
-    };
-    let (i0, i1) = span(ulo, uhi, w);
-    let (j0, j1) = span(vlo, vhi, h);
+    let size = (mask.w as f32, mask.h as f32);
     let mut out = Vec::new();
-    for j in j0..j1 {
-        for i in i0..i1 {
-            if !mask.at(i, j) {
-                continue;
+    for j in span(quad.lo[1], quad.hi[1], mask.h) {
+        for i in span(quad.lo[0], quad.hi[0], mask.w) {
+            if mask.at(i, j) {
+                out.push(quad.texel((i, j), size));
             }
-            let (cu, cv) = (
-                [ulo.max(i as f32 / w), uhi.min((i + 1) as f32 / w)],
-                [vlo.max(j as f32 / h), vhi.min((j + 1) as f32 / h)],
-            );
-            // A corner of the piece lies on the high side of an axis when the quad's corner does.
-            let pick = |k: usize, c: [f32; 2], axis: usize| {
-                let (lo, hi) = bound(axis);
-                c[usize::from(uv[k][axis] * 2.0 > lo + hi)]
-            };
-            let sub: [V2; 4] = std::array::from_fn(|k| [pick(k, cu, 0), pick(k, cv, 1)]);
-            let corners = sub.map(|c| {
-                let d = [c[0] - uv[0][0], c[1] - uv[0][1]];
-                let s = (d[0] * du[0] + d[1] * du[1]) / uu;
-                let t = (d[0] * dv[0] + d[1] * dv[1]) / vv;
-                lerp3(pos[0], pos[1], pos[3], s, t)
-            });
-            out.push((corners, sub));
         }
     }
     out
+}
+
+/// `mesh` with every texture coordinate through `map`, for the glint that needs no cutting.
+pub(crate) fn remap(mut mesh: MeshData, map: &dyn Fn(V2) -> V2) -> MeshData {
+    mesh.vertices.iter_mut().for_each(|v| v.uv = map(v.uv));
+    mesh
 }
 
 #[cfg(test)]

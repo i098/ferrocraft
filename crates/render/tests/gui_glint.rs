@@ -56,26 +56,34 @@ fn player() -> EntityDraw {
     }
 }
 
+/// The inventory model of `d` over the backdrop.
+fn draw(r: &mut Renderer, d: &EntityDraw) -> (u32, u32, Vec<u8>) {
+    let mut quads = vec![backdrop()];
+    quads.extend(r.gui_entity([200.0, 460.0], 200.0, [0.0, -60.0], d));
+    r.render_to_rgba(&Camera::default(), &quads)
+}
+
+fn without_glint(mut d: EntityDraw) -> EntityDraw {
+    d.armor_glint = [false; 4];
+    d.held_glint = false;
+    d
+}
+
+/// Number of pixels where `keep(a, b, c)` holds, over the same pixel of three images.
+fn count(a: &[u8], b: &[u8], c: &[u8], keep: impl Fn(&[u8], &[u8], &[u8]) -> bool) -> usize {
+    let px = |v: &[u8]| v.chunks(4).map(<[u8]>::to_vec).collect::<Vec<_>>();
+    let (a, b, c) = (px(a), px(b), px(c));
+    (0..a.len()).filter(|&i| keep(&a[i], &b[i], &c[i])).count()
+}
+
 #[test]
 #[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
 fn inventory_glint_is_masked_by_the_model_texels() {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
     let mut r = Renderer::new_offscreen(400, 500, Some(std::path::Path::new(&jar)));
-    let cam = Camera::default();
-    let mut plain = player();
-    plain.armor_glint = [false; 4];
-    plain.held_glint = false;
-    let mut quads = vec![backdrop()];
-    quads.extend(r.gui_entity([200.0, 460.0], 200.0, [0.0, -60.0], &plain));
-    let base = r.render_to_rgba(&cam, &quads).2;
-    quads = vec![backdrop()];
-    quads.extend(r.gui_entity([200.0, 460.0], 200.0, [0.0, -60.0], &player()));
-    let (w, h, glint) = r.render_to_rgba(&cam, &quads);
-    let changed = base
-        .chunks(4)
-        .zip(glint.chunks(4))
-        .filter(|(a, b)| a != b)
-        .count();
+    let base = draw(&mut r, &without_glint(player())).2;
+    let (w, h, glint) = draw(&mut r, &player());
+    let changed = count(&base, &base, &glint, |a, _, g| a != g);
     assert!(changed > 500, "the glint changed {changed} pixels");
     if let Some(dir) = std::env::var_os("GLINT_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
@@ -84,20 +92,10 @@ fn inventory_glint_is_masked_by_the_model_texels() {
     }
     // Opaque armor/sword coverage = pixels where the plain armored render differs from a bare player.
     // Outside it (backdrop and skin seen through chain holes) the glint must not change anything.
-    let mut bare = player();
-    bare.armor = [0; 4];
-    bare.held = 0;
-    bare.armor_glint = [false; 4];
-    bare.held_glint = false;
-    quads = vec![backdrop()];
-    quads.extend(r.gui_entity([200.0, 460.0], 200.0, [0.0, -60.0], &bare));
-    let bare = r.render_to_rgba(&cam, &quads).2;
-    let leaked = bare
-        .chunks(4)
-        .zip(base.chunks(4))
-        .zip(glint.chunks(4))
-        .filter(|((u, p), g)| u == p && p != g)
-        .count();
+    let mut bare = without_glint(player());
+    (bare.armor, bare.held) = ([0; 4], 0);
+    let bare = draw(&mut r, &bare).2;
+    let leaked = count(&bare, &base, &glint, |u, p, g| u == p && p != g);
     assert_eq!(
         leaked, 0,
         "glint drawn over {leaked} pixels outside the opaque texels"

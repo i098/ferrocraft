@@ -15,7 +15,8 @@
 //! Java to Rust, per frame: u8 mod screen open (a screen a mod opened is current), u32 command count,
 //! then the commands of `Sink.java`: `'R'` rect, `'G'` gradient, `'T'` text, `'D'` define (a resource
 //! by name: u32 length and UTF-8 bytes, then u32 length and bytes of a PNG or SVG file; sent once),
-//! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color),
+//! `'I'` image (name, four f32 corners, i32 ARGB tint, u8 recolor: an SVG takes the tint's color, u8 blend: 0 source
+//! alpha over, 1 inverts the destination, 2 darkens it, 3 adds),
 //! `'C'` clip (u8 on, then four f32 corners when on), `'S'` shape (u8 kind: 0 a rounded rect with four f32 corners, four
 //! f32 radii and i32 ARGB; 1 a line with four f32 end coordinates, f32 width and i32 ARGB).
 //! `'H'` HUD owner (u32 bit set): the vanilla HUD elements that Java owns this frame, see `hud.rs`; Rust does not draw them.
@@ -91,6 +92,8 @@ pub enum DrawCmd {
         argb: u32,
         /// An SVG is painted in the color of `argb` instead of its own.
         recolor: bool,
+        /// 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (the vanilla `blendFunc` pairs).
+        blend: u8,
     },
     /// A rectangle with rounded corners; `radii` run top left, top right, bottom right, bottom left.
     Round {
@@ -235,6 +238,7 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
             rect: rect(r)?,
             argb: u32_(r)?,
             recolor: u8_(r)? != 0,
+            blend: u8_(r)?,
         }),
         b'C' => Ok(DrawCmd::Clip(if u8_(r)? != 0 {
             Some(rect(r)?)
@@ -330,7 +334,7 @@ mod tests {
             b.extend(v.to_be_bytes());
         }
         b.extend(0xff00ff00u32.to_be_bytes());
-        b.push(1);
+        b.extend([1, 1]);
         b.extend([b'C', 0]);
         b.extend([b'C', 1]);
         for v in [1.0f32, 2.0, 3.0, 4.0] {
@@ -368,7 +372,8 @@ mod tests {
                     name: "a.b".into(),
                     rect: [5.0, 6.0, 7.0, 8.0],
                     argb: 0xff00ff00,
-                    recolor: true
+                    recolor: true,
+                    blend: 1
                 },
                 DrawCmd::Clip(None),
                 DrawCmd::Clip(Some([1.0, 2.0, 3.0, 4.0])),

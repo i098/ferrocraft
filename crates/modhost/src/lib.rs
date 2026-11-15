@@ -348,6 +348,7 @@ impl ModHost {
                     rect: [x0, y0, x1, y1],
                     argb,
                     recolor,
+                    blend,
                 } => {
                     let (w, h) = (x1 - x0, y1 - y0);
                     if let (Some(data), true) = (sources.get(name), w > 0.0 && h > 0.0) {
@@ -363,7 +364,9 @@ impl ModHost {
                             known,
                             textures,
                         ) {
+                            g.set_blend(blend_of(*blend));
                             g.blit_tinted(tex, *x0, *y0, w, h, [0.0, 0.0, 1.0, 1.0], tint);
+                            g.set_blend(render::Blend::Alpha);
                         }
                     }
                 }
@@ -979,6 +982,19 @@ fn write_hud(
     Ok(())
 }
 
+/// The blend of an image command: the code is the vanilla `blendFunc` pair `GlState.java` found.
+fn blend_of(code: u8) -> render::Blend {
+    match code {
+        1 => render::Blend::Invert,
+        2 => render::Blend::Darken,
+        3 => render::Blend::Add,
+        _ => render::Blend::Alpha,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod crosshair_frame;
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -1013,7 +1029,7 @@ mod tests {
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;
 
-    fn link() -> Arc<Link> {
+    pub(super) fn link() -> Arc<Link> {
         Arc::new(Link {
             state: Mutex::new(Shared {
                 phase: Phase::Starting,

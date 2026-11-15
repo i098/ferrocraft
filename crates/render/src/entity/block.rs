@@ -23,7 +23,9 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
         Class::Object(70) => d.stack.map(|s| (s.id, s.damage)),
         Class::Object(id) if super::vehicle::is_cart(id) => {
             let b = d.look.vehicle.block;
-            (b != 0).then_some(((b >> 4) as i16, (b & 15) as i16))
+            // A chest cart draws through `blockent::build_cart_chests`.
+            (b != 0 && !crate::blockent::is_cart_chest(b >> 4))
+                .then_some(((b >> 4) as i16, (b & 15) as i16))
         }
         _ => None,
     };

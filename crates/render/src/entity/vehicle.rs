@@ -3,9 +3,8 @@
 //! (`BoatModel`: 5 parts, `MinecartModel`: 6 parts, both on a 64x32 texture). The block a cart carries
 //! is placed by [`block_frame`] and meshed by `block::build`; the rail snap is
 //! `world::vehicle::on_rail`, applied to the draw by the caller.
-//!
-//! shortcut: a cart carrying a chest, ender chest or trapped chest shows no block. Vanilla draws it
-//! through `AnimatedBlockEntityRenderer`; the chest model of `blockent` is not wired to carts yet.
+//! A cart carrying a chest, ender chest or trapped chest shows the chest model of
+//! `blockent::build_cart_chests`, not `block::build`.
 
 use super::{add_box, rotate, skin_dims, Class, EntityDraw, Skin, Skins, V3};
 use crate::hand::{chain, point, scale3, translate, Mat};

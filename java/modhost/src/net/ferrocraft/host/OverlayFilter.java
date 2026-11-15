@@ -11,13 +11,13 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
  * Rust draws it, and the event is cancelled so that the JVM draws nothing. The ALL element stays open so GuiIngameForge posts
  * its closing event, where HUD mods draw; a mod that cancels ALL owns the whole HUD. The CHAT element stays when a mod changed the chat, see {@link ChatGui}.
  *
- * <p>The bit of an element is the one of {@code crates/modhost/src/hud.rs}. Elements with no bit are always Rust's, the crosshair too until issue #282 lets Java draw the vanilla texture.
+ * <p>The bit of an element is the one of {@code crates/modhost/src/hud.rs}. Elements with no bit are always Rust's. A mod crosshair (PolyCrosshair) draws a {@code DynamicTexture} with {@code Gui.drawScaledCustomSizeModalRect}; {@link GlState} sends that quad to Rust as an image.
  */
 public final class OverlayFilter {
-    private static final int EVERY_BIT = 0b1111;
+    private static final int EVERY_BIT = 0b11111;
     /** Index = bit number of crates/modhost/src/hud.rs. */
     private static final java.util.List<ElementType> OWNABLE = java.util.Arrays.asList(
-            ElementType.HELMET, ElementType.HOTBAR, ElementType.DEBUG, ElementType.PLAYER_LIST);
+            ElementType.HELMET, ElementType.HOTBAR, ElementType.DEBUG, ElementType.PLAYER_LIST, ElementType.CROSSHAIRS);
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void pre(RenderGameOverlayEvent.Pre e) {

@@ -127,6 +127,11 @@ public class BridgeTransformer implements IClassTransformer {
     }
 
     private static InsnList glMethod(MethodNode m) {
+        InsnList state = GlPatch.gl(m);
+        return state != null ? state : glStub(m);
+    }
+
+    private static InsnList glStub(MethodNode m) {
         if (!isStatic(m) || m.name.equals("<clinit>")) return null;
         InsnList l = new InsnList();
         switch (m.name + m.desc) {
@@ -311,7 +316,7 @@ public class BridgeTransformer implements IClassTransformer {
                 l.add(new InsnNode(Opcodes.RETURN));
                 return l;
             default:
-                return null;
+                return GlPatch.gui(m);
         }
     }
 
@@ -370,7 +375,7 @@ public class BridgeTransformer implements IClassTransformer {
         }
     }
 
-    private static InsnList forward(MethodNode m, String owner, String name, String desc) {
+    static InsnList forward(MethodNode m, String owner, String name, String desc) {
         InsnList l = new InsnList();
         loads(l, m, 0);
         call(l, owner, name, desc);

@@ -1314,9 +1314,16 @@ impl App {
         (with_entities(r, entities, quads), textures, effects)
     }
 
-    /// The local player for the model of an open container screen.
+    /// The model of an open container screen: the local player, or the horse of a horse window.
     fn container_player(&self, frac: f64) -> Option<EntityDraw> {
-        self.container.as_ref().and(self.self_draw(frac))
+        self.container.as_ref()?;
+        match &self.game.inv.open {
+            Some(w) if matches!(w.kind, world::inventory::Kind::Horse(_)) => {
+                let e = self.game.entities.get(w.horse?)?;
+                Some(entity_draw(e, frac, None, None, false, false))
+            }
+            _ => self.self_draw(frac),
+        }
     }
 }
 

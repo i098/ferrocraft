@@ -119,6 +119,8 @@ pub struct Window {
     pub recipe_index: usize,
     /// Horse windows: the horse is a plain horse, the only kind that wears armor (`canWearArmor`).
     pub horse_armor: bool,
+    /// Horse windows: the entity id of the horse (`GuiScreenHorseInventory.horseEntity`).
+    pub horse: Option<i32>,
     transaction: i16,
 }
 
@@ -303,6 +305,7 @@ impl Inventory {
             recipes: Vec::new(),
             recipe_index: 0,
             horse_armor: false,
+            horse: None,
             transaction: 0,
         });
         true

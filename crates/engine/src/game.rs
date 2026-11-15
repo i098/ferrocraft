@@ -764,6 +764,7 @@ impl Game {
         }
         if let Some(w) = &mut self.inv.open {
             // `canWearArmor`: only a plain horse (type 0) wears armor.
+            w.horse = horse;
             w.horse_armor = horse
                 .and_then(|h| self.entities.get(h))
                 .is_some_and(|e| e.meta.horse == Some(0));

@@ -106,12 +106,21 @@ pub struct InventoryView<'a> {
     pub icons: &'a Icons,
     pub advanced_tooltips: bool,
     pub effects: &'a Effects,
-    /// The local player, for the model in the inventory screens.
+    /// The model the screen draws: the local player in the inventory screens, the horse in a horse window.
     pub player: Option<&'a EntityDraw>,
 }
 
-/// The local player and the cursor position its model turns toward.
+/// The model of the screen and the cursor position it turns toward.
 pub(super) type PlayerModel<'a> = Option<(&'a EntityDraw, [i32; 2])>;
+
+/// The horse window turns its model toward the cursor of this frame, the player window toward the one before.
+fn model_cursor(inv: &Inventory, now: [i32; 2], old: [i32; 2]) -> [i32; 2] {
+    if matches!(inv.kind(), Kind::Horse(_)) {
+        now
+    } else {
+        old
+    }
+}
 
 /// `PlayerInventoryScreen.drawStatusEffects`: one 140x32 panel per effect, left of the window.
 fn draw_effects(c: &mut dyn Canvas, effects: &Effects, x: i32, top: i32) {
@@ -617,7 +626,10 @@ impl ContainerScreen {
         let old = std::mem::replace(&mut self.old_mouse, [mx, my]);
         match &self.creative {
             Some(cr) => cr.draw_background(c, inv, icons, l, t, player.map(|p| (p, [mx, my]))),
-            None => self.draw_background(c, inv, l, t, player.map(|p| (p, old))),
+            None => {
+                let at = model_cursor(inv, [mx, my], old);
+                self.draw_background(c, inv, l, t, player.map(|p| (p, at)));
+            }
         }
         self.extras.draw_back(c, inv, l, t, mx, my);
         self.hovered = self.slot_at(mx, my);
@@ -817,14 +829,20 @@ impl ContainerScreen {
             }
             _ => modal(c, lay.texture, l, t, 0, 0, lay.width, lay.height),
         }
-        if let (Kind::Player, Some((p, [mx, my]))) = (inv.kind(), player) {
-            let (x, y) = (l + 51, t + 75);
+        // Player: drawEntityOnScreen(i + 51, j + 75, 30, ..); horse: (i + 51, j + 60, 17, ..).
+        let (scale, foot) = match inv.kind() {
+            Kind::Player => (30.0, 75),
+            Kind::Horse(_) => (17.0, 60),
+            _ => return,
+        };
+        if let Some((e, [mx, my])) = player {
+            let (x, y) = (l + 51, t + foot);
             c.entity(
                 x as f32,
                 y as f32,
-                30.0,
-                [(x - mx) as f32, (y - 50 - my) as f32],
-                p,
+                scale,
+                [(x - mx) as f32, (t + 25 - my) as f32],
+                e,
             );
         }
     }

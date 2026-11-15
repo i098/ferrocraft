@@ -9,7 +9,7 @@
 mod initial;
 
 use super::Mat;
-use crate::entity::{self, Class, EntityDraw, Look, Skins, TeamTag};
+use crate::entity::{self, Class, EntityDraw, HorseLook, Look, Skins, TeamTag};
 use crate::jrandom::JavaRandom;
 use crate::mesh::MeshData;
 pub use initial::Local;
@@ -182,6 +182,11 @@ fn still_mob(id: u8, size: (f32, f32), partial: f32, it: &Initial) -> EntityDraw
             } else {
                 Look::default().collar
             },
+            horse: HorseLook {
+                kind: it.horse_kind,
+                variant: it.horse_variant,
+                ..HorseLook::default()
+            },
             ..Look::default()
         },
     }
@@ -298,5 +303,19 @@ mod tests {
         assert_eq!(s.mob, Some(53));
         read(&mut s, "XPOrb");
         assert_eq!(s.mob, None);
+    }
+
+    #[test]
+    fn re_rolled_horse_spawners_draw_different_species_and_coats() {
+        let mut rng = JavaRandom::new(4);
+        let mut looks = std::collections::HashSet::new();
+        for _ in 0..40 {
+            let mut s = Spawner::default();
+            s.read("EntityHorse", 0, None, Local::default(), &mut rng);
+            let d = still_mob(100, (1.4, 1.6), 0.0, &s.initial);
+            looks.insert((d.look.horse.kind, d.look.horse.variant));
+        }
+        assert!(looks.iter().any(|l| l.0 == 1), "a donkey");
+        assert!(looks.iter().filter(|l| l.0 == 0).count() > 5, "coats vary");
     }
 }

@@ -2,7 +2,8 @@
 //! choices of the 1.8.9 `onInitialSpawn` methods that change how a mob looks are rolled here:
 //! `EntityZombie` and `EntityPigZombie` (baby, chicken jockey, armor, weapon, enchantments),
 //! `EntitySkeleton` (armor, bow), `EntitySlime` and `EntityMagmaCube` (size), `EntitySheep` (fleece
-//! color), `EntityVillager` (profession) and `EntityRabbit` (type).
+//! color), `EntityVillager` (profession), `EntityRabbit` (type) and `EntityHorse` (donkey, coat,
+//! marking, baby).
 //!
 //! The mob is never added to a world, so none of it ticks. Not drawn, as the client has no model for
 //! it: the zombie villager of a 5% villager roll and the wither skeleton of a Nether skeleton.
@@ -20,6 +21,7 @@ pub const MAGMA_CUBE: u8 = 62;
 pub const SHEEP: u8 = 91;
 pub const RABBIT: u8 = 101;
 pub const VILLAGER: u8 = 120;
+pub const HORSE: u8 = 100;
 
 const BOW: i16 = 261;
 const GOLDEN_SWORD: i16 = 283;
@@ -76,6 +78,10 @@ pub struct Initial {
     pub slime_size: u8,
     /// Sheep: the fleece color, metadata 16 of `EntitySheep`.
     pub fleece: u8,
+    /// Horse: the species (metadata byte 19), 0 horse or 1 donkey.
+    pub horse_kind: u8,
+    /// Horse: the coat in the low byte and the marking in the next (metadata int 20).
+    pub horse_variant: i32,
     /// Villager: the profession. Rabbit: the type.
     pub variant: u8,
     /// Item id in the main hand, 0 for none.
@@ -105,9 +111,22 @@ impl Initial {
             SHEEP => it.fleece = fleece(rng),
             VILLAGER => it.variant = rng.next_int(5) as u8,
             RABBIT => it.variant = rng.next_int(6) as u8,
+            HORSE => it.roll_horse(rng),
             _ => {}
         }
         it
+    }
+
+    /// `HorseBaseEntity.initialize`: 1 in 10 is a donkey, else a coat and a marking; 1 in 5 is a baby.
+    fn roll_horse(&mut self, rng: &mut JavaRandom) {
+        if rng.next_int(10) == 0 {
+            self.horse_kind = 1;
+        } else {
+            let coat = rng.next_int(7);
+            let marking = rng.next_int(5);
+            self.horse_variant = coat | marking << 8;
+        }
+        self.child = rng.next_int(5) == 0;
     }
 
     fn roll_zombie(&mut self, id: u8, local: Local, multiplier: f32, rng: &mut JavaRandom) {
@@ -300,5 +319,29 @@ mod tests {
             let p = Initial::roll(PIG_ZOMBIE, local, &mut rng);
             assert_eq!((p.held, p.armor), (GOLDEN_SWORD, [0; 4]));
         }
+    }
+
+    #[test]
+    fn horses_roll_donkeys_coats_markings_and_babies() {
+        let local = Local::default();
+        let mut rng = JavaRandom::new(9);
+        let n = 50_000;
+        let (mut donkeys, mut babies) = (0, 0);
+        let mut coats = [0u32; 7];
+        for _ in 0..n {
+            let h = Initial::roll(HORSE, local, &mut rng);
+            babies += i32::from(h.child);
+            if h.horse_kind == 1 {
+                donkeys += 1;
+                assert_eq!(h.horse_variant, 0);
+            } else {
+                assert!((h.horse_variant >> 8) < 5);
+                coats[(h.horse_variant & 0xFF) as usize] += 1;
+            }
+        }
+        let pct = |c: i32| f64::from(c) * 100.0 / f64::from(n);
+        assert!((pct(donkeys) - 10.0).abs() < 0.5);
+        assert!((pct(babies) - 20.0).abs() < 0.7);
+        assert!(coats.iter().all(|&c| c > 0));
     }
 }

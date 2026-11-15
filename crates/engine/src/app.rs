@@ -1603,6 +1603,8 @@ fn entity_draw(
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,
             wolf_shake: [0.0, -0.08, -0.16, -0.2].map(|o| e.anim.shake_angle(p, o)),
+            wolf_interested: e.anim.interested_angle(p),
+            wolf_wet: e.anim.wet_shading(p),
             partial: p,
             vehicle: vehicle::look(e, p),
             ..Look::default()

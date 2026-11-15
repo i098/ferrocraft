@@ -151,6 +151,8 @@ pub struct SizeMeta {
     pub cat: Option<u8>,
     /// Boats and minecarts; see [`crate::vehicle::VehicleMeta`].
     pub vehicle: crate::vehicle::VehicleMeta,
+    /// Wolf: metadata byte 19, 1 while begging (`isBegging`).
+    pub begging: Option<u8>,
 }
 
 impl SizeMeta {
@@ -173,6 +175,7 @@ impl SizeMeta {
         self.health = new.health.or(self.health);
         self.cat = new.cat.or(self.cat);
         self.vehicle.merge(new.vehicle);
+        self.begging = new.begging.or(self.begging);
     }
 }
 
@@ -617,6 +620,7 @@ impl Entity {
             self.death_time += 1;
         }
         self.sheep_timer = (self.sheep_timer - 1).max(0);
+        self.anim.begging = self.meta.begging == Some(1);
         self.anim.tick();
     }
 
@@ -1238,6 +1242,14 @@ impl Entities {
                 vel: [0, 1, 2].map(|i| e.pos[i] - e.prev_pos[i]),
                 explosions: e.explosions.clone(),
             });
+        }
+    }
+
+    /// Sets `Entity.isWet()` (in water) of every wolf for the next [`Entities::tick`]; `block` gives block states.
+    pub fn update_wet(&mut self, block: impl Fn(i32, i32, i32) -> u16) {
+        for e in self.map.values_mut().filter(|e| e.kind == Kind::Mob(95)) {
+            let height = f64::from(e.size().1);
+            e.anim.in_water = crate::motion_sound::in_water(e.pos, height, &block);
         }
     }
 

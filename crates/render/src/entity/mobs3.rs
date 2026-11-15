@@ -51,12 +51,31 @@ fn wolf_tail_angle(d: &EntityDraw) -> f32 {
     }
 }
 
+/// `RenderWolf.doRender`: a wet wolf is drawn with the color `getBrightness * getShadingWhileWet`; `light` is
+/// the `[sky, block]` level at the wolf. `None` for every other entity and for a dry wolf.
+pub(super) fn wet_color(d: &EntityDraw, light: [f32; 2]) -> Option<f32> {
+    let shade = d
+        .look
+        .wolf_wet
+        .filter(|_| d.class == super::Class::Mob(WOLF))?;
+    let level = (light[0].max(light[1]) * 15.0).round() as i32;
+    Some(super::shadow::light_brightness(level) * shade)
+}
+
+/// The color factor of the main layer: [`wet_color`] as [`super::build`] stored it, 1 otherwise.
+pub(super) fn wet_factor(d: &EntityDraw) -> f32 {
+    d.look
+        .wolf_wet
+        .filter(|_| d.class == super::Class::Mob(WOLF))
+        .unwrap_or(1.0)
+}
+
 /// `ModelWolf`: head with two ears and a nose, body, mane, four legs and the tail.
 fn wolf(d: &EntityDraw) -> Model {
     let flags = d.look.variant;
     let [head_roll, mane_roll, body_roll, tail_roll] = d.look.wolf_shake;
     let hr = head_rot(d);
-    let hr = [hr[0], hr[1], head_roll];
+    let hr = [hr[0], hr[1], d.look.wolf_interested + head_roll];
     let (f, amount) = (d.limb_swing, d.limb_swing_amount);
     let walk = |phase: f32| cos(f * 0.6662 + phase) * 1.4 * amount;
     let head_at = [-1.0, 13.5, -7.0];
@@ -279,6 +298,25 @@ mod tests {
         }
         // The tail pitch is the wild 0.62831855 and it sways with the stride.
         assert!(near(r[10][0], 0.628_318_55) && near(r[10][1], 0.544_200_2));
+    }
+
+    #[test]
+    fn begging_rolls_the_head_and_a_wet_wolf_is_shaded() {
+        let mut d = mob(WOLF);
+        let dry = build(&d, WOLF).unwrap();
+        d.look.wolf_interested = 0.348_716_83;
+        d.look.wolf_shake[0] = 0.1;
+        let m = build(&d, WOLF).unwrap();
+        // Ears and nose roll with the head.
+        assert!((0..4).all(|i| near(m.parts[i].rot[2], 0.448_716_83)));
+        assert_eq!(dry.parts[0].rot[2], 0.0);
+        assert_eq!(wet_color(&d, [1.0, 1.0]), None);
+        d.look.wolf_wet = Some(0.853_125);
+        assert!(near(wet_color(&d, [1.0, 0.0]).unwrap(), 0.853_125));
+        // Light level 7 reads 0.179 in the brightness table.
+        assert!(wet_color(&d, [0.0, 7.0 / 15.0]).unwrap() < 0.2);
+        d.class = Class::Mob(98);
+        assert_eq!(wet_color(&d, [1.0, 1.0]), None);
     }
 
     #[test]

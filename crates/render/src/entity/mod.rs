@@ -174,6 +174,11 @@ pub struct Look {
     pub golem_rose: i32,
     /// Wolf: `getShakeAngle` roll in radians of the head, mane, body and tail (offsets 0, -0.08, -0.16, -0.2).
     pub wolf_shake: [f32; 4],
+    /// Wolf: `getInterestedAngle`, the begging head roll in radians.
+    pub wolf_interested: f32,
+    /// Wolf: `getShadingWhileWet` while the wolf is wet (`isWolfWet`), else `None`. [`build`] multiplies it by the
+    /// light brightness, which makes it the color `RenderWolf.doRender` sets.
+    pub wolf_wet: Option<f32>,
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
     /// Boats and minecarts: hit wobble and carried block; see [`vehicle::VehicleLook`].
@@ -201,6 +206,8 @@ impl Default for Look {
             golem_attack: 0,
             golem_rose: 0,
             wolf_shake: [0.0; 4],
+            wolf_interested: 0.0,
+            wolf_wet: None,
             partial: 0.0,
             vehicle: vehicle::VehicleLook::default(),
         }
@@ -932,8 +939,22 @@ pub fn build(
     let mut out = MeshData::default();
     for d in draws {
         let start = out.vertices.len();
-        let bright = draw_entity(&mut out, d, skins);
         let level = light_level(d, &light, true);
+        let shaded;
+        let d = match mobs3::wet_color(d, level) {
+            Some(color) => {
+                shaded = EntityDraw {
+                    look: Look {
+                        wolf_wet: Some(color),
+                        ..d.look.clone()
+                    },
+                    ..d.clone()
+                };
+                &shaded
+            }
+            None => d,
+        };
+        let bright = draw_entity(&mut out, d, skins);
         let bright = bright.max(start);
         for v in &mut out.vertices[start..bright] {
             v.light = level;
@@ -1243,6 +1264,7 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     }
     let m = model(d);
     let (skin, tint) = base_look(&m, d, skins);
+    let tint = tint.map(|c| c * mobs3::wet_factor(d));
     let generic = m.skin == Skin::White
         && matches!(d.class, Class::Mob(_) | Class::Object(_) | Class::Orb)
         && m.parts.len() == 1;

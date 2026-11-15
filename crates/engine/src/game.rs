@@ -687,6 +687,7 @@ impl Game {
             (self.death_ticks + 1).min(20)
         };
         let store = &self.store;
+        self.entities.update_wet(|x, y, z| store.get_block(x, y, z));
         self.entities
             .tick_in(&|p| store.get_block(p[0], p[1], p[2]));
         if self.ticks.is_multiple_of(20) {

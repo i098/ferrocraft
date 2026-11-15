@@ -132,11 +132,10 @@ public final class HookIndex {
     @SuppressWarnings("unchecked")
     private static Map<String, ?> allConfigs() {
         Class<?> config = R.cls("org.spongepowered.asm.mixin.transformer.Config");
-        try {
-            return (Map<String, ?>) R.call(config, "getAllConfigs");
-        } catch (IllegalStateException noMethod) {
-            return (Map<String, ?>) R.get(config, "allConfigs");
+        for (java.lang.reflect.Method m : config.getDeclaredMethods()) {
+            if (m.getName().equals("getAllConfigs")) return (Map<String, ?>) R.call(config, "getAllConfigs");
         }
+        return (Map<String, ?>) R.get(config, "allConfigs");
     }
 
     /**

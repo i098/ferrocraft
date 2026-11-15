@@ -213,6 +213,8 @@ pub struct Renderer {
     /// The loaded `shaders/post` effect and whether it runs (F4, `useShader`).
     post: Option<Post>,
     post_on: bool,
+    /// The spectator outline pass; loaded when first asked for.
+    outline: outline::Slot,
     blocks: HashMap<(i32, i32), SharedBlocks>,
     /// Biome ids per chunk column, `z << 4 | x`.
     biomes: HashMap<(i32, i32), SharedBiomes>,
@@ -510,6 +512,7 @@ impl Renderer {
             mod_look: Default::default(),
             post: None,
             post_on: false,
+            outline: outline::Slot::Idle,
             blocks: HashMap::new(),
             biomes: HashMap::new(),
             meshes: HashMap::new(),
@@ -707,6 +710,7 @@ impl Renderer {
         if let Some(post) = &mut self.post {
             post.resize(&self.device, &self.queue, w, h);
         }
+        self.resize_outline(w, h);
     }
 
     pub fn upload_chunk(&mut self, chunk: &impl ChunkBlocks) {
@@ -1260,10 +1264,7 @@ impl Renderer {
     pub fn set_post(&mut self, name: Option<&str>) -> Result<(), String> {
         self.post = None;
         let Some(name) = name else { return Ok(()) };
-        let format = match &self.target {
-            Target::Window { config, .. } => config.format,
-            Target::Offscreen { .. } => OFFSCREEN,
-        };
+        let format = self.color_format();
         let size = self.size();
         let post = match &mut self.source {
             Some(source) => {
@@ -1897,6 +1898,7 @@ impl Renderer {
                 [(&rain, &self.rain_group), (&snow, &self.snow_group)],
             );
         }
+        self.record_outlines(&mut enc);
         self.draw_hand_and_gui(
             &mut enc,
             [world, view],
@@ -1945,6 +1947,8 @@ impl Renderer {
             self.draw_hand(&mut pass, hand);
         }
         self.draw_fire_overlay(&mut pass, fire);
+        // `renderEntityOutlines` blends the outlines in before the effect.
+        self.composite_outlines(&mut pass);
         // `updateCameraAndRender`: the effect runs after the hand and before the GUI.
         if let Some(post) = self.running_post() {
             drop(pass);
@@ -2534,6 +2538,7 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
 }
 
 mod block_entities;
+mod outline;
 mod shadow;
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {

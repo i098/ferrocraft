@@ -6,6 +6,7 @@ import net.minecraft.flat.BatModel;
 import net.minecraft.flat.BlazeModel;
 import net.minecraft.flat.Bootstrap;
 import net.minecraft.flat.DyeColor;
+import net.minecraft.flat.EnderCrystalModel;
 import net.minecraft.flat.GhastModel;
 import net.minecraft.flat.LivingEntity;
 import net.minecraft.flat.MagmaCubeModel;
@@ -22,7 +23,7 @@ import net.minecraft.flat.WolfEntity;
 import net.minecraft.flat.WolfModel;
 
 /**
- * Prints the part tree of the slime, magma cube, blaze, ghast, bat, wolf, ocelot, rabbit and squid models of the
+ * Prints the part tree of the slime, magma cube, blaze, ghast, bat, ender crystal, wolf, ocelot, rabbit and squid models of the
  * real 1.8.9 client: texture offset, pivot, rotation, mirror flag and box corners of every part. The
  * blaze, ghast and magma cube models are also run through setupAnimation (the bat one reads entity
  * metadata, which needs a world, so only its constructor runs). The wolf and ocelot models run in each
@@ -163,6 +164,7 @@ public class MobModels {
         ghast.setupAnimation(0f, 0f, 10f, 0f, 0f, 0f, null);
         model("GhastModel after setupAnimation(age 10)", ghast);
         model("BatModel", new BatModel());
+        model("EnderCrystalModel(0, true)", new EnderCrystalModel(0.0f, true));
         wolfAndOcelot();
         rabbit();
         SquidModel squid = new SquidModel();

@@ -11,6 +11,7 @@ mod armorstand;
 mod arrows;
 mod baby;
 mod block;
+pub mod crystal;
 pub(crate) mod fire;
 mod glint_mask;
 pub(crate) mod guardian;
@@ -178,6 +179,8 @@ pub struct Look {
     pub partial: f32,
     /// Boats and minecarts: hit wobble and carried block; see [`vehicle::VehicleLook`].
     pub vehicle: vehicle::VehicleLook,
+    /// Ender crystals: `renderTicks`, the tick counter that spins and bobs the cubes.
+    pub crystal_ticks: i32,
 }
 
 impl Default for Look {
@@ -203,6 +206,7 @@ impl Default for Look {
             wolf_shake: [0.0; 4],
             partial: 0.0,
             vehicle: vehicle::VehicleLook::default(),
+            crystal_ticks: 0,
         }
     }
 }
@@ -1221,6 +1225,10 @@ fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
     if let Class::Object(id) = d.class {
         if projectile::handles(id) {
             projectile::build(out, id, d, skins);
+            return true;
+        }
+        if crystal::handles(id) {
+            crystal::build(out, d, skins);
             return true;
         }
         if vehicle::handles(id) {

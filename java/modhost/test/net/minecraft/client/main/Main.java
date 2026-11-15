@@ -11,6 +11,7 @@ public final class Main {
         else if ("ChatTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.ChatTest.run();
         else if ("MirrorHudTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.MirrorHudTest.run();
         else if ("MirrorTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.MirrorTest.run();
+        else if ("ResourceTexTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.ResourceTexTest.run();
         else net.ferrocraft.host.PlayerTest.run();
     }
 }

@@ -96,6 +96,13 @@ public final class GlStateTest {
         check(f.boxes.get(1)[0] == 1 && f.boxes.get(1)[3] == 4, "the sized quad's box");
         check(f.tint == 0x80FFFFFF && f.blend == 0, "tint " + Integer.toHexString(f.tint));
         check(f.pixels[0] == RED && f.pixels[1] == GREEN && f.pixels[2] == BLUE && f.pixels[3] == CLEAR, "the uploaded 2 x 2 picture");
+        // Gui.drawTexturedModalRect is an instance method: u and v count in 256 units: 128 of 256 is one of the 2 texels.
+        Object gui0 = g.getConstructor().newInstance();
+        g.getMethod("func_73729_b", int.class, int.class, int.class, int.class, int.class, int.class)
+                .invoke(gui0, 20, 30, 0, 0, 128, 128);
+        Frame t = Frame.read(Sink.take(false));
+        check(t.boxes.size() == 1 && t.boxes.get(0)[0] == 20 && t.boxes.get(0)[1] == 30 && t.boxes.get(0)[2] == 148 && t.boxes.get(0)[3] == 158, "the textured quad's box");
+        check(t.pixels.length == 1 && t.pixels[0] == RED, "128 of 256 is the first texel: " + t.pixels.length);
     }
 
     private static final class Loader extends ClassLoader {
@@ -104,17 +111,25 @@ public final class GlStateTest {
         }
     }
 
-    /** A {@code Gui} with the two textured quad methods and nothing in them. */
+    /** A {@code Gui} with the three textured quad methods and nothing in them. */
     private static byte[] stubGui() {
         org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
         cw.visit(org.objectweb.asm.Opcodes.V1_6, org.objectweb.asm.Opcodes.ACC_PUBLIC, "net/minecraft/client/gui/Gui", null, "java/lang/Object", null);
-        stubMethod(cw, "func_152125_a", "(IIFFIIIIFF)V");
-        stubMethod(cw, "func_146110_a", "(IIFFIIFF)V");
+        org.objectweb.asm.MethodVisitor c = cw.visitMethod(org.objectweb.asm.Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+        c.visitCode();
+        c.visitVarInsn(org.objectweb.asm.Opcodes.ALOAD, 0);
+        c.visitMethodInsn(org.objectweb.asm.Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
+        c.visitInsn(org.objectweb.asm.Opcodes.RETURN);
+        c.visitMaxs(0, 0);
+        c.visitEnd();
+        stubMethod(cw, "func_152125_a", "(IIFFIIIIFF)V", true);
+        stubMethod(cw, "func_146110_a", "(IIFFIIFF)V", true);
+        stubMethod(cw, "func_73729_b", "(IIIIII)V", false);
         return cw.toByteArray();
     }
 
-    private static void stubMethod(org.objectweb.asm.ClassWriter cw, String name, String desc) {
-        org.objectweb.asm.MethodVisitor v = cw.visitMethod(org.objectweb.asm.Opcodes.ACC_PUBLIC | org.objectweb.asm.Opcodes.ACC_STATIC, name, desc, null, null);
+    private static void stubMethod(org.objectweb.asm.ClassWriter cw, String name, String desc, boolean isStatic) {
+        org.objectweb.asm.MethodVisitor v = cw.visitMethod(org.objectweb.asm.Opcodes.ACC_PUBLIC | (isStatic ? org.objectweb.asm.Opcodes.ACC_STATIC : 0), name, desc, null, null);
         v.visitCode();
         v.visitInsn(org.objectweb.asm.Opcodes.RETURN);
         v.visitMaxs(0, 0);

@@ -232,6 +232,8 @@ mod tests {
         assert_eq!(s.mob, Some(54));
         s.read("Wolf", 0, None);
         assert_eq!(s.mob, Some(95));
+        s.read("Rabbit", 0, None);
+        assert_eq!(s.mob, Some(101));
         s.read("Squid", 0, None);
         assert_eq!(s.mob, None);
         s.read("XPOrb", 0, None);

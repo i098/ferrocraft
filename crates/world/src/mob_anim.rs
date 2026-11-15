@@ -2,6 +2,7 @@
 
 const GOLEM: u8 = 99;
 const WOLF: u8 = 95;
+const RABBIT: u8 = 101;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MobAnim {
@@ -9,6 +10,9 @@ pub struct MobAnim {
     pub golem_attack: i32,
     /// Iron golem `holdRoseTick`: 400 at status 11, counts down every tick.
     pub golem_rose: i32,
+    /// Rabbit `jumpTicks` and `jumpDuration`: the jump runs 10 ticks from status 1.
+    pub jump_ticks: i32,
+    pub jump_duration: i32,
     /// Wolf `isShaking`.
     pub shaking: bool,
     /// Wolf `timeWolfIsShaking`.
@@ -23,6 +27,10 @@ impl MobAnim {
         match (mob, status) {
             (GOLEM, 4) => self.golem_attack = 10,
             (GOLEM, 11) => self.golem_rose = 400,
+            (RABBIT, 1) => {
+                self.jump_duration = 10;
+                self.jump_ticks = 0;
+            }
             (WOLF, 8) => {
                 self.shaking = true;
                 self.shake_time = 0.0;
@@ -36,6 +44,13 @@ impl MobAnim {
     pub fn tick(&mut self) {
         self.golem_attack = (self.golem_attack - 1).max(0);
         self.golem_rose = (self.golem_rose - 1).max(0);
+        // `EntityRabbit.onLivingUpdate`: count the jump up, then end it.
+        if self.jump_ticks != self.jump_duration {
+            self.jump_ticks += 1;
+        } else if self.jump_duration != 0 {
+            self.jump_ticks = 0;
+            self.jump_duration = 0;
+        }
         self.prev_shake_time = self.shake_time;
         if self.shaking {
             self.shake_time += 0.05;
@@ -43,9 +58,20 @@ impl MobAnim {
                 *self = MobAnim {
                     golem_attack: self.golem_attack,
                     golem_rose: self.golem_rose,
+                    jump_ticks: self.jump_ticks,
+                    jump_duration: self.jump_duration,
                     ..MobAnim::default()
                 };
             }
+        }
+    }
+
+    /// `EntityRabbit.getJumpCompletion`.
+    pub fn jump_completion(&self, partial: f32) -> f32 {
+        if self.jump_duration == 0 {
+            0.0
+        } else {
+            (self.jump_ticks as f32 + partial) / self.jump_duration as f32
         }
     }
 
@@ -86,5 +112,21 @@ mod tests {
             // The oracle reads the 65536-entry `MathHelper.sin` table, off by up to about 5e-5 from `f32::sin`.
             assert!((got - want).abs() < 1e-4, "{offset}: {got} vs {want}");
         }
+    }
+
+    #[test]
+    fn rabbit_jump_status_runs_ten_ticks_then_ends() {
+        let mut a = MobAnim::default();
+        a.set_status(101, 1);
+        assert_eq!(a.jump_completion(0.5), 0.05);
+        for _ in 0..10 {
+            a.tick();
+        }
+        assert_eq!(a.jump_completion(0.0), 1.0);
+        a.tick();
+        assert_eq!(a.jump_completion(0.0), 0.0);
+        let mut other = MobAnim::default();
+        other.set_status(95, 1);
+        assert_eq!(other.jump_completion(0.0), 0.0);
     }
 }

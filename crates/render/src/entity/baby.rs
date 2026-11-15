@@ -53,6 +53,8 @@ fn split(d: &EntityDraw) -> Option<Split> {
         // `ModelWolf`: head, two ears and nose move by (0, 5, 2); the rest halves.
         Class::Mob(95) => quadruped(4, 5.0, 2.0),
         Class::Mob(98) => OCELOT,
+        // `ModelRabbit`: head, ears and nose move by (0, 5, 2); the rest halves.
+        Class::Mob(101) => quadruped(4, 5.0, 2.0),
         Class::Mob(93) => CHICKEN,
         _ => return None,
     })

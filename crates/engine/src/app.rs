@@ -1589,11 +1589,12 @@ fn entity_draw(
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
             collar: match e.kind {
-                Kind::Mob(98) => e.meta.cat.unwrap_or(0),
+                Kind::Mob(98 | 101) => e.meta.cat.unwrap_or(0),
                 _ => e.meta.collar.unwrap_or(14),
             },
             health: e.meta.health.unwrap_or(1.0),
             sprinting: e.sprinting(),
+            jump: e.anim.jump_completion(p),
             squish: e.squish.factor(p),
             eat_timer: e.sheep_timer,
             golem_attack: e.anim.golem_attack,

@@ -82,12 +82,21 @@ fn inventory_glint_is_masked_by_the_model_texels() {
         encode_png(&dir.join("glint.png"), w, h, &glint).unwrap();
         encode_png(&dir.join("plain.png"), w, h, &base).unwrap();
     }
-    // A pixel that is clear without the glint stays clear: no glint on transparent texels.
-    let bg = &base[..4];
-    let leaked = base
+    // Opaque armor/sword coverage = pixels where the plain armored render differs from a bare player.
+    // Outside it (backdrop and skin seen through chain holes) the glint must not change anything.
+    let mut bare = player();
+    bare.armor = [0; 4];
+    bare.held = 0;
+    bare.armor_glint = [false; 4];
+    bare.held_glint = false;
+    quads = vec![backdrop()];
+    quads.extend(r.gui_entity([200.0, 460.0], 200.0, [0.0, -60.0], &bare));
+    let bare = r.render_to_rgba(&cam, &quads).2;
+    let leaked = bare
         .chunks(4)
+        .zip(base.chunks(4))
         .zip(glint.chunks(4))
-        .filter(|(a, b)| *a == bg && a != b)
+        .filter(|((u, p), g)| u == p && p != g)
         .count();
-    assert_eq!(leaked, 0, "glint drawn over {leaked} empty pixels");
+    assert_eq!(leaked, 0, "glint drawn over {leaked} pixels outside the opaque texels");
 }

@@ -18,6 +18,7 @@ mod glint_mask;
 pub(crate) mod guardian;
 pub(crate) mod gui;
 pub mod hanging;
+mod horse;
 pub mod item;
 pub mod leash;
 pub(crate) mod mobs;
@@ -26,6 +27,7 @@ mod mobs3;
 mod mooshroom;
 pub(crate) mod outline;
 mod projectile;
+pub use horse::HorseLook;
 mod rabbit;
 pub(crate) mod shadow;
 mod sheep;
@@ -197,6 +199,8 @@ pub struct Look {
     pub invulnerable: bool,
     /// Leashed mobs: the holder the rope runs to.
     pub leash: Option<leash::Holder>,
+    /// Horses: type, coat, armor and the animation of the frame; see [`horse::HorseLook`].
+    pub horse: horse::HorseLook,
 }
 
 impl Default for Look {
@@ -227,6 +231,7 @@ impl Default for Look {
             crystal_ticks: 0,
             invulnerable: false,
             leash: None,
+            horse: horse::HorseLook::default(),
         }
     }
 }
@@ -276,6 +281,8 @@ struct Part {
     /// Model-wide `scale` of `ModelBiped.render` for a child: the part, moved by `shift`, is scaled
     /// about the model origin.
     scale: f32,
+    /// Extra vertical factor of `scale`, for the `scalef(s, 0.5 + s / 2, s)` of a baby horse's legs.
+    stretch_y: f32,
     shift: [f32; 3],
     /// Parent `ModelRenderer`s, nearest first, as (pivot, rotation): the part's box is carried
     /// through each one's translate and rotate (`ModelBat` wings).
@@ -293,6 +300,7 @@ impl Part {
             inflate: 0.0,
             mirror: false,
             scale: 1.0,
+            stretch_y: 1.0,
             shift: [0.0; 3],
             parents: Vec::new(),
         }
@@ -301,6 +309,10 @@ impl Part {
     fn placed(mut self, scale: f32, shift: [f32; 3]) -> Part {
         self.scale = scale;
         self.shift = shift;
+        self
+    }
+    fn stretched(mut self, y: f32) -> Part {
+        self.stretch_y = y;
         self
     }
     fn rot(mut self, rot: [f32; 3]) -> Part {
@@ -723,9 +735,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 27] = [
+    const MODELED: [u8; 28] = [
         50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 67, 90, 91, 92, 93, 94, 95, 96, 97,
-        98, 99, 101, 120,
+        98, 99, 100, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -743,6 +755,7 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
         .or_else(|| mobs3::build(d, id))
         .or_else(|| rabbit::build(d, id))
         .or_else(|| endermite::build(d, id))
+        .or_else(|| horse::build(d, id))
         .or_else(|| squid::build(d, id))
         .or_else(|| snowman::build(d, id))
         .or_else(|| witch::build(d, id))
@@ -1084,6 +1097,7 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         // `RenderOcelot.preRenderCallback`: a tame ocelot is drawn at 0.8.
         Class::Mob(mobs3::OCELOT) if d.look.variant & mobs3::TAMED != 0 => 0.8,
         Class::Mob(mobs2::BAT) => 0.35,
+        Class::Mob(horse::HORSE) => horse::scale(&d.look.horse),
         _ => 1.0,
     };
     [s, s]
@@ -1186,7 +1200,9 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
             q = rotate(q, rot);
             q = [0, 1, 2].map(|i| q[i] + pivot[i]);
         }
-        xf.world([0, 1, 2].map(|i| (q[i] + part.shift[i]) * part.scale))
+        xf.world([0, 1, 2].map(|i| {
+            (q[i] + part.shift[i]) * part.scale * if i == 1 { part.stretch_y } else { 1.0 }
+        }))
     };
     add_box(
         out,

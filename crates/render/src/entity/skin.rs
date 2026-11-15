@@ -4,6 +4,8 @@
 
 use crate::assets::{decode_png, AssetSource, Image};
 
+pub(super) mod horse;
+
 /// Height of one slot; most textures are 64 wide, so they fill the left half of a row.
 pub const SLOT: u32 = 64;
 /// Width of the atlas, for the 128 wide iron golem texture.
@@ -245,6 +247,8 @@ pub enum Skin {
     Endermite,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
+    /// A horse texture (128x128), by index into [`horse`]'s table.
+    Horse(u8),
     /// `items/fireworks.png`, the rocket icon.
     Firework,
     /// A downloaded cape in dynamic slot `n`.
@@ -257,8 +261,8 @@ pub enum Skin {
     Player(u8),
 }
 
-/// Fixed slots plus the white one.
-pub const SLOTS: u32 = SKINS.len() as u32 + 1;
+/// Fixed slots, the horse textures after them, and the white one.
+pub const SLOTS: u32 = SKINS.len() as u32 + horse::SLOTS + 1;
 /// Downloaded player skins kept at once; the least recently drawn one is replaced.
 pub const PLAYER_SLOTS: usize = 32;
 /// Downloaded capes kept at once.
@@ -268,6 +272,7 @@ const TOTAL: u32 = SLOTS + (PLAYER_SLOTS + CAPE_SLOTS) as u32;
 pub struct Skins {
     pub rgba: Vec<u8>,
     loaded: [bool; SKINS.len()],
+    horse_loaded: [bool; horse::COUNT],
     /// Owner key and last-use tick of each dynamic slot.
     players: [Option<(u128, u64)>; PLAYER_SLOTS],
     capes: [Option<(u128, u64)>; CAPE_SLOTS],
@@ -306,6 +311,7 @@ impl Skins {
         Skins {
             rgba: vec![255; (WIDTH * SLOT * TOTAL * 4) as usize],
             loaded: [false; SKINS.len()],
+            horse_loaded: [false; horse::COUNT],
             players: [None; PLAYER_SLOTS],
             capes: [None; CAPE_SLOTS],
             clock: 0,
@@ -436,6 +442,7 @@ impl Skins {
             }
             s.loaded[i] = true;
         }
+        s.load_horses(source);
         s
     }
 
@@ -521,13 +528,22 @@ impl Skins {
     /// Whether the real texture of `skin` was found; a missing one is drawn white with a tint.
     pub fn has(&self, skin: Skin) -> bool {
         matches!(skin, Skin::Player(_) | Skin::Cape(_))
-            || slot(skin).is_some_and(|s| self.loaded[s as usize])
+            || slot(skin).is_some_and(|s| self.loaded(s))
+    }
+
+    /// Whether fixed slot `s` holds its real texture.
+    fn loaded(&self, s: u32) -> bool {
+        let s = s as usize;
+        match s.checked_sub(SKINS.len()) {
+            None => self.loaded[s],
+            Some(h) => self.horse_loaded[h / 2],
+        }
     }
 
     /// Row offset in texels of the slot to sample for `skin`.
     pub fn v_offset(&self, skin: Skin) -> f32 {
         let s = match slot(skin) {
-            Some(s) if s >= SLOTS || self.loaded[s as usize] => s,
+            Some(s) if s >= SLOTS || self.loaded(s) => s,
             _ => SLOTS - 1,
         };
         (s * SLOT) as f32
@@ -574,6 +590,7 @@ fn slot(skin: Skin) -> Option<u32> {
         Skin::Cape(i) => Some(SLOTS + PLAYER_SLOTS as u32 + u32::from(i)),
         Skin::White => None,
         Skin::Armor(i) => Some(u32::from(ARMOR_FIRST + i)),
+        Skin::Horse(i) => Some(horse::slot(i)),
         Skin::GuardianElder => Some(ELDER_SLOT),
         fixed => FIXED.iter().position(|&s| s == fixed).map(|i| i as u32),
     })

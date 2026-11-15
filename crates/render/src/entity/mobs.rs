@@ -510,6 +510,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         SHEEP if d.look.variant & 16 == 0 && !d.invisible => vec![sheep_wool(d)],
         SPIDER | CAVE_SPIDER => vec![eyes(Skin::SpiderEyes)],
         ENDERMAN => vec![eyes(Skin::EndermanEyes)],
+        super::horse::HORSE => super::horse::layers(d, m),
         _ => super::mobs2::layers(d),
     }
 }

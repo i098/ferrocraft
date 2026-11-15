@@ -230,11 +230,12 @@ pub enum NetEvent {
         name: String,
     },
     /// S3E: `mode` 0 create, 1 remove, 2 update info, 3 add members, 4 remove members.
-    /// `prefix`, `suffix`, `visibility` (`nameTagVisibility`) and `color` (`Formatting` id, -1 none)
+    /// `display_name`, `prefix`, `suffix`, `visibility` (`nameTagVisibility`) and `color` (`Formatting` id, -1 none)
     /// are empty or 0 in modes 1, 3 and 4.
     Team {
         name: String,
         mode: u8,
+        display_name: String,
         prefix: String,
         suffix: String,
         visibility: String,

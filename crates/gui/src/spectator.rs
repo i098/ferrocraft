@@ -139,7 +139,7 @@ impl Category {
         teams.sort_by_key(|(name, _)| *name);
         let items = teams
             .into_iter()
-            .map(|(name, t)| {
+            .map(|(_, t)| {
                 let members: Vec<TabEntry> = t
                     .members
                     .iter()
@@ -148,7 +148,7 @@ impl Category {
                     .collect();
                 let head = (!members.is_empty()).then(|| members[seed % members.len()].clone());
                 Item::Team(TeamItem {
-                    name: name.to_owned(),
+                    name: t.display_name.clone(),
                     color: prefix_color(&t.prefix),
                     members,
                     head,
@@ -573,5 +573,19 @@ mod tests {
     fn a_team_shows_the_color_of_its_prefix() {
         assert_eq!(prefix_color("\u{a7}cRed "), Some(0xFF5555));
         assert_eq!(prefix_color("Plain"), None);
+    }
+
+    #[test]
+    fn a_team_item_shows_the_display_name_not_the_key() {
+        let mut sb = Scoreboard::default();
+        let info = crate::scoreboard::TeamInfo {
+            display_name: "Red Team".into(),
+            ..Default::default()
+        };
+        sb.set_team("red", 0, &info, &[]);
+        let Item::Team(t) = &Category::teams(&TabList::default(), &sb, 0).items[0] else {
+            panic!("no team item");
+        };
+        assert_eq!(t.name, "Red Team");
     }
 }

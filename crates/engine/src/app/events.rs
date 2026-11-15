@@ -613,6 +613,7 @@ impl App {
             NetEvent::Team {
                 name,
                 mode,
+                display_name,
                 prefix,
                 suffix,
                 visibility,
@@ -620,6 +621,7 @@ impl App {
                 members,
             } => {
                 let info = TeamInfo {
+                    display_name,
                     prefix,
                     suffix,
                     visibility,

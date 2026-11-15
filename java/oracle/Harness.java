@@ -27,6 +27,7 @@ import net.minecraft.flat.ChunkSource;
 import net.minecraft.flat.WorldChunk;
 import net.minecraft.flat.Dimension;
 import net.minecraft.flat.ProtoChunk;
+import net.minecraft.flat.SquidEntity;
 import net.minecraft.flat.EmptyWorldStorage;
 import net.minecraft.flat.MagmaCubeEntity;
 import net.minecraft.flat.SlimeEntity;
@@ -57,6 +58,8 @@ import net.minecraft.flat.SlimeEntity;
  *                                 16 hex digits each; needs "start"
  *   squish <magma 0/1> <ticks> <kick tick>  a slime or magma cube dropped from y 66 onto the floor, which gets a jump
  *                                 at the kick tick; per tick: onGround, stretch and lastStretch as float bits in hex; needs "start"
+ *   squid <ticks> <water 0/1> <vx> <vy> <vz> <yaw> <status tick>  a client squid given that velocity at tick 0 and
+ *                                 the status 19 at the status tick; per tick: see squidCommand; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
  */
 public class Harness {
@@ -258,6 +261,53 @@ public class Harness {
         net.minecraft.flat.Vec3d v = t[4].equals("none") ? cart.snapPositionToRail(x, y, z)
             : cart.snapPositionToRailWithOffset(x, y, z, Double.parseDouble(t[4]));
         System.out.println(v == null ? "null" : hex(v.x) + " " + hex(v.y) + " " + hex(v.z));
+    }
+
+    private static String bits(float v) {
+        return Integer.toHexString(Float.floatToRawIntBits(v));
+    }
+
+    private static String bits(double v) {
+        return Long.toHexString(Double.doubleToRawLongBits(v));
+    }
+
+    /**
+     * `SquidEntity.mobTick` as a client runs it: the server velocity is set once, the world is flagged as a
+     * client one, and `water` forces the water state. First line: the entity id the constructor seeded its
+     * tentacle speed from. Then per tick: x and z movement, yaw, the three velocities (double bits), then pitch,
+     * roll, tentacle movement, tentacle rotation, body yaw, last body yaw and head yaw (float bits).
+     */
+    static void squidCommand(String[] t) throws Exception {
+        Field client = net.minecraft.flat.World.class.getField("isClient");
+        client.setAccessible(true);
+        client.setBoolean(world, true);
+        final boolean water = t[2].equals("1");
+        SquidEntity s = new SquidEntity(world) {
+            @Override
+            public boolean checkWaterCollisions() {
+                inWater = water;
+                return water;
+            }
+        };
+        s.setPositionAndAngles(0.5, 70, 0.5, Float.parseFloat(t[6]), 0f);
+        s.bodyYaw = s.yaw;
+        s.lastBodyYaw = s.yaw;
+        System.out.println(s.getNetworkId());
+        for (int i = 0; i < Integer.parseInt(t[1]); i++) {
+            if (i == 0) {
+                s.velocityX = Double.parseDouble(t[3]);
+                s.velocityY = Double.parseDouble(t[4]);
+                s.velocityZ = Double.parseDouble(t[5]);
+            }
+            if (i == Integer.parseInt(t[7])) {
+                s.doEvent((byte) 19);
+            }
+            s.tick();
+            System.out.println(bits(s.x - s.lastX) + " " + bits(s.z - s.lastZ) + " " + bits(s.yaw) + " "
+                + bits(s.velocityX) + " " + bits(s.velocityY) + " " + bits(s.velocityZ) + " "
+                + bits(s.bodyPitch) + " " + bits(s.bodyRoll) + " " + bits(s.tentacleMovement) + " "
+                + bits(s.tentacleRotation) + " " + bits(s.bodyYaw) + " " + bits(s.lastBodyYaw) + " " + bits(s.headYaw));
+        }
     }
 
     /** `FontRenderer.bidiReorder`, UTF-8 hex in and out. */
@@ -583,6 +633,9 @@ public class Harness {
                     break;
                 case "squish":
                     squishCommand(t);
+                    break;
+                case "squid":
+                    squidCommand(t);
                     break;
                 case "mip":
                     mipLines(t);

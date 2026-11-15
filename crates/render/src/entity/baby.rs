@@ -48,7 +48,7 @@ fn split(d: &EntityDraw) -> Option<Split> {
         Class::Mob(54 | 57) => BIPED,
         // `ModelQuadruped` has (8, 4); `ModelPig` sets `childYOffset` to 4 and `ModelCow` adds 2 to `childZOffset`.
         Class::Mob(90) => quadruped(2, 4.0, 4.0),
-        Class::Mob(92) => quadruped(3, 8.0, 6.0),
+        Class::Mob(92 | 96) => quadruped(3, 8.0, 6.0),
         Class::Mob(91) => quadruped(1, 8.0, 4.0),
         // `ModelWolf`: head, two ears and nose move by (0, 5, 2); the rest halves.
         Class::Mob(95) => quadruped(4, 5.0, 2.0),

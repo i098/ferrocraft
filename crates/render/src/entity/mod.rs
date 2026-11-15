@@ -12,6 +12,7 @@ mod arrows;
 mod baby;
 mod block;
 pub mod crystal;
+mod endermite;
 pub(crate) mod fire;
 mod glint_mask;
 pub(crate) mod guardian;
@@ -721,9 +722,9 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 26] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 90, 91, 92, 93, 94, 95, 96, 97, 98,
-        99, 101, 120,
+    const MODELED: [u8; 27] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 67, 90, 91, 92, 93, 94, 95, 96, 97,
+        98, 99, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -740,6 +741,7 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
         .or_else(|| mobs2::build(d, id))
         .or_else(|| mobs3::build(d, id))
         .or_else(|| rabbit::build(d, id))
+        .or_else(|| endermite::build(d, id))
         .or_else(|| squid::build(d, id))
         .or_else(|| snowman::build(d, id))
         .or_else(|| witch::build(d, id))
@@ -794,6 +796,15 @@ fn tint_of(class: Class) -> [f32; 3] {
         Class::Orb => [0.5, 1.0, 0.2],
         Class::Painting => [1.0; 3],
         Class::Player { .. } => [1.0; 3],
+    }
+}
+
+/// `getDeathMaxRotation` in radians: 90 degrees, 180 for the endermite.
+fn death_max_rotation(class: Class) -> f32 {
+    if class == Class::Mob(endermite::ENDERMITE) {
+        endermite::DEATH_YAW.to_radians()
+    } else {
+        FRAC_PI_2
     }
 }
 
@@ -1084,9 +1095,11 @@ impl Xf {
             d.yaw
         };
         let (st, ct) = (180.0 - body_yaw).to_radians().sin_cos();
-        // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees).
+        // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees, 180 for
+        // the endermite).
+        let max_fall = death_max_rotation(d.class);
         let fall = if d.death_time > 0.0 {
-            ((d.death_time - 1.0).max(0.0) / 20.0 * 1.6).sqrt().min(1.0) * FRAC_PI_2
+            ((d.death_time - 1.0).max(0.0) / 20.0 * 1.6).sqrt().min(1.0) * max_fall
         } else {
             0.0
         };

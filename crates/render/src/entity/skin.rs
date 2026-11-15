@@ -11,7 +11,7 @@ const WIDTH: u32 = 128;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 82] = [
+const SKINS: [&str; 83] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -96,6 +96,7 @@ const SKINS: [&str; 82] = [
     // The second half of the 64x128 witch texture.
     "",
     "entity/lead_knot.png",
+    "entity/endermite.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -105,42 +106,45 @@ const EYES: [usize; 2] = [43, 44];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Skin; 35] = [
-    Skin::Slime,
-    Skin::MagmaCube,
-    Skin::Blaze,
-    Skin::Ghast,
-    Skin::GhastShooting,
-    Skin::Bat,
-    Skin::Firework,
-    Skin::Wolf,
-    Skin::WolfTame,
-    Skin::WolfAngry,
-    Skin::WolfCollar,
-    Skin::Ocelot,
-    Skin::CatBlack,
-    Skin::CatRed,
-    Skin::CatSiamese,
-    Skin::RabbitBrown,
-    Skin::RabbitWhite,
-    Skin::RabbitBlack,
-    Skin::RabbitWhiteSplotched,
-    Skin::RabbitGold,
-    Skin::RabbitSalt,
-    Skin::RabbitCaerbannog,
-    Skin::RabbitToast,
-    Skin::Boat,
-    Skin::Minecart,
-    Skin::Squid,
-    Skin::EnderCrystal,
-    Skin::Mooshroom,
-    Skin::EnderEye,
-    Skin::XpBottle,
-    Skin::Wither,
-    Skin::WitherInvulnerable,
-    Skin::Snowman,
-    Skin::Witch,
-    Skin::LeadKnot,
+const SLIME_SLOT_SKINS: [Option<Skin>; 37] = [
+    Some(Skin::Slime),
+    Some(Skin::MagmaCube),
+    Some(Skin::Blaze),
+    Some(Skin::Ghast),
+    Some(Skin::GhastShooting),
+    Some(Skin::Bat),
+    Some(Skin::Firework),
+    Some(Skin::Wolf),
+    Some(Skin::WolfTame),
+    Some(Skin::WolfAngry),
+    Some(Skin::WolfCollar),
+    Some(Skin::Ocelot),
+    Some(Skin::CatBlack),
+    Some(Skin::CatRed),
+    Some(Skin::CatSiamese),
+    Some(Skin::RabbitBrown),
+    Some(Skin::RabbitWhite),
+    Some(Skin::RabbitBlack),
+    Some(Skin::RabbitWhiteSplotched),
+    Some(Skin::RabbitGold),
+    Some(Skin::RabbitSalt),
+    Some(Skin::RabbitCaerbannog),
+    Some(Skin::RabbitToast),
+    Some(Skin::Boat),
+    Some(Skin::Minecart),
+    Some(Skin::Squid),
+    Some(Skin::EnderCrystal),
+    Some(Skin::Mooshroom),
+    Some(Skin::EnderEye),
+    Some(Skin::XpBottle),
+    Some(Skin::Wither),
+    Some(Skin::WitherInvulnerable),
+    Some(Skin::Snowman),
+    Some(Skin::Witch),
+    // The second half of the 64x128 witch texture.
+    None,
+    Some(Skin::LeadKnot),
+    Some(Skin::Endermite),
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -237,6 +241,8 @@ pub enum Skin {
     Witch,
     /// `textures/entity/lead_knot.png` (32x32), the knot of a leash on a fence.
     LeadKnot,
+    /// `textures/entity/endermite.png` (64x32).
+    Endermite,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// `items/fireworks.png`, the rocket icon.
@@ -591,7 +597,7 @@ fn mob_slot(skin: Skin) -> Option<u32> {
         _ => {
             return SLIME_SLOT_SKINS
                 .iter()
-                .position(|&s| s == skin)
+                .position(|&s| s == Some(skin))
                 .map(|i| (SLIME_SLOT + i) as u32)
         }
     })
@@ -609,6 +615,14 @@ mod tests {
             slot(Skin::XpBottle),
             Some(index("items/experience_bottle.png"))
         );
+    }
+
+    #[test]
+    fn mob_slots_hold_their_own_textures() {
+        let index = |path: &str| SKINS.iter().position(|&n| n == path).unwrap() as u32;
+        assert_eq!(slot(Skin::Witch), Some(index("entity/witch.png")));
+        assert_eq!(slot(Skin::LeadKnot), Some(index("entity/lead_knot.png")));
+        assert_eq!(slot(Skin::Endermite), Some(index("entity/endermite.png")));
     }
 
     #[test]

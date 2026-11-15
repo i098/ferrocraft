@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prints the slime, magma cube, blaze, ghast, bat and ender crystal, wolf, ocelot, rabbit, squid, snow golem and witch model trees of the real 1.8.9 client.
+# Prints the slime, magma cube, blaze, ghast, bat and ender crystal, wolf, ocelot, rabbit, endermite, squid, snow golem and witch model trees of the real 1.8.9 client.
 # Needs target/oracle/mapped.jar (built by `cargo test -p oracle`) and a JDK 8 or newer.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"

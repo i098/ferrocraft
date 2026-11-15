@@ -102,6 +102,18 @@ public class MobModels {
         call(wolf, "setSitting", true);
         System.out.println("tail angle tame, metadata health 1=" + wolf.getTailBob());
         pose("WolfModel tame sitting", new WolfModel(), wolf, wolf.getTailBob());
+        Class<?> wc = WolfEntity.class;
+        java.lang.reflect.Field last = wc.getDeclaredField("lastShakeProgress");
+        java.lang.reflect.Field now = wc.getDeclaredField("shakeProgress");
+        last.setAccessible(true);
+        now.setAccessible(true);
+        last.setFloat(wolf, 0.8f);
+        now.setFloat(wolf, 0.85f);
+        for (float off : new float[] {0.0f, -0.08f, -0.16f, -0.2f}) {
+            System.out.println("shake angle partial 0.5 offset " + off + "=" + wolf.getShakeAngle(0.5f, off));
+        }
+        call(wolf, "setSitting", false);
+        pose("WolfModel tame shaking (prev 0.8, now 0.85, partial 1.0)", new WolfModel(), wolf, wolf.getTailBob());
         model("OcelotModel", new OcelotModel());
         OcelotEntity cat = new OcelotEntity(null);
         pose("OcelotModel walking", new OcelotModel(), cat, 0.0f);

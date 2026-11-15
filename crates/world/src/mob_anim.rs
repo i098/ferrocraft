@@ -61,3 +61,30 @@ impl MobAnim {
             * std::f32::consts::PI
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Values of `WolfEntity.getShakeAngle(0.5, offset)` in the 1.8.9 oracle (`harness/mobmodels.sh`)
+    /// with `lastShakeProgress` 0.8 and `shakeProgress` 0.85.
+    #[test]
+    fn shake_angle_matches_the_oracle() {
+        let a = MobAnim {
+            shaking: true,
+            shake_time: 0.85,
+            prev_shake_time: 0.8,
+            ..MobAnim::default()
+        };
+        for (offset, want) in [
+            (0.0, -0.060_967_486),
+            (-0.08, 0.447_871_83),
+            (-0.16, 0.086_133_55),
+            (-0.2, -0.224_598_1),
+        ] {
+            let got = a.shake_angle(0.5, offset);
+            // The oracle reads the 65536-entry `MathHelper.sin` table, off by up to about 5e-5 from `f32::sin`.
+            assert!((got - want).abs() < 1e-4, "{offset}: {got} vs {want}");
+        }
+    }
+}

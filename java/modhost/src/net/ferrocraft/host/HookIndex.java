@@ -109,7 +109,7 @@ public final class HookIndex {
         Set<String> targets = new TreeSet<>();
         try {
             // Mixins.getConfigs() holds only the configs that Mixin has not applied yet; the created ones stay in this map.
-            Map<String, ?> configs = (Map<String, ?>) R.call(R.cls("org.spongepowered.asm.mixin.transformer.Config"), "getAllConfigs");
+            Map<String, ?> configs = allConfigs();
             for (Object config : configs.values()) {
                 targets.addAll((Set<String>) R.call(R.call(config, "getConfig"), "getTargets"));
             }
@@ -125,6 +125,17 @@ public final class HookIndex {
             } catch (ClassNotFoundException | LinkageError e) {
                 Host.log("hook table: " + target + " did not load: " + e);
             }
+        }
+    }
+
+    /** Forge's Mixin has the method; Fabric's Mixin (0.17) keeps the same map in a private static field of Config. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, ?> allConfigs() {
+        Class<?> config = R.cls("org.spongepowered.asm.mixin.transformer.Config");
+        try {
+            return (Map<String, ?>) R.call(config, "getAllConfigs");
+        } catch (IllegalStateException noMethod) {
+            return (Map<String, ?>) R.get(config, "allConfigs");
         }
     }
 

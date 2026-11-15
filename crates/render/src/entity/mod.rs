@@ -166,6 +166,8 @@ pub struct Look {
     /// Iron golem: `attackTimer` and `holdRoseTick`, the arm swing and rose pose.
     pub golem_attack: i32,
     pub golem_rose: i32,
+    /// Wolf: `getShakeAngle` roll in radians of the head, mane, body and tail (offsets 0, -0.08, -0.16, -0.2).
+    pub wolf_shake: [f32; 4],
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
 }
@@ -189,6 +191,7 @@ impl Default for Look {
             eat_timer: 0,
             golem_attack: 0,
             golem_rose: 0,
+            wolf_shake: [0.0; 4],
             partial: 0.0,
         }
     }

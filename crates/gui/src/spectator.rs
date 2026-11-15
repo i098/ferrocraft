@@ -1,9 +1,9 @@
 //! `SpectatorGui` and `SpectatorMenu`: the nine slot bar a spectator opens with the wheel, a number
 //! key or a middle click, with its player and team categories.
 
-use crate::scoreboard::Scoreboard;
+use crate::scoreboard::{prefix_color, Scoreboard};
 use crate::tablist::{default_skin, head_uvs, TabEntry, TabList};
-use crate::toolkit::{color_code, format_from, Gui, WIDGETS};
+use crate::toolkit::{Gui, WIDGETS};
 use render::Blend;
 
 const SPECTATOR_WIDGETS: &str = "textures/gui/spectator_widgets.png";
@@ -11,8 +11,6 @@ const SPECTATOR: u8 = 3;
 /// `SpectatorGui.getHotbarAlpha`: the bar stays 5 seconds and fades over the last 2.
 const SHOW_MS: i64 = 5000;
 const FADE_MS: f32 = 2000.0;
-/// `FontRenderer.colorCode` index of each formatting char.
-const FORMAT_CHARS: &str = "0123456789abcdefklmnor";
 
 /// What `SpectatorMenuItem.select` asks the client to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,20 +158,6 @@ impl Category {
             items,
         }
     }
-}
-
-/// `LivingEntityRenderer.setupSolidState`: the color of the team prefix, which tints a player's
-/// spectator outline; `None` (white) without a team or a prefix code.
-pub fn outline_color(sb: &Scoreboard, player: &str) -> Option<u32> {
-    sb.team_of(player)
-        .and_then(|(_, t)| prefix_color(&t.prefix))
-}
-
-/// `TextRenderer.getColor(isolateFormatting(prefix).charAt(1))`.
-fn prefix_color(prefix: &str) -> Option<u32> {
-    let code = format_from(prefix).chars().nth(1)?;
-    let i = FORMAT_CHARS.find(code.to_ascii_lowercase())?;
-    Some(color_code(i))
 }
 
 /// The state of `SpectatorMenu`: the open category, the page and the selected slot.

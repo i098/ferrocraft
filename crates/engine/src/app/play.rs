@@ -112,6 +112,16 @@ pub(super) struct ViewBob {
     pitch: [f32; 2],
 }
 
+/// `WorldRenderer.shouldRenderEntityOutlines`: the draws to outline while the local player is a
+/// spectator and holds `key.spectatorOutlines`.
+pub(super) fn outline_draws<'a>(
+    game: &crate::game::Game,
+    input: &input_audio::InputState,
+    draws: &'a [render::EntityDraw],
+) -> Option<&'a [render::EntityDraw]> {
+    (game.gamemode == 3 && input.spectator_outlines_held()).then_some(draws)
+}
+
 impl ViewBob {
     fn tick(&mut self, d: [f64; 3], on_ground: bool, alive: bool) {
         let h = d[0].hypot(d[2]) as f32;

@@ -234,7 +234,10 @@ mod tests {
         };
         for feet in [[4.5, 60.38, 8.5], [5.5, 60.38, 6.5]] {
             let uv = be.portals(&c, feet, 0).sky.vertices[0].uv;
-            assert!((uv[0] - 2.75).abs() < 1e-3 && (uv[1] - 29.075).abs() < 1e-3, "{uv:?}");
+            assert!(
+                (uv[0] - 2.75).abs() < 1e-3 && (uv[1] - 29.075).abs() < 1e-3,
+                "{uv:?}"
+            );
         }
     }
 
@@ -242,8 +245,16 @@ mod tests {
     fn range_is_measured_from_the_view_entity_not_the_camera() {
         let be = portal_at([4, 60, 4]);
         let far_cam = cam([4.5, 62.0, 90.0]);
-        assert!(!be.portals(&far_cam, [4.5, 60.38, 8.5], 0).sky.vertices.is_empty());
+        assert!(!be
+            .portals(&far_cam, [4.5, 60.38, 8.5], 0)
+            .sky
+            .vertices
+            .is_empty());
         let near_cam = cam([4.5, 62.0, 8.5]);
-        assert!(be.portals(&near_cam, [4.5, 60.38, 90.0], 0).sky.vertices.is_empty());
+        assert!(be
+            .portals(&near_cam, [4.5, 60.38, 90.0], 0)
+            .sky
+            .vertices
+            .is_empty());
     }
 }

@@ -192,6 +192,8 @@ pub struct Look {
     pub wolf_wet: Option<f32>,
     /// Fraction of the tick the frame is drawn at; the eating head interpolates with it.
     pub partial: f32,
+    /// `isRiding`: the model sits on its vehicle, which poses the arms and legs of a biped.
+    pub riding: bool,
     /// Boats and minecarts: hit wobble and carried block; see [`vehicle::VehicleLook`].
     pub vehicle: vehicle::VehicleLook,
     /// Ender crystals: `renderTicks`, the tick counter that spins and bobs the cubes.
@@ -230,6 +232,7 @@ impl Default for Look {
             wolf_interested: 0.0,
             wolf_wet: None,
             partial: 0.0,
+            riding: false,
             vehicle: vehicle::VehicleLook::default(),
             crystal_ticks: 0,
             invulnerable: false,
@@ -424,6 +427,25 @@ fn hold_item(r_arm: &mut [f32; 3], blocking: bool) {
     }
 }
 
+/// Walk cycle angles of the right arm, left arm, right leg and left leg; `isRiding` tilts the arms forward
+/// and sets the legs astride (`ModelBiped.setRotationAngles`).
+fn limbs(d: &EntityDraw) -> [V3; 4] {
+    let (f, f1) = (d.limb_swing, d.limb_swing_amount);
+    let mut l = [
+        [cos(f * 0.6662 + PI) * 2.0 * f1 * 0.5, 0.0, 0.0],
+        [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0],
+        [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0],
+        [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0],
+    ];
+    if d.look.riding {
+        l[0][0] -= PI / 5.0;
+        l[1][0] -= PI / 5.0;
+        l[2] = [-2.0 * PI / 5.0, PI / 10.0, 0.0];
+        l[3] = [-2.0 * PI / 5.0, -PI / 10.0, 0.0];
+    }
+    l
+}
+
 /// `ModelBiped.setRotationAngles` and the box layout. `arm_w` and `limb` are the arm and leg
 /// widths (4 for a player, 3 for alex, 2 for a skeleton).
 fn biped(
@@ -434,15 +456,11 @@ fn biped(
     limb_w: f32,
     raised: bool,
 ) -> Model {
-    let (f, f1) = (d.limb_swing, d.limb_swing_amount);
     let head_rot_y = wrap(d.head_yaw - d.yaw).to_radians();
     let head_rot_x = d.pitch.to_radians();
     let swing = d.swing;
 
-    let mut r_arm = [cos(f * 0.6662 + PI) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let l_arm = [cos(f * 0.6662) * 2.0 * f1 * 0.5, 0.0, 0.0];
-    let r_leg = [cos(f * 0.6662) * 1.4 * f1, 0.0, 0.0];
-    let l_leg = [cos(f * 0.6662 + PI) * 1.4 * f1, 0.0, 0.0];
+    let [mut r_arm, l_arm, r_leg, l_leg] = limbs(d);
     let body_rot = [0.0f32; 3];
     let mut r_arm_pivot = [-5.0, 2.0, 0.0];
     let mut l_arm_pivot = [5.0, 2.0, 0.0];

@@ -773,8 +773,22 @@ impl App {
             using: self.using(f).map(|u| u.action),
             view: [0.0; 2],
             line: None,
-            look: Look::default(),
+            look: Look {
+                riding: self.game.vehicle.is_some(),
+                ..Look::default()
+            },
         })
+    }
+
+    /// A remote rider sits on its vehicle as `Entity.updateRiderPosition` places it, and takes the riding pose.
+    fn seat_rider(&self, e: &Entity, d: &mut EntityDraw, frac: f64) {
+        let Some(v) = e.vehicle.and_then(|id| self.game.entities.get(id)) else {
+            return;
+        };
+        d.look.riding = true;
+        if v.kind == Kind::Mob(100) && matches!(e.kind, Kind::Player) {
+            d.pos = v.rider_seat(v.lerp_pos(frac), f64::from(-0.35f32));
+        }
     }
 
     fn draw(&mut self) {
@@ -836,6 +850,7 @@ impl App {
             self.held_and_line(e, d, frac);
             d.look.leash = self.leash_holder(e, frac);
             vehicle::snap(&self.game.store, e, d);
+            self.seat_rider(e, d, frac);
         }
         self.mod_drawn = mod_world::Drawn::ask(
             self.mods.as_ref(),

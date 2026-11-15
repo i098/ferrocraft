@@ -57,7 +57,7 @@ pub(super) fn build(d: &EntityDraw, id: u8) -> Option<Model> {
 }
 
 /// `ModelVillager`: the nose and the three arm boxes share their parent's pivot.
-fn villager(d: &EntityDraw) -> Model {
+pub(super) fn villager(d: &EntityDraw) -> Model {
     let hr = head_rot(d);
     let leg = cos(d.limb_swing * 0.6662) * 1.4 * d.limb_swing_amount * 0.5;
     let mut robe = Part::new([0.0; 3], [-4.0, 0.0, -3.0], [8.0, 12.0, 6.0], (0.0, 38.0));

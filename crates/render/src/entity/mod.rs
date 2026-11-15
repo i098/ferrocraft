@@ -33,6 +33,7 @@ pub mod skull;
 mod snowman;
 mod squid;
 pub mod vehicle;
+mod wielded;
 mod witch;
 
 // Indices of the player model's second skin layer in `Model::parts`, after the 7 base boxes.

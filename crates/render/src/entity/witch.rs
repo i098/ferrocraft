@@ -3,8 +3,9 @@
 //! layout is checked against `harness/mobmodels.sh`.
 
 use super::mobs::{model, villager};
+use super::wielded;
 use super::{EntityDraw, Model, Part, Skin};
-use crate::hand::{chain, ident, rotate, scale3, translate, Mat};
+use crate::hand::{chain, rotate, scale3, translate, Mat};
 use std::f32::consts::PI;
 
 pub(super) const WITCH: u8 = 66;
@@ -128,8 +129,8 @@ fn item_pose(held: i16, block3d: bool) -> Mat {
             rotate(-100.0, 0),
             rotate(-20.0, 1),
         ])
-    } else if is_wielded(held) {
-        wielded_pose(held)
+    } else if wielded::is_wielded(held) {
+        wielded::pose(held)
     } else {
         chain(&[
             translate(0.1875, 0.1875, 0.0),
@@ -139,36 +140,6 @@ fn item_pose(held: i16, block3d: bool) -> Mat {
             rotate(-30.0, 2),
         ])
     }
-}
-
-/// `Item.isWielded` (`setWielded`) in 1.8.9: the sword, shovel, pickaxe, axe and hoe tiers, the
-/// stick, bone, fishing rod, blaze rod and carrot on a stick.
-fn is_wielded(id: i16) -> bool {
-    matches!(
-        id,
-        256..=258 | 267..=280 | 283..=286 | 290..=294 | 346 | 352 | 369 | 398
-    )
-}
-
-/// `isFlippedWhenWielded`: only the fishing rod and the carrot on a stick.
-fn is_flipped(id: i16) -> bool {
-    matches!(id, 346 | 398)
-}
-
-/// The wielded branch of `LayerHeldItemWitch`: an optional half turn, the nose lift of
-/// `RenderWitch.glTranslate`, then the 0.625 scale.
-fn wielded_pose(held: i16) -> Mat {
-    let flip = if is_flipped(held) {
-        chain(&[rotate(180.0, 2), translate(0.0, -0.0625, 0.0)])
-    } else {
-        ident()
-    };
-    chain(&[
-        flip,
-        translate(0.0, 0.1875, 0.0),
-        translate(0.0625, -0.125, 0.0),
-        scale3([0.625, -0.625, 0.625]),
-    ])
 }
 
 #[cfg(test)]
@@ -291,20 +262,5 @@ mod tests {
         let nose = drawn(&d).parts[1].clone();
         assert_eq!(nose.rot[0], -0.9);
         assert_eq!(nose.pivot, [0.0, 1.0, -1.5]);
-    }
-
-    /// The oracle's `Item.isWielded` list: swords and tools lift by 0.1875 and shrink to 0.625; the
-    /// rod and the carrot on a stick turn half a turn first; a potion and an unlisted item do not.
-    #[test]
-    fn wielded_items_take_the_full_3d_pose() {
-        let near = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
-        let at = |id, p| crate::hand::point(&item_pose(id, false), p);
-        assert!(near(at(276, [0.0; 3]), [0.0625, 0.0625, 0.0]));
-        assert!(near(at(276, [1.0; 3]), [0.6875, -0.5625, 0.625]));
-        assert!(near(at(346, [0.0; 3]), [-0.0625, 0.0, 0.0]));
-        assert!(near(at(398, [0.0; 3]), [-0.0625, 0.0, 0.0]));
-        assert!(near(at(373, [0.0; 3]), [0.1875, 0.1875, 0.0]));
-        assert!(!is_wielded(261) && !is_wielded(259) && !is_wielded(287));
-        assert!(is_wielded(369) && is_wielded(280) && is_wielded(352));
     }
 }

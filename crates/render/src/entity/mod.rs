@@ -21,6 +21,7 @@ pub mod item;
 pub(crate) mod mobs;
 mod mobs2;
 mod mobs3;
+mod mooshroom;
 pub(crate) mod outline;
 mod projectile;
 mod rabbit;

@@ -118,6 +118,17 @@ fn a_leashed_cow_draws_its_rope_and_the_knot_its_model() {
         some > none + 100,
         "the rope adds brown pixels: {some} vs {none}"
     );
+
+    r.set_entities(&unleashed[1..]);
+    let box_only = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&leashed[1..]);
+    let knot_only = r.render_to_rgba(&cam, &[]).2;
+    let knot_px = knot_only
+        .chunks(4)
+        .zip(box_only.chunks(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(knot_px > 50, "the knot differs from the fallback box: {knot_px}");
     if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();

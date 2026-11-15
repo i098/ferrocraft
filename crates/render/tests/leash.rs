@@ -119,16 +119,26 @@ fn a_leashed_cow_draws_its_rope_and_the_knot_its_model() {
         "the rope adds brown pixels: {some} vs {none}"
     );
 
-    r.set_entities(&unleashed[1..]);
-    let box_only = r.render_to_rgba(&cam, &[]).2;
     r.set_entities(&leashed[1..]);
     let knot_only = r.render_to_rgba(&cam, &[]).2;
+    // Unhandled objects (id 99 here) took the generic grey box path that 77 used before the fix.
+    r.set_entities(&[draw(Class::Object(99), knot, (0.375, 0.5), Look::default())]);
+    let fallback = r.render_to_rgba(&cam, &[]).2;
     let knot_px = knot_only
         .chunks(4)
-        .zip(box_only.chunks(4))
+        .zip(empty.chunks(4))
         .filter(|(a, b)| a != b)
         .count();
-    assert!(knot_px > 50, "the knot differs from the fallback box: {knot_px}");
+    assert!(
+        knot_px > 50,
+        "the knot adds pixels to the empty scene: {knot_px}"
+    );
+    let differs = knot_only
+        .chunks(4)
+        .zip(fallback.chunks(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(differs > 50, "the knot is not the fallback box: {differs}");
     if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();

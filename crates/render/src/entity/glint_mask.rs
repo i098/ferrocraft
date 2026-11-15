@@ -3,8 +3,10 @@
 //! texture, so the glint quads are cut here along the texel grid of the model texture and the
 //! transparent texels are dropped.
 
-use super::{Skin, Skins};
-use crate::mesh::{MeshData, Vertex};
+// Aliases, not imports: this leaf module stays out of the import chain of `item`.
+type Image = crate::assets::Image;
+type MeshData = crate::mesh::MeshData;
+type Vertex = crate::mesh::Vertex;
 
 /// Alpha test of `GL_GREATER, 0.1`: a texel of alpha 26 or more is drawn.
 const ALPHA_MIN: u8 = 26;
@@ -25,10 +27,9 @@ impl Mask {
         Mask { w, h, opaque }
     }
 
-    /// The armor texture of `skin` in the skin atlas.
-    pub fn armor(skins: &Skins, skin: Skin) -> Mask {
-        let row = skins.v_offset(skin) as usize;
-        Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32)
+    /// The opaque texels of a whole image.
+    pub fn of(img: &Image) -> Mask {
+        Mask::from_rgba(&img.rgba, img.width, 0, img.width, img.height)
     }
 
     fn at(&self, x: usize, y: usize) -> bool {

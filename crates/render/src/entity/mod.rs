@@ -861,6 +861,12 @@ pub fn build_glint(draws: &[EntityDraw], masked: Option<&Skins>) -> MeshData {
     out
 }
 
+/// The opaque texels of the armor texture of `skin` in the skin atlas.
+fn armor_mask(skins: &Skins, skin: Skin) -> Mask {
+    let row = skins.v_offset(skin) as usize;
+    Mask::from_rgba(&skins.rgba, Skins::width() as usize, row, 64, 32)
+}
+
 /// One vanilla glint pass over the glowing armor pieces of `d`, appended to `out`.
 fn armor_glint_pass(out: &mut MeshData, d: &EntityDraw, masked: Option<&Skins>, pass: usize) {
     let m = armor_model(d);
@@ -880,7 +886,7 @@ fn armor_glint_pass(out: &mut MeshData, d: &EntityDraw, masked: Option<&Skins>, 
         }
         let map = |uv| glint_uv_armor(uv, d.age, pass);
         let piece = match masked {
-            Some(skins) => glint_mask::split(&piece, &Mask::armor(skins, skin), &map),
+            Some(skins) => glint_mask::split(&piece, &armor_mask(skins, skin), &map),
             None => glint_mask::remap(piece, &map),
         };
         let base = out.vertices.len() as u32;

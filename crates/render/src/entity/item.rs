@@ -145,13 +145,7 @@ fn geometry(
                     tex: ItemTex::Sprite(texture),
                     mesh,
                     normals: Some(flat.normals),
-                    mask: Some(Mask::from_rgba(
-                        &image.rgba,
-                        image.width,
-                        0,
-                        image.width,
-                        image.height,
-                    )),
+                    mask: Some(Mask::of(&image)),
                 })
             })
             .collect();
@@ -337,32 +331,19 @@ impl Items {
             ItemTex::Atlas => (1.0, &mut self.glint),
             ItemTex::Sprite(_) => (ITEM_UV_SCALE, &mut self.glint_flat),
         };
-        let placed = MeshData {
-            vertices: vertices
-                .iter()
-                .map(|v| Vertex {
-                    color: ITEM_GLINT_COLOR,
-                    light: [1.0; 2],
-                    ..*v
-                })
-                .collect(),
+        let mut placed = MeshData {
+            vertices: vertices.to_vec(),
             indices: layer.mesh.indices.clone(),
         };
+        for v in &mut placed.vertices {
+            (v.color, v.light) = (ITEM_GLINT_COLOR, [1.0; 2]);
+        }
+        let mask = layer.mask.as_ref().filter(|_| super::UNSHADED.get());
         for pass in 0..2 {
             let map = |uv: [f32; 2]| glint_uv_item(uv.map(|c| c * scale), ms, pass);
-            let mut mesh = match (&layer.mask, super::UNSHADED.get()) {
-                (Some(mask), true) => glint_mask::split(&placed, mask, &map),
-                _ => MeshData {
-                    vertices: placed
-                        .vertices
-                        .iter()
-                        .map(|v| Vertex {
-                            uv: map(v.uv),
-                            ..*v
-                        })
-                        .collect(),
-                    indices: placed.indices.clone(),
-                },
+            let mut mesh = match mask {
+                Some(mask) => glint_mask::split(&placed, mask, &map),
+                None => glint_mask::remap(placed.clone(), &map),
             };
             let base = glint.vertices.len() as u32;
             glint.vertices.append(&mut mesh.vertices);

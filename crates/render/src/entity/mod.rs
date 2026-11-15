@@ -1426,6 +1426,8 @@ fn fallback_tint(skin: Skin) -> [f32; 3] {
         | Skin::FireCharge
         | Skin::Bobber
         | Skin::Firework
+        | Skin::EnderEye
+        | Skin::XpBottle
         | Skin::SplashPotion => [0.8, 0.8, 0.85],
         _ => [1.0; 3],
     }

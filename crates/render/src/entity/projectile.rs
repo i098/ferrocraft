@@ -11,7 +11,9 @@ pub const EGG: i8 = 62;
 pub const FIREBALL: i8 = 63;
 pub const SMALL_FIREBALL: i8 = 64;
 pub const ENDER_PEARL: i8 = 65;
+pub const ENDER_EYE: i8 = 72;
 pub const POTION: i8 = 73;
+pub const XP_BOTTLE: i8 = 75;
 pub const FIREWORK: i8 = 76;
 pub const FISHING_BOBBER: i8 = 90;
 
@@ -25,7 +27,9 @@ pub fn handles(id: i8) -> bool {
             | FIREBALL
             | SMALL_FIREBALL
             | ENDER_PEARL
+            | ENDER_EYE
             | POTION
+            | XP_BOTTLE
             | FIREWORK
             | FISHING_BOBBER
     )
@@ -39,7 +43,9 @@ pub fn build(out: &mut MeshData, id: i8, d: &EntityDraw, skins: &Skins) {
         SNOWBALL => (Skin::Snowball, 0.25, 0.0),
         EGG => (Skin::Egg, 0.25, 0.0),
         ENDER_PEARL => (Skin::EnderPearl, 0.25, 0.0),
+        ENDER_EYE => (Skin::EnderEye, 0.25, 0.0),
         POTION => (Skin::SplashPotion, 0.25, 0.0),
+        XP_BOTTLE => (Skin::XpBottle, 0.25, 0.0),
         // `RenderSnowball` with `Items.fireworks`.
         FIREWORK => (Skin::Firework, 0.25, 0.0),
         // `ProjectileRenderer`: a 1x1 sprite scaled by 2 (large) or 0.5 (small), raised a quarter.

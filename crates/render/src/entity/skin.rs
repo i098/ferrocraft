@@ -85,6 +85,7 @@ const SKINS: [&str; 72] = [
     "entity/boat.png",
     "entity/minecart.png",
     "entity/squid.png",
+    "entity/endercrystal/endercrystal.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -121,6 +122,7 @@ const SLIME_SLOT_SKINS: [Skin; 26] = [
     Skin::Boat,
     Skin::Minecart,
     Skin::Squid,
+    Skin::EnderCrystal,
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -201,6 +203,8 @@ pub enum Skin {
     Minecart,
     /// `textures/entity/squid.png` (64x32).
     Squid,
+    /// `textures/entity/endercrystal/endercrystal.png` (64x32).
+    EnderCrystal,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// `items/fireworks.png`, the rocket icon.

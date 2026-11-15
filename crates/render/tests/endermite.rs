@@ -134,5 +134,16 @@ fn endermites_draw_their_model_and_texture() {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();
         encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
+        // A 0.9 block pig beside the endermites shows their scale.
+        let pig = EntityDraw {
+            class: Class::Mob(90),
+            size: (0.9, 0.9),
+            ..endermite(1.5, 180.0, 0.0)
+        };
+        let mut scaled = draws.to_vec();
+        scaled.push(pig);
+        r.set_entities(&scaled);
+        let scale = r.render_to_rgba(&cam, &[]).2;
+        encode_png(&dir.join("after_scale.png"), 800, 450, &scale).unwrap();
     }
 }

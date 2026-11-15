@@ -33,6 +33,8 @@ impl Visibility {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Team {
+    /// `ScorePlayerTeam.getTeamName`: the registered name until S3E sets one.
+    pub display_name: String,
     pub prefix: String,
     pub suffix: String,
     pub visibility: Visibility,
@@ -44,6 +46,7 @@ pub struct Team {
 /// The fields of an S3E in modes 0 and 2.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TeamInfo {
+    pub display_name: String,
     pub prefix: String,
     pub suffix: String,
     /// `nameTagVisibility` key.
@@ -119,8 +122,12 @@ impl Scoreboard {
                 t.members.retain(|m| !members.contains(m));
             }
         }
-        let t = self.teams.entry(name.into()).or_default();
+        let t = self.teams.entry(name.into()).or_insert_with(|| Team {
+            display_name: name.into(),
+            ..Team::default()
+        });
         if mode == 0 || mode == 2 {
+            t.display_name = info.display_name.clone();
             t.prefix = info.prefix.clone();
             t.suffix = info.suffix.clone();
             t.visibility = Visibility::by_key(&info.visibility);

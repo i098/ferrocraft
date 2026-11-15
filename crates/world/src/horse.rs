@@ -13,6 +13,51 @@ pub fn is_chested(flags: i32) -> bool {
     flags & CHESTED != 0
 }
 
+/// `EntityHorse` metadata index 16 flags: the horse eats grass, rears (`isAngry`), opens its mouth.
+const EATING_HAY: i32 = 32;
+const ANGRY: i32 = 64;
+const MOUTH_OPEN: i32 = 128;
+
+/// The three animation progress values `EntityHorse.onUpdate` eases on the client toward the metadata
+/// flags, each with its value one tick ago for the partial tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HorseAnim {
+    grass: [f32; 2],
+    angry: [f32; 2],
+    mouth: [f32; 2],
+}
+
+impl HorseAnim {
+    /// The animation part of `EntityHorse.onUpdate`, once per tick with the flags of metadata 16.
+    pub fn tick(&mut self, flags: i32) {
+        self.grass[0] = self.grass[1];
+        if flags & EATING_HAY != 0 {
+            self.grass[1] = (self.grass[1] + (1.0 - self.grass[1]) * 0.4 + 0.05).min(1.0);
+        } else {
+            self.grass[1] = (self.grass[1] + ((0.0 - self.grass[1]) * 0.4 - 0.05)).max(0.0);
+        }
+        self.angry[0] = self.angry[1];
+        if flags & ANGRY != 0 {
+            self.grass = [0.0; 2];
+            self.angry[1] = (self.angry[1] + (1.0 - self.angry[1]) * 0.4 + 0.05).min(1.0);
+        } else {
+            let a = self.angry[1];
+            self.angry[1] = (a + ((0.8 * a * a * a - a) * 0.6 - 0.05)).max(0.0);
+        }
+        self.mouth[0] = self.mouth[1];
+        if flags & MOUTH_OPEN != 0 {
+            self.mouth[1] = (self.mouth[1] + (1.0 - self.mouth[1]) * 0.7 + 0.05).min(1.0);
+        } else {
+            self.mouth[1] = (self.mouth[1] + ((0.0 - self.mouth[1]) * 0.7 - 0.05)).max(0.0);
+        }
+    }
+
+    /// `getGrassAnimationProgress`, `getAngryAnimationProgress` and `getEatingAnimationProgress`.
+    pub fn progress(&self, partial: f32) -> [f32; 3] {
+        [self.grass, self.angry, self.mouth].map(|[last, now]| last + (now - last) * partial)
+    }
+}
+
 /// `EntityPlayerSP.horseJumpPowerCounter` and `horseJumpPower`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HorseJump {
@@ -59,6 +104,24 @@ impl HorseJump {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eating_eases_up_and_rearing_cuts_it_off() {
+        let mut a = HorseAnim::default();
+        a.tick(EATING_HAY);
+        assert!((a.progress(1.0)[0] - 0.05).abs() < 1e-6);
+        assert_eq!(a.progress(0.0)[0], 0.0);
+        for _ in 0..20 {
+            a.tick(EATING_HAY);
+        }
+        assert_eq!(a.progress(1.0)[0], 1.0);
+        a.tick(EATING_HAY | ANGRY);
+        assert_eq!(a.progress(1.0), [0.0, 0.05, 0.0]);
+        for _ in 0..20 {
+            a.tick(0);
+        }
+        assert_eq!(a.progress(1.0), [0.0; 3]);
+    }
 
     #[test]
     fn release_sends_the_charge() {

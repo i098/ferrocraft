@@ -120,6 +120,10 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         Some(MetaValue::Byte(b)) => Some(*b as u8),
         _ => None,
     };
+    let int = |index| match find(meta, index) {
+        Some(MetaValue::Int(i)) => Some(*i),
+        _ => None,
+    };
     SizeMeta {
         stand: byte(10),
         pose: [11, 12, 13, 14, 15, 16].map(|index| match find(meta, index) {
@@ -133,6 +137,8 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
             _ => None,
         },
         horse: byte(19),
+        horse_variant: int(20),
+        horse_armor: int(22),
         horse_flags: match find(meta, 16) {
             Some(MetaValue::Int(i)) => Some(*i),
             _ => None,

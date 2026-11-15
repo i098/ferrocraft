@@ -28,6 +28,8 @@ pub struct MobAnim {
     /// Wolf `headRotationCourse` and `headRotationCourseOld`.
     pub begging_course: f32,
     pub prev_begging_course: f32,
+    /// Horse eating, rearing and mouth animation.
+    pub horse: crate::horse::HorseAnim,
 }
 
 impl MobAnim {

@@ -39,7 +39,7 @@ pub use biome::splashes;
 pub use blockent::{Banner, Skull, WornHead};
 pub use entity::{hanging, item, leash, vehicle};
 pub use entity::{
-    nametags, CapeSway, Class, EntityDraw, Look, NameTag, StandLook, TeamTag, Thrower,
+    nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook, TeamTag, Thrower,
 };
 pub use gpu::{view_proj, Renderer};
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

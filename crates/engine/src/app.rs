@@ -37,7 +37,7 @@ use input_audio::sound::Sound;
 use input_audio::InputState;
 use render::{
     AssetSource, Camera, CapeSway, ChunkBlocks, Class, EntityDraw, Environment, Fluid, Hand,
-    HeldKind, Look, Particles, Renderer, StandLook, TeamTag, Thrower, UseAction, Using,
+    HeldKind, HorseLook, Look, Particles, Renderer, StandLook, TeamTag, Thrower, UseAction, Using,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1614,8 +1614,23 @@ fn entity_draw(
             vehicle: vehicle::look(e, p),
             crystal_ticks: crystal::ticks(e),
             invulnerable: skull::charged(e),
+            horse: horse_look(e, p),
             ..Look::default()
         },
+    }
+}
+
+/// The horse metadata and the eased animation of the frame.
+fn horse_look(e: &Entity, partial: f32) -> HorseLook {
+    let [grass, angry, mouth] = e.anim.horse.progress(partial);
+    HorseLook {
+        kind: e.meta.horse.unwrap_or(0),
+        flags: e.meta.horse_flags.unwrap_or(0),
+        variant: e.meta.horse_variant.unwrap_or(0),
+        armor: e.meta.horse_armor.unwrap_or(0),
+        grass,
+        angry,
+        mouth,
     }
 }
 

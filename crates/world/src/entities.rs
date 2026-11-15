@@ -135,6 +135,10 @@ pub struct SizeMeta {
     pub horse: Option<u8>,
     /// Horse flags (index 16, an int): tame, saddled, chested.
     pub horse_flags: Option<i32>,
+    /// Horse variant (index 20, an int): the coat in the low byte, the markings in the next.
+    pub horse_variant: Option<i32>,
+    /// Horse armor tier (index 22, an int): 0 none, 1 iron, 2 gold, 3 diamond.
+    pub horse_armor: Option<i32>,
     pub always_name: Option<u8>,
     pub skeleton: Option<u8>,
     /// Arrows: metadata index 16, bit 1 is `getIsCritical`.
@@ -166,6 +170,8 @@ impl SizeMeta {
         self.guardian = new.guardian.or(self.guardian);
         self.horse = new.horse.or(self.horse);
         self.horse_flags = new.horse_flags.or(self.horse_flags);
+        self.horse_variant = new.horse_variant.or(self.horse_variant);
+        self.horse_armor = new.horse_armor.or(self.horse_armor);
         self.always_name = new.always_name.or(self.always_name);
         self.skeleton = new.skeleton.or(self.skeleton);
         self.arrow = new.arrow.or(self.arrow);
@@ -634,6 +640,7 @@ impl Entity {
         self.sheep_timer = (self.sheep_timer - 1).max(0);
         self.anim.begging = self.meta.begging == Some(1);
         self.anim.tick();
+        self.anim.horse.tick(self.meta.horse_flags.unwrap_or(0));
     }
 
     fn set_metadata(

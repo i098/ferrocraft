@@ -2585,8 +2585,19 @@ async fn request_device(
         }
     }
     let adapter = adapter.expect("no wgpu adapter found");
+    // The entity skin atlas stacks 64 pixel slots and outgrew the default 8192; every desktop adapter reaches 16384.
+    let limits = wgpu::Limits {
+        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384),
+        ..wgpu::Limits::default()
+    };
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                required_limits: limits,
+                ..Default::default()
+            },
+            None,
+        )
         .await
         .expect("request wgpu device");
     (adapter, device, queue)

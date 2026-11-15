@@ -661,10 +661,10 @@ impl App {
         d.team_tag = TeamTag {
             shown: sb.name_tag_shown(name, &self.args.username),
             below: sb.below_name(name),
+            outline: sb.outline_color(name),
         };
     }
 
-    /// The local player as a model, for F5 views.
     /// The player who cast a fishing rod, as `FishingBobberRenderer` reads it.
     fn thrower(&self, id: i32, frac: f64) -> Option<Thrower> {
         let f = frac as f32;
@@ -939,6 +939,7 @@ impl App {
         );
         r.set_mod_look(hurt, glint);
         r.set_entities(&draws);
+        r.set_entity_outlines(play::outline_draws(&self.game, &self.input, &draws));
         r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));

@@ -1,7 +1,17 @@
 //! Client `Scoreboard` (objectives, scores, display slots, teams) and `GuiIngame.renderScoreboard`.
 
-use crate::toolkit::{Gui, FONT_HEIGHT};
+use crate::toolkit::{color_code, format_from, Gui, FONT_HEIGHT};
 use std::collections::HashMap;
+
+/// `FontRenderer.colorCode` index of each formatting char.
+const FORMAT_CHARS: &str = "0123456789abcdefklmnor";
+
+/// `TextRenderer.getColor(isolateFormatting(prefix).charAt(1))`.
+pub(crate) fn prefix_color(prefix: &str) -> Option<u32> {
+    let code = format_from(prefix).chars().nth(1)?;
+    let i = FORMAT_CHARS.find(code.to_ascii_lowercase())?;
+    Some(color_code(i))
+}
 
 /// Display slot 0: the tab list. 1: the sidebar. 2: below the name. 3 to 18: the sidebar of one team color.
 pub const SLOT_LIST: u8 = 0;
@@ -168,6 +178,13 @@ impl Scoreboard {
             Visibility::HideForOtherTeams => mine.is_none_or(same),
             Visibility::HideForOwnTeam => mine.is_none_or(|m| !same(m)),
         })
+    }
+
+    /// `LivingEntityRenderer.setupSolidState`: the color of the team prefix, which tints a player's
+    /// spectator outline; `None` (white) without a team or a prefix code.
+    pub fn outline_color(&self, player: &str) -> Option<u32> {
+        self.team_of(player)
+            .and_then(|(_, t)| prefix_color(&t.prefix))
     }
 
     /// `RenderPlayer.renderNameTag`: the line below a player's tag, `"<score> <objective>"`.

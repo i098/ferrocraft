@@ -33,20 +33,4 @@ pub(super) fn pose(held: i16) -> Mat {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The oracle's `Item.isWielded` list: swords and tools lift by 0.1875 and shrink to 0.625; the
-    /// rod and the carrot on a stick turn half a turn first; a bow, a potion and an unlisted item are not wielded.
-    #[test]
-    fn wielded_items_take_the_full_3d_pose() {
-        let near = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
-        let at = |id, p| crate::hand::point(&pose(id), p);
-        assert!(near(at(276, [0.0; 3]), [0.0625, 0.0625, 0.0]));
-        assert!(near(at(276, [1.0; 3]), [0.6875, -0.5625, 0.625]));
-        assert!(near(at(346, [0.0; 3]), [-0.0625, 0.0, 0.0]));
-        assert!(near(at(398, [0.0; 3]), [-0.0625, 0.0, 0.0]));
-        assert!(!is_wielded(261) && !is_wielded(259) && !is_wielded(287));
-        assert!(is_wielded(369) && is_wielded(280) && is_wielded(352));
-    }
-}
+mod tests;

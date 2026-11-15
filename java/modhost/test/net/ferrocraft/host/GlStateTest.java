@@ -96,6 +96,11 @@ public final class GlStateTest {
         check(f.boxes.get(1)[0] == 1 && f.boxes.get(1)[3] == 4, "the sized quad's box");
         check(f.tint == 0x80FFFFFF && f.blend == 0, "tint " + Integer.toHexString(f.tint));
         check(f.pixels[0] == RED && f.pixels[1] == GREEN && f.pixels[2] == BLUE && f.pixels[3] == CLEAR, "the uploaded 2 x 2 picture");
+        texturedModalRect(g);
+
+    }
+
+    private static void texturedModalRect(Class<?> g) throws Exception {
         // Gui.drawTexturedModalRect is an instance method: u and v count in 256 units: 128 of 256 is one of the 2 texels.
         Object gui0 = g.getConstructor().newInstance();
         g.getMethod("func_73729_b", int.class, int.class, int.class, int.class, int.class, int.class)
@@ -115,6 +120,14 @@ public final class GlStateTest {
     private static byte[] stubGui() {
         org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
         cw.visit(org.objectweb.asm.Opcodes.V1_6, org.objectweb.asm.Opcodes.ACC_PUBLIC, "net/minecraft/client/gui/Gui", null, "java/lang/Object", null);
+        stubConstructor(cw);
+        stubMethod(cw, "func_152125_a", "(IIFFIIIIFF)V", true);
+        stubMethod(cw, "func_146110_a", "(IIFFIIFF)V", true);
+        stubMethod(cw, "func_73729_b", "(IIIIII)V", false);
+        return cw.toByteArray();
+    }
+
+    private static void stubConstructor(org.objectweb.asm.ClassWriter cw) {
         org.objectweb.asm.MethodVisitor c = cw.visitMethod(org.objectweb.asm.Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
         c.visitCode();
         c.visitVarInsn(org.objectweb.asm.Opcodes.ALOAD, 0);
@@ -122,10 +135,6 @@ public final class GlStateTest {
         c.visitInsn(org.objectweb.asm.Opcodes.RETURN);
         c.visitMaxs(0, 0);
         c.visitEnd();
-        stubMethod(cw, "func_152125_a", "(IIFFIIIIFF)V", true);
-        stubMethod(cw, "func_146110_a", "(IIFFIIFF)V", true);
-        stubMethod(cw, "func_73729_b", "(IIIIII)V", false);
-        return cw.toByteArray();
     }
 
     private static void stubMethod(org.objectweb.asm.ClassWriter cw, String name, String desc, boolean isStatic) {

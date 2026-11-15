@@ -280,6 +280,14 @@ impl Post {
         &self.targets[0]
     }
 
+    /// `PostChain.getTempTarget`: the color texture of a target the chain declares.
+    pub fn target(&self, name: &str) -> Option<&wgpu::TextureView> {
+        self.names
+            .iter()
+            .position(|n| n == name)
+            .map(|i| &self.targets[i])
+    }
+
     /// `PostChain.resize`: every target takes the window size, as vanilla resizes them all.
     pub fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32) {
         self.size = (w, h);

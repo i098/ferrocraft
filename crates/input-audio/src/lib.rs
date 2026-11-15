@@ -680,6 +680,11 @@ impl InputState {
         self.is_held(Bind::PlayerList)
     }
 
+    /// `GameSettings.keyBindSpectatorOutlines.isKeyDown()`.
+    pub fn spectator_outlines_held(&self) -> bool {
+        self.is_held(Bind::SpectatorOutlines)
+    }
+
     pub fn chat_input(&self) -> Option<&str> {
         self.chat.as_ref().map(|f| f.text.as_str())
     }

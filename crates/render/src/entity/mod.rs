@@ -19,6 +19,7 @@ pub mod item;
 pub(crate) mod mobs;
 mod mobs2;
 mod mobs3;
+pub(crate) mod outline;
 mod projectile;
 pub(crate) mod shadow;
 mod sheep;
@@ -124,6 +125,8 @@ pub struct TeamTag {
     pub shown: Option<bool>,
     /// The `"<score> <objective>"` line of display slot 2 (`BELOW_NAME`).
     pub below: Option<String>,
+    /// RGB of the team prefix color that tints the spectator outline; `None` draws it white.
+    pub outline: Option<u32>,
 }
 
 /// Per-entity appearance data that comes from metadata and the profile.

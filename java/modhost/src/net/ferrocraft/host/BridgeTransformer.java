@@ -377,7 +377,7 @@ public class BridgeTransformer implements IClassTransformer {
 
     static InsnList forward(MethodNode m, String owner, String name, String desc) {
         InsnList l = new InsnList();
-        loads(l, m, isStatic(m) ? 0 : 1); // an instance method passes its arguments, not `this`
+        loads(l, m, 0);
         call(l, owner, name, desc);
         l.add(new InsnNode(Type.getReturnType(m.desc).getOpcode(Opcodes.IRETURN)));
         return l;

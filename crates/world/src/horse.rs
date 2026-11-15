@@ -109,14 +109,16 @@ mod tests {
     fn eating_eases_up_and_rearing_cuts_it_off() {
         let mut a = HorseAnim::default();
         a.tick(EATING_HAY);
-        assert!((a.progress(1.0)[0] - 0.05).abs() < 1e-6);
+        assert!((a.progress(1.0)[0] - 0.45).abs() < 1e-6);
         assert_eq!(a.progress(0.0)[0], 0.0);
         for _ in 0..20 {
             a.tick(EATING_HAY);
         }
         assert_eq!(a.progress(1.0)[0], 1.0);
         a.tick(EATING_HAY | ANGRY);
-        assert_eq!(a.progress(1.0), [0.0, 0.05, 0.0]);
+        let p = a.progress(1.0);
+        assert_eq!((p[0], p[2]), (0.0, 0.0));
+        assert!((p[1] - 0.45).abs() < 1e-6);
         for _ in 0..20 {
             a.tick(0);
         }

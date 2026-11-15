@@ -266,6 +266,8 @@ pub struct Entity {
     pub explosions: Vec<FireworkExplosion>,
     /// Slimes and magma cubes: the jump squish.
     pub squish: crate::squish::Squish,
+    /// Squids: the tentacle, roll and body turn animation.
+    pub squid: crate::squid::Squid,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -355,6 +357,8 @@ struct Target {
 /// Interpolation steps vanilla uses for remote entities (`newPosRotationIncrements`).
 const STEPS: u32 = 3;
 const DEATH_TICKS: i32 = 20;
+/// Mob id of the squid.
+const SQUID: u8 = 94;
 
 fn angle(raw: i8) -> f32 {
     f32::from(raw) * 360.0 / 256.0
@@ -415,6 +419,7 @@ impl Entity {
             title: String::new(),
             owner: 0,
             squish: crate::squish::Squish::default(),
+            squid: crate::squid::Squid::new(id, yaw),
         }
     }
 
@@ -549,7 +554,8 @@ impl Entity {
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
         self.prev_pos = self.pos;
         (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
-        if self.target.steps > 0 {
+        let interpolating = self.target.steps > 0;
+        if interpolating {
             let n = f64::from(self.target.steps);
             for i in 0..3 {
                 self.pos[i] += (self.target.pos[i] - self.pos[i]) / n;
@@ -580,6 +586,17 @@ impl Entity {
         }
         if let Kind::Mob(id @ (55 | 62)) = self.kind {
             self.squish.tick(self.on_ground, id == 62);
+        }
+        if self.kind == Kind::Mob(SQUID) {
+            // Water is not queried here: a squid is taken to swim (see `Squid::tick`).
+            self.squid.tick(
+                &mut self.vel,
+                [dx, dz],
+                self.yaw,
+                interpolating,
+                true,
+                &mut self.head_yaw,
+            );
         }
         if self.hurt_time > 0 {
             self.hurt_time -= 1;
@@ -629,6 +646,9 @@ impl Entity {
     fn set_status(&mut self, status: i8) {
         if let Kind::Mob(m) = self.kind {
             self.anim.set_status(m, status);
+            if m == SQUID {
+                self.squid.set_status(status);
+            }
         }
         match status {
             // `handleStatusUpdate(2)`: the hit also kicks the limb swing to 1.5.

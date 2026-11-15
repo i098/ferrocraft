@@ -800,12 +800,14 @@ fn tint_of(class: Class) -> [f32; 3] {
     }
 }
 
-/// `getDeathMaxRotation` in radians: 90 degrees, 180 for the endermite.
+/// `getDeathMaxRotation` in radians: 90 degrees, 180 for the spider, cave spider, silverfish
+/// (`RenderSpider`, `RenderSilverfish`) and endermite.
 fn death_max_rotation(class: Class) -> f32 {
-    if class == Class::Mob(endermite::ENDERMITE) {
-        endermite::DEATH_YAW.to_radians()
-    } else {
-        FRAC_PI_2
+    match class {
+        Class::Mob(mobs::SPIDER | mobs::CAVE_SPIDER | mobs::SILVERFISH | endermite::ENDERMITE) => {
+            endermite::DEATH_YAW.to_radians()
+        }
+        _ => FRAC_PI_2,
     }
 }
 
@@ -1097,7 +1099,7 @@ impl Xf {
         };
         let (st, ct) = (180.0 - body_yaw).to_radians().sin_cos();
         // Dead mobs fall onto their side over 20 ticks (`getDeathMaxRotation` 90 degrees, 180 for
-        // the endermite).
+        // the spiders, silverfish and endermite).
         let max_fall = death_max_rotation(d.class);
         let fall = if d.death_time > 0.0 {
             ((d.death_time - 1.0).max(0.0) / 20.0 * 1.6).sqrt().min(1.0) * max_fall

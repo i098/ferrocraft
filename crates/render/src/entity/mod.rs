@@ -723,8 +723,8 @@ fn wrap(mut d: f32) -> f32 {
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
     const MODELED: [u8; 27] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 67, 90, 91, 92, 93, 94, 95, 96, 97, 98,
-        99, 101, 120,
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 66, 67, 90, 91, 92, 93, 94, 95, 96, 97,
+        98, 99, 101, 120,
     ];
     MODELED.contains(&id)
 }

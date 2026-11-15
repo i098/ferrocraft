@@ -21,6 +21,7 @@ mod mobs2;
 mod mobs3;
 pub(crate) mod outline;
 mod projectile;
+mod rabbit;
 pub(crate) mod shadow;
 mod sheep;
 mod skin;
@@ -150,12 +151,14 @@ pub struct Look {
     pub id: i32,
     /// Living entities: metadata 9, arrows stuck in the body.
     pub arrows: u8,
-    /// Wolf: metadata byte 20, the collar dye damage value. Ocelot: metadata byte 18, the cat type.
+    /// Wolf: metadata byte 20, the collar dye damage value. Ocelot: metadata byte 18, the cat type. Rabbit: metadata byte 18, the rabbit type.
     pub collar: u8,
     /// Wolf: metadata float 18, the health that sets the tail angle of a tame wolf.
     pub health: f32,
     /// Ocelot: the sprinting flag (metadata 0 bit 3), which picks the run pose.
     pub sprinting: bool,
+    /// Rabbit: `getJumpCompletion`, 0 at rest and 0 to 1 over a jump.
+    pub jump: f32,
     /// Slimes and magma cubes: `prevSquishFactor` eased to `squishFactor` by the partial tick.
     pub squish: f32,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
@@ -181,6 +184,7 @@ impl Default for Look {
             collar: 14,
             health: 1.0,
             sprinting: false,
+            jump: 0.0,
             squish: 0.0,
             eat_timer: 0,
             golem_attack: 0,
@@ -682,8 +686,8 @@ fn wrap(mut d: f32) -> f32 {
 
 /// Mob ids with a ported model; every other mob draws as a tinted box.
 pub(crate) fn has_model(id: u8) -> bool {
-    const MODELED: [u8; 21] = [
-        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 95, 98, 99, 120,
+    const MODELED: [u8; 22] = [
+        50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 65, 90, 91, 92, 93, 95, 98, 99, 101, 120,
     ];
     MODELED.contains(&id)
 }
@@ -713,6 +717,7 @@ fn adult_model(d: &EntityDraw) -> Model {
         Class::Mob(id) => mobs::build(d, id)
             .or_else(|| mobs2::build(d, id))
             .or_else(|| mobs3::build(d, id))
+            .or_else(|| rabbit::build(d, id))
             .unwrap_or_else(|| generic(d)),
         Class::Object(78) => armorstand::model(d),
         _ => generic(d),

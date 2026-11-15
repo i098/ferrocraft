@@ -18,6 +18,7 @@ mod own_sounds;
 mod pack;
 mod play;
 mod screen;
+mod vehicle;
 
 use crate::args::Args;
 use crate::game::{eye_height, Game};
@@ -830,6 +831,7 @@ impl App {
             d.view = [cam.yaw, cam.pitch];
             self.team_tag(e, d);
             self.held_and_line(e, d, frac);
+            vehicle::snap(&self.game.store, e, d);
         }
         self.mod_drawn = mod_world::Drawn::ask(
             self.mods.as_ref(),
@@ -1600,6 +1602,7 @@ fn entity_draw(
             golem_attack: e.anim.golem_attack,
             golem_rose: e.anim.golem_rose,
             partial: p,
+            vehicle: vehicle::look(e),
             ..Look::default()
         },
     }

@@ -134,33 +134,34 @@ public final class GlState {
         float sx = u * t.w / tw, sy = v * t.h / th, sw = uw * t.w / tw, sh = vh * t.h / th;
         int ow = Math.max(1, Math.round(sw)), oh = Math.max(1, Math.round(sh));
         if ((long) ow * oh > MAX_QUAD_PIXELS) return;
-        String key = sx + "," + sy + "," + sw + "," + sh;
+        String key = blend + "," + (blend ? 0 : alpha) + "," + sx + "," + sy + "," + sw + "," + sh;
         String name = t.names.get(key);
         int[] part = null;
         if (name == null) {
-            part = region(t, sx, sy, sw, sh, ow, oh);
+            part = region(t, sx, sy, sw, sh, ow, oh, blend, alpha);
             name = "tex:" + sha256(ow, oh, part);
             t.names.put(key, name);
         }
         byte[] png = null;
         if (!Sink.defined(name)) {
-            if (part == null) part = region(t, sx, sy, sw, sh, ow, oh);
+            if (part == null) part = region(t, sx, sy, sw, sh, ow, oh, blend, alpha);
             png = png(ow, oh, part);
         }
-        Sink.image(name, png, x, y, x + w, y + h, tint(), false, blendMode());
+        Sink.image(name, png, x, y, x + w, y + h, blend ? tint() : tint() | 0xFF000000, false, blendMode());
     }
 
     private static boolean drawable(int uw, int vh, int w, int h, float tw, float th) {
         return tw > 0 && th > 0 && uw > 0 && vh > 0 && w != 0 && h != 0;
     }
 
-    private static int[] region(Tex t, float sx, float sy, float sw, float sh, int ow, int oh) {
+    private static int[] region(Tex t, float sx, float sy, float sw, float sh, int ow, int oh, boolean blended, float a) {
         int[] out = new int[ow * oh];
         for (int j = 0; j < oh; j++) {
             int ty = Math.floorMod((int) Math.floor(sy + (j + 0.5f) * sh / oh), t.h);
             for (int i = 0; i < ow; i++) {
                 int tx = Math.floorMod((int) Math.floor(sx + (i + 0.5f) * sw / ow), t.w);
-                out[j * ow + i] = t.px[ty * t.w + tx];
+                int p = t.px[ty * t.w + tx];
+                out[j * ow + i] = blended ? p : (p >>> 24) / 255f * a > 0.1f ? p | 0xFF000000 : p & 0xFFFFFF;
             }
         }
         return out;

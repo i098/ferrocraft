@@ -45,13 +45,15 @@ public final class GlStateTest {
         // Part (1,1)-(3,3): row 1 is [RED, GREEN] and row 2 is [CLEAR, CLEAR].
         for (int i = 0; i < 4; i++) check(f.pixels[i] == want[i], "pixel " + i + " is " + Integer.toHexString(f.pixels[i]));
 
-        // Another upload changes the picture and its name; blending off draws with source alpha over.
+        // Another upload changes the picture and its name; blending off draws opaque.
         GlState.texSubImage(3553, 0, 1, 1, 1, 1, 32993, 33639, IntBuffer.wrap(new int[] {BLUE}));
         GlState.disable(3042);
         GlState.quad(10, 20, 1f, 1f, 2, 2, 8, 8, 4f, 4f);
         Frame g = Frame.read(Sink.take(false));
         check(g.names.size() == 1 && !g.names.get(0).equals(f.names.get(0)), "an upload gives the picture another name");
         check(g.blend == 0, "blend off is source alpha over");
+        check(g.tint >>> 24 == 0xFF, "blend off draws opaque");
+        check(g.pixels[0] >>> 24 == 0xFF && g.pixels[1] >>> 24 == 0xFF && g.pixels[2] >>> 24 == 0 && g.pixels[3] >>> 24 == 0, "blend off keeps opaque texels and alpha-tests transparent ones out");
 
         // A bound texture that holds no pixels draws nothing.
         GlState.bindTexture(3553, 99);

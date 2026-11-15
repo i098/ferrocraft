@@ -20,6 +20,10 @@ import java.util.Set;
  * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
+    /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
+    private static final int CROSSHAIR = 1 << 4;
+    private static boolean crosshair;
+    private static boolean textured;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
     private static final float[][] STACK = new float[DEPTH][3];
@@ -163,11 +167,16 @@ public final class Sink {
 
     /** The image {@code name} (defined with {@code data} the first time) in the box x0 y0 x1 y1. */
     public static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor) {
-        image(name, data, x0, y0, x1, y1, argb, recolor, 0);
+        emit(name, data, x0, y0, x1, y1, argb, recolor, 0);
     }
 
     /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
     static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
+        textured = true;
+        emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
+    }
+
+    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
         float[] m = STACK[top];
         try {
             if (DEFINED.add(name)) {
@@ -211,6 +220,15 @@ public final class Sink {
 
     /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */
     static synchronized void hud(int bits) {
+        if ((bits & CROSSHAIR) != 0) {
+            crosshair = true;
+            bits &= ~CROSSHAIR;
+            if (bits == 0) return;
+        }
+        writeHud(bits);
+    }
+
+    private static void writeHud(int bits) {
         try {
             out.writeByte('H');
             out.writeInt(bits);
@@ -235,6 +253,9 @@ public final class Sink {
 
     /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
     static synchronized byte[] take(boolean modScreen) {
+        if (crosshair && textured) writeHud(CROSSHAIR);
+        crosshair = false;
+        textured = false;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {

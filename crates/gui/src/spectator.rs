@@ -162,6 +162,13 @@ impl Category {
     }
 }
 
+/// `LivingEntityRenderer.setupSolidState`: the color of the team prefix, which tints a player's
+/// spectator outline; `None` (white) without a team or a prefix code.
+pub fn outline_color(sb: &Scoreboard, player: &str) -> Option<u32> {
+    sb.team_of(player)
+        .and_then(|(_, t)| prefix_color(&t.prefix))
+}
+
 /// `TextRenderer.getColor(isolateFormatting(prefix).charAt(1))`.
 fn prefix_color(prefix: &str) -> Option<u32> {
     let code = format_from(prefix).chars().nth(1)?;

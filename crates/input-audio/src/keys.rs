@@ -32,11 +32,13 @@ pub enum Bind {
     Screenshot,
     Perspective,
     Fullscreen,
+    /// `key.spectatorOutlines`: unbound by default.
+    SpectatorOutlines,
     /// Hotbar slot 0..=8.
     Hotbar(u8),
 }
 
-const BIND_COUNT: usize = 27;
+const BIND_COUNT: usize = 28;
 
 impl Bind {
     pub const ALL: [Bind; BIND_COUNT] = [
@@ -58,6 +60,7 @@ impl Bind {
         Bind::Screenshot,
         Bind::Perspective,
         Bind::Fullscreen,
+        Bind::SpectatorOutlines,
         Bind::Hotbar(0),
         Bind::Hotbar(1),
         Bind::Hotbar(2),
@@ -82,24 +85,24 @@ impl Bind {
     }
 
     /// `GameSettings` default key.
-    pub fn default_control(self) -> Control {
+    pub fn default_control(self) -> Option<Control> {
         match self {
-            Bind::Hotbar(n) => Control::Key(HOTBAR_KEYS[usize::from(n.min(8))]),
+            Bind::Hotbar(n) => Some(Control::Key(HOTBAR_KEYS[usize::from(n.min(8))])),
             _ => BASE_BINDS[self.index()].1,
         }
     }
 }
 
 use KeyCode as K;
-const fn key(k: KeyCode) -> Control {
-    Control::Key(k)
+const fn key(k: KeyCode) -> Option<Control> {
+    Some(Control::Key(k))
 }
-const fn mouse(b: MouseButton) -> Control {
-    Control::Mouse(b)
+const fn mouse(b: MouseButton) -> Option<Control> {
+    Some(Control::Mouse(b))
 }
 
 /// `options.txt` name and default for each non-hotbar bind, in `Bind::ALL` order.
-const BASE_BINDS: [(&str, Control); 18] = [
+const BASE_BINDS: [(&str, Option<Control>); 19] = [
     ("forward", key(K::KeyW)),
     ("left", key(K::KeyA)),
     ("back", key(K::KeyS)),
@@ -118,6 +121,7 @@ const BASE_BINDS: [(&str, Control); 18] = [
     ("screenshot", key(K::F2)),
     ("togglePerspective", key(K::F5)),
     ("fullscreen", key(K::F11)),
+    ("spectatorOutlines", None),
 ];
 
 const HOTBAR_KEYS: [KeyCode; 9] = [
@@ -153,6 +157,7 @@ const VANILLA_ORDER: [Bind; BIND_COUNT] = [
     Bind::Screenshot,
     Bind::Perspective,
     Bind::Fullscreen,
+    Bind::SpectatorOutlines,
     Bind::Hotbar(0),
     Bind::Hotbar(1),
     Bind::Hotbar(2),
@@ -170,7 +175,7 @@ pub struct KeyBindings([Option<Control>; BIND_COUNT]);
 
 impl Default for KeyBindings {
     fn default() -> Self {
-        Self(Bind::ALL.map(|b| Some(b.default_control())))
+        Self(Bind::ALL.map(Bind::default_control))
     }
 }
 

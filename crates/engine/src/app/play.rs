@@ -287,7 +287,7 @@ impl App {
         self.limb_tick();
         let host = self.host_player_tick();
         self.input.blind = self.game.effects.has(world::effects::id::BLINDNESS);
-        // `LocalClientPlayerEntity.tickMovement`: no movement input while `!isCamera()`.
+        // `EntityPlayerSP.updateEntityActionState`: no movement input unless `isCurrentViewEntity()`.
         let input = if playing && self.game.camera.is_none() {
             let native = |s: &mut Self| {
                 s.game
@@ -343,7 +343,7 @@ impl App {
         if self.game.vehicle.is_some() {
             self.send_riding(input);
         } else if self.game.camera.is_none() {
-            // `LocalClientPlayerEntity.sendMovementToServer`: no C03-C06 while `!isCamera()`.
+            // `EntityPlayerSP.onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
             self.send_pose();
         }
         self.sound_tick();

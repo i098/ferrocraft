@@ -1,4 +1,4 @@
-//! `LocalClientPlayerEntity.sendMovementToServer` and `tickMovement` while the camera is another entity.
+//! `EntityPlayerSP.onUpdateWalkingPlayer` and `updateEntityActionState` while the camera is another entity.
 use crate::app::App;
 use crate::args::Args;
 use crate::link::Link;
@@ -157,7 +157,12 @@ fn camera_packet_stops_and_resumes_movement_packets() {
     app.input.on_key(KeyCode::ShiftLeft, true, None);
     assert!(!app.ui.is_open(), "screen open");
 
-    let camera = |id| cb::Camera { camera_id: VarInt(id) }.into();
+    let camera = |id| {
+        cb::Camera {
+            camera_id: VarInt(id),
+        }
+        .into()
+    };
     send(&out, camera(OTHER_ID));
     pump_until(&mut app, |a| a.game.camera == Some(OTHER_ID));
     let (ids, moved) = tick(&mut app, &rx);

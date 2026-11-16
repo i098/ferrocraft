@@ -114,7 +114,10 @@ fn swing_length_follows_the_servers_effect_packets() {
         a.s.send_swing().unwrap();
         a.drain(300);
         b.drain(300);
-        assert!(b.entities.get(a.id).unwrap().swinging, "{line}: no swing seen");
+        assert!(
+            b.entities.get(a.id).unwrap().swinging,
+            "{line}: no swing seen"
+        );
         let ticks = b.swing_ticks(a.id);
         println!("{line}: observer swing = {ticks} ticks (vanilla duration {want})");
         assert_eq!(ticks, want + 1, "{line}: observer swing length");

@@ -259,6 +259,7 @@ fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
                 .as_ref()
                 .map_or_else(String::new, |i| i.name_tag_visibility.clone()),
             color: p.info.as_ref().map_or(0, |i| i.color),
+            friendly: p.info.as_ref().map_or(0, |i| i.friendly_fire),
             members: p.players.clone().unwrap_or_default(),
         },
         _ => return None,
@@ -604,6 +605,7 @@ mod tests {
                 suffix: "§r".into(),
                 visibility: "always".into(),
                 color: 12,
+                friendly: 0,
                 members: vec!["Steve".into()],
             }]
         );

@@ -625,6 +625,7 @@ impl App {
                 suffix,
                 visibility,
                 color,
+                friendly,
                 members,
             } => {
                 let info = TeamInfo {
@@ -633,6 +634,7 @@ impl App {
                     suffix,
                     visibility,
                     color,
+                    friendly,
                 };
                 sb.set_team(&name, mode, &info, &members);
             }

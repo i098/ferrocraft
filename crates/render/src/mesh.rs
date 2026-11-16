@@ -1,4 +1,5 @@
-//! CPU chunk meshing: one quad per visible block face with vanilla smooth lighting and ambient occlusion,
+//! CPU chunk meshing: one quad per visible block face with vanilla smooth lighting and ambient occlusion
+//! (one flat light per face when smooth lighting is off),
 //! plus crosses, liquids and box shapes (faces next to an opaque block are culled, including across chunk borders).
 
 use crate::assets::Atlas;

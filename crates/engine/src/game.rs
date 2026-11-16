@@ -257,6 +257,16 @@ pub struct Game {
 const WATER_BREATHING: i8 = 13;
 
 impl Game {
+    /// Third-person camera distance from `eye` back along `dir`, stopped by block shapes.
+    pub fn camera_distance(&self, eye: [f64; 3], dir: [f64; 3], max_dist: f64) -> f64 {
+        world::camera::camera_distance(
+            &|p| self.store.get_block(p[0], p[1], p[2]),
+            eye,
+            dir,
+            max_dist,
+        )
+    }
+
     /// Respiration level of the worn helmet; window 0 slots 5 to 8 are the armor, enchantment 5.
     pub fn respiration(&self) -> i32 {
         world::dig::highest_enchant_level(&self.inv.player[5..=8], 5)

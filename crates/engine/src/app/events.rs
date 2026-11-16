@@ -733,7 +733,7 @@ impl App {
     }
 
     /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.
-    fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
+    pub(super) fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
         let at = pos.map(|v| f64::from(v) + 0.5);
         if let Some(s) = &mut self.sound {
             s.play_effect(id, data, at);

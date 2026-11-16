@@ -157,14 +157,6 @@ pub fn wire_pitch(byte: u8) -> f32 {
 pub fn effect_sound(id: i32, random: f32, random2: f32) -> Option<(&'static str, f32, f32)> {
     let mob = (random - random2) * 0.2 + 1.0;
     let anvil = random * 0.1 + 0.9;
-    if id == 1003 {
-        let door = if random < 0.5 {
-            "random.door_open"
-        } else {
-            "random.door_close"
-        };
-        return Some((door, 1.0, anvil));
-    }
     const FIXED: &[(i32, &str, f32, f32)] = &[
         (1000, "random.click", 1.0, 1.0),
         (1001, "random.click", 1.0, 1.2),
@@ -184,6 +176,8 @@ pub fn effect_sound(id: i32, random: f32, random2: f32) -> Option<(&'static str,
         (1017, "mob.zombie.unfect", 2.0),
     ];
     const ANVIL: &[(i32, &str, f32)] = &[
+        (1003, "random.door_open", 1.0),
+        (1006, "random.door_close", 1.0),
         (1020, "random.anvil_break", 1.0),
         (1021, "random.anvil_use", 1.0),
         (1022, "random.anvil_land", 0.3),
@@ -212,6 +206,17 @@ mod tests {
         assert_eq!(BlockSound::of(20).dig().0, "dig.glass");
         assert_eq!(wire_pitch(63), 1.0);
         assert_eq!(wire_pitch(10), 0.5);
+    }
+
+    #[test]
+    fn door_events_open_and_close_with_vanilla_pitch() {
+        let (n, v, p) = effect_sound(1003, 0.5, 0.9).unwrap();
+        assert_eq!((n, v), ("random.door_open", 1.0));
+        assert!((p - 0.95).abs() < 1e-6);
+        for r in [0.0, 0.7] {
+            assert_eq!(effect_sound(1006, r, 0.0).unwrap().0, "random.door_close");
+            assert_eq!(effect_sound(1003, r, 0.0).unwrap().0, "random.door_open");
+        }
     }
 
     #[test]

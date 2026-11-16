@@ -951,6 +951,11 @@ impl Game {
         }
     }
 
+    /// The outline box of the block under the crosshair, when `outline::draws` allows it.
+    pub fn outline(&self, hide_hud: bool, ray: Option<crate::outline::Ray>) -> Option<[f64; 6]> {
+        crate::outline::selection(self, hide_hud, ray)
+    }
+
     /// A selectable block lies between `from` and `to`.
     pub fn line_blocked(&self, from: [f64; 3], to: [f64; 3]) -> bool {
         self.block_dist(from, to).is_some()

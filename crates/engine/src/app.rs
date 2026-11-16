@@ -1005,12 +1005,7 @@ impl App {
         r.set_entity_outlines(play::outline_draws(&self.game, &self.input, &draws));
         r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
-        r.set_selection(
-            ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
-                self.game.block_aim(eye, yaw, pitch, id, vehicle)
-            })
-            .and_then(|(hit, _)| self.game.selection(hit)),
-        );
+        r.set_selection(self.game.outline(self.hide_hud, ray));
         r.set_lines(
             self.mod_drawn
                 .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes),

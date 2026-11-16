@@ -11,6 +11,7 @@
 
 pub mod body;
 pub mod border;
+pub mod camera;
 pub mod chunk;
 pub mod dig;
 pub mod door;

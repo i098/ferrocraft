@@ -634,15 +634,7 @@ impl App {
             (yaw, pitch)
         };
         let dir = look_vector(yaw, pitch);
-        let mut dist = 0.0;
-        while dist < max_dist {
-            let next = dist + 0.1;
-            let at = [0, 1, 2].map(|i| (eye[i] - dir[i] * next).floor() as i32);
-            if render::is_solid(self.game.store.get_block(at[0], at[1], at[2])) {
-                break;
-            }
-            dist = next;
-        }
+        let dist = self.game.camera_distance(eye, dir, max_dist);
         Camera {
             pos: [0, 1, 2].map(|i| eye[i] - dir[i] * dist),
             yaw,

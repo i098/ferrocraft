@@ -732,8 +732,26 @@ impl App {
         }
     }
 
+    /// Client half of `DoorBlock`, `TrapdoorBlock` and `FenceGateBlock` `onUse`: toggle the block
+    /// and play the open or close sound. The server skips the clicking player's event.
+    pub(super) fn toggle_openable(&mut self, pos: [i32; 3]) {
+        let yaw = self.game.player.as_ref().map_or(0.0, |p| p.yaw);
+        let store = &self.game.store;
+        let at = |p: [i32; 3]| store.get_block(p[0], p[1], p[2]);
+        let Some(t) = world::door::toggle(&at, pos, yaw) else {
+            return;
+        };
+        for ([x, y, z], state) in t.set {
+            self.game.store.set_block(x, y, z, state);
+            if let (Some(r), Some(c)) = (&mut self.renderer, self.game.store.get(x >> 4, z >> 4)) {
+                r.upload_chunk(&View(c));
+            }
+        }
+        self.world_effect(t.event, pos, 0);
+    }
+
     /// `S28 Effect`: record, door and block-break sounds, and the shards of a broken block.
-    fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
+    pub(super) fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
         let at = pos.map(|v| f64::from(v) + 0.5);
         if let Some(s) = &mut self.sound {
             s.play_effect(id, data, at);

@@ -13,6 +13,7 @@ pub mod body;
 pub mod border;
 pub mod chunk;
 pub mod dig;
+pub mod door;
 pub mod effects;
 pub mod entities;
 pub mod entity_sound;

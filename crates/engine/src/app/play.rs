@@ -1075,6 +1075,9 @@ impl App {
         if let Outcome::Placed(blocks) = outcome {
             self.placed(&blocks);
         }
+        if activated {
+            self.toggle_openable(h.pos);
+        }
         if handled {
             self.game.swing.start();
             let r = self.session_send(|s| s.send_swing());

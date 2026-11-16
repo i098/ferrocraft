@@ -253,7 +253,7 @@ pub struct Entity {
     pub limb_swing: f32,
     pub limb_swing_amount: f32,
     pub prev_limb_swing_amount: f32,
-    /// 0 when idle; counts up to 6 during an arm swing.
+    /// 0 when idle; counts up to `effects.arm_swing_duration()` (6 without Haste or Mining Fatigue) during an arm swing.
     pub swing_ticks: i32,
     pub swinging: bool,
     /// Potion effects from `S1D`/`S1E`; `getArmSwingAnimationEnd` reads Haste and Mining Fatigue.

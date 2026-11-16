@@ -93,22 +93,25 @@ fn horse_click(e: &Entity, held: Option<i16>, sneaking: bool, rider: Rider) -> b
     if adult && rider != Rider::None {
         return false;
     }
-    if let Some(item) = held {
-        if kind == 0 && HORSE_ARMOR.contains(&item) {
-            return true;
-        }
-        if !tame {
-            return true;
-        }
-        let hurt = e.health.is_some_and(|h| h < HORSE_MIN_MAX_HEALTH);
-        let fed = !undead && HORSE_FOOD.contains(&item) && (hurt || baby);
-        let chest = matches!(kind, 1 | 2) && !horse::is_chested(flags) && item == CHEST_BLOCK;
-        let saddle = adult && !horse::is_saddled(flags) && item == SADDLE;
-        if fed || chest || saddle {
-            return true;
-        }
+    if held.is_some_and(|item| horse_item(e, item, tame, baby)) {
+        return true;
     }
     adult
+}
+
+/// A held item that makes the horse take it: armor, a tame-up try, food, a chest or a saddle.
+fn horse_item(e: &Entity, item: i16, tame: bool, baby: bool) -> bool {
+    let kind = e.meta.horse.unwrap_or(0);
+    let flags = e.meta.horse_flags.unwrap_or(0);
+    let undead = kind == 3 || kind == 4;
+    if kind == 0 && HORSE_ARMOR.contains(&item) || !tame {
+        return true;
+    }
+    let hurt = e.health.is_some_and(|h| h < HORSE_MIN_MAX_HEALTH);
+    let fed = !undead && HORSE_FOOD.contains(&item) && (hurt || baby);
+    let chest = matches!(kind, 1 | 2) && !horse::is_chested(flags) && item == CHEST_BLOCK;
+    let saddle = !baby && !horse::is_saddled(flags) && item == SADDLE;
+    fed || chest || saddle
 }
 
 #[cfg(test)]

@@ -22,6 +22,7 @@ mod pack;
 mod play;
 mod screen;
 mod skull;
+mod use_entity;
 mod vehicle;
 
 use limbs::Limbs;

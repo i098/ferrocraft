@@ -998,7 +998,7 @@ impl App {
 
     /// `Minecraft.rightClickMouse`: interact with the entity or the block under the crosshair,
     /// and when neither consumed the click use the held item in the air.
-    fn use_item(&mut self) {
+    pub(super) fn use_item(&mut self) {
         if self.game.is_hitting_block() {
             return;
         }
@@ -1009,27 +1009,9 @@ impl App {
         };
         let dir = look_vector(yaw, pitch);
         let held = self.game.inv.held_stack().clone();
-        let gamemode = self.game.gamemode;
         let aim = self.game.aim(eye, yaw, pitch, skip, vehicle);
         if let Some(Aim::Entity(id, dist)) = aim {
-            let Some(e) = self.game.entities.get(id) else {
-                return;
-            };
-            let at = [0, 1, 2].map(|a| (eye[a] + dir[a] * dist - e.pos[a]) as f32);
-            let handled = gamemode != 3 && e.kind == Kind::Object(78);
-            let rider = world::interact::rider_of(&self.game.entities, self.game.vehicle, id);
-            let held_id = held.as_ref().map(|s| s.id);
-            let consumed =
-                gamemode != 3 && world::interact::client_interact(e, held_id, sneaking, rider);
-            let r = self.session_send(|s| s.interact_entity_at(id, at));
-            self.send_result(r);
-            if handled {
-                return;
-            }
-            let r = self.session_send(|s| s.interact_entity(id));
-            self.send_result(r);
-            // `Minecraft.doUse`: a consumed entity click sends no use-item packet.
-            if consumed {
+            if self.use_entity(id, dist, eye, dir, sneaking, &held) {
                 return;
             }
         } else if let Some(Aim::Block(h, dist)) = aim {
@@ -1625,45 +1607,6 @@ mod tests {
         assert_eq!(sprint_dust_state(pos, 1.8, |_, _, _| 0), None);
         let flooded = |x: i32, y: i32, z: i32| if y >= 64 { water } else { floor(x, y, z) };
         assert_eq!(sprint_dust_state(pos, 1.8, flooded), None);
-    }
-
-    /// `Minecraft.doUse`: a click on an adult villager is consumed, so a sword starts no block.
-    #[test]
-    fn a_click_on_a_villager_starts_no_item_use() {
-        let click = |kind: u8| {
-            let mut app = App::new(crate::args::Args {
-                username: "Player".into(),
-                auth: None,
-                assets_dir: None,
-                server: None,
-                game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
-            });
-            app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
-            app.game.inv.player[36] = Some(world::inventory::ItemStack {
-                id: 267,
-                count: 1,
-                damage: 0,
-                nbt: None,
-            });
-            // Yaw 0 faces +z: the mob stands two blocks ahead of the eye.
-            app.game.entities.apply(EntityEvent::SpawnMob {
-                id: 9,
-                kind,
-                pos: [16, 2048, 96],
-                yaw: 0,
-                pitch: 0,
-                head_yaw: 0,
-                vel: [0; 3],
-                flags: None,
-                name: None,
-                health: None,
-                size: Default::default(),
-            });
-            app.use_item();
-            app.use_ticks
-        };
-        assert_eq!(click(120), 0, "villager");
-        assert_eq!(click(54), 72_000, "zombie: the sword blocks");
     }
 
     #[test]

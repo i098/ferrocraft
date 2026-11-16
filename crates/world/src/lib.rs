@@ -19,6 +19,7 @@ pub mod entities;
 pub mod entity_sound;
 pub mod fluid;
 pub mod horse;
+pub mod interact;
 pub mod inventory;
 pub mod mob_anim;
 pub mod motion_sound;

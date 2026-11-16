@@ -998,7 +998,7 @@ impl App {
 
     /// `Minecraft.rightClickMouse`: interact with the entity or the block under the crosshair,
     /// and when neither consumed the click use the held item in the air.
-    fn use_item(&mut self) {
+    pub(super) fn use_item(&mut self) {
         if self.game.is_hitting_block() {
             return;
         }
@@ -1009,21 +1009,11 @@ impl App {
         };
         let dir = look_vector(yaw, pitch);
         let held = self.game.inv.held_stack().clone();
-        let gamemode = self.game.gamemode;
         let aim = self.game.aim(eye, yaw, pitch, skip, vehicle);
         if let Some(Aim::Entity(id, dist)) = aim {
-            let Some(e) = self.game.entities.get(id) else {
-                return;
-            };
-            let at = [0, 1, 2].map(|a| (eye[a] + dir[a] * dist - e.pos[a]) as f32);
-            let handled = gamemode != 3 && e.kind == Kind::Object(78);
-            let r = self.session_send(|s| s.interact_entity_at(id, at));
-            self.send_result(r);
-            if handled {
+            if self.use_entity(id, dist, eye, dir, sneaking, &held) {
                 return;
             }
-            let r = self.session_send(|s| s.interact_entity(id));
-            self.send_result(r);
         } else if let Some(Aim::Block(h, dist)) = aim {
             if self.use_block(h, dist, eye, dir, sneaking, &held) {
                 return;

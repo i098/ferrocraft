@@ -1,9 +1,15 @@
 //! Horse riding state of `EntityPlayerSP`: the jump charge and the `EntityHorse` metadata flags.
 
+/// `EntityHorse` metadata index 16 flag: the horse is tame (`isTame`).
+const TAME: i32 = 2;
 /// `EntityHorse` metadata index 16 flag: the horse wears a saddle (`isHorseSaddled`).
 const SADDLED: i32 = 4;
 /// `EntityHorse` metadata index 16 flag: a donkey or mule carries a chest (`isChested`).
 const CHESTED: i32 = 8;
+
+pub fn is_tame(flags: i32) -> bool {
+    flags & TAME != 0
+}
 
 pub fn is_saddled(flags: i32) -> bool {
     flags & SADDLED != 0

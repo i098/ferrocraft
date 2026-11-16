@@ -53,10 +53,9 @@ fn renders_synthetic_chunks_to_png() {
         px(w - 5, 5),
         "terrain below the horizon must differ from the sky"
     );
-    assert_eq!(
-        px(w - 5, 5),
-        [121, 167, 255, 255],
-        "top-right shows the sky clear color"
+    assert!(
+        px(w - 5, 5)[0] > 121,
+        "toward the horizon the sky plane fades into the fog color"
     );
 
     let path = std::env::var("RENDER_PNG").unwrap_or_else(|_| {
@@ -1459,4 +1458,43 @@ fn held_bow_and_rod_change_picture_with_draw_and_cast() {
             encode_png(&dir.join(format!("{name}.png")), 854, 480, px).expect("write png");
         }
     }
+}
+
+/// `renderSky` under `setupFog(-1)`: looking down at the void shows the dark lower disc at the
+/// horizon height, faded toward the fog color by `1 - d / far`; looking up shows the sky plane 16
+/// blocks over the eye in the same fog.
+#[test]
+fn sky_plane_and_lower_disc_sit_in_linear_fog() {
+    let env = Environment::default();
+    let s = env.sky_state(0.8, [0.0, -1.0, 0.0]);
+    let far = (env.render_distance_chunks * 16) as f32;
+    let expect = |color: [f32; 3], d: f32| {
+        let f = (1.0 - d / far).clamp(0.0, 1.0);
+        [0, 1, 2].map(|i| ((s.fog[i] * (1.0 - f) + color[i] * f) * 255.0).round())
+    };
+    let lower = [
+        s.sky[0] * 0.2 + 0.04,
+        s.sky[1] * 0.2 + 0.04,
+        s.sky[2] * 0.6 + 0.1,
+    ];
+    let mut r = Renderer::new_offscreen(64, 64, None);
+    r.set_environment(env);
+    let mut center = |pitch: f32| {
+        let cam = Camera {
+            pos: [0.0, 100.0, 0.0],
+            pitch,
+            ..Camera::default()
+        };
+        let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
+        let p = &rgba[(((h / 2) * w + w / 2) * 4) as usize..][..3];
+        [p[0] as f32, p[1] as f32, p[2] as f32]
+    };
+    let close = |got: [f32; 3], want: [f32; 3]| {
+        assert!(
+            (0..3).all(|i| (got[i] - want[i]).abs() <= 2.0),
+            "{got:?} vs {want:?}"
+        );
+    };
+    close(center(90.0), expect(lower, 37.0));
+    close(center(-90.0), expect(s.sky, 16.0));
 }

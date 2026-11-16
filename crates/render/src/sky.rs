@@ -403,36 +403,79 @@ fn add(a: [f32; 3], b: [f64; 3]) -> [f32; 3] {
     [a[0] + b[0] as f32, a[1] + b[1] as f32, a[2] + b[2] as f32]
 }
 
-/// Sky disc, below-horizon disc, sunrise glow and stars, with the camera at `eye`.
-/// `blend` geometry is alpha blended, `solid` geometry replaces the clear color.
+/// `ClientWorld.getHorizonHeight` of a default world.
+const HORIZON: f64 = 63.0;
+
+/// Sky plane, sunrise glow, stars, sun, moon and the dark discs, with the camera at `eye`.
+/// `solid` (the sky plane) and `dark` are drawn in the world fog, `dark` last; `blend` is alpha
+/// blended and `additive` adds, both unfogged.
 pub struct SkyLayers {
     pub solid: SkyGeometry,
     pub blend: SkyGeometry,
     pub additive: SkyGeometry,
+    pub dark: SkyGeometry,
+}
+
+/// `renderSkyHemisphere`: the 13x13 grid of 64-block tiles over -384..448 at height `y`, as one
+/// quad (fog is per pixel, so the tiling changes nothing).
+fn sky_plane(g: &mut SkyGeometry, y: f32, eye: [f64; 3], color: [f32; 4]) {
+    let (a, b) = (-384.0, 448.0);
+    g.solid_quad(
+        [[a, y, a], [a, y, b], [b, y, b], [b, y, a]].map(|p| add(p, eye)),
+        color,
+    );
 }
 
 pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
     let mut solid = SkyGeometry::default();
     let mut blend = SkyGeometry::default();
     let mut additive = SkyGeometry::default();
+    let mut dark = SkyGeometry::default();
     let sky = [s.sky[0], s.sky[1], s.sky[2], 1.0];
-    let r = 512.0;
-    solid.solid_quad(
-        [[-r, 16.0, -r], [-r, 16.0, r], [r, 16.0, r], [r, 16.0, -r]].map(|p| add(p, eye)),
-        sky,
-    );
-    if eye[1] < 63.0 {
-        solid.solid_quad(
-            [
-                [-r, -16.0, -r],
-                [r, -16.0, -r],
-                [r, -16.0, r],
-                [-r, -16.0, r],
-            ]
-            .map(|p| add(p, eye)),
-            [0.0, 0.0, 0.0, 1.0],
-        );
+    sky_plane(&mut solid, 16.0, eye, sky);
+
+    // `renderSky` after the stars: below the horizon a black plane 4 blocks under the eye and a
+    // black shaft around the eye, then always the lower disc at the horizon height.
+    let d0 = eye[1] - HORIZON;
+    if d0 < 0.0 {
+        let black = [0.0, 0.0, 0.0, 1.0];
+        sky_plane(&mut dark, -4.0, eye, black);
+        let bottom = -(d0 + 65.0) as f32;
+        let (x0, x1) = (-1.0, 1.0);
+        for c in [x0, x1] {
+            let walls = [
+                [
+                    [x0, bottom, c],
+                    [x1, bottom, c],
+                    [x1, -1.0, c],
+                    [x0, -1.0, c],
+                ],
+                [
+                    [c, bottom, x0],
+                    [c, bottom, x1],
+                    [c, -1.0, x1],
+                    [c, -1.0, x0],
+                ],
+            ];
+            for w in walls {
+                dark.solid_quad(w.map(|p| add(p, eye)), black);
+            }
+        }
+        for y in [-1.0, bottom] {
+            dark.solid_quad(
+                [[x0, y, x0], [x0, y, x1], [x1, y, x1], [x1, y, x0]].map(|p| add(p, eye)),
+                black,
+            );
+        }
     }
+    // The lower disc sits at the horizon height whatever the eye height.
+    let lower = [
+        s.sky[0] * 0.2 + 0.04,
+        s.sky[1] * 0.2 + 0.04,
+        s.sky[2] * 0.6 + 0.1,
+        1.0,
+    ];
+    sky_plane(&mut dark, -d0 as f32, eye, lower);
 
     // Sunrise and sunset glow (`WorldProvider.calcSunriseSunsetColors`).
     if let Some(col) = sunrise_glow(s.angle) {
@@ -496,6 +539,7 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
         solid,
         blend,
         additive,
+        dark,
     }
 }
 

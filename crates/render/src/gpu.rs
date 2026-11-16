@@ -156,6 +156,7 @@ pub struct Renderer {
     translucent_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
     sky_add_pipe: wgpu::RenderPipeline,
+    sky_fog_pipe: wgpu::RenderPipeline,
     cloud_pipe: wgpu::RenderPipeline,
     /// `renderCloudsFancy` first pass: `colorMask(false, ...)`, depth only.
     cloud_depth_pipe: wgpu::RenderPipeline,
@@ -428,7 +429,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -476,6 +477,7 @@ impl Renderer {
             translucent_pipe,
             sky_pipe,
             sky_add_pipe,
+            sky_fog_pipe,
             cloud_pipe,
             cloud_depth_pipe,
             hand_pipe,
@@ -1718,6 +1720,7 @@ impl Renderer {
         let sky_solid = self.upload_geometry(&layers.solid);
         let sky_blend = self.upload_geometry(&layers.blend);
         let sky_add = self.upload_geometry(&layers.additive);
+        let sky_dark = self.upload_geometry(&layers.dark);
         let clouds = (self.env_tex.has_clouds && env.fluid.is_none())
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
@@ -1811,13 +1814,15 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_bind_group(0, &self.env_group, &[]);
+            // Vanilla order: fogged sky plane, glow, sun, moon, stars, then the fogged dark discs.
+            pass.set_pipeline(&self.sky_fog_pipe);
+            sky_solid.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_pipeline(&self.sky_pipe);
-            [&sky_solid, &sky_blend]
-                .into_iter()
-                .flatten()
-                .for_each(|m| draw_mesh(&mut pass, m));
+            sky_blend.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_pipeline(&self.sky_add_pipe);
             sky_add.iter().for_each(|m| draw_mesh(&mut pass, m));
+            pass.set_pipeline(&self.sky_fog_pipe);
+            sky_dark.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_bind_group(0, &self.world_group, &[]);
             pass.set_pipeline(&self.opaque_pipe);
             self.meshes
@@ -2198,7 +2203,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 20] {
+) -> [wgpu::RenderPipeline; 21] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2337,6 +2342,17 @@ fn build_pipelines(
     let sky_pipe = pipe(
         "vs_world",
         "fs_sky",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        false,
+        false,
+    );
+    // `renderSky` runs under `setupFog(-1)`: the sky plane and the dark discs are fogged.
+    let sky_fog_pipe = pipe(
+        "vs_world",
+        "fs_sky_fog",
         stride,
         &world_attrs,
         alpha,
@@ -2540,6 +2556,7 @@ fn build_pipelines(
         translucent_pipe,
         sky_pipe,
         sky_add_pipe,
+        sky_fog_pipe,
         cloud_pipe,
         cloud_depth_pipe,
         hand_pipe,

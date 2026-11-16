@@ -1,7 +1,5 @@
 //! Player movement physics of Minecraft 1.8.9, ported method by method from vanilla.
 //!
-//! (CI warm-cache probe line; reverted in the next commit.)
-//!
 //! Ported: `PlayerEntity.mobTick` (the movement part of `onLivingUpdate`), `moveEntityWithHeading`
 //! with its water, lava and ladder branches, `moveFlying`, `jump`, `jumpInWater`, `handleWaterMovement`
 //! (water flow push) and `Entity.moveEntity` (axis-wise collision with the real block shapes,

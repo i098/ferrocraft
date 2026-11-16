@@ -44,7 +44,37 @@ pub(crate) fn events(packet: &cb::Packet) -> Vec<NetEvent> {
         .or_else(|| world_event(packet))
         .or_else(|| spawn_event(packet))
         .into_iter()
+        .chain(player_meta(packet))
+        .chain(properties(packet))
         .collect()
+}
+
+/// Absorption (float 17) and air (short 1) of an S1C metadata packet.
+fn player_meta(packet: &cb::Packet) -> Option<NetEvent> {
+    use ferrocraft_protocol::codec::MetaValue;
+    let cb::Packet::EntityMetadata(p) = packet else {
+        return None;
+    };
+    let find = |index| p.metadata.0.iter().find(|e| e.index == index);
+    let absorption = match find(17) {
+        Some(e) => match e.value {
+            MetaValue::Float(f) => Some(f),
+            _ => None,
+        },
+        None => None,
+    };
+    let air = match find(1) {
+        Some(e) => match e.value {
+            MetaValue::Short(s) => Some(s),
+            _ => None,
+        },
+        None => None,
+    };
+    (absorption.is_some() || air.is_some()).then_some(NetEvent::PlayerMeta {
+        entity_id: p.entity_id.0,
+        absorption,
+        air,
+    })
 }
 
 /// S05 SpawnPosition: `World.setSpawnPoint`.
@@ -98,7 +128,6 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
             entity_id: p.entity_id.0,
             effect_id: p.effect_id,
         },
-        P::EntityProperties(p) => movement_speed(p)?,
         P::SetExperience(p) => NetEvent::Experience {
             bar: p.bar,
             level: p.level.0,
@@ -153,16 +182,14 @@ fn container_event(packet: &cb::Packet) -> Option<NetEvent> {
     })
 }
 
-/// The `generic.movementSpeed` instance of an S20 packet.
-fn movement_speed(p: &cb::EntityProperties) -> Option<NetEvent> {
-    let a = p
-        .attributes
-        .0
-        .iter()
-        .find(|a| a.key == "generic.movementSpeed")?;
-    Some(NetEvent::MovementSpeed {
-        entity_id: p.entity_id.0,
-        speed: world::effects::Speed {
+/// The `generic.movementSpeed` and `generic.maxHealth` instances of an S20 packet.
+fn properties(packet: &cb::Packet) -> Vec<NetEvent> {
+    let cb::Packet::EntityProperties(p) = packet else {
+        return Vec::new();
+    };
+    let instance = |key: &str| {
+        let a = p.attributes.0.iter().find(|a| a.key == key)?;
+        Some(world::effects::Speed {
             base: a.value,
             modifiers: a
                 .modifiers
@@ -173,8 +200,16 @@ fn movement_speed(p: &cb::EntityProperties) -> Option<NetEvent> {
                     operation: m.operation,
                 })
                 .collect(),
-        },
-    })
+        })
+    };
+    let entity_id = p.entity_id.0;
+    [
+        instance("generic.movementSpeed").map(|speed| NetEvent::MovementSpeed { entity_id, speed }),
+        instance("generic.maxHealth").map(|health| NetEvent::MaxHealth { entity_id, health }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 fn score_event(packet: &cb::Packet) -> Option<NetEvent> {
@@ -363,6 +398,27 @@ mod tests {
             event: event.clone(),
         });
         assert_eq!(got, vec![NetEvent::Combat(event)]);
+    }
+
+    #[test]
+    fn metadata_absorption_and_air_map() {
+        use ferrocraft_protocol::codec::{MetaEntry, MetaValue, Metadata};
+        let entry = |index, value| MetaEntry { index, value };
+        let got = wire(cb::EntityMetadata {
+            entity_id: VarInt(7),
+            metadata: Metadata(vec![
+                entry(1, MetaValue::Short(120)),
+                entry(17, MetaValue::Float(4.0)),
+            ]),
+        });
+        assert_eq!(
+            got,
+            vec![NetEvent::PlayerMeta {
+                entity_id: 7,
+                absorption: Some(4.0),
+                air: Some(120)
+            }]
+        );
     }
 
     /// Vanilla 1.8.9 writes byte 1 when the effect shows particles (a plain `/effect` sends 1).

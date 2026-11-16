@@ -1223,7 +1223,11 @@ impl App {
             }
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac);
-            let status = status_of(&self.game, self.hud.update_counter);
+            let in_water = self.game.player.as_ref().is_some_and(|p| {
+                let get = |x, y, z| self.game.store.get_block(x, y, z);
+                screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))
+            });
+            let status = status_of(&self.game, self.hud.update_counter, in_water);
             self.hud.selected_slot = i32::from(self.game.inv.held);
             let inv = &self.game.inv;
             let hotbar = self.icons.as_ref().map(|icons| gui::HotbarItems {
@@ -1388,13 +1392,19 @@ fn draw_name_tags(
 }
 
 /// `GuiIngame.renderPlayerStats` inputs from the local player.
-fn status_of(game: &Game, update_counter: i32) -> Status {
+fn status_of(game: &Game, update_counter: i32, in_water: bool) -> Status {
+    let max_health = game.max_health_of(game.entity_id);
     let armor_points: i32 = (5..9)
         .filter_map(|i| game.inv.player[i].as_ref())
         .map(|s| armor_points(s.id))
         .sum();
     Status {
         health: game.health,
+        max_health,
+        absorption: game.absorption,
+        air: game.air,
+        in_water,
+        mount_health: game.mount_health(),
         food: game.food,
         saturation: game.saturation,
         armor: armor_points,
@@ -1407,7 +1417,7 @@ fn status_of(game: &Game, update_counter: i32) -> Status {
         withered: game.effects.has(Fx::WITHER),
         hunger: game.effects.has(Fx::HUNGER),
         regen_tick: if game.effects.has(Fx::REGENERATION) {
-            update_counter % (Status::default().max_health + 5.0).ceil() as i32
+            update_counter % (max_health + 5.0).ceil() as i32
         } else {
             -1
         },
@@ -1734,8 +1744,70 @@ mod tests {
         // Vanilla: updateCounter % ceil(maxHealth + 5) = % 25, independent of current health.
         for health in [1.0, 0.0, -5.0, -20.0] {
             game.health = health;
-            assert_eq!(status_of(&game, 24).regen_tick, 24);
-            assert_eq!(status_of(&game, 25).regen_tick, 0);
+            assert_eq!(status_of(&game, 24, false).regen_tick, 24);
+            assert_eq!(status_of(&game, 25, false).regen_tick, 0);
         }
+    }
+
+    #[test]
+    fn status_reads_absorption_air_max_health_and_water() {
+        use ferrocraft_net_client::NetEvent;
+        use world::effects::Speed;
+        let mut game = Game::new();
+        game.entity_id = 7;
+        game.apply(NetEvent::PlayerMeta {
+            entity_id: 7,
+            absorption: Some(4.0),
+            air: Some(120),
+        });
+        game.apply(NetEvent::MaxHealth {
+            entity_id: 7,
+            health: Speed {
+                base: 20.0,
+                modifiers: vec![world::effects::Modifier {
+                    uuid: 1,
+                    amount: 4.0,
+                    operation: 0,
+                }],
+            },
+        });
+        let s = status_of(&game, 0, true);
+        assert_eq!(
+            (s.absorption, s.air, s.max_health, s.in_water),
+            (4.0, 120, 24.0, true)
+        );
+        assert_eq!(s.mount_health, None);
+    }
+
+    #[test]
+    fn status_shows_the_living_vehicle_health() {
+        use ferrocraft_net_client::NetEvent;
+        use world::entities::EntityEvent;
+        let mut game = Game::new();
+        game.entity_id = 7;
+        game.vehicle = Some(9);
+        assert_eq!(game.mount_health(), None, "vehicle not spawned");
+        game.apply(NetEvent::Entity(EntityEvent::SpawnMob {
+            id: 9,
+            kind: 100,
+            pos: [0; 3],
+            yaw: 0,
+            pitch: 0,
+            head_yaw: 0,
+            vel: [0; 3],
+            flags: None,
+            name: None,
+            health: Some(12.0),
+            size: Default::default(),
+        }));
+        assert_eq!(game.mount_health(), Some((12.0, 20.0)));
+        game.apply(NetEvent::MaxHealth {
+            entity_id: 9,
+            health: world::effects::Speed {
+                base: 30.0,
+                modifiers: vec![],
+            },
+        });
+        assert_eq!(status_of(&game, 0, false).mount_health, Some((12.0, 30.0)));
     }
 }

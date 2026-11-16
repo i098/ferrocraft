@@ -227,7 +227,19 @@ pub struct Game {
     pub potion_ambient: bool,
 }
 
+/// Potion id of Water Breathing.
+const WATER_BREATHING: i8 = 13;
+
 impl Game {
+    /// Respiration level of the worn helmet; window 0 slots 5 to 8 are the armor, enchantment 5.
+    pub fn respiration(&self) -> i32 {
+        world::dig::highest_enchant_level(&self.inv.player[5..=8], 5)
+    }
+
+    pub fn water_breathing(&self) -> bool {
+        self.effects.has(WATER_BREATHING)
+    }
+
     pub fn new() -> Game {
         Game {
             store: ChunkStore::default(),

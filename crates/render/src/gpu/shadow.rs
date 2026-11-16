@@ -29,8 +29,21 @@ impl Renderer {
         })
     }
 
+    /// The fog light of this frame: the light at the viewer's block, smoothed over ticks.
+    pub(super) fn fog_light_now(&mut self, cam: &Camera, env: &Environment) -> f32 {
+        let [x, z] = [cam.pos[0], cam.pos[2]].map(|v| v.floor() as i32);
+        let [sky, block] = self.light_levels(x, env.view_y.floor() as i32, z);
+        let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
+        self.fog_light.advance(
+            env.ticks,
+            crate::sky::fog_light::light_brightness(level as u8),
+            env.render_distance_chunks,
+        );
+        self.fog_light.at(env.partial)
+    }
+
     /// `[sky, block]` light levels `0..=15` of a block.
-    pub(super) fn light_levels(&self, x: i32, y: i32, z: i32) -> [i32; 2] {
+    fn light_levels(&self, x: i32, y: i32, z: i32) -> [i32; 2] {
         self.light_at([x as f64, y as f64, z as f64])
             .map(|l| (l * 15.0).round() as i32)
     }

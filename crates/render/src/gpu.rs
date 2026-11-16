@@ -1194,19 +1194,6 @@ impl Renderer {
             })
     }
 
-    /// The fog light of this frame: the light at the viewer's block, smoothed over ticks.
-    fn fog_light_now(&mut self, cam: &Camera, env: &Environment) -> f32 {
-        let [x, z] = [cam.pos[0], cam.pos[2]].map(|v| v.floor() as i32);
-        let [sky, block] = self.light_levels(x, env.view_y.floor() as i32, z);
-        let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
-        self.fog_light.advance(
-            env.ticks,
-            crate::sky::fog_light::light_brightness(level as u8),
-            env.render_distance_chunks,
-        );
-        self.fog_light.at(env.partial)
-    }
-
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
     pub fn render(&mut self, cam: &Camera, overlay: &[Quad]) {
         self.flush_meshes(cam);

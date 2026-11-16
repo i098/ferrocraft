@@ -167,21 +167,28 @@ enum Pass {
     Blend,
 }
 
+fn is_leaves(state: u16) -> bool {
+    matches!(state >> 4, 18 | 161)
+}
+
 struct Mesher<'a> {
     hood: &'a Neighborhood<'a>,
     atlas: &'a Atlas,
     /// `GameSettings.ambientOcclusion != 0`: per-corner smooth lighting, else one flat light per face.
     smooth: bool,
+    /// `GameSettings.fancyGraphics`: leaves are cutout cubes keeping inner faces; else solid, culled cubes.
+    fancy: bool,
     light: Light,
     out: Meshes,
 }
 
 /// Mesh the chunk into opaque/cutout geometry and blended geometry, in chunk-local coordinates.
-pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool) -> Meshes {
+pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool) -> Meshes {
     let mut m = Mesher {
         hood,
         atlas,
         smooth,
+        fancy,
         light: Light::compute(hood),
         out: Meshes::default(),
     };
@@ -290,16 +297,27 @@ impl Mesher<'_> {
     }
 
     fn visible(&self, state: u16, l: &Look, n: u16) -> bool {
-        if is_opaque_cube(n) {
+        if self.opaque(n) {
             return false;
         }
-        // Glass, ice and slime hide the faces they share with the same block; leaves keep them (fancy graphics).
+        // Glass, ice and slime hide the faces they share with the same block; fancy leaves keep them.
         !(l.kind == Kind::Cutout && n >> 4 == state >> 4 && !matches!(state >> 4, 18 | 161))
+    }
+
+    /// `Block.isOpaqueCube`: leaves are opaque on Fast (`BlockLeaves.isOpaqueCube` is `!fancyGraphics`).
+    fn opaque(&self, state: u16) -> bool {
+        is_opaque_cube(state) || (!self.fancy && is_leaves(state))
+    }
+
+    /// Leaves drawn as solid blocks: the world shader skips its alpha test for vertex alpha 2.
+    fn solid_leaves(&self, state: u16) -> bool {
+        !self.fancy && is_leaves(state)
     }
 
     fn cube(&mut self, at: [i32; 3], state: u16, l: &Look) {
         let pass = Self::pass_of(state);
         let emissive = crate::blocks::emission(state) > 0;
+        let alpha = if self.solid_leaves(state) { 2.0 } else { 1.0 };
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
             if !self.visible(state, l, n) {
@@ -327,7 +345,7 @@ impl Mesher<'_> {
                         at[2] as f32 + c[2],
                     ],
                     uv: self.atlas.uv(tex, face_uv(f, *c)),
-                    color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
+                    color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, alpha],
                     light,
                 };
             }
@@ -391,7 +409,7 @@ impl Mesher<'_> {
         };
         let base = self.light_at(at, dir);
         let sample = |d: [i32; 3]| {
-            if is_opaque_cube(self.st(at, d)) {
+            if self.opaque(self.st(at, d)) {
                 (base, 0.2)
             } else {
                 (self.light_at(at, d), 1.0)
@@ -428,7 +446,7 @@ impl Mesher<'_> {
         for (f, &dir) in DIRS.iter().enumerate() {
             let n = self.st(at, dir);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
-            if same(n) || (f != UP && is_opaque_cube(n)) {
+            if same(n) || (f != UP && self.opaque(n)) {
                 continue;
             }
             let mut light = if f == UP {
@@ -456,7 +474,7 @@ impl Mesher<'_> {
         (-1..=1).any(|dx| {
             (-1..=1).any(|dz| {
                 let s = self.st(at, [dx, 1, dz]);
-                !same(s) && !is_opaque_cube(s)
+                !same(s) && !self.opaque(s)
             })
         })
     }
@@ -624,7 +642,7 @@ impl Mesher<'_> {
                 b.min[0] <= 0.0,
                 b.max[0] >= 1.0,
             ][f];
-            if b.cull && on_border && is_opaque_cube(self.st(at, DIRS[f])) {
+            if b.cull && on_border && self.opaque(self.st(at, DIRS[f])) {
                 continue;
             }
             let light = self.flat_light(at, if on_border { DIRS[f] } else { [0; 3] });
@@ -704,7 +722,42 @@ mod tests {
             },
             &Atlas::flat(),
             smooth,
+            true,
         )
+    }
+
+    #[test]
+    fn fast_leaves_are_solid_and_cull_inner_faces() {
+        // Two oak leaves side by side: `BlockLeaves.isOpaqueCube` is `!fancyGraphics`.
+        let c = flat(|x, y, z| {
+            if y == 70 && z == 4 && (x == 4 || x == 5) {
+                18 << 4
+            } else {
+                0
+            }
+        });
+        let leaves = |fancy| {
+            let hood = Neighborhood {
+                origin: (0, 0),
+                center: &c,
+                neighbors: [None; 8],
+                biomes: [None; 9],
+            };
+            mesh_chunk(&hood, &Atlas::flat(), true, fancy)
+                .opaque
+                .vertices
+        };
+        let (fast, fancy) = (leaves(false), leaves(true));
+        assert_eq!(fancy.len(), 12 * 4, "fancy keeps the inner faces");
+        assert!(
+            fancy.iter().all(|v| v.color[3] == 1.0),
+            "fancy is alpha tested"
+        );
+        assert_eq!(fast.len(), 10 * 4, "fast hides the shared faces");
+        assert!(
+            fast.iter().all(|v| v.color[3] > 1.5),
+            "fast skips the alpha test"
+        );
     }
 
     #[test]

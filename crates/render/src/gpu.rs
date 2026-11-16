@@ -14,7 +14,7 @@ use crate::post::Post;
 use crate::sky::{
     build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
 };
-use crate::weather::{build_precipitation, precipitation_height};
+use crate::weather::{build_precipitation, precipitation_height, rain_radius};
 use crate::{Camera, ChunkBlocks, Quad};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -232,6 +232,7 @@ pub struct Renderer {
     /// Chunks to remesh on the workers.
     dirty: HashSet<(i32, i32)>,
     smooth_lighting: bool,
+    fancy_graphics: bool,
     /// Chunks to remesh on the render thread this frame (a block changed in them), as vanilla `rebuildSync`.
     urgent: HashSet<(i32, i32)>,
     /// Newest mesh job per chunk; a result with another generation is stale.
@@ -538,6 +539,7 @@ impl Renderer {
             meshes: HashMap::new(),
             dirty: HashSet::new(),
             smooth_lighting: true,
+            fancy_graphics: true,
             urgent: HashSet::new(),
             pending: HashMap::new(),
             next_generation: 0,
@@ -636,6 +638,14 @@ impl Renderer {
     pub fn set_smooth_lighting(&mut self, on: bool) {
         if self.smooth_lighting != on {
             self.smooth_lighting = on;
+            self.dirty.extend(self.blocks.keys().copied());
+        }
+    }
+
+    /// `GameSettings.fancyGraphics`: leaves and the rain radius change; remeshes every chunk when it changes.
+    pub fn set_fancy_graphics(&mut self, on: bool) {
+        if self.fancy_graphics != on {
+            self.fancy_graphics = on;
             self.dirty.extend(self.blocks.keys().copied());
         }
     }
@@ -846,6 +856,7 @@ impl Renderer {
                 self.biomes.get(&(cx + dx, cz + dz)).cloned()
             }),
             smooth: self.smooth_lighting,
+            fancy: self.fancy_graphics,
         }
     }
 
@@ -1543,7 +1554,8 @@ impl Renderer {
     /// Rain and snow meshes for this frame.
     fn rain_mesh(&self, env: &Environment, cam: &Camera) -> (Option<GpuMesh>, Option<GpuMesh>) {
         let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
-        let (rain, snow) = build_precipitation(env, feet, |x, z| self.rain_top(x, z));
+        let range = rain_radius(self.fancy_graphics);
+        let (rain, snow) = build_precipitation(env, feet, |x, z| self.rain_top(x, z), range);
         (self.upload_geometry(&rain), self.upload_geometry(&snow))
     }
 

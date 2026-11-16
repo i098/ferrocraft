@@ -124,6 +124,31 @@ impl DigWorld for Local<'_> {
     }
 }
 
+/// What the crosshair points at (`objectMouseOver`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Aim {
+    Entity(i32, f64),
+    Block(Hit, f64),
+    /// An entity beyond 3 blocks: no target, and it hides the block behind it.
+    Miss,
+}
+
+impl Aim {
+    pub fn entity(self) -> Option<i32> {
+        match self {
+            Aim::Entity(id, _) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn block(self) -> Option<Hit> {
+        match self {
+            Aim::Block(h, _) => Some(h),
+            _ => None,
+        }
+    }
+}
+
 pub struct Game {
     pub store: ChunkStore,
     pub entities: Entities,
@@ -851,9 +876,8 @@ impl Game {
         self.inv.creative = self.creative;
     }
 
-    /// World-space outline box of the targeted block, grown by 0.002 like vanilla.
-    pub fn selection(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<[f64; 6]> {
-        let (hit, _) = self.ray_dist(eye, yaw, pitch)?;
+    /// World-space outline box of the block `hit`, grown by 0.002 like vanilla.
+    pub fn selection(&self, hit: Hit) -> Option<[f64; 6]> {
         let at = |p: [i32; 3]| self.store.get_block(p[0], p[1], p[2]);
         let b = dig::selection_box(&at, hit.pos)?;
         let o = hit.pos.map(f64::from);
@@ -873,6 +897,48 @@ impl Game {
     pub fn ray_dist(&self, eye: [f64; 3], yaw: f32, pitch: f32) -> Option<(Hit, f64)> {
         let at = |pos: [i32; 3]| self.store.get_block(pos[0], pos[1], pos[2]);
         dig::raycast_dist(&at, eye, yaw, pitch, dig::reach(self.creative))
+    }
+
+    /// `EntityRenderer.getMouseOver`: what the crosshair of a viewer at `eye` points at. The entity
+    /// search runs to the full reach (6 with `extendedReach`, else the block reach); a block nearer
+    /// than the entity hides it. Outside creative an entity beyond 3 blocks is no target but
+    /// still clears the block: a miss.
+    pub fn aim(
+        &self,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        skip: i32,
+        vehicle: Option<i32>,
+    ) -> Option<Aim> {
+        let block = self.ray_dist(eye, yaw, pitch);
+        let reach = if self.creative {
+            6.0
+        } else {
+            dig::reach(false)
+        };
+        let dir = dig::look_vector(yaw, pitch);
+        let far = block.map(|(_, d)| d);
+        match self.entities.pick(eye, dir, reach, skip, vehicle, far) {
+            Some((_, d)) if !self.creative && d > 3.0 => Some(Aim::Miss),
+            Some((id, d)) => Some(Aim::Entity(id, d)),
+            None => block.map(|(h, d)| Aim::Block(h, d)),
+        }
+    }
+
+    /// The block `aim` gives, if the crosshair points at one.
+    pub fn block_aim(
+        &self,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        skip: i32,
+        vehicle: Option<i32>,
+    ) -> Option<(Hit, f64)> {
+        match self.aim(eye, yaw, pitch, skip, vehicle)? {
+            Aim::Block(h, d) => Some((h, d)),
+            _ => None,
+        }
     }
 
     /// A selectable block lies between `from` and `to`.
@@ -1046,6 +1112,46 @@ mod tests {
         using_item: false,
         fly_speed: None,
     };
+
+    /// A 2 block tall wall at z 4 and a zombie `z` blocks in front of an eye at the origin of the wall row.
+    fn wall_and_zombie(z: f64, creative: bool) -> Game {
+        let mut g = Game::new();
+        let mut c = floor_chunk();
+        c.set_block(0, 64, 4, 1 << 4);
+        c.set_block(0, 65, 4, 1 << 4);
+        g.store.insert(c);
+        g.creative = creative;
+        g.entities.apply(world::entities::EntityEvent::SpawnMob {
+            id: 7,
+            kind: 54,
+            pos: [16, 64 * 32, (z * 32.0) as i32],
+            yaw: 0,
+            pitch: 0,
+            head_yaw: 0,
+            vel: [0; 3],
+            flags: None,
+            name: None,
+            health: None,
+            size: Default::default(),
+        });
+        g
+    }
+
+    #[test]
+    fn entity_beyond_3_blocks_misses_and_hides_the_block() {
+        let eye = [0.5, 64.9, 0.0];
+        let near = wall_and_zombie(2.9, false);
+        assert!(matches!(near.aim(eye, 0.0, 0.0, 0, None), Some(Aim::Entity(7, d)) if d < 3.0));
+        let far = wall_and_zombie(3.5, false);
+        assert_eq!(far.aim(eye, 0.0, 0.0, 0, None), Some(Aim::Miss));
+        assert_eq!(far.block_aim(eye, 0.0, 0.0, 0, None), None);
+        // `extendedReach`: creative keeps the entity out to 6 blocks.
+        let creative = wall_and_zombie(3.5, true);
+        assert!(matches!(
+            creative.aim(eye, 0.0, 0.0, 0, None),
+            Some(Aim::Entity(7, _))
+        ));
+    }
 
     #[test]
     fn lightning_event_flashes_the_sky_until_the_bolt_expires() {

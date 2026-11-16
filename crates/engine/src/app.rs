@@ -27,7 +27,7 @@ mod vehicle;
 use limbs::Limbs;
 
 use crate::args::Args;
-use crate::game::{eye_height, Game};
+use crate::game::{eye_height, Aim, Game};
 use crate::link::Link;
 use crate::skins::PlayerSkins;
 use crate::ui::{Fm, Ui};
@@ -823,10 +823,9 @@ impl App {
         // `isDrawBlockOutline`: only a player view draws the outline and the highlight.
         let player_view = spectated.is_none_or(|e| e.kind == Kind::Player);
         let ray = self.view_ray(frac).filter(|_| player_view);
-        let pointed = ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
-            self.entity_pick(eye, yaw, pitch, id, vehicle)
-                .map(|(id, _)| id)
-        });
+        let pointed = ray
+            .and_then(|(eye, yaw, pitch, id, vehicle)| self.game.aim(eye, yaw, pitch, id, vehicle))
+            .and_then(Aim::entity);
         let skins = &mut self.skins;
         let size = self.renderer.as_ref().map_or((0, 0), |r| r.size());
         let mut renderer = self.renderer.as_mut();
@@ -985,7 +984,12 @@ impl App {
         r.set_entity_outlines(play::outline_draws(&self.game, &self.input, &draws));
         r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
-        r.set_selection(ray.and_then(|(eye, yaw, pitch, ..)| self.game.selection(eye, yaw, pitch)));
+        r.set_selection(
+            ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
+                self.game.block_aim(eye, yaw, pitch, id, vehicle)
+            })
+            .and_then(|(hit, _)| self.game.selection(hit)),
+        );
         r.set_lines(
             self.mod_drawn
                 .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes),
@@ -1168,7 +1172,9 @@ impl App {
                 yaw: p.yaw,
                 pitch: self.game.pitch,
                 looking_at: ray
-                    .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
+                    .and_then(|(eye, yaw, pitch, id, vehicle)| {
+                        self.game.block_aim(eye, yaw, pitch, id, vehicle)
+                    })
                     .map(|(h, _)| h.pos),
                 reduced: self.reduced_debug(),
                 ..Default::default()

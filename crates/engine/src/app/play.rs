@@ -1,7 +1,7 @@
 //! The 20 TPS step and the player's actions: movement packets, digging, attacking, using items.
 
 use super::{boxed, screen, App, View, MAX_TICKS_PER_FRAME, TICK};
-use crate::game::{eye_height, Attack, Effect};
+use crate::game::{eye_height, Aim, Attack, Effect};
 use crate::weather::{precipitation_top, raining_at};
 use gui::inventory::dials::DialWorld;
 use gui::inventory::ContainerScreen;
@@ -780,24 +780,6 @@ impl App {
         }
     }
 
-    /// The entity under the crosshair of a viewer at `eye` looking along `yaw`, `pitch`
-    /// (`EntityRenderer.getMouseOver`), which skips the viewer `skip` and its vehicle: a nearer
-    /// block hides it.
-    pub(super) fn entity_pick(
-        &self,
-        eye: [f64; 3],
-        yaw: f32,
-        pitch: f32,
-        skip: i32,
-        vehicle: Option<i32>,
-    ) -> Option<(i32, f64)> {
-        let reach = if self.game.creative { 6.0 } else { 3.0 };
-        let block = self.game.ray_dist(eye, yaw, pitch).map(|(_, d)| d);
-        self.game
-            .entities
-            .pick(eye, look_vector(yaw, pitch), reach, skip, vehicle, block)
-    }
-
     /// `EntityPlayer.attackTargetEntityWithCurrentItem` on the attacking client: the crit particles when the
     /// crit test holds, the enchant particles when the held item's damage enchantment applies to the target.
     fn predict_hit_particles(&mut self, target: i32) {
@@ -862,14 +844,11 @@ impl App {
             presses,
         };
         let ray = self.view_ray(1.0);
-        let entity = ray
-            .and_then(|(eye, yaw, pitch, skip, vehicle)| {
-                self.entity_pick(eye, yaw, pitch, skip, vehicle)
-            })
-            .map(|(id, _)| id);
-        let block = ray
-            .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
-            .map(|(h, _)| h);
+        let aim = ray.and_then(|(eye, yaw, pitch, skip, vehicle)| {
+            self.game.aim(eye, yaw, pitch, skip, vehicle)
+        });
+        let entity = aim.and_then(Aim::entity);
+        let block = aim.and_then(Aim::block);
         let eyes_in_water = self.game.player.as_ref().is_some_and(|p| {
             let get = |x, y, z| self.game.store.get_block(x, y, z);
             screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))
@@ -921,10 +900,10 @@ impl App {
     }
 
     fn hit_shard(&mut self) {
-        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
+        let Some((eye, yaw, pitch, skip, vehicle)) = self.view_ray(1.0) else {
             return;
         };
-        if let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) {
+        if let Some((h, _)) = self.game.block_aim(eye, yaw, pitch, skip, vehicle) {
             let at = |p: [i32; 3]| self.game.store.get_block(p[0], p[1], p[2]);
             let state = at(h.pos);
             if state != 0 {
@@ -1031,7 +1010,8 @@ impl App {
         let dir = look_vector(yaw, pitch);
         let held = self.game.inv.held_stack().clone();
         let gamemode = self.game.gamemode;
-        if let Some((id, dist)) = self.entity_pick(eye, yaw, pitch, skip, vehicle) {
+        let aim = self.game.aim(eye, yaw, pitch, skip, vehicle);
+        if let Some(Aim::Entity(id, dist)) = aim {
             let Some(e) = self.game.entities.get(id) else {
                 return;
             };
@@ -1044,7 +1024,7 @@ impl App {
             }
             let r = self.session_send(|s| s.interact_entity(id));
             self.send_result(r);
-        } else if let Some((h, dist)) = self.game.ray_dist(eye, yaw, pitch) {
+        } else if let Some(Aim::Block(h, dist)) = aim {
             if self.use_block(h, dist, eye, dir, sneaking, &held) {
                 return;
             }
@@ -1144,10 +1124,10 @@ impl App {
     /// `Minecraft.middleClickMouse`: select the targeted block's item on the hotbar; creative
     /// puts it there when missing.
     fn pick_block(&mut self) {
-        let Some((eye, yaw, pitch, ..)) = self.view_ray(1.0) else {
+        let Some((eye, yaw, pitch, skip, vehicle)) = self.view_ray(1.0) else {
             return;
         };
-        let Some((h, _)) = self.game.ray_dist(eye, yaw, pitch) else {
+        let Some((h, _)) = self.game.block_aim(eye, yaw, pitch, skip, vehicle) else {
             return;
         };
         let state = self.game.store.get_block(h.pos[0], h.pos[1], h.pos[2]);

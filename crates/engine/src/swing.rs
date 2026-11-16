@@ -33,6 +33,11 @@ impl Swing {
         self.now = self.ticks as f32 / DURATION as f32;
     }
 
+    /// `swingProgress > 0`: the arm is mid-swing.
+    pub fn active(&self) -> bool {
+        self.now > 0.0
+    }
+
     /// `getSwingProgress(partial)`, `0..1`.
     pub fn progress(&self, partial: f32) -> f32 {
         let mut d = self.now - self.prev;

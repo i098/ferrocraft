@@ -232,7 +232,14 @@ pub struct Entity {
     /// Look at the previous tick (`prevRotationYaw`, `prevRotationPitch`).
     pub prev_yaw: f32,
     pub prev_pitch: f32,
+    /// `rotationYawHead`; the server sets it at once, never eased.
     pub head_yaw: f32,
+    /// `renderYawOffset`: the direction the body model faces, apart from the look yaw.
+    pub body_yaw: f32,
+    /// `prevRenderYawOffset` and `prevRotationYawHead`: the values at the previous tick.
+    pub last_body_yaw: f32,
+    pub last_head_yaw: f32,
+    body_control: crate::body::BodyControl,
     pub on_ground: bool,
     pub vel: [f64; 3],
     pub flags: u8,
@@ -365,7 +372,6 @@ struct Target {
     pos: [f64; 3],
     yaw: f32,
     pitch: f32,
-    head_yaw: f32,
     steps: u32,
 }
 
@@ -374,6 +380,8 @@ const STEPS: u32 = 3;
 const DEATH_TICKS: i32 = 20;
 /// Mob id of the squid.
 const SQUID: u8 = 94;
+/// Mob id of the ender dragon, whose body follows its own ring buffer.
+const DRAGON: u8 = 63;
 
 fn angle(raw: i8) -> f32 {
     f32::from(raw) * 360.0 / 256.0
@@ -401,6 +409,10 @@ impl Entity {
             prev_yaw: yaw,
             prev_pitch: pitch,
             head_yaw: yaw,
+            body_yaw: yaw,
+            last_body_yaw: yaw,
+            last_head_yaw: yaw,
+            body_control: crate::body::BodyControl::default(),
             on_ground: false,
             vel: [0.0; 3],
             flags: 0,
@@ -410,7 +422,6 @@ impl Entity {
                 pos,
                 yaw,
                 pitch,
-                head_yaw: yaw,
                 steps: 0,
             },
             limb_swing: 0.0,
@@ -592,6 +603,8 @@ impl Entity {
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
         self.prev_pos = self.pos;
         (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
+        self.last_body_yaw = self.body_yaw;
+        self.last_head_yaw = self.head_yaw;
         let interpolating = self.target.steps > 0;
         if interpolating {
             let n = f64::from(self.target.steps);
@@ -601,7 +614,6 @@ impl Entity {
             let k = self.target.steps as f32;
             self.yaw += wrap(self.target.yaw - self.yaw) / k;
             self.pitch += (self.target.pitch - self.pitch) / k;
-            self.head_yaw += wrap(self.target.head_yaw - self.head_yaw) / k;
             self.target.steps -= 1;
         }
 
@@ -666,6 +678,7 @@ impl Entity {
                 &mut self.head_yaw,
             );
         }
+        self.turn_body([dx, dz]);
         if self.hurt_time > 0 {
             self.hurt_time -= 1;
         }
@@ -676,6 +689,24 @@ impl Entity {
         self.anim.begging = self.meta.begging == Some(1);
         self.anim.tick();
         self.anim.horse.tick(self.meta.horse_flags.unwrap_or(0));
+    }
+
+    /// `LivingEntity.tick` after the entity moved by `moved`: a player's body follows `bodyMovement`,
+    /// a mob's follows its `BodyControl`. The squid keeps its own state, an armor stand's body is its yaw.
+    fn turn_body(&mut self, moved: [f64; 2]) {
+        match self.kind {
+            Kind::Player => {
+                let aim =
+                    crate::body::player_aim(self.body_yaw, self.yaw, moved, self.swing_ticks > 0);
+                self.body_yaw = crate::body::body_movement(self.body_yaw, self.yaw, aim);
+            }
+            Kind::Mob(SQUID | DRAGON) => {}
+            Kind::Mob(_) => {
+                self.body_control
+                    .tick(self.yaw, moved, &mut self.body_yaw, &mut self.head_yaw)
+            }
+            _ => {}
+        }
     }
 
     fn set_metadata(
@@ -789,6 +820,20 @@ impl Entity {
 
     /// Yaw and pitch between the previous and current tick, yaw the short way round
     /// (`orientCamera` after `EntityLivingBase.onUpdate` wraps `prevRotationYaw`).
+    /// Yaw, head yaw and pitch of the frame, as `LivingEntityRenderer.render` eases them: the yaw is
+    /// the body yaw of a player or mob, the look yaw of anything else.
+    pub fn lerp_pose(&self, partial: f32) -> (f32, f32, f32) {
+        let (yaw, pitch) = self.lerp_look(partial);
+        let ease = |last: f32, now: f32| last + wrap(now - last) * partial;
+        let head = ease(self.last_head_yaw, self.head_yaw);
+        match self.kind {
+            Kind::Player => (ease(self.last_body_yaw, self.body_yaw), head, pitch),
+            Kind::Mob(SQUID | DRAGON) => (yaw, head, pitch),
+            Kind::Mob(_) => (ease(self.last_body_yaw, self.body_yaw), head, pitch),
+            _ => (yaw, head, pitch),
+        }
+    }
+
     pub fn lerp_look(&self, partial: f32) -> (f32, f32) {
         (
             self.prev_yaw + wrap(self.yaw - self.prev_yaw) * partial,
@@ -1132,10 +1177,7 @@ impl Entities {
                 e.set_target(pos, angle(yaw), angle(pitch));
                 e.on_ground = on_ground;
             }),
-            E::HeadLook { id, head_yaw } => self.with(id, |e| {
-                e.target.head_yaw = angle(head_yaw);
-                e.target.steps = e.target.steps.max(STEPS);
-            }),
+            E::HeadLook { id, head_yaw } => self.with(id, |e| e.head_yaw = angle(head_yaw)),
             E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
             E::Destroy(ids) => ids.iter().for_each(|id| {
                 self.map.remove(id);
@@ -1163,6 +1205,8 @@ impl Entities {
                 flags,
             } => {
                 let mut e = Entity::new(id, Kind::Player, pos, yaw, pitch);
+                // `renderYawOffset` of a fresh player is 0 until its first tick turns it toward the yaw.
+                (e.body_yaw, e.last_body_yaw) = (0.0, 0.0);
                 e.uuid = Some(uuid);
                 if let Some((name, textures)) = self.names.get(&uuid) {
                     e.name = Some(name.clone());
@@ -1195,7 +1239,8 @@ impl Entities {
             } => {
                 let mut e = Entity::new(id, Kind::Mob(kind), pos, yaw, pitch);
                 e.head_yaw = angle(head_yaw);
-                e.target.head_yaw = e.head_yaw;
+                (e.body_yaw, e.last_body_yaw, e.last_head_yaw) =
+                    (e.head_yaw, e.head_yaw, e.head_yaw);
                 e.vel = velocity(vel);
                 e.flags = flags.unwrap_or(0);
                 e.meta = size;

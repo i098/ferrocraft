@@ -717,6 +717,9 @@ impl App {
         let f = ((dx * dx + dz * dz).sqrt() as f32 * 4.0).min(1.0);
         l.amount += (f - l.amount) * 0.4;
         l.swing += l.amount;
+        l.prev_body_yaw = l.body_yaw;
+        let aim = world::body::player_aim(l.body_yaw, p.yaw, [dx, dz], self.game.swing.active());
+        l.body_yaw = world::body::body_movement(l.body_yaw, p.yaw, aim);
         let dy = p.pos[1] - self.game.prev_pos[1];
         let alive = self.game.health > 0.0;
         self.view_bob.tick([dx, dy, dz], p.on_ground, alive);

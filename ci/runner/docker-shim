@@ -3,7 +3,8 @@
 # For a ferrocraft place only: give the job container its own persistent cargo target
 # folder, then hand over to the host-wide shim. One folder per place, so two jobs never
 # share a target dir. Over-cap folders are deleted before the job starts, so the total at
-# job start is at most 4 x PLACE_CAP_GB, plus the growth of the running jobs. The container uid differs from the shim uid, so the
+# job start is at most 4 x PLACE_CAP_GB, plus the growth of the running jobs. The container
+# uid differs from the shim uid, so the
 # delete needs passwordless sudo.
 set -eu
 base=${FERROCRAFT_TARGET_ROOT:-/sdc-disk/ci-target}

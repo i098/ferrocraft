@@ -791,6 +791,20 @@ impl App {
         }
     }
 
+    /// `EntityPickupParticle`: items flying to their collector; an unknown collector is the local player.
+    fn pickup_draws(&self, frac: f64) -> Vec<EntityDraw> {
+        let g = &self.game;
+        let to = |id| match g.entities.get(id) {
+            Some(c) => Some(c.lerp_pos(frac)),
+            None => g.player.as_ref().map(|p| {
+                std::array::from_fn(|i| g.prev_pos[i] + (p.pos[i] - g.prev_pos[i]) * frac)
+            }),
+        };
+        let ghosts = g.entities.pickup_ghosts(frac as f32, to);
+        let draw = |e| entity_draw(e, frac, None, None, false, false);
+        ghosts.iter().map(draw).collect()
+    }
+
     fn draw(&mut self) {
         let frac = self.tick_frac();
         let cam = self.camera(frac);
@@ -882,21 +896,7 @@ impl App {
                 ids.remove(i);
             }
         }
-        // `EntityPickupParticle`: an unknown collector is the local player.
-        let g = &self.game;
-        let ghosts = g
-            .entities
-            .pickup_ghosts(frac as f32, |id| match g.entities.get(id) {
-                Some(c) => Some(c.lerp_pos(frac)),
-                None => g.player.as_ref().map(|p| {
-                    std::array::from_fn(|i| g.prev_pos[i] + (p.pos[i] - g.prev_pos[i]) * frac)
-                }),
-            });
-        draws.extend(
-            ghosts
-                .iter()
-                .map(|e| entity_draw(e, frac, None, None, false, false)),
-        );
+        draws.extend(self.pickup_draws(frac));
         self.tab_heads();
         let (quads, textures, effects) = self.overlay(frac, &cam, &draws);
         self.run_effects(effects);

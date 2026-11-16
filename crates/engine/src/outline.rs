@@ -1,5 +1,6 @@
 //! `EntityRenderer.isDrawBlockOutline` of 1.8.9: when the block under the crosshair gets an outline.
 
+use crate::game::Game;
 use world::inventory::items;
 use world::inventory::{ItemStack, Tag};
 
@@ -47,6 +48,21 @@ pub fn draws(gamemode: u8, hide_hud: bool, held: Option<&ItemStack>, target: u16
         }),
         _ => true,
     }
+}
+
+/// Eye, yaw, pitch, viewer id and vehicle of a view.
+pub type Ray = ([f64; 3], f32, f32, i32, Option<i32>);
+
+/// The outline box for the view `ray` (eye, yaw, pitch, viewer id, vehicle), or `None` when none draws.
+pub fn selection(game: &Game, hide_hud: bool, ray: Option<Ray>) -> Option<[f64; 6]> {
+    let (eye, yaw, pitch, id, vehicle) = ray?;
+    let (hit, _) = game.block_aim(eye, yaw, pitch, id, vehicle)?;
+    let [x, y, z] = hit.pos;
+    let held = game.inv.held_stack().as_ref();
+    if !draws(game.gamemode, hide_hud, held, game.store.get_block(x, y, z)) {
+        return None;
+    }
+    game.selection(hit)
 }
 
 #[cfg(test)]

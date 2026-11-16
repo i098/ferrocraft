@@ -93,6 +93,8 @@ fn button_index(button: MouseButton) -> Option<u8> {
         MouseButton::Left => Some(0),
         MouseButton::Right => Some(1),
         MouseButton::Middle => Some(2),
+        MouseButton::Back => Some(3),
+        MouseButton::Forward => Some(4),
         _ => None,
     }
 }
@@ -128,13 +130,21 @@ impl App {
     }
 
     fn mouse_button(&mut self, down: bool, button: u8) {
-        self.mouse_down = down;
+        if button <= 2 {
+            self.mouse_down = down;
+        } else if !down {
+            return;
+        }
         if down && button == 0 && self.chat_click() {
             return;
         }
         let (mx, my) = self.gui_cursor();
         let mods = self.mods();
+        // Container clicks know only the three vanilla buttons; the screen gets all of them.
         if self.container.is_some() {
+            if button > 2 {
+                return;
+            }
             let now = self.ui_now_ms();
             let reqs = {
                 let c = self.container.as_mut().expect("checked");
@@ -344,5 +354,36 @@ mod tests {
         assert_eq!(app.input.take_actions(), vec![]);
         app.screen_key(KeyCode::F2, None, false);
         assert_eq!(app.input.take_actions(), vec![Action::Screenshot]);
+    }
+
+    #[test]
+    fn side_buttons_leave_left_drag_alone_in_a_container() {
+        let mut app = App::new(Args {
+            username: "Player".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
+        app.mouse_button(true, 0);
+        assert!(app.mouse_down);
+        let held = Some(world::inventory::ItemStack {
+            id: 1,
+            count: 5,
+            damage: 0,
+            nbt: None,
+        });
+        app.game.inv.cursor = held.clone();
+        let slots = app.game.inv.player.clone();
+        for button in [3, 4] {
+            app.mouse_button(true, button);
+            assert!(app.mouse_down);
+            app.mouse_button(false, button);
+            assert!(app.mouse_down);
+        }
+        // The cursor sits outside the window: a container click would have dropped the stack.
+        assert_eq!(app.game.inv.cursor, held);
+        assert_eq!(app.game.inv.player, slots);
     }
 }

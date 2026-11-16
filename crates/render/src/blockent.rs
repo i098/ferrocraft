@@ -946,6 +946,8 @@ pub struct WornHead {
     pub head_yaw: f32,
     pub pitch: f32,
     pub sneaking: bool,
+    /// `isChild`: the head is scaled by 0.7 and lowered a block.
+    pub child: bool,
     /// Model scale of the renderer: 0.9375 for players, 1 for most mobs.
     pub scale: f32,
     /// Item damage of the skull item: the skull type.
@@ -968,6 +970,9 @@ pub fn build_worn_heads(
             .scale([-1.0, -1.0, 1.0])
             .scale([s, s, s])
             .translate([0.0, -1.507_812_5, 0.0]);
+        if h.child {
+            m = m.scale([0.7; 3]).translate([0.0, 1.0, 0.0]);
+        }
         m = m
             .translate([0.0, if h.sneaking { 1.0 / 16.0 } else { 0.0 }, 0.0])
             .rotate_zyx([h.pitch.to_radians(), h.head_yaw.to_radians(), 0.0]);

@@ -187,12 +187,10 @@ fn holds(d: &EntityDraw) -> bool {
     )
 }
 
-/// `WornSkullLayer`: a block worn as a helmet by an armor stand, as its id and damage; or the
+/// `WornSkullLayer` for a block helmet (see [`super::helmet`]), as its id and damage; or the
 /// pumpkin of `LayerSnowmanHead`.
 fn worn_block(d: &EntityDraw) -> Option<(i16, i16)> {
-    let stand = (d.class == Class::Object(78) && (1..256).contains(&d.armor[3]))
-        .then_some((d.armor[3], d.look.stand.head_damage));
-    super::snowman::wanted(d).or(stand)
+    super::snowman::wanted(d).or(super::helmet::block(d))
 }
 
 fn dropped(d: &EntityDraw) -> Option<Stack> {

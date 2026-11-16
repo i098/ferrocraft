@@ -26,6 +26,7 @@ pub mod potion_brew;
 pub mod shape;
 pub mod squid;
 pub mod squish;
+pub mod tool;
 pub mod vehicle;
 
 use std::sync::LazyLock;

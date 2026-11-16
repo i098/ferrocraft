@@ -1,6 +1,8 @@
 //! Day/night sky, fog, sun, moon, stars and clouds, ported from vanilla 1.8.9
 //! (`World.getSkyColor`, `RenderGlobal.renderSky`, `RenderGlobal.renderClouds`).
 
+pub(crate) mod fog_light;
+
 use crate::assets::{decode_png, AssetSource, Image};
 use crate::jrandom::JavaRandom;
 use crate::mesh::Vertex;
@@ -37,8 +39,16 @@ pub struct Environment {
     pub blindness: Option<i32>,
     /// Night Vision light boost `getNightVisionBrightness`, 0 without the effect.
     pub night_vision: f32,
-    /// Feet height of the viewer, for the Blindness fog color.
+    /// Feet height of the viewer, for the void fog color.
     pub view_y: f32,
+    /// Light at the viewer `0..=1`, smoothed over ticks (`fogColor2 + (fogColor1 - fogColor2) * partial`).
+    pub fog_light: f32,
+    /// Respiration level of the worn helmet.
+    pub respiration: i32,
+    /// Water Breathing is active.
+    pub water_breathing: bool,
+    /// Superflat level type: no void darkening above y 1.
+    pub flat_world: bool,
 }
 
 impl Default for Environment {
@@ -58,26 +68,24 @@ impl Default for Environment {
             blindness: None,
             night_vision: 0.0,
             view_y: 64.0,
+            fog_light: 1.0,
+            respiration: 0,
+            water_breathing: false,
+            flat_world: false,
         }
     }
 }
 
-/// Blindness: `setupFog` closes the fog to 5 blocks (opening over the last second) and `updateFogColor`
-/// darkens the color by the void factor. Returns the color, fog start and fog end.
-fn blind_fog(fog: [f32; 3], far: f32, ticks: i32, view_y: f32) -> ([f32; 3], f32, f32) {
+/// Blindness: `setupFog` closes the fog to 5 blocks, opening over the last second.
+/// Returns fog start and fog end.
+fn blind_fog(far: f32, ticks: i32) -> (f32, f32) {
     let k = if ticks < 20 {
         1.0 - ticks as f32 / 20.0
     } else {
         0.0
     };
     let end = 5.0 + (far - 5.0) * k;
-    let void = view_y / 32.0 * k;
-    let dark = if void < 1.0 {
-        void.max(0.0).powi(2)
-    } else {
-        1.0
-    };
-    (fog.map(|c| c * dark), end * 0.25, end)
+    (end * 0.25, end)
 }
 
 /// Everything derived from `Environment` for one frame.
@@ -253,17 +261,18 @@ impl Environment {
     }
 
     /// `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog;
-    /// Blindness replaces both with a short linear fog. Returns color, start, end and density.
+    /// then the camera light, the void and Night Vision scale the color. Blindness replaces the
+    /// fog distances with a short linear fog. Returns color, start, end and density.
     fn final_fog(&self, fog: [f32; 3]) -> ([f32; 3], f32, f32, Option<f32>) {
-        let (fog, density) = match self.fluid {
-            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
-            Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
-            None => (fog, None),
-        };
+        let (fog, density) =
+            fog_light::fluid_fog(self.fluid, self.respiration, self.water_breathing, fog);
+        let dark =
+            self.fog_light * fog_light::void_darkness(self.view_y, self.blindness, self.flat_world);
+        let fog = fog_light::night_vision_fog(fog.map(|c| c * dark), self.night_vision);
         let far = (self.render_distance_chunks * 16) as f32;
         match self.blindness {
             Some(ticks) => {
-                let (fog, start, end) = blind_fog(fog, far, ticks, self.view_y);
+                let (start, end) = blind_fog(far, ticks);
                 (fog, start, end, None)
             }
             None => (fog, far * 0.75, far, density),

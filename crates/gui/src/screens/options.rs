@@ -1908,6 +1908,7 @@ impl Screen for StreamUnavailable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screens::{Metrics, PlayerStats};
 
     #[test]
     fn options_txt_round_trips() {
@@ -1950,5 +1951,56 @@ mod tests {
         assert_eq!(Opt::FramerateLimit.denorm(0.5), 140.0);
         assert_eq!(Opt::Fov.denorm(1.0), 110.0);
         assert_eq!(Opt::RenderDistance.norm(17.0), 0.5);
+    }
+
+    struct M;
+    impl Metrics for M {
+        fn width(&self, s: &str) -> i32 {
+            s.len() as i32 * 6
+        }
+    }
+
+    /// `ControlsOptionsScreen.mouseClicked`: a waiting bind stores `-100 + button`.
+    #[test]
+    fn side_buttons_bind_as_minus_97_and_96() {
+        let texts = Texts::parse("", "");
+        let stats = PlayerStats::default();
+        for (button, code) in [(3, -97), (4, -96)] {
+            let dir = std::env::temp_dir().join("ferrocraft-controls-test");
+            let mut settings = Settings::new(dir.clone());
+            let mut clip = String::new();
+            let mut ctx = Ctx {
+                width: 320,
+                height: 240,
+                texts: &texts,
+                settings: &mut settings,
+                in_world: true,
+                difficulty: None,
+                hardcore: false,
+                now_ms: 0,
+                game_dir: dir,
+                effects: Vec::new(),
+                clipboard: &mut clip,
+                metrics: &M,
+                shift: false,
+                stats: &stats,
+                icons: None,
+                player_id: "",
+            };
+            struct Stub;
+            impl Screen for Stub {
+                fn init(&mut self, _: &mut Ctx) {}
+                fn draw(&mut self, _: &mut dyn Canvas, _: i32, _: i32, _: &mut Ctx) {}
+                fn click(&mut self, _: i32, _: i32, _: i32, _: &mut Ctx) -> Option<Nav> {
+                    None
+                }
+            }
+            let mut c = Controls::new(Box::new(Stub));
+            c.init(&mut ctx);
+            c.waiting = Some(0);
+            assert!(c.click(0, 0, button, &mut ctx).is_none());
+            assert_eq!(c.waiting, None);
+            assert_eq!(ctx.settings.keys[0].code, code);
+        }
     }
 }

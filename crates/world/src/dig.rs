@@ -1,12 +1,12 @@
-//! Block breaking of Minecraft 1.8.9: the block ray, bare-hand break speed and the dig state
+//! Block breaking of Minecraft 1.8.9: the block ray, break progress and the dig state
 //! machine of `PlayerControllerMP` and `Minecraft.clickMouse`/`sendClickBlockToController`.
 //!
-//! Not ported yet: held tools and enchantments (the client has no inventory, so the hand is
-//! always empty), potion effects, water, entity targets, `CanDestroy` tags of adventure mode
+//! Not ported yet: `CanDestroy` tags of adventure mode
 //! (an empty hand never digs there; the swing is kept) and the world border.
 //! The break speed of every block is checked against the real 1.8.9 jar through `oracle`.
 
 use crate::entities::Kind;
+use crate::tool::{relative_hardness, Mining};
 use crate::{cos, sin};
 
 /// Block ids 0..=197 of 1.8.9: `Block.blockHardness`, -1 for unbreakable.
@@ -49,20 +49,6 @@ pub fn requires_tool(id: u16) -> bool {
             | 118 | 120 | 121 | 128..=130 | 133 | 137 | 139 | 145 | 147 | 148 | 152..=156
             | 158 | 159 | 166..=168 | 172 | 173 | 179..=182
     )
-}
-
-/// `Block.getPlayerRelativeBlockHardness` for an empty hand: the share of the block that one
-/// tick of digging removes. At 1.0 or more the block breaks at once.
-pub fn relative_hardness(id: u16, on_ground: bool) -> f32 {
-    let h = hardness(id);
-    if h < 0.0 {
-        return 0.0;
-    }
-    let mut speed = 1.0_f32;
-    if !on_ground {
-        speed /= 5.0;
-    }
-    speed / h / if requires_tool(id) { 100.0 } else { 30.0 }
 }
 
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
@@ -569,7 +555,7 @@ pub trait DigWorld {
 
 /// Inputs of one client tick.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Frame {
+pub struct Frame<'a> {
     /// Attack key is down with the game focused.
     pub held: bool,
     /// Attack key presses since the last tick.
@@ -580,7 +566,11 @@ pub struct Frame {
     /// Adventure or spectator: `clickBlock` refuses, but the swing still happens.
     pub no_dig: bool,
     pub on_ground: bool,
+    /// Held tool, effects and water: what `PlayerEntity.getMiningSpeed` reads.
+    pub mining: Mining,
     pub target: Option<Hit>,
+    /// The held stack: `getDisplayItemInHand`, compared by `same_tool`.
+    pub tool: Option<&'a crate::inventory::ItemStack>,
     /// The entity under the crosshair; a click attacks it and `target` is then `None`.
     pub entity: Option<i32>,
 }
@@ -590,6 +580,8 @@ pub struct Frame {
 pub struct Digger {
     hitting: bool,
     current: [i32; 3],
+    /// `currentItemHittingBlock`: the stack held when the dig began.
+    tool: Option<crate::inventory::ItemStack>,
     progress: f32,
     hit_delay: i32,
     click_delay: i32,
@@ -616,7 +608,50 @@ const MISS_DELAY: i32 = 10;
 /// released, which resets it.
 const FOCUS_DELAY: i32 = 10000;
 
+/// `Item.isDamageable`: a positive max damage and no `Unbreakable` tag.
+fn damageable(s: &crate::inventory::ItemStack) -> bool {
+    use crate::inventory::Tag;
+    const MAX_DAMAGE: [(i16, i16); 9] = [
+        (256, 259),
+        (261, 261),
+        (267, 279),
+        (283, 286),
+        (290, 294),
+        (298, 317),
+        (346, 346),
+        (359, 359),
+        (398, 398),
+    ];
+    let unbreakable = |n: &crate::inventory::Nbt| {
+        n.root
+            .iter()
+            .any(|(k, t)| k == "Unbreakable" && matches!(t, Tag::Byte(b) if *b != 0))
+    };
+    MAX_DAMAGE.iter().any(|&(lo, hi)| (lo..=hi).contains(&s.id))
+        && !s.nbt.as_ref().is_some_and(unbreakable)
+}
+
+/// `PlayerControllerMP.isHittingPosition` tool test: same item, same NBT, and the same metadata
+/// unless the item is damageable.
+fn same_tool(
+    saved: &Option<crate::inventory::ItemStack>,
+    held: Option<&crate::inventory::ItemStack>,
+) -> bool {
+    match (saved, held) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.id == b.id && a.nbt == b.nbt && (damageable(a) || a.damage == b.damage)
+        }
+        _ => false,
+    }
+}
+
 impl Digger {
+    /// `isHittingPosition`: the block being dug is `pos` and the tool is unchanged.
+    fn is_hitting_position(&self, f: &Frame, pos: [i32; 3]) -> bool {
+        self.hitting && self.current == pos && same_tool(&self.tool, f.tool)
+    }
+
     /// One client tick, in vanilla order: focus, counter, clicks, then the held key.
     pub fn tick(&mut self, f: &Frame, w: &mut impl DigWorld, out: &mut Vec<Action>) {
         if f.grabbed {
@@ -678,19 +713,30 @@ impl Digger {
             out.push(start(Status::Start, hit.pos));
             self.creative_break(hit, w);
             self.hit_delay = HIT_DELAY;
-        } else if !self.hitting || self.current != hit.pos {
-            if self.hitting {
-                out.push(start(Status::Abort, self.current));
-            }
-            out.push(start(Status::Start, hit.pos));
-            let id = w.state(hit.pos) >> 4;
-            if id != 0 && relative_hardness(id, f.on_ground) >= 1.0 {
-                self.destroy(hit.pos, w);
-            } else {
-                self.hitting = true;
-                self.current = hit.pos;
-                self.progress = 0.0;
-            }
+        } else if !self.is_hitting_position(f, hit.pos) {
+            self.start_dig(f, hit, w, out);
+        }
+    }
+
+    /// The survival branch of `clickBlock`: abort the old dig, send START, and begin or finish.
+    fn start_dig(&mut self, f: &Frame, hit: Hit, w: &mut impl DigWorld, out: &mut Vec<Action>) {
+        let start = |status, pos| Action::Dig {
+            status,
+            pos,
+            face: hit.face,
+        };
+        if self.hitting {
+            out.push(start(Status::Abort, self.current));
+        }
+        out.push(start(Status::Start, hit.pos));
+        let id = w.state(hit.pos) >> 4;
+        if id != 0 && relative_hardness(id, f.on_ground, &f.mining) >= 1.0 {
+            self.destroy(hit.pos, w);
+        } else {
+            self.hitting = true;
+            self.current = hit.pos;
+            self.tool = f.tool.cloned();
+            self.progress = 0.0;
         }
     }
 
@@ -717,26 +763,38 @@ impl Digger {
                 face: hit.face,
             });
             self.creative_break(hit, w);
-        } else if self.hitting && self.current == hit.pos {
-            let id = w.state(hit.pos) >> 4;
-            if id == 0 {
-                self.hitting = false;
-                return false;
-            }
-            self.progress += relative_hardness(id, f.on_ground);
-            if self.progress >= 1.0 {
-                self.hitting = false;
-                out.push(Action::Dig {
-                    status: Status::Stop,
-                    pos: hit.pos,
-                    face: hit.face,
-                });
-                self.destroy(hit.pos, w);
-                self.progress = 0.0;
-                self.hit_delay = HIT_DELAY;
-            }
+        } else if self.is_hitting_position(f, hit.pos) {
+            return self.advance_dig(f, hit, w, out);
         } else {
             self.click_block(f, hit, w, out);
+        }
+        true
+    }
+
+    /// The progress branch of `onPlayerDamageBlock`: false when the block is gone.
+    fn advance_dig(
+        &mut self,
+        f: &Frame,
+        hit: Hit,
+        w: &mut impl DigWorld,
+        out: &mut Vec<Action>,
+    ) -> bool {
+        let id = w.state(hit.pos) >> 4;
+        if id == 0 {
+            self.hitting = false;
+            return false;
+        }
+        self.progress += relative_hardness(id, f.on_ground, &f.mining);
+        if self.progress >= 1.0 {
+            self.hitting = false;
+            out.push(Action::Dig {
+                status: Status::Stop,
+                pos: hit.pos,
+                face: hit.face,
+            });
+            self.destroy(hit.pos, w);
+            self.progress = 0.0;
+            self.hit_delay = HIT_DELAY;
         }
         true
     }
@@ -921,7 +979,7 @@ mod tests {
         face: 1,
     };
 
-    fn held(creative: bool) -> Frame {
+    fn held(creative: bool) -> Frame<'static> {
         Frame {
             held: true,
             creative,
@@ -955,6 +1013,74 @@ mod tests {
             }
         }
         None
+    }
+
+    fn stack(id: i16, damage: i16) -> crate::inventory::ItemStack {
+        crate::inventory::ItemStack {
+            id,
+            count: 1,
+            damage,
+            nbt: None,
+        }
+    }
+
+    /// `isHittingPosition`: a changed tool aborts and restarts the dig; a damaged copy of the same
+    /// damageable item does not.
+    #[test]
+    fn changing_tool_restarts_the_dig() {
+        let mut w = Blocks(HashMap::from([(AT.pos, STONE)]));
+        let mut d = Digger::default();
+        let mut out = vec![];
+        let (pick, worn) = (stack(278, 0), stack(278, 5));
+        let with = |tool, press| Frame {
+            presses: press,
+            tool,
+            ..held(false)
+        };
+        d.tick(&with(None, 1), &mut w, &mut out);
+        d.tick(&with(None, 0), &mut w, &mut out);
+        assert!(d.progress > 0.0);
+        out.clear();
+        d.tick(&with(Some(&pick), 0), &mut w, &mut out);
+        let dig = |status, pos| Action::Dig {
+            status,
+            pos,
+            face: 1,
+        };
+        assert_eq!(
+            out[..2],
+            [dig(Status::Abort, AT.pos), dig(Status::Start, AT.pos)]
+        );
+        let restarted = d.progress;
+        assert_eq!(restarted, 0.0, "progress restarts");
+
+        out.clear();
+        d.tick(&with(Some(&worn), 0), &mut w, &mut out);
+        assert_eq!(out, [Action::Swing], "same damageable item keeps digging");
+        assert!(d.progress > restarted);
+    }
+
+    #[test]
+    fn changing_metadata_of_a_plain_item_restarts_the_dig() {
+        let mut w = Blocks(HashMap::from([(AT.pos, STONE)]));
+        let mut d = Digger::default();
+        let mut out = vec![];
+        let (dirt, dirt2) = (stack(3, 0), stack(3, 1));
+        let with = |tool, press| Frame {
+            presses: press,
+            tool,
+            ..held(false)
+        };
+        d.tick(&with(Some(&dirt), 1), &mut w, &mut out);
+        out.clear();
+        d.tick(&with(Some(&dirt2), 0), &mut w, &mut out);
+        assert!(matches!(
+            out.first(),
+            Some(Action::Dig {
+                status: Status::Abort,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1059,8 +1185,8 @@ mod tests {
             let id = id as u16;
             let got = (
                 hardness(id).to_bits(),
-                relative_hardness(id, true).to_bits(),
-                relative_hardness(id, false).to_bits(),
+                relative_hardness(id, true, &Mining::default()).to_bits(),
+                relative_hardness(id, false, &Mining::default()).to_bits(),
                 u32::from(!requires_tool(id)),
             );
             let want = (bits(f[0]), bits(f[1]), bits(f[2]), bits(f[3]));

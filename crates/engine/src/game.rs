@@ -10,6 +10,7 @@ use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
 use world::horse::{self, HorseJump};
 use world::inventory::{merchant, Inventory};
+use world::tool::Mining;
 use world::{Input, Player, World};
 
 /// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
@@ -174,6 +175,8 @@ pub struct Game {
     pub spawn: [i32; 3],
     /// `EntityPlayer.hasReducedDebug`: from `JoinGame` and entity status 22/23.
     pub reduced_debug: bool,
+    /// Level type `flat` from `JoinGame`/`Respawn`: `Dimension.getFogSize` is 1 instead of 1/32.
+    pub flat_world: bool,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
     pub ticks: u64,
     pub inv: Inventory,
@@ -225,7 +228,19 @@ pub struct Game {
     pub potion_ambient: bool,
 }
 
+/// Potion id of Water Breathing.
+const WATER_BREATHING: i8 = 13;
+
 impl Game {
+    /// Respiration level of the worn helmet; window 0 slots 5 to 8 are the armor, enchantment 5.
+    pub fn respiration(&self) -> i32 {
+        world::dig::highest_enchant_level(&self.inv.player[5..=8], 5)
+    }
+
+    pub fn water_breathing(&self) -> bool {
+        self.effects.has(WATER_BREATHING)
+    }
+
     pub fn new() -> Game {
         Game {
             store: ChunkStore::default(),
@@ -258,6 +273,7 @@ impl Game {
             daylight_cycle: true,
             spawn: [0; 3],
             reduced_debug: false,
+            flat_world: false,
             ticks: 0,
             inv: Inventory::default(),
             broken: Vec::new(),
@@ -506,6 +522,7 @@ impl Game {
             NetEvent::Respawn { dimension_changed } => {
                 return Some(self.respawn(dimension_changed))
             }
+            NetEvent::LevelType { flat } => self.flat_world = flat,
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
                 self.store.insert(*c);
@@ -952,12 +969,13 @@ impl Game {
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
     /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
     /// the block `block` and a click attacks it, as in vanilla's `objectMouseOver`. Only
-    /// survival and creative can dig.
+    /// survival and creative can dig. `eyes_in_water` is `isSubmergedIn(WATER)`.
     pub fn dig_tick(
         &mut self,
         attack: Attack,
         entity: Option<i32>,
         block: Option<Hit>,
+        eyes_in_water: bool,
     ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
         let Some(p) = &self.player else {
@@ -970,7 +988,14 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
+            mining: Mining::of_player(
+                self.inv.held_stack(),
+                &self.inv.player[5..=8],
+                &self.effects,
+                eyes_in_water,
+            ),
             target: block.filter(|_| entity.is_none()),
+            tool: self.inv.held_stack().as_ref(),
             entity,
         };
         let mut local = Local {
@@ -1173,6 +1198,16 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn level_type_sets_flat_world_and_survives_respawn_event_order() {
+        let mut g = Game::new();
+        assert!(!g.flat_world);
+        g.apply(NetEvent::LevelType { flat: true });
+        assert!(g.flat_world);
+        g.apply(NetEvent::LevelType { flat: false });
+        assert!(!g.flat_world);
     }
 
     #[test]

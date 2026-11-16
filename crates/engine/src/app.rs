@@ -12,6 +12,7 @@ mod crystal;
 mod events;
 mod input;
 mod leash;
+mod limbs;
 mod mod_boot;
 mod mod_events;
 mod mod_lists;
@@ -22,6 +23,8 @@ mod play;
 mod screen;
 mod skull;
 mod vehicle;
+
+use limbs::Limbs;
 
 use crate::args::Args;
 use crate::game::{eye_height, Game};
@@ -63,14 +66,6 @@ type Overlay = (
     Vec<(String, Vec<u8>)>,
     Vec<gui::screens::Effect>,
 );
-
-/// `EntityPlayer.limbSwing` for the local player, so the third-person model walks.
-#[derive(Default)]
-struct Limbs {
-    swing: f32,
-    amount: f32,
-    prev_amount: f32,
-}
 
 /// Item shown in the hand: id, damage, glint and leather `display.color`.
 type HandItem = (i16, i16, bool, Option<i32>);
@@ -681,7 +676,7 @@ impl App {
                 ],
                 yaw: p.yaw,
                 pitch: self.game.pitch,
-                body_yaw: p.yaw,
+                body_yaw: self.limbs.body_yaw(f),
                 eye_height: eye_height(self.input.sneaking()) as f32,
                 sneaking: self.input.sneaking(),
                 swing: self.game.swing.progress(f),
@@ -689,11 +684,12 @@ impl App {
             });
         }
         let e = self.game.entities.get(id)?;
+        let (yaw, pitch) = e.lerp_look(f);
         Some(Thrower {
             pos: e.lerp_pos(frac),
-            yaw: e.yaw,
-            pitch: e.pitch,
-            body_yaw: e.yaw,
+            yaw,
+            pitch,
+            body_yaw: e.lerp_pose(f).0,
             eye_height: e.eye_height(),
             sneaking: e.sneaking(),
             swing: e.swing_progress(f),
@@ -713,7 +709,7 @@ impl App {
                 lerp(self.game.prev_pos[1], p.pos[1]),
                 lerp(self.game.prev_pos[2], p.pos[2]),
             ],
-            yaw: p.yaw,
+            yaw: self.limbs.body_yaw(f),
             head_yaw: p.yaw,
             pitch: self.game.pitch,
             limb_swing: self.limbs.swing - self.limbs.amount * (1.0 - f),
@@ -1577,12 +1573,12 @@ fn entity_draw(
         Kind::Painting => Class::Painting,
     };
     let p = partial as f32;
-    let (yaw, pitch) = skull::look(e, p);
+    let (yaw, head_yaw, pitch) = e.lerp_pose(p);
     EntityDraw {
         class,
         pos: e.lerp_pos(partial),
         yaw,
-        head_yaw: e.head_yaw,
+        head_yaw,
         pitch,
         limb_swing: e.limb_swing - e.limb_swing_amount * (1.0 - p),
         limb_swing_amount: e.prev_limb_swing_amount

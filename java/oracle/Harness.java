@@ -62,6 +62,8 @@ import net.minecraft.flat.SlimeEntity;
  *                                 at the kick tick; per tick: onGround, stretch and lastStretch as float bits in hex; needs "start"
  *   squid <ticks> <water 0/1> <vx> <vy> <vz> <yaw> <status tick>  a client squid given that velocity at tick 0 and
  *                                 the status 19 at the status tick; per tick: see squidCommand; needs "start"
+ *   body <swing tick, -1 = none> <ticks> <x z yaw>*  a remote player moved to each x z with that yaw, then ticked;
+ *                                 first line: body yaw before the first tick; per tick: body yaw and last body yaw (float bits); needs "start"
  *   guardian <ticks> <water 0/1> <moving 0/1> <seed> <switch tick>  a client guardian; per tick: see guardianCommand;
  *                                 needs "start"
  *   dragon <ticks> <vx> <vy> <vz> <yaw0> <dyaw> <y0> <dy>  a client ender dragon; per tick: see dragonCommand; needs "start"
@@ -315,6 +317,37 @@ public class Harness {
                 + bits(s.velocityX) + " " + bits(s.velocityY) + " " + bits(s.velocityZ) + " "
                 + bits(s.bodyPitch) + " " + bits(s.bodyRoll) + " " + bits(s.tentacleMovement) + " "
                 + bits(s.tentacleRotation) + " " + bits(s.bodyYaw) + " " + bits(s.lastBodyYaw) + " " + bits(s.headYaw));
+        }
+    }
+
+    /**
+     * `LivingEntity.tick` -> `bodyMovement` for a `RemoteClientPlayerEntity`: each tick it gets a one-step
+     * interpolation to the next position and yaw. Line 1: body yaw of the fresh entity (float bits). Then per
+     * tick: body yaw and last body yaw (float bits).
+     */
+    static void bodyCommand(String[] t) throws Exception {
+        Field client = net.minecraft.flat.World.class.getField("isClient");
+        client.setAccessible(true);
+        client.setBoolean(world, true);
+        net.minecraft.flat.RemoteClientPlayerEntity p =
+            new net.minecraft.flat.RemoteClientPlayerEntity(world, new GameProfile(UUID.randomUUID(), "body")) {
+                @Override
+                public boolean isSpectator() {
+                    return false;
+                }
+            };
+        p.setPositionAndAngles(Double.parseDouble(t[3]), 70, Double.parseDouble(t[4]), Float.parseFloat(t[5]), 0f);
+        System.out.println(bits(p.bodyYaw));
+        int swing = Integer.parseInt(t[1]);
+        int n = Integer.parseInt(t[2]);
+        for (int i = 0; i < n; i++) {
+            p.lerpPositionAndAngles(Double.parseDouble(t[3 + 3 * i]), 70, Double.parseDouble(t[4 + 3 * i]),
+                Float.parseFloat(t[5 + 3 * i]), 0f, 1, false);
+            if (i == swing) {
+                p.swingArm();
+            }
+            p.tick();
+            System.out.println(bits(p.bodyYaw) + " " + bits(p.lastBodyYaw));
         }
     }
 
@@ -737,6 +770,9 @@ public class Harness {
                     break;
                 case "squish":
                     squishCommand(t);
+                    break;
+                case "body":
+                    bodyCommand(t);
                     break;
                 case "squid":
                     squidCommand(t);

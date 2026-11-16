@@ -4,6 +4,7 @@
 //! (squidRotation), `tentacleRotation` (tentacleAngle), `tentacleSpeed` (rotationVelocity) and
 //! `rotationSpeed` (rotateSpeed). `RenderSquid` reads [`Squid::pose`].
 
+use crate::body::wrap_degrees;
 use std::f32::consts::PI;
 
 const TAU: f32 = std::f32::consts::TAU;
@@ -35,8 +36,7 @@ pub struct Squid {
     rotation_speed: f32,
     body_yaw: f32,
     last_body_yaw: f32,
-    active_ticks: i32,
-    last_head_yaw: f32,
+    control: crate::body::BodyControl,
 }
 
 impl Squid {
@@ -99,7 +99,8 @@ impl Squid {
         }
         // In water the squid sets `rotationYaw = renderYawOffset` before the body turn.
         let rotation_yaw = if in_water { self.body_yaw } else { yaw };
-        self.turn_body(rotation_yaw, moved, head_yaw);
+        self.control
+            .tick(rotation_yaw, moved, &mut self.body_yaw, head_yaw);
     }
 
     /// The `inWater` branch of `onLivingUpdate`: the tentacle stroke and the body angles.
@@ -129,30 +130,6 @@ impl Squid {
         self.pitch += (climb - self.pitch) * 0.1;
     }
 
-    /// `BodyControl.tick` (a mob's `func_110146_f`): a moving mob takes its yaw as the body yaw and drags
-    /// the head within 75 degrees of it; a still one turns the body toward the head, the more slowly the
-    /// longer the head rests.
-    fn turn_body(&mut self, rotation_yaw: f32, moved: [f64; 2], head_yaw: &mut f32) {
-        if moved[0] * moved[0] + moved[1] * moved[1] > 2.500_000_277_905_201e-7 {
-            self.body_yaw = rotation_yaw;
-            *head_yaw = clamp_angle(self.body_yaw, *head_yaw, 75.0);
-            self.last_head_yaw = *head_yaw;
-            self.active_ticks = 0;
-            return;
-        }
-        let mut bound = 75.0;
-        if (*head_yaw - self.last_head_yaw).abs() > 15.0 {
-            self.active_ticks = 0;
-            self.last_head_yaw = *head_yaw;
-        } else {
-            self.active_ticks += 1;
-            if self.active_ticks > 10 {
-                bound = (1.0 - (self.active_ticks - 10) as f32 / 10.0).max(0.0) * 75.0;
-            }
-        }
-        self.body_yaw = clamp_angle(*head_yaw, self.body_yaw, bound);
-    }
-
     /// The pose of the frame at `partial` of the tick.
     pub fn pose(&self, partial: f32) -> Pose {
         let ease = |last: f32, now: f32| last + (now - last) * partial;
@@ -166,23 +143,6 @@ impl Squid {
             tentacle: ease(self.last_tentacle, self.tentacle),
         }
     }
-}
-
-/// `MathHelper.wrapDegrees`.
-fn wrap_degrees(v: f32) -> f32 {
-    let mut v = v % 360.0;
-    if v >= 180.0 {
-        v -= 360.0;
-    }
-    if v < -180.0 {
-        v += 360.0;
-    }
-    v
-}
-
-/// `BodyControl.clampAndWrapAngle`: `target` less the offset to `from`, kept within `bound`.
-fn clamp_angle(target: f32, from: f32, bound: f32) -> f32 {
-    target - wrap_degrees(target - from).clamp(-bound, bound)
 }
 
 #[cfg(test)]

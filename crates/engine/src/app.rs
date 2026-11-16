@@ -665,6 +665,23 @@ impl App {
         };
     }
 
+    /// `!isInvisibleTo(viewer)`: this viewer sees an invisible entity, drawn translucent.
+    fn sees_invisible(&self, player: Option<&str>) -> bool {
+        let sb = &self.hud.scoreboard;
+        !sb.is_invisible_to(player, &self.args.username, self.game.gamemode == 3)
+    }
+
+    /// The local player is invisible and the viewer sees them, drawn translucent.
+    fn sees_own_ghost(&self) -> bool {
+        self.game.effects.has(Fx::INVISIBILITY) && self.sees_invisible(Some(&self.args.username))
+    }
+
+    /// A remote entity is invisible and the viewer sees it, drawn translucent.
+    fn sees_ghost(&self, e: &Entity, d: &EntityDraw) -> bool {
+        let player = e.name.as_deref().filter(|_| e.kind == Kind::Player);
+        d.invisible && self.sees_invisible(player)
+    }
+
     /// The player who cast a fishing rod, as `FishingBobberRenderer` reads it.
     fn thrower(&self, id: i32, frac: f64) -> Option<Thrower> {
         let f = frac as f32;
@@ -772,6 +789,7 @@ impl App {
             line: None,
             look: Look {
                 riding: self.game.vehicle.is_some(),
+                ghost: self.sees_own_ghost(),
                 stand: StandLook {
                     head_damage: self.game.inv.player[5].as_ref().map_or(0, |s| s.damage),
                     ..StandLook::default()
@@ -864,6 +882,7 @@ impl App {
             d.view = [cam.yaw, cam.pitch];
             d.look.viewer = viewer;
             self.team_tag(e, d);
+            d.look.ghost = self.sees_ghost(e, d);
             self.held_and_line(e, d, frac);
             d.look.leash = self.leash_holder(e, frac);
             vehicle::snap(&self.game.store, e, d);

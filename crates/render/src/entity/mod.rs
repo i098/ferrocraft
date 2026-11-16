@@ -222,7 +222,12 @@ pub struct Look {
     /// Ender dragon: the wing clock and ring buffer of the frame. `None` is a dragon that never
     /// ticked (a spawner's): all offsets 0 and the wing clock 0.
     pub dragon: Option<Box<world::mob_anim::DragonPose>>,
+    /// An invisible entity the viewer can see (`!isInvisibleTo(viewer)`): the body draws at [`GHOST_ALPHA`].
+    pub ghost: bool,
 }
+
+/// `LivingEntityRenderer.renderModel`: alpha of the body of an invisible entity the viewer can see.
+pub const GHOST_ALPHA: f32 = 0.15;
 
 impl Default for Look {
     fn default() -> Look {
@@ -260,6 +265,7 @@ impl Default for Look {
             guardian_tail: 0.0,
             viewer: [0.0; 3],
             dragon: None,
+            ghost: false,
         }
     }
 }
@@ -1082,6 +1088,27 @@ pub fn build(
     out
 }
 
+/// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]) out of `mesh`, which the opaque
+/// entity pass draws, into a mesh for the blended pass.
+pub fn take_ghosts(mesh: &mut MeshData) -> MeshData {
+    let mut ghosts = MeshData::default();
+    let vertices = &mesh.vertices;
+    let (ghost, solid): (Vec<[u32; 3]>, Vec<[u32; 3]>) = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .copied()
+        .partition(|t| vertices[t[0] as usize].color[3] == GHOST_ALPHA);
+    for t in ghost {
+        let base = ghosts.vertices.len() as u32;
+        ghosts.vertices.extend(t.map(|i| vertices[i as usize]));
+        ghosts.indices.extend([base, base + 1, base + 2]);
+    }
+    mesh.indices = solid.into_flattened();
+    ghosts
+}
+
 /// `[sky, block]` light of one entity; `flash` adds the hurt flag of a flashing body.
 pub(crate) fn light_level(
     d: &EntityDraw,
@@ -1427,6 +1454,31 @@ fn box_object(out: &mut MeshData, id: i8, d: &EntityDraw, skins: &Skins) -> bool
     true
 }
 
+/// `LivingEntityRenderer.renderModel` skips the body of an invisible entity unless the viewer can
+/// see it, then draws it at `GHOST_ALPHA`; layers still draw.
+fn emit_body(
+    out: &mut MeshData,
+    xf: &Xf,
+    m: &Model,
+    (d, skins): (&EntityDraw, &Skins),
+    (skin, tint): (Skin, [f32; 3]),
+    shown: impl Fn(usize) -> bool,
+) {
+    let start = out.vertices.len();
+    if !d.invisible || d.look.ghost {
+        for (i, part) in m.parts.iter().enumerate() {
+            if shown(i) && (part.inflate == 0.0 || skin != Skin::White) {
+                emit_part(out, xf, part, part.inflate, tint, skins.v_offset(skin));
+            }
+        }
+    }
+    if d.invisible {
+        for v in &mut out.vertices[start..] {
+            v.color[3] = GHOST_ALPHA;
+        }
+    }
+}
+
 /// The body model, its armor and layers; returns where the full-bright layers start.
 fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     if d.class == Class::Object(78) {
@@ -1444,16 +1496,7 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
     let shown =
         |i: usize| !player || player_part_bit(i).is_none_or(|bit| d.look.skin_parts & bit != 0);
 
-    // `LivingEntityRenderer.renderModel` skips the body of an invisible entity; layers still draw.
-    for (i, part) in m
-        .parts
-        .iter()
-        .enumerate()
-        .filter(|(i, p)| !d.invisible && shown(*i) && (p.inflate == 0.0 || skin != Skin::White))
-    {
-        let _ = i;
-        emit_part(out, &xf, part, part.inflate, tint, skins.v_offset(skin));
-    }
+    emit_body(out, &xf, &m, (d, skins), (skin, tint), shown);
     let holds = matches!(
         d.class,
         Class::Player { .. } | Class::Mob(53 | 54 | 57 | 51)

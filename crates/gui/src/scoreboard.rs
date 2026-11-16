@@ -50,6 +50,8 @@ pub struct Team {
     pub visibility: Visibility,
     /// `Formatting.getId` of the team color; `None` is reset (-1).
     pub color: Option<u8>,
+    /// `ScorePlayerTeam.getSeeFriendlyInvisiblesEnabled`: bit 2 of the friendly flags.
+    pub see_friendly_invisibles: bool,
     pub members: Vec<String>,
 }
 
@@ -62,6 +64,8 @@ pub struct TeamInfo {
     /// `nameTagVisibility` key.
     pub visibility: String,
     pub color: i8,
+    /// The friendly flags byte: 1 friendly fire, 2 see friendly invisibles.
+    pub friendly: i8,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -142,6 +146,7 @@ impl Scoreboard {
             t.suffix = info.suffix.clone();
             t.visibility = Visibility::by_key(&info.visibility);
             t.color = u8::try_from(info.color).ok();
+            t.see_friendly_invisibles = info.friendly & 2 != 0;
         }
         match mode {
             0 | 3 => t.members.extend(members.iter().cloned()),
@@ -178,6 +183,19 @@ impl Scoreboard {
             Visibility::HideForOtherTeams => mine.is_none_or(same),
             Visibility::HideForOwnTeam => mine.is_none_or(|m| !same(m)),
         })
+    }
+
+    /// `Entity.isInvisibleTo` and `EntityPlayer.isInvisibleTo` for the viewer `me`: a spectator sees every
+    /// invisible entity; a player also sees an invisible team mate when the team allows it. `player` is the
+    /// entity's name when it is a player, `None` for any other entity.
+    pub fn is_invisible_to(&self, player: Option<&str>, me: &str, spectator: bool) -> bool {
+        if spectator {
+            return false;
+        }
+        let Some((team, t)) = player.and_then(|p| self.team_of(p)) else {
+            return true;
+        };
+        self.team_of(me).map(|(n, _)| n) != Some(team) || !t.see_friendly_invisibles
     }
 
     /// `LivingEntityRenderer.setupSolidState`: the color of the team prefix, which tints a player's
@@ -323,6 +341,44 @@ mod tests {
         assert_eq!(s.format_name("a"), "a");
         s.set_objective("o", "", 1, false);
         assert_eq!(s.objective_in(SLOT_SIDEBAR), None);
+    }
+
+    /// `isInvisibleTo`: hidden from a player, shown to a spectator, shown to the team when the flag is set.
+    #[test]
+    fn invisible_to_spectators_and_flagged_teams() {
+        let mut s = Scoreboard::default();
+        let team = |s: &mut Scoreboard, n: &str, friendly: i8, who: &[&str]| {
+            let info = TeamInfo {
+                friendly,
+                ..TeamInfo::default()
+            };
+            let who: Vec<String> = who.iter().map(|w| w.to_string()).collect();
+            s.set_team(n, 0, &info, &who);
+        };
+        team(&mut s, "see", 2, &["a", "b"]);
+        team(&mut s, "fire", 1, &["c", "d"]);
+        team(&mut s, "both", 3, &["e"]);
+        assert!(!s.is_invisible_to(Some("a"), "x", true), "spectator");
+        assert!(!s.is_invisible_to(None, "x", true), "spectator, mob");
+        assert!(
+            !s.is_invisible_to(Some("a"), "b", false),
+            "team with flag 2"
+        );
+        assert!(
+            s.is_invisible_to(Some("c"), "d", false),
+            "team without flag 2"
+        );
+        assert!(s.is_invisible_to(Some("a"), "c", false), "other team");
+        assert!(
+            s.is_invisible_to(Some("a"), "x", false),
+            "viewer has no team"
+        );
+        assert!(
+            s.is_invisible_to(Some("x"), "a", false),
+            "target has no team"
+        );
+        assert!(s.is_invisible_to(None, "a", false), "mob");
+        assert!(!s.is_invisible_to(Some("e"), "e", false), "self, flags 3");
     }
 
     /// `canRenderName`: the four `Team.Visibility` modes for a viewer on the same team, on another team and on none.

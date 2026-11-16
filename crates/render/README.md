@@ -29,6 +29,7 @@ Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and 
 `set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.
 `set_shadow_view` supplies the view entity's feet, so the F5 camera offset does not change the distance fade.
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
+Invisible entities draw their bodies at alpha 0.15 (`Look::ghost`) when the viewer is a spectator or a team mate with see-friendly-invisibles; otherwise bodies are skipped.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.
 The engine disables that overlay in third-person views and spectator mode.
 Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post` chain from the jar, as vanilla `PostChain`; the GLSL 1.20 programs are rewritten to 4.50 for naga (`glsl.rs`). The effect runs after the hand and before the GUI. A failed load returns `Err` and switches effects off; `toggle_post` is F4. `SHADERS` is the "Super Secret Settings..." cycle.

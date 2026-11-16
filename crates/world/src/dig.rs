@@ -1003,13 +1003,13 @@ mod tests {
     }
 
     /// `isHittingPosition`: a changed tool aborts and restarts the dig; a damaged copy of the same
-    /// damageable item does not, but another metadata of a non-damageable item does.
+    /// damageable item does not.
     #[test]
     fn changing_tool_restarts_the_dig() {
         let mut w = Blocks(HashMap::from([(AT.pos, STONE)]));
         let mut d = Digger::default();
         let mut out = vec![];
-        let (pick, worn, dirt, dirt2) = (stack(278, 0), stack(278, 5), stack(3, 0), stack(3, 1));
+        let (pick, worn) = (stack(278, 0), stack(278, 5));
         let with = |tool, press| Frame {
             presses: press,
             tool,

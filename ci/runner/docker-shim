@@ -2,11 +2,12 @@
 # Installed as ~/.local/share/runner-up/shim-ferrocraft/docker (see README.md).
 # For a ferrocraft place only: give the job container its own persistent cargo target
 # folder, then hand over to the host-wide shim. One folder per place, so two jobs never
-# share a target dir. Over-cap folders are deleted before the job starts, so the total
-# stays below 4 x PLACE_CAP_GB.
+# share a target dir. Over-cap folders are deleted before the job starts, so the total at
+# job start is at most 4 x PLACE_CAP_GB, plus the growth of the running jobs. The container uid differs from the shim uid, so the
+# delete needs passwordless sudo.
 set -eu
 base=${FERROCRAFT_TARGET_ROOT:-/sdc-disk/ci-target}
-cap_gb=${FERROCRAFT_PLACE_CAP_GB:-5}
+cap_gb=${FERROCRAFT_PLACE_CAP_GB:-4}
 shared=${FERROCRAFT_SHARED_SHIM:-/home/administrator/.local/share/runner-up/shim/docker}
 if [ "${1-}" = run ]; then
   place=
@@ -22,7 +23,7 @@ if [ "${1-}" = run ]; then
     used_kb=$(du -sk "$d" | cut -f1)
     if [ "$used_kb" -gt $((cap_gb * 1024 * 1024)) ]; then
       echo "ferrocraft-target: $place used $((used_kb / 1024)) MB, over the ${cap_gb} GB cap; deleting" >&2
-      find "$d" -mindepth 1 -delete
+      sudo -n find "$d" -mindepth 1 -delete
     fi
     chmod 0777 "$d"
     shift

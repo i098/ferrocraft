@@ -26,6 +26,8 @@ Install on the runner host:
     #   ~/.config/systemd/user/runner-up@i098-ferrocraft.service.d/target-dir.conf
     systemctl --user daemon-reload && systemctl --user restart runner-up@i098-ferrocraft
 
-Disk cap: 20 GB in total. Before each job starts, the shim deletes the place folder when it holds more than `FERROCRAFT_PLACE_CAP_GB` (default 5). Four places give at most 4 x (5 GB + the growth of one job). A deleted folder means one cold build, never a wrong result.
+Disk cap: below 20 GB. Before each job starts, the shim deletes the place folder when it holds more than `FERROCRAFT_PLACE_CAP_GB` (default 4). Four places hold at most 16 GB at job start, plus the growth of the running jobs. A deleted folder means one cold build, never a wrong result.
+
+The job container runs as uid 1001 and the shim user is uid 1000, so the shim cannot delete files the container wrote. The shim user needs passwordless sudo (`sudo -n find`) for the delete.
 
 Cargo decides freshness from file times, and a new checkout gives every file a new time. `ci/warm-target.sh start` fixes this: a file whose git blob equals the last fully built tree gets an old time, and a changed file gets the current time. `ci/warm-target.sh done` runs after `cargo test --no-run` succeeds and records the tree. A job that stops before then leaves no record, and the next job rebuilds everything.

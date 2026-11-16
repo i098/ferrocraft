@@ -923,6 +923,13 @@ impl App {
                 dye,
             )
         });
+        let [arm_pitch, arm_yaw] = self.game.arm_look.at(frac as f32);
+        let look = render::HandLook {
+            pitch: self.game.pitch,
+            yaw: self.game.player.as_ref().map_or(0.0, |p| p.yaw),
+            arm_pitch,
+            arm_yaw,
+        };
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);
         let using = self.using(frac as f32);
@@ -986,6 +993,7 @@ impl App {
                     lowered,
                     using,
                     glint: hand_item.is_some_and(|h| h.2),
+                    look,
                 }),
         );
         r.set_on_fire(

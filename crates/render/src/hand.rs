@@ -37,6 +37,33 @@ pub struct Hand {
     pub using: Option<Using>,
     /// `ItemStack.hasEffect` of the held item: draws the enchantment glint over it.
     pub glint: bool,
+    /// The view and the eased arm look, for the sway and the item lights.
+    pub look: HandLook,
+}
+
+/// `EntityPlayerSP` rotation and `renderArmPitch`/`renderArmYaw`, in degrees. The arm angles
+/// follow the look by half the gap each tick (`LocalClientPlayerEntity`), interpolated by the caller.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HandLook {
+    pub pitch: f32,
+    pub yaw: f32,
+    pub arm_pitch: f32,
+    pub arm_yaw: f32,
+}
+
+impl HandLook {
+    /// `ItemInHandRenderer.applyHandSway`: rotate by a tenth of the gap between look and eased look.
+    pub(crate) fn sway(&self) -> Mat {
+        chain(&[
+            rotate((self.pitch - self.arm_pitch) * 0.1, 0),
+            rotate((self.yaw - self.arm_yaw) * 0.1, 1),
+        ])
+    }
+
+    /// `ItemInHandRenderer.rotate`: the item lights are set under `rotate(pitch, x)`, `rotate(yaw, y)`.
+    fn light_view(&self) -> Mat {
+        chain(&[rotate(self.pitch, 0), rotate(self.yaw, 1)])
+    }
 }
 
 /// `EnumAction` of the item being used, as far as the first-person pose differs.
@@ -130,10 +157,11 @@ pub(crate) fn chain(ms: &[Mat]) -> Mat {
     ms.iter().fold(ident(), |acc, m| mul(acc, *m))
 }
 
-/// `ItemRenderer.transformFirstPersonItem`.
-fn item_transform(swing: f32, lowered: f32) -> Mat {
+/// `ItemRenderer.transformFirstPersonItem`, after `applyHandSway`.
+fn item_transform(swing: f32, lowered: f32, look: &HandLook) -> Mat {
     let root = swing.sqrt();
     chain(&[
+        look.sway(),
         translate(
             -0.4 * (root * PI).sin(),
             0.2 * (root * 2.0 * PI).sin(),
@@ -153,9 +181,9 @@ fn item_transform(swing: f32, lowered: f32) -> Mat {
 /// swing is skipped and the action's transform joins the plain first-person one.
 fn held_transform(hand: &Hand) -> Mat {
     let Some(Using { action, timer }) = hand.using else {
-        return item_transform(hand.swing, hand.lowered);
+        return item_transform(hand.swing, hand.lowered, &hand.look);
     };
-    let base = item_transform(0.0, hand.lowered);
+    let base = item_transform(0.0, hand.lowered, &hand.look);
     match action {
         UseAction::Consume => {
             let progress = timer / action.duration();
@@ -505,7 +533,7 @@ pub fn flat(hand: &Hand, f: &Flat) -> Draw {
     ]);
     let mut vertices = f.mesh.vertices.clone();
     for (quad, n) in vertices.chunks_mut(4).zip(&f.normals) {
-        let shade = item_light(&model, *n);
+        let shade = item_light(&model, *n, &hand.look);
         for v in quad {
             v.color = [shade, shade, shade, 1.0];
         }
@@ -524,6 +552,7 @@ const BOX: [[f32; 2]; 3] = [[-3.0, 1.0], [-2.0, 10.0], [-2.0, 2.0]];
 fn arm_model(hand: &Hand) -> Mat {
     let (swing, root) = (hand.swing, hand.swing.sqrt());
     let place = chain(&[
+        hand.look.sway(),
         translate(
             -0.3 * (root * PI).sin(),
             0.4 * (root * 2.0 * PI).sin(),
@@ -587,7 +616,7 @@ pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
     let mut vertices = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
     for (normal, corners) in faces {
-        let shade = item_light(&model, normal);
+        let shade = item_light(&model, normal, &hand.look);
         let base = vertices.len() as u32;
         for (p, u, v) in corners {
             vertices.push(Vertex {
@@ -606,11 +635,14 @@ pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
     }
 }
 
-/// `RenderHelper.enableStandardItemLighting`: two directional lights of 0.6 plus 0.4 ambient, lights fixed in eye space.
-fn item_light(model: &Mat, normal: [f32; 3]) -> f32 {
+/// `RenderHelper.enableStandardItemLighting`: two directional lights of 0.6 plus 0.4 ambient. The
+/// lights are placed under the view rotation of `ItemInHandRenderer.rotate`, so they turn with the look.
+fn item_light(model: &Mat, normal: [f32; 3], look: &HandLook) -> f32 {
     let n: [f32; 3] = std::array::from_fn(|r| (0..3).map(|c| model[c][r] * normal[c]).sum());
     let len = n.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
+    let view = look.light_view();
     let diffuse = |l: [f32; 3]| {
+        let l = point(&view, l);
         let ll = l.iter().map(|v| v * v).sum::<f32>().sqrt();
         ((0..3).map(|i| n[i] * l[i]).sum::<f32>() / (len * ll)).max(0.0)
     };
@@ -631,6 +663,7 @@ mod tests {
                 lowered: 0.0,
                 using: None,
                 glint: false,
+                look: HandLook::default(),
             },
             64,
         );
@@ -744,10 +777,56 @@ mod tests {
                     timer,
                 }),
                 glint: false,
+                look: HandLook::default(),
             })
         };
-        let rest = item_transform(0.0, 0.0);
+        let rest = item_transform(0.0, 0.0, &HandLook::default());
         assert!((at(32.0)[3][1] - rest[3][1]).abs() < 0.1);
         assert!(at(8.0)[3][0] < rest[3][0] + 0.6 * 0.4 + 1e-3 && at(8.0)[3] != rest[3]);
+    }
+
+    /// `applyHandSway`: a pitch change of 20 degrees against the eased pitch turns the hand by
+    /// 2 degrees about x and nothing about y.
+    #[test]
+    fn sway_turns_a_tenth_of_the_look_change() {
+        let look = HandLook {
+            pitch: 30.0,
+            arm_pitch: 10.0,
+            yaw: 5.0,
+            arm_yaw: 5.0,
+        };
+        let want = rotate(2.0, 0);
+        let got = look.sway();
+        for c in 0..4 {
+            for r in 0..4 {
+                assert!((got[c][r] - want[c][r]).abs() < 1e-6, "{got:?}");
+            }
+        }
+        assert_eq!(HandLook::default().sway(), ident());
+    }
+
+    /// The item lights turn with the view: the same arm shades differently looking up and straight ahead.
+    #[test]
+    fn item_light_follows_the_view() {
+        let shades = |pitch| {
+            let hand = Hand {
+                held: None,
+                swing: 0.0,
+                lowered: 0.0,
+                using: None,
+                glint: false,
+                look: HandLook {
+                    pitch,
+                    arm_pitch: pitch,
+                    ..HandLook::default()
+                },
+            };
+            arm(&hand, 64)
+                .vertices
+                .iter()
+                .map(|v| v.color[0])
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(shades(0.0), shades(-60.0));
     }
 }

@@ -1,5 +1,6 @@
 //! Window-free game state: chunks, the local player and the 20 TPS step.
 
+use crate::arm_look::ArmLook;
 use crate::swing::Swing;
 use crate::weather::{raining_at, Weather};
 use ferrocraft_net_client::{formatted_text, styled, CombatEventKind, NetEvent, Styled, TileEvent};
@@ -192,6 +193,8 @@ pub struct Game {
     /// Lightning bolts of Spawn Global Entity and the flash they cause.
     pub bolts: render::Bolts,
     pub swing: Swing,
+    /// `renderArmPitch` and `renderArmYaw`.
+    pub arm_look: ArmLook,
     /// Time of day from Time Update; the packet sends a negative value while the cycle is frozen.
     pub world_time: i64,
     /// `doDaylightCycle`, from the sign of the last Time Update.
@@ -304,6 +307,7 @@ impl Game {
             weather: Weather::default(),
             bolts: render::Bolts::default(),
             swing: Swing::default(),
+            arm_look: ArmLook::default(),
             world_time: 6000,
             daylight_cycle: true,
             spawn: [0; 3],
@@ -767,6 +771,9 @@ impl Game {
         self.weather.tick();
         self.bolts.tick();
         self.swing.tick(self.effects.arm_swing_duration());
+        if let Some(p) = &self.player {
+            self.arm_look.tick([self.pitch, p.yaw]);
+        }
         for b in &mut self.bob {
             *b = (*b - 1).max(0);
         }

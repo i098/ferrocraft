@@ -24,6 +24,8 @@ pub struct Job {
     pub neighbors: [Option<SharedBlocks>; 8],
     /// Biomes of the chunk and its neighbours, as `Neighborhood::biomes`.
     pub biomes: [Option<SharedBiomes>; 9],
+    /// Smooth lighting on (`GameSettings.ambientOcclusion != 0`).
+    pub smooth: bool,
 }
 
 pub struct Done {
@@ -44,7 +46,7 @@ impl Job {
         Done {
             key: self.key,
             generation: self.generation,
-            meshes: mesh_chunk(&hood, atlas),
+            meshes: mesh_chunk(&hood, atlas, self.smooth),
         }
     }
 }

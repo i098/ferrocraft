@@ -361,6 +361,7 @@ impl App {
         let (fullscreen, vsync, unicode) = (s.fullscreen, s.vsync, self.ui.unicode());
         let mipmap_levels = s.mipmap_levels.max(0) as u32;
         let entity_shadows = s.entity_shadows;
+        let smooth_lighting = s.ao != 0;
         let vsync = std::env::var("FERROCRAFT_VSYNC").map_or(vsync, |v| v != "0");
         let unicode = self
             .renderer
@@ -378,6 +379,7 @@ impl App {
         }
         if let Some(r) = &mut self.renderer {
             r.set_vsync(vsync);
+            r.set_smooth_lighting(smooth_lighting);
             r.set_mipmap_levels(mipmap_levels);
             r.set_entity_shadows(entity_shadows);
         }

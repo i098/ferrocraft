@@ -227,6 +227,7 @@ pub struct Renderer {
     mesher: Mesher,
     /// Chunks to remesh on the workers.
     dirty: HashSet<(i32, i32)>,
+    smooth_lighting: bool,
     /// Chunks to remesh on the render thread this frame (a block changed in them), as vanilla `rebuildSync`.
     urgent: HashSet<(i32, i32)>,
     /// Newest mesh job per chunk; a result with another generation is stale.
@@ -529,6 +530,7 @@ impl Renderer {
             biomes: HashMap::new(),
             meshes: HashMap::new(),
             dirty: HashSet::new(),
+            smooth_lighting: true,
             urgent: HashSet::new(),
             pending: HashMap::new(),
             next_generation: 0,
@@ -620,6 +622,14 @@ impl Renderer {
         if let Target::Window { surface, config } = &mut self.target {
             config.present_mode = present_mode(on);
             surface.configure(&self.device, config);
+        }
+    }
+
+    /// `Minecraft.isAmbientOcclusionEnabled` (`ao != 0`); remeshes every chunk when it changes.
+    pub fn set_smooth_lighting(&mut self, on: bool) {
+        if self.smooth_lighting != on {
+            self.smooth_lighting = on;
+            self.dirty.extend(self.blocks.keys().copied());
         }
     }
 
@@ -828,6 +838,7 @@ impl Renderer {
                 let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
                 self.biomes.get(&(cx + dx, cz + dz)).cloned()
             }),
+            smooth: self.smooth_lighting,
         }
     }
 

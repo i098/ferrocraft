@@ -826,6 +826,20 @@ impl App {
         }
     }
 
+    /// Knockback slowdown of the attacker: 0.6 on x and z and the sprint ends (`dig::attack_slowdown`).
+    fn slow_after_hit(&mut self, target: i32) {
+        let g = &mut self.game;
+        let is_player = g
+            .entities
+            .get(target)
+            .is_some_and(|e| e.kind == world::entities::Kind::Player);
+        let Some(p) = g.player.as_mut() else { return };
+        if dig::attack_slowdown(g.inv.held_stack(), p.sprinting, is_player, &mut p.vel) {
+            p.sprinting = false;
+            self.input.stop_sprint();
+        }
+    }
+
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
     fn dig(&mut self) {
         let presses = std::mem::take(&mut self.attack_presses);
@@ -857,6 +871,7 @@ impl App {
                 }
                 DigAction::Attack(id) => {
                     self.predict_hit_particles(id);
+                    self.slow_after_hit(id);
                     self.mod_attack(id);
                     self.session_send(|s| s.attack_entity(id))
                 }

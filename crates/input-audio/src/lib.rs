@@ -647,6 +647,11 @@ impl InputState {
         self.host_sneak = sneak;
     }
 
+    /// `setSprinting(false)`: a held sprint key starts the sprint again on the next `movement` call.
+    pub fn stop_sprint(&mut self) {
+        self.sprinting = false;
+    }
+
     fn update_sprint(&mut self, on_ground: bool, can_start: bool, sprint_key: bool) {
         let fresh = on_ground && !self.was_sneaking && !self.was_full_forward;
         if fresh && can_start && !self.sprinting {

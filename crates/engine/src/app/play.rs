@@ -860,7 +860,9 @@ impl App {
                     self.session_send(|s| s.send_dig(status as u8, pos, face))
                 }
                 DigAction::Swing => {
-                    self.game.swing.start();
+                    self.game
+                        .swing
+                        .start(self.game.effects.arm_swing_duration());
                     self.session_send(|s| s.send_swing())
                 }
                 DigAction::Attack(id) => {
@@ -1069,7 +1071,9 @@ impl App {
             self.toggle_openable(h.pos);
         }
         if handled {
-            self.game.swing.start();
+            self.game
+                .swing
+                .start(self.game.effects.arm_swing_duration());
             let r = self.session_send(|s| s.send_swing());
             self.send_result(r);
         }

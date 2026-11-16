@@ -20,6 +20,7 @@ pub(crate) mod guardian;
 mod guardian_body;
 pub(crate) mod gui;
 pub mod hanging;
+pub(crate) mod helmet;
 mod horse;
 pub mod item;
 pub mod leash;
@@ -164,6 +165,8 @@ pub struct Look {
     pub cape: Option<CapeSway>,
     /// Armor stands: flags, pose and worn block; see [`StandLook`].
     pub stand: StandLook,
+    /// `SkullOwner.Id` of a worn skull item: the player whose skin the head shows.
+    pub head_owner: Option<u128>,
     /// Entity id, the seed of the stuck-arrow placement (`LayerArrow`).
     pub id: i32,
     /// Living entities: metadata 9, arrows stuck in the body.
@@ -230,6 +233,7 @@ impl Default for Look {
             screaming: false,
             cape: None,
             stand: StandLook::default(),
+            head_owner: None,
             id: 0,
             arrows: 0,
             collar: 14,

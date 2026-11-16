@@ -10,6 +10,7 @@ use world::dig::{self, Action, DigWorld, Digger, Frame, Hit};
 use world::entities::{Entities, EntityEvent};
 use world::horse::{self, HorseJump};
 use world::inventory::{merchant, Inventory};
+use world::tool::Mining;
 use world::{Input, Player, World};
 
 /// `EntityPlayer.getEyeHeight`: 1.62 above the feet, 0.08 lower while sneaking.
@@ -973,12 +974,13 @@ impl Game {
     /// One client tick of block breaking. Returns the packets to send and the chunks whose
     /// blocks the player removed locally. `entity` is the entity under the crosshair: it hides
     /// the block `block` and a click attacks it, as in vanilla's `objectMouseOver`. Only
-    /// survival and creative can dig.
+    /// survival and creative can dig. `eyes_in_water` is `isSubmergedIn(WATER)`.
     pub fn dig_tick(
         &mut self,
         attack: Attack,
         entity: Option<i32>,
         block: Option<Hit>,
+        eyes_in_water: bool,
     ) -> (Vec<Action>, Vec<Effect>) {
         let (mut actions, mut touched) = (Vec::new(), Vec::new());
         let Some(p) = &self.player else {
@@ -991,7 +993,14 @@ impl Game {
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,
+            mining: Mining::of_player(
+                self.inv.held_stack(),
+                &self.inv.player[5..=8],
+                &self.effects,
+                eyes_in_water,
+            ),
             target: block.filter(|_| entity.is_none()),
+            tool: self.inv.held_stack().as_ref(),
             entity,
         };
         let mut local = Local {

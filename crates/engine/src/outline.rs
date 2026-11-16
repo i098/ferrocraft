@@ -9,7 +9,7 @@ const ADVENTURE: u8 = 2;
 const SPECTATOR: u8 = 3;
 /// Blocks whose tile entity is an `IInventory`: dispenser, furnace (idle, lit), chest, brewing stand, beacon,
 /// trapped chest, hopper, dropper.
-const INVENTORY_BLOCKS: [u16; 8] = [23, 61, 62, 54, 117, 138, 146, 154];
+const INVENTORY_BLOCKS: [u16; 9] = [23, 61, 62, 54, 117, 138, 146, 154, 158];
 
 /// `Block.getBlockFromName`: a registry name (`minecraft:` is the default namespace) or a numeric id.
 fn block_named(name: &str) -> Option<u16> {
@@ -60,7 +60,8 @@ pub fn selection(game: &Game, hide_hud: bool, ray: Option<Ray>) -> Option<[f64; 
     let (hit, _) = game.block_aim(eye, yaw, pitch, id, vehicle)?;
     let [x, y, z] = hit.pos;
     let held = game.inv.held_stack().as_ref();
-    if !draws(game.gamemode, hide_hud, held, game.store.get_block(x, y, z)) {
+    let mode = if game.camera.is_some() { 0 } else { game.gamemode };
+    if !draws(mode, hide_hud, held, game.store.get_block(x, y, z)) {
         return None;
     }
     game.selection(hit)
@@ -128,5 +129,6 @@ mod tests {
     fn spectator_draws_on_inventories_only() {
         assert!(!draws(3, false, None, STONE));
         assert!(draws(3, false, None, CHEST));
+        assert!(draws(3, false, None, 158 << 4 | 3));
     }
 }

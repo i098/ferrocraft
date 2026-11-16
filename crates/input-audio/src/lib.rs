@@ -9,10 +9,14 @@ pub use keys::{control_from_lwjgl, lwjgl_from_control, Bind, Control, KeyBinding
 
 use gui::screens::{Metrics, Mods, TextField};
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
+
+/// Vanilla waits this long after focus loss before it pauses.
+const FOCUS_PAUSE_DELAY: Duration = Duration::from_millis(500);
 
 /// The font widths and the clipboard text a chat key needs.
 type ChatEnv<'a> = (&'a dyn Metrics, &'a mut String);
@@ -143,6 +147,8 @@ pub struct InputState {
     grab_requested: bool,
     screen_open: bool,
     focused: bool,
+    /// When the window lost focus; `None` while focused.
+    focus_lost_at: Option<Instant>,
     pause_on_lost_focus: bool,
 }
 
@@ -182,6 +188,7 @@ impl InputState {
             grab_requested: true,
             screen_open: false,
             focused: true,
+            focus_lost_at: None,
             pause_on_lost_focus: true,
         }
     }
@@ -258,13 +265,31 @@ impl InputState {
     }
 
     fn set_focused(&mut self, focused: bool) {
-        let was_playing = self.wants_cursor_grab();
+        self.set_focused_at(focused, Instant::now());
+    }
+
+    fn set_focused_at(&mut self, focused: bool, now: Instant) {
         self.focused = focused;
         if focused {
+            self.focus_lost_at = None;
             return;
         }
+        self.focus_lost_at.get_or_insert(now);
         self.release_all();
-        if was_playing && self.pause_on_lost_focus {
+    }
+
+    /// `GameRenderer.render` (1.8.9, lines 776-780): once the window has been unfocused for
+    /// more than 500 ms, `pauseGame` opens the pause menu; it does nothing with a screen open.
+    fn poll_focus_pause(&mut self, now: Instant) {
+        let Some(lost) = self.focus_lost_at else {
+            return;
+        };
+        if self.pause_on_lost_focus
+            && now.saturating_duration_since(lost) > FOCUS_PAUSE_DELAY
+            && self.chat.is_none()
+            && !self.screen_open
+            && self.grab_requested
+        {
             self.grab_requested = false;
             self.actions.push_back(Action::Pause);
         }
@@ -587,6 +612,7 @@ impl InputState {
 
     /// Queued actions since the last call, oldest first.
     pub fn take_actions(&mut self) -> Vec<Action> {
+        self.poll_focus_pause(Instant::now());
         self.actions.drain(..).collect()
     }
 
@@ -1008,14 +1034,42 @@ mod tests {
     }
 
     #[test]
-    fn focus_loss_pauses_and_stops_movement() {
+    fn focus_loss_stops_movement_and_pauses_after_500_ms() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
         let mut s = InputState::default();
         press(&mut s, KeyCode::KeyW);
-        s.set_focused(false);
+        s.set_focused_at(false, t0);
         assert_eq!(s.movement(true, false, true, false).forward, 0.0);
+        s.poll_focus_pause(t0 + ms(100));
+        assert_eq!(s.take_actions(), vec![]);
+        s.poll_focus_pause(t0 + ms(500));
+        assert_eq!(s.take_actions(), vec![]);
+        s.poll_focus_pause(t0 + ms(600));
+        s.poll_focus_pause(t0 + ms(700));
         assert_eq!(s.take_actions(), vec![Action::Pause]);
-        s.set_focused(true);
+        s.set_focused_at(true, t0 + ms(800));
         assert!(!s.wants_cursor_grab());
+    }
+
+    #[test]
+    fn short_focus_steal_never_pauses() {
+        let t0 = Instant::now();
+        let mut s = InputState::default();
+        s.set_focused_at(false, t0);
+        s.set_focused_at(true, t0 + Duration::from_millis(100));
+        s.poll_focus_pause(t0 + Duration::from_secs(5));
+        assert_eq!(s.take_actions(), vec![]);
+    }
+
+    #[test]
+    fn open_screen_blocks_focus_pause() {
+        let t0 = Instant::now();
+        let mut s = InputState::default();
+        s.set_screen_open(true);
+        s.set_focused_at(false, t0);
+        s.poll_focus_pause(t0 + Duration::from_millis(600));
+        assert_eq!(s.take_actions(), vec![]);
     }
 
     #[test]

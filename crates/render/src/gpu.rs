@@ -212,6 +212,7 @@ pub struct Renderer {
     animations: Vec<Animation>,
     /// `Environment.ticks` of the last frame; the difference is the client ticks to animate.
     animated_to: Option<u64>,
+    fog_light: crate::fog_light::FogLight,
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
@@ -521,6 +522,7 @@ impl Renderer {
             atlas_clock: Animator::default(),
             animations,
             animated_to: None,
+            fog_light: Default::default(),
             font,
             env_tex,
             environment: Environment::default(),
@@ -1192,6 +1194,19 @@ impl Renderer {
             })
     }
 
+    /// The fog light of this frame: the light at the viewer's block, smoothed over ticks.
+    fn fog_light_now(&mut self, cam: &Camera, env: &Environment) -> f32 {
+        let [x, z] = [cam.pos[0], cam.pos[2]].map(|v| v.floor() as i32);
+        let [sky, block] = self.light_levels(x, env.view_y.floor() as i32, z);
+        let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
+        self.fog_light.advance(
+            env.ticks,
+            crate::fog_light::light_brightness(level as u8),
+            env.render_distance_chunks,
+        );
+        self.fog_light.at(env.partial)
+    }
+
     /// Draw one frame to the window: the world, then `overlay` in order. Offscreen renderers draw into their texture.
     pub fn render(&mut self, cam: &Camera, overlay: &[Quad]) {
         self.flush_meshes(cam);
@@ -1717,7 +1732,8 @@ impl Renderer {
 
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
-        let env = self.environment;
+        let mut env = self.environment;
+        env.fog_light = self.fog_light_now(cam, &env);
         self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
         let shadow = self.prepare_shadows(cam);

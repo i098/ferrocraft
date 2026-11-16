@@ -939,6 +939,10 @@ impl App {
                 })
             }),
             view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
+            // Window 0 slots 5 to 8 are the worn armor; Respiration is enchantment 5.
+            respiration: world::dig::highest_enchant_level(&self.game.inv.player[5..=8], 5),
+            water_breathing: self.game.effects.has(Fx::WATER_BREATHING),
+            ..Environment::default()
         });
         r.set_lightning(self.game.bolts.shapes());
         r.set_border(self.game.player.as_ref().map(|p| {

@@ -30,7 +30,7 @@ impl Renderer {
     }
 
     /// `[sky, block]` light levels `0..=15` of a block.
-    fn light_levels(&self, x: i32, y: i32, z: i32) -> [i32; 2] {
+    pub(super) fn light_levels(&self, x: i32, y: i32, z: i32) -> [i32; 2] {
         self.light_at([x as f64, y as f64, z as f64])
             .map(|l| (l * 15.0).round() as i32)
     }

@@ -13,6 +13,7 @@ mod border;
 pub use border::Border;
 mod crack;
 mod entity;
+mod fog_light;
 mod gpu;
 mod hand;
 mod jrandom;

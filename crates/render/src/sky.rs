@@ -37,8 +37,14 @@ pub struct Environment {
     pub blindness: Option<i32>,
     /// Night Vision light boost `getNightVisionBrightness`, 0 without the effect.
     pub night_vision: f32,
-    /// Feet height of the viewer, for the Blindness fog color.
+    /// Feet height of the viewer, for the void fog color.
     pub view_y: f32,
+    /// Light at the viewer `0..=1`, smoothed over ticks (`fogColor2 + (fogColor1 - fogColor2) * partial`).
+    pub fog_light: f32,
+    /// Respiration level of the worn helmet.
+    pub respiration: i32,
+    /// Water Breathing is active.
+    pub water_breathing: bool,
 }
 
 impl Default for Environment {
@@ -58,26 +64,50 @@ impl Default for Environment {
             blindness: None,
             night_vision: 0.0,
             view_y: 64.0,
+            fog_light: 1.0,
+            respiration: 0,
+            water_breathing: false,
         }
     }
 }
 
-/// Blindness: `setupFog` closes the fog to 5 blocks (opening over the last second) and `updateFogColor`
-/// darkens the color by the void factor. Returns the color, fog start and fog end.
-fn blind_fog(fog: [f32; 3], far: f32, ticks: i32, view_y: f32) -> ([f32; 3], f32, f32) {
+/// Blindness: `setupFog` closes the fog to 5 blocks, opening over the last second.
+/// Returns fog start and fog end.
+fn blind_fog(far: f32, ticks: i32) -> (f32, f32) {
     let k = if ticks < 20 {
         1.0 - ticks as f32 / 20.0
     } else {
         0.0
     };
     let end = 5.0 + (far - 5.0) * k;
-    let void = view_y / 32.0 * k;
-    let dark = if void < 1.0 {
-        void.max(0.0).powi(2)
+    (end * 0.25, end)
+}
+
+/// `updateFogColor`: the color goes dark below y 32, as `(y / 32)^2`; Blindness scales the depth
+/// down over its last second and removes it before that.
+fn void_darkness(view_y: f32, blindness: Option<i32>) -> f32 {
+    let mut depth = f64::from(view_y) * 0.03125;
+    if let Some(ticks) = blindness {
+        depth = if ticks < 20 {
+            depth * f64::from(1.0 - ticks as f32 / 20.0)
+        } else {
+            0.0
+        };
+    }
+    if depth < 1.0 {
+        depth.max(0.0).powi(2) as f32
     } else {
         1.0
-    };
-    (fog.map(|c| c * dark), end * 0.25, end)
+    }
+}
+
+/// `updateFogColor`: Night Vision scales the color until its brightest channel is 1, by `strength`.
+fn night_vision_fog(fog: [f32; 3], strength: f32) -> [f32; 3] {
+    if strength <= 0.0 || fog.iter().any(|c| *c <= 0.0) {
+        return fog;
+    }
+    let boost = fog.iter().map(|c| 1.0 / c).fold(f32::INFINITY, f32::min);
+    fog.map(|c| c * (1.0 - strength) + c * boost * strength)
 }
 
 /// Everything derived from `Environment` for one frame.
@@ -253,17 +283,28 @@ impl Environment {
     }
 
     /// `updateFogColor` and `setupFog`: the liquid replaces the fog color and uses exponential fog;
-    /// Blindness replaces both with a short linear fog. Returns color, start, end and density.
+    /// then the camera light, the void and Night Vision scale the color. Blindness replaces the
+    /// fog distances with a short linear fog. Returns color, start, end and density.
     fn final_fog(&self, fog: [f32; 3]) -> ([f32; 3], f32, f32, Option<f32>) {
         let (fog, density) = match self.fluid {
-            Some(Fluid::Water) => ([0.02, 0.02, 0.2], Some(0.1)),
+            Some(Fluid::Water) => {
+                let mut lift = self.respiration as f32 * 0.2;
+                let mut density = 0.1 - self.respiration as f32 * 0.03;
+                if self.water_breathing {
+                    lift = lift * 0.3 + 0.6;
+                    density = 0.01;
+                }
+                ([0.02 + lift, 0.02 + lift, 0.2 + lift], Some(density))
+            }
             Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
             None => (fog, None),
         };
+        let dark = self.fog_light * void_darkness(self.view_y, self.blindness);
+        let fog = night_vision_fog(fog.map(|c| c * dark), self.night_vision);
         let far = (self.render_distance_chunks * 16) as f32;
         match self.blindness {
             Some(ticks) => {
-                let (fog, start, end) = blind_fog(fog, far, ticks, self.view_y);
+                let (start, end) = blind_fog(far, ticks);
                 (fog, start, end, None)
             }
             None => (fog, far * 0.75, far, density),
@@ -900,5 +941,78 @@ mod tests {
             ending.fog_end, 128.0,
             "the fog reopens over the last second"
         );
+    }
+
+    fn fog_with(f: impl Fn(&mut Environment)) -> [f32; 3] {
+        let mut env = Environment::default();
+        f(&mut env);
+        env.sky_state(0.8, [0.0; 3]).fog
+    }
+
+    #[test]
+    fn fog_darkens_with_the_square_of_depth_below_y32() {
+        let top = fog_with(|_| {});
+        assert_eq!(fog_with(|e| e.view_y = 40.0), top, "no change above y 32");
+        assert_eq!(fog_with(|e| e.view_y = 0.0), [0.0; 3]);
+        let half = fog_with(|e| e.view_y = 16.0);
+        for i in 0..3 {
+            assert!((half[i] - top[i] * 0.25).abs() < 1e-6, "{i}");
+        }
+        assert_eq!(fog_with(|e| e.view_y = -5.0), [0.0; 3]);
+    }
+
+    #[test]
+    fn fog_follows_the_camera_light() {
+        let top = fog_with(|_| {});
+        assert_eq!(fog_with(|e| e.fog_light = 0.0), [0.0; 3]);
+        let dim = fog_with(|e| e.fog_light = 0.3);
+        for i in 0..3 {
+            assert!((dim[i] - top[i] * 0.3).abs() < 1e-6, "{i}");
+        }
+    }
+
+    #[test]
+    fn night_vision_scales_the_brightest_channel_to_one_in_the_dark() {
+        let base = fog_with(|e| e.view_y = 16.0);
+        let lit = fog_with(|e| {
+            e.view_y = 16.0;
+            e.night_vision = 1.0;
+        });
+        // Full strength scales the color until its brightest channel (blue) reaches 1.
+        let boost = 1.0 / base[2];
+        assert!((lit[2] - 1.0).abs() < 1e-5);
+        for i in 0..3 {
+            assert!((lit[i] - base[i] * boost).abs() < 1e-5, "{i}");
+        }
+        let half = fog_with(|e| {
+            e.view_y = 16.0;
+            e.night_vision = 0.5;
+        });
+        assert!((half[2] - base[2] * (0.5 + 0.5 * boost)).abs() < 1e-5);
+        assert_eq!(fog_with(|e| e.night_vision = 0.0), fog_with(|_| {}));
+    }
+
+    #[test]
+    fn respiration_and_water_breathing_clear_the_water_fog() {
+        let water = |respiration, water_breathing| {
+            let e = Environment {
+                fluid: Some(Fluid::Water),
+                respiration,
+                water_breathing,
+                ..Environment::default()
+            };
+            let s = e.sky_state(0.8, [0.0; 3]);
+            (s.fog, s.fog_density.unwrap())
+        };
+        let (plain, d) = water(0, false);
+        assert_eq!((plain, d), ([0.02, 0.02, 0.2], 0.1));
+        let (r3, d3) = water(3, false);
+        assert!((r3[0] - 0.62).abs() < 1e-6 && (r3[2] - 0.8).abs() < 1e-6);
+        assert!((d3 - 0.01).abs() < 1e-6);
+        let (wb, dw) = water(0, true);
+        assert!((wb[0] - 0.62).abs() < 1e-6 && (wb[2] - 0.8).abs() < 1e-6);
+        assert_eq!(dw, 0.01);
+        let (both, _) = water(3, true);
+        assert!((both[0] - 0.8).abs() < 1e-6);
     }
 }

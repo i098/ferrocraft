@@ -7,6 +7,7 @@ pub mod id {
     pub const JUMP_BOOST: i8 = 8;
     pub const NAUSEA: i8 = 9;
     pub const REGENERATION: i8 = 10;
+    pub const WATER_BREATHING: i8 = 13;
     pub const INVISIBILITY: i8 = 14;
     pub const BLINDNESS: i8 = 15;
     pub const NIGHT_VISION: i8 = 16;

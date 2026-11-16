@@ -360,6 +360,11 @@ impl Creative {
         true
     }
 
+    #[cfg(test)]
+    pub(super) fn open_item_tab(&mut self) {
+        self.select(0);
+    }
+
     /// `GuiContainerCreative.keyTyped`.
     pub fn key(&mut self, key: Key, typed: Option<char>) -> KeyUse {
         if self.tab != SEARCH {

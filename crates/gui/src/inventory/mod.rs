@@ -551,7 +551,10 @@ impl ContainerScreen {
         }
     }
 
-    /// `GuiContainer.keyTyped`; `typed` is the character the key types, if any.
+    /// `GuiContainer.keyTyped`; `typed` is the character the key types, if any. `repeat` marks an
+    /// OS key repeat. `Screen.handleKeyboard` forwards repeats to `keyPressed` whenever
+    /// `Keyboard.enableRepeatEvents(true)` is set, and only `CreativeInventoryScreen.init` (all
+    /// tabs) and `AnvilScreen.init` set it. Every other container acts once per physical press.
     pub fn key(
         &mut self,
         inv: &mut Inventory,
@@ -559,24 +562,17 @@ impl ContainerScreen {
         typed: Option<char>,
         mods: Mods,
         m: &dyn Metrics,
+        repeat: bool,
     ) -> Vec<Request> {
         let mut out = Vec::new();
+        if repeat && self.creative.is_none() && inv.kind() != Kind::Anvil {
+            return out;
+        }
         if let Some(reqs) = self.extras.key(inv, key, typed, mods, m) {
             return reqs;
         }
-        if let Some(cr) = &mut self.creative {
-            match cr.key(key, typed) {
-                creative::KeyUse::Used => return out,
-                creative::KeyUse::Hotbar => {
-                    if !self.hotbar_key(inv, key, &mut out) {
-                        if let Some(cr) = &mut self.creative {
-                            cr.type_text(None, typed);
-                        }
-                    }
-                    return out;
-                }
-                creative::KeyUse::Pass => {}
-            }
+        if self.creative_key(inv, key, typed, &mut out) {
+            return out;
         }
         if matches!(key, Key::Escape | Key::Inventory) {
             out.push(Request::Close {
@@ -595,6 +591,31 @@ impl ContainerScreen {
             }
         }
         out
+    }
+
+    /// The creative screen's own key handling; true when it consumed the key.
+    fn creative_key(
+        &mut self,
+        inv: &mut Inventory,
+        key: Key,
+        typed: Option<char>,
+        out: &mut Vec<Request>,
+    ) -> bool {
+        let Some(cr) = &mut self.creative else {
+            return false;
+        };
+        match cr.key(key, typed) {
+            creative::KeyUse::Used => true,
+            creative::KeyUse::Hotbar => {
+                if !self.hotbar_key(inv, key, out) {
+                    if let Some(cr) = &mut self.creative {
+                        cr.type_text(None, typed);
+                    }
+                }
+                true
+            }
+            creative::KeyUse::Pass => false,
+        }
     }
 
     /// `checkHotbarKeys`.
@@ -890,5 +911,79 @@ impl ContainerScreen {
             Kind::Anvil | Kind::Beacon => {}
         }
         self.extras.draw_fore(c, inv, icons);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Mono;
+    impl Metrics for Mono {
+        fn width(&self, s: &str) -> i32 {
+            s.chars().count() as i32 * 6
+        }
+    }
+
+    fn chest() -> (Inventory, ContainerScreen) {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(1, "minecraft:chest", "Chest".into(), 27));
+        *inv.slot_mut(0) = Some(ItemStack {
+            id: 1,
+            count: 5,
+            damage: 0,
+            nbt: None,
+        });
+        let mut screen = ContainerScreen::new(&inv, 427, 240);
+        screen.hovered = Some(0);
+        (inv, screen)
+    }
+
+    #[test]
+    fn a_repeat_of_a_hotbar_key_or_q_sends_no_click() {
+        for key in [Key::Hotbar(2), Key::Drop] {
+            let (mut inv, mut screen) = chest();
+            let mods = Mods::default();
+            let first = screen.key(&mut inv, key, None, mods, &Mono, false);
+            assert_eq!(first.len(), 1, "{key:?} acts on the physical press");
+            let again = screen.key(&mut inv, key, None, mods, &Mono, true);
+            assert!(again.is_empty(), "{key:?} repeat sends nothing");
+        }
+    }
+
+    #[test]
+    fn a_repeat_acts_like_a_press_on_the_creative_and_anvil_screens() {
+        let stack = || {
+            Some(ItemStack {
+                id: 1,
+                count: 5,
+                damage: 0,
+                nbt: None,
+            })
+        };
+        for key in [Key::Hotbar(2), Key::Drop] {
+            let mods = Mods::default();
+            let run = |creative: bool, repeat: bool| {
+                let mut inv = Inventory::default();
+                let slot = if creative {
+                    inv.creative = true;
+                    9
+                } else {
+                    assert!(inv.open_window(1, "minecraft:anvil", "Repair".into(), 3));
+                    0
+                };
+                *inv.slot_mut(slot) = stack();
+                let mut screen = ContainerScreen::new(&inv, 427, 240);
+                if let Some(cr) = &mut screen.creative {
+                    cr.open_item_tab();
+                }
+                screen.hovered = Some(slot);
+                screen.key(&mut inv, key, None, mods, &Mono, repeat)
+            };
+            for creative in [true, false] {
+                let press = run(creative, false);
+                assert!(!press.is_empty(), "creative={creative} {key:?} press acts");
+                assert_eq!(press, run(creative, true), "creative={creative} {key:?}");
+            }
+        }
     }
 }

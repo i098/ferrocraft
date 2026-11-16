@@ -2,7 +2,7 @@
 
 `Dockerfile` builds `ferrocraft-ci-runner:1` on top of the shared `crewship-ci-runner:latest`.
 The base image is a local image of this host with no registry digest.
-It adds what every `check` job installed at run time: Rust 1.100.0 (the pin in `rust-toolchain.toml`) with rustfmt and clippy, and Temurin JDK 8 in the runner tool cache.
+It adds Rust 1.100.0 (the pin in `rust-toolchain.toml`) with rustfmt and clippy, and Temurin JDK 8 in the runner tool cache. Vulkan and ALSA packages come from the base image.
 
 Build on the runner host, from this directory:
 

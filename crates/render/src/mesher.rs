@@ -26,6 +26,8 @@ pub struct Job {
     pub biomes: [Option<SharedBiomes>; 9],
     /// Smooth lighting on (`GameSettings.ambientOcclusion != 0`).
     pub smooth: bool,
+    /// Fancy graphics on (`GameSettings.fancyGraphics`).
+    pub fancy: bool,
 }
 
 pub struct Done {
@@ -46,7 +48,7 @@ impl Job {
         Done {
             key: self.key,
             generation: self.generation,
-            meshes: mesh_chunk(&hood, atlas, self.smooth),
+            meshes: mesh_chunk(&hood, atlas, self.smooth, self.fancy),
         }
     }
 }

@@ -7,8 +7,15 @@ use crate::mesh::HEIGHT;
 use crate::particles::Kind as ParticleKind;
 use crate::sky::{Environment, SkyGeometry};
 
-/// Fancy graphics, the 1.8.9 default.
-const RANGE: i32 = 10;
+/// Rain radius in columns (`EntityRenderer.renderRainSnow`: `b0 = 5`, 10 with fancy graphics).
+pub fn rain_radius(fancy: bool) -> i32 {
+    if fancy {
+        10
+    } else {
+        5
+    }
+}
+
 /// Vanilla light map coordinates for open sky, as `(sky, block)` of 240: rain uses the raw light,
 /// snow `(light * 3 + 0xF000F0) / 4`.
 /// shortcut: every column counts as open sky; read the real light if roofed columns look wrong.
@@ -31,6 +38,7 @@ pub fn build_precipitation(
     env: &Environment,
     feet: [f64; 3],
     top: impl Fn(i32, i32) -> Option<(i32, u8)>,
+    range: i32,
 ) -> (SkyGeometry, SkyGeometry) {
     let (mut rain, mut snow) = (SkyGeometry::default(), SkyGeometry::default());
     if env.rain <= 0.0 {
@@ -41,8 +49,8 @@ pub fn build_precipitation(
         feet[1].floor() as i32,
         feet[2].floor() as i32,
     );
-    for z in k - RANGE..=k + RANGE {
-        for x in i - RANGE..=i + RANGE {
+    for z in k - range..=k + range {
+        for x in i - range..=i + range {
             // The vanilla offset table holds NaN at the centre column, which draws nothing.
             if (x, z) == (i, k) {
                 continue;
@@ -50,15 +58,19 @@ pub fn build_precipitation(
             let Some((ground, biome)) = top(x, z) else {
                 continue;
             };
-            let (low, high) = ((j - RANGE).max(ground), (j + RANGE).max(ground));
+            let (low, high) = ((j - range).max(ground), (j + range).max(ground));
             if low == high {
                 continue;
             }
             // `renderRainSnow` reads the temperature at the slab's bottom.
             let heights = (low as f32, high as f32);
             match precipitation(biome, x, low, z) {
-                Some(Precipitation::Rain) => rain.quad(column_quad(env, feet, (x, z), heights)),
-                Some(Precipitation::Snow) => snow.quad(snow_quad(env, feet, (x, z), heights)),
+                Some(Precipitation::Rain) => {
+                    rain.quad(column_quad(env, feet, (x, z), heights, range))
+                }
+                Some(Precipitation::Snow) => {
+                    snow.quad(snow_quad(env, feet, (x, z), heights, range))
+                }
                 None => {}
             }
         }
@@ -80,6 +92,7 @@ fn column_quad(
     feet: [f64; 3],
     (x, z): (i32, i32),
     (low, high): (f32, f32),
+    range: i32,
 ) -> [Corner; 4] {
     let (dx, dz) = (
         x as f32 - feet[0].floor() as f32,
@@ -97,7 +110,7 @@ fn column_quad(
         x as f32 + 0.5 - feet[0] as f32,
         z as f32 + 0.5 - feet[2] as f32,
     );
-    let f3 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
+    let f3 = (cx * cx + cz * cz).sqrt() / range as f32;
     let color = [1.0, 1.0, 1.0, ((1.0 - f3 * f3) * 0.5 + 0.5) * env.rain];
     let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
     // Vanilla `renderRainSnow`: the vertex at y = low gets v = low * 0.25 + phase, the one at y = high gets high * 0.25 + phase.
@@ -115,6 +128,7 @@ fn snow_quad(
     feet: [f64; 3],
     (x, z): (i32, i32),
     (low, high): (f32, f32),
+    range: i32,
 ) -> [Corner; 4] {
     let (dx, dz) = (
         x as f32 - feet[0].floor() as f32,
@@ -136,7 +150,7 @@ fn snow_quad(
         x as f32 + 0.5 - feet[0] as f32,
         z as f32 + 0.5 - feet[2] as f32,
     );
-    let f6 = (cx * cx + cz * cz).sqrt() / RANGE as f32;
+    let f6 = (cx * cx + cz * cz).sqrt() / range as f32;
     let color = [1.0, 1.0, 1.0, ((1.0 - f6 * f6) * 0.3 + 0.5) * env.rain];
     let (xf, zf) = (x as f32 + 0.5, z as f32 + 0.5);
     [
@@ -255,12 +269,30 @@ mod rain_tests {
         };
         let counts = |biome: u8| {
             let (rain, snow) =
-                build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| Some((64, biome)));
+                build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| Some((64, biome)), 10);
             (rain.vertices.len(), snow.vertices.len())
         };
         assert!(matches!(counts(1), (n, 0) if n > 0), "plains rain");
         assert!(matches!(counts(12), (0, n) if n > 0), "ice plains snow");
         assert_eq!(counts(2), (0, 0), "desert stays dry");
+    }
+
+    #[test]
+    fn fast_graphics_halves_the_rain_radius() {
+        let env = Environment {
+            rain: 1.0,
+            ..Environment::default()
+        };
+        // One quad of 4 vertices per column of the (2r + 1)^2 square, minus the centre.
+        let verts = |fancy| {
+            let r = rain_radius(fancy);
+            build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| Some((64, 1)), r)
+                .0
+                .vertices
+                .len()
+        };
+        assert_eq!(verts(true), 4 * (21 * 21 - 1));
+        assert_eq!(verts(false), 4 * (11 * 11 - 1));
     }
 
     #[test]
@@ -272,7 +304,7 @@ mod rain_tests {
         };
         for biome in [1, 12] {
             let (rain, snow) =
-                build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| Some((64, biome)));
+                build_precipitation(&env, [0.5, 70.0, 0.5], |_, _| Some((64, biome)), 10);
             let v = if biome == 1 { rain } else { snow }.vertices;
             let (bottom, top) = (&v[0], &v[2]);
             assert!(
@@ -294,7 +326,7 @@ mod rain_tests {
             partial: 0.5,
             ..Environment::default()
         };
-        let q = snow_quad(&env, [3.5, 70.0, 3.5], (0, 0), (64.0, 68.0));
+        let q = snow_quad(&env, [3.5, 70.0, 3.5], (0, 0), (64.0, 68.0), 10);
         let (u, v) = (-0.565_053_2_f32, 0.815_366_f32 + 16.0);
         assert!((q[0].1[0] - u).abs() < 1e-4, "{}", q[0].1[0]);
         assert!((q[1].1[0] - (u + 1.0)).abs() < 1e-4);

@@ -66,7 +66,9 @@ fn lightmap(sky: f32, block: f32) -> vec3<f32> {
 @fragment
 fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
-    if (t.a < 0.1) {
+    // Vertex alpha 2 marks Fast-graphics leaves: a solid block, drawn without the alpha test.
+    let solid = i.color.a > 1.5;
+    if (t.a < 0.1 && !solid) {
         discard;
     }
     // Entities flashing red carry +2 on the block light (`entity::HURT_FLAG`).
@@ -84,7 +86,7 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
         fog = exp(-g.fog.y * d);
     }
     rgb = mix(g.fog_color.rgb, rgb, fog);
-    return vec4<f32>(rgb, t.a * i.color.a);
+    return vec4<f32>(rgb, select(t.a * i.color.a, 1.0, solid));
 }
 
 // Entity fire ignores lighting but keeps world fog and alpha testing.

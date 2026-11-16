@@ -13,6 +13,7 @@ Keyboard, mouse and chat input per vanilla 1.8.9.
   (LWJGL codes).
 - `apply_cursor_grab` locks the cursor (Locked, then Confined). The engine must call
   `window.focus_window()` at start: a child process on macOS begins unfocused and then gets no
-  key events. Focus loss drops the grab, releases all keys and queues `Action::Pause`.
+  key events. Focus loss releases all keys at once; after 500 ms unfocused, with no screen open,
+  it drops the grab and queues `Action::Pause`.
 - A GUI screen calls `set_screen_open(true)`: movement stops, the cursor is free, and Esc
   queues `Action::CloseScreen`.

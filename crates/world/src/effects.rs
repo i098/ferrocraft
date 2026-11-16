@@ -4,6 +4,8 @@
 
 /// `Potion.id` values the client reads.
 pub mod id {
+    pub const HASTE: i8 = 3;
+    pub const MINING_FATIGUE: i8 = 4;
     pub const JUMP_BOOST: i8 = 8;
     pub const NAUSEA: i8 = 9;
     pub const REGENERATION: i8 = 10;
@@ -75,6 +77,17 @@ impl Effects {
             e.ambient = false;
         }
         e.particles = new.particles;
+    }
+
+    /// `LivingEntity.getArmSwingDuration` (MCP `getArmSwingAnimationEnd`): Haste shortens the swing, Mining Fatigue lengthens it.
+    pub fn arm_swing_duration(&self) -> i32 {
+        if let Some(e) = self.get(id::HASTE) {
+            6 - (1 + i32::from(e.amplifier))
+        } else if let Some(e) = self.get(id::MINING_FATIGUE) {
+            6 + (1 + i32::from(e.amplifier)) * 2
+        } else {
+            6
+        }
     }
 
     /// `handleRemoveEntityEffect`.

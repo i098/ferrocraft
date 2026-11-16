@@ -456,11 +456,21 @@ impl Game {
                 self.absorption = absorption.unwrap_or(self.absorption);
                 self.air = air.map_or(self.air, i32::from);
             }
-            // Effects and speed of other entities are not tracked.
-            NetEvent::EntityEffect { .. }
-            | NetEvent::PlayerMeta { .. }
-            | NetEvent::RemoveEntityEffect { .. }
-            | NetEvent::MovementSpeed { .. } => {}
+            NetEvent::EntityEffect { entity_id, effect } => {
+                self.entities.apply(EntityEvent::Effect {
+                    id: entity_id,
+                    effect,
+                })
+            }
+            NetEvent::RemoveEntityEffect {
+                entity_id,
+                effect_id,
+            } => self.entities.apply(EntityEvent::RemoveEffect {
+                id: entity_id,
+                effect_id,
+            }),
+            // Speed of other entities is not tracked.
+            NetEvent::PlayerMeta { .. } | NetEvent::MovementSpeed { .. } => {}
             other => return Err(other),
         }
         Ok(())
@@ -745,7 +755,7 @@ impl Game {
         }
         self.weather.tick();
         self.bolts.tick();
-        self.swing.tick();
+        self.swing.tick(self.effects.arm_swing_duration());
         for b in &mut self.bob {
             *b = (*b - 1).max(0);
         }

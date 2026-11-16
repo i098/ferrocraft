@@ -66,6 +66,8 @@ import net.minecraft.flat.SlimeEntity;
  *                                 needs "start"
  *   dragon <ticks> <vx> <vy> <vz> <yaw0> <dyaw> <y0> <dy>  a client ender dragon; per tick: see dragonCommand; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
+ * Framing: the process serves many scripts. A script ends with a "%%run" line; per-script state is reset, the output
+ * follows, then "%%done", or "%%error <hex stack trace>" if the script failed. The process runs until stdin closes.
  */
 public class Harness {
     static final Map<String, Block> BLOCKS = new HashMap<>();
@@ -570,16 +572,41 @@ public class Harness {
         return f;
     }
 
+    /** Request loop: a script is its lines up to "%%run"; the reply is the output, then "%%done" or "%%error <hex>". */
     public static void main(String[] args) throws Exception {
         Bootstrap.init();
-        floor = Blocks.STONE;
         BLOCKS.put("air", Blocks.AIR);
         BLOCKS.put("stone", Blocks.STONE);
         BLOCKS.put("ice", Blocks.ICE);
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        for (String line; (line = in.readLine()) != null; ) {
+            if (!line.equals("%%run")) {
+                lines.add(line);
+                continue;
+            }
+            floor = Blocks.STONE;
+            world = null;
+            EXTRA.clear();
+            CHUNKS.clear();
+            PROTO.clear();
+            try {
+                script(lines);
+                System.out.println("%%done");
+            } catch (Throwable e) {
+                java.io.StringWriter text = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(text));
+                System.out.println("%%error " + toHex(text.toString()));
+            }
+            System.out.flush();
+            lines.clear();
+        }
+    }
+
+    static void script(java.util.List<String> lines) throws Exception {
         PlayerEntity player = null;
         Field jumping = field(net.minecraft.flat.LivingEntity.class, "jumping");
-        for (String line; (line = in.readLine()) != null; ) {
+        for (String line : lines) {
             String[] t = line.trim().split("\\s+");
             switch (t[0]) {
                 case "floor":

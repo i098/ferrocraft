@@ -93,6 +93,8 @@ fn button_index(button: MouseButton) -> Option<u8> {
         MouseButton::Left => Some(0),
         MouseButton::Right => Some(1),
         MouseButton::Middle => Some(2),
+        MouseButton::Back => Some(3),
+        MouseButton::Forward => Some(4),
         _ => None,
     }
 }
@@ -134,7 +136,11 @@ impl App {
         }
         let (mx, my) = self.gui_cursor();
         let mods = self.mods();
+        // Container clicks know only the three vanilla buttons; the screen gets all of them.
         if self.container.is_some() {
+            if button > 2 {
+                return;
+            }
             let now = self.ui_now_ms();
             let reqs = {
                 let c = self.container.as_mut().expect("checked");

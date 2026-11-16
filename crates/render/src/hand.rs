@@ -214,7 +214,7 @@ pub fn held_mesh(state: u16, atlas: &Atlas) -> MeshData {
         neighbors: [None; 8],
         biomes: [None; 9],
     };
-    let m = mesh_chunk(&hood, atlas);
+    let m = mesh_chunk(&hood, atlas, true);
     let mut out = m.opaque;
     let base = out.vertices.len() as u32;
     out.vertices.extend(m.water.vertices);

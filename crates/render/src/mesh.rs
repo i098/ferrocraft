@@ -1,4 +1,5 @@
-//! CPU chunk meshing: one quad per visible block face with vanilla smooth lighting and ambient occlusion,
+//! CPU chunk meshing: one quad per visible block face with vanilla smooth lighting and ambient occlusion
+//! (one flat light per face when smooth lighting is off),
 //! plus crosses, liquids and box shapes (faces next to an opaque block are culled, including across chunk borders).
 
 use crate::assets::Atlas;
@@ -169,15 +170,18 @@ enum Pass {
 struct Mesher<'a> {
     hood: &'a Neighborhood<'a>,
     atlas: &'a Atlas,
+    /// `GameSettings.ambientOcclusion != 0`: per-corner smooth lighting, else one flat light per face.
+    smooth: bool,
     light: Light,
     out: Meshes,
 }
 
 /// Mesh the chunk into opaque/cutout geometry and blended geometry, in chunk-local coordinates.
-pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas) -> Meshes {
+pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool) -> Meshes {
     let mut m = Mesher {
         hood,
         atlas,
+        smooth,
         light: Light::compute(hood),
         out: Meshes::default(),
     };
@@ -313,11 +317,7 @@ impl Mesher<'_> {
             let mut verts = [Vertex::zeroed(); 4];
             let mut ao = [1.0f32; 4];
             for (i, c) in CORNERS[f].iter().enumerate() {
-                let (light, a) = if emissive {
-                    (self.flat_light(at, DIRS[f]), 1.0)
-                } else {
-                    self.smooth(at, f, *c)
-                };
+                let (light, a) = self.corner_light(at, f, *c, emissive);
                 ao[i] = a;
                 let k = SHADE[f] * a;
                 verts[i] = Vertex {
@@ -360,6 +360,16 @@ impl Mesher<'_> {
             }
         }
         self.push_quad(Pass::Opaque, verts, flip);
+    }
+
+    /// Light and occlusion of one face corner; flat lighting (and emissive blocks) skip the corner average.
+    fn corner_light(&self, at: [i32; 3], f: usize, c: [f32; 3], emissive: bool) -> ([f32; 2], f32) {
+        match (emissive, self.smooth) {
+            (true, _) => (self.flat_light(at, DIRS[f]), 1.0),
+            // `BlockModelRenderer.renderModelFlat`: the light of the cell the face looks at.
+            (false, false) => (self.light_at(at, DIRS[f]), 1.0),
+            (false, true) => self.smooth(at, f, c),
+        }
     }
 
     /// Vanilla smooth lighting at one corner of a face: light is the average of the four cells around
@@ -681,6 +691,10 @@ mod tests {
     }
 
     fn mesh(c: &[u16], neighbors: [Option<&[u16]>; 8]) -> Meshes {
+        mesh_smooth(c, neighbors, true)
+    }
+
+    fn mesh_smooth(c: &[u16], neighbors: [Option<&[u16]>; 8], smooth: bool) -> Meshes {
         mesh_chunk(
             &Neighborhood {
                 origin: (0, 0),
@@ -689,7 +703,25 @@ mod tests {
                 biomes: [None; 9],
             },
             &Atlas::flat(),
+            smooth,
         )
+    }
+
+    #[test]
+    fn flat_lighting_gives_every_face_one_light() {
+        // The block above-beside shades the top corners next to it only under smooth lighting.
+        let c = flat(|x, y, z| match (x, y, z) {
+            (4, 70, 4) | (5, 71, 4) => 1 << 4,
+            _ => 0,
+        });
+        let faces_equal = |m: &Meshes| {
+            m.opaque
+                .vertices
+                .chunks(4)
+                .all(|q| q.iter().all(|v| v.light == q[0].light))
+        };
+        assert!(!faces_equal(&mesh_smooth(&c, [None; 8], true)));
+        assert!(faces_equal(&mesh_smooth(&c, [None; 8], false)));
     }
 
     #[test]

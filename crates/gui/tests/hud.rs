@@ -142,7 +142,10 @@ fn draws_hud_to_png() {
             .expect("four bytes")
     };
     let sky = at(w - 5, 5);
-    // Reference background for the checks below; the horizon fog tints it, so no fixed color is pinned.
+    // The horizon fog tints the sky, so the reference is the same frame without any GUI quads.
+    let (_, _, bare) = r.render_to_rgba(&Camera::default(), &[]);
+    let top_right = (5 * w + (w - 5)) as usize * 4;
+    assert_eq!(sky, bare[top_right..][..4], "top-right is plain sky");
     // `GuiOverlayDebug.renderDebugInfoLeft` fills from GUI (1, 1) with 0x90505050; the scale is 2.
     assert_eq!(
         at(1, 1),

@@ -12,6 +12,10 @@ set --
 # Git writes one line per ref: "<local ref> <local sha> <remote ref> <remote sha>".
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ] || [ -n "$(git status --porcelain)" ]; then
+    echo "pre-push: $local_ref is not the clean checked-out HEAD; the checks would not cover the pushed commit" >&2
+    exit 1
+  fi
   if [ "$remote_sha" != "$zero" ]; then
     base=$remote_sha
   else

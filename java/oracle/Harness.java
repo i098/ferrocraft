@@ -66,6 +66,8 @@ import net.minecraft.flat.SlimeEntity;
  *                                 needs "start"
  *   dragon <ticks> <vx> <vy> <vz> <yaw0> <dyaw> <y0> <dy>  a client ender dragon; per tick: see dragonCommand; needs "start"
  * stdout: one line per tick: x y z vx vy vz onGround, doubles as 16 hex digits of raw bits.
+ * Framing: the process serves many scripts. A script ends with a "%%run" line; per-script state is reset, the output
+ * follows, then "%%done", or "%%error <hex stack trace>" if the script failed. The process runs until stdin closes.
  */
 public class Harness {
     static final Map<String, Block> BLOCKS = new HashMap<>();

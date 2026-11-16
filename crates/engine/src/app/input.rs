@@ -368,7 +368,12 @@ mod tests {
         app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
         app.mouse_button(true, 0);
         assert!(app.mouse_down);
-        let held = Some(world::inventory::ItemStack { id: 1, count: 5, damage: 0, nbt: None });
+        let held = Some(world::inventory::ItemStack {
+            id: 1,
+            count: 5,
+            damage: 0,
+            nbt: None,
+        });
         app.game.inv.cursor = held.clone();
         let slots = app.game.inv.player.clone();
         for button in [3, 4] {

@@ -841,6 +841,30 @@ pub fn enchant_bonus(held: &crate::inventory::Slot, target: Creature) -> f32 {
         .sum()
 }
 
+/// The client half of `EntityPlayer.attackTargetEntityWithCurrentItem`: the knockback level is the held
+/// Knockback (19) level plus one while sprinting. When it is above zero and the target takes damage on the
+/// client (a remote player, never a mob), the horizontal velocity drops to 0.6 and the sprint ends.
+/// Returns whether the sprint ended.
+pub fn attack_slowdown(
+    held: &crate::inventory::Slot,
+    sprinting: bool,
+    target_is_player: bool,
+    vel: &mut [f64; 3],
+) -> bool {
+    let level = enchantments(held)
+        .filter(|&(id, _)| id == 19)
+        .map(|(_, lvl)| lvl)
+        .max()
+        .unwrap_or(0)
+        + i32::from(sprinting);
+    if !target_is_player || level <= 0 {
+        return false;
+    }
+    vel[0] *= 0.6;
+    vel[2] *= 0.6;
+    true
+}
+
 /// `(id, lvl)` of each entry of the stack's `ench` tag.
 fn enchantments(stack: &crate::inventory::Slot) -> impl Iterator<Item = (i32, i32)> + '_ {
     use crate::inventory::Tag;
@@ -1251,6 +1275,24 @@ mod tests {
         ] {
             assert!(!no.is_critical(true), "{no:?}");
         }
+    }
+
+    #[test]
+    fn sprinting_hit_on_a_player_slows_the_attacker() {
+        let mut v = [1.0, 0.5, -1.0];
+        assert!(attack_slowdown(&None, true, true, &mut v));
+        assert_eq!(v, [0.6, 0.5, -0.6]);
+        let mut v = [1.0, 0.5, 1.0];
+        assert!(attack_slowdown(&enchanted(19, 1), false, true, &mut v));
+        assert_eq!(v[0], 0.6);
+    }
+
+    #[test]
+    fn mob_hit_or_walking_hit_changes_nothing() {
+        let mut v = [1.0, 0.5, 1.0];
+        assert!(!attack_slowdown(&None, true, false, &mut v));
+        assert!(!attack_slowdown(&None, false, true, &mut v));
+        assert_eq!(v, [1.0, 0.5, 1.0]);
     }
 
     fn enchanted(id: i16, lvl: i16) -> crate::inventory::Slot {

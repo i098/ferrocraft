@@ -972,6 +972,59 @@ mod tests {
         assert!(!screen_opens(Some(387), "MC|Brand"), "other channel");
     }
 
+    /// Vanilla `attackTargetEntityWithCurrentItem`: a sprinting hit on a remote player scales x/z by 0.6 and
+    /// ends the sprint; a mob target (client `attackEntityFrom` is false) changes nothing.
+    #[test]
+    fn hit_slows_attacker_only_for_a_player_target() {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
+        use world::entities::EntityEvent as E;
+        app.game.entities.apply(E::SpawnPlayer {
+            id: 7,
+            uuid: 7,
+            pos: [0; 3],
+            yaw: 0,
+            pitch: 0,
+            held: 0,
+            flags: None,
+        });
+        app.game.entities.apply(E::SpawnMob {
+            id: 8,
+            kind: 54,
+            pos: [0; 3],
+            yaw: 0,
+            pitch: 0,
+            head_yaw: 0,
+            vel: [0; 3],
+            flags: None,
+            name: None,
+            health: None,
+            size: Default::default(),
+        });
+        let set = |app: &mut App| {
+            let p = app.game.player.as_mut().unwrap();
+            p.vel = [1.0, 0.5, -1.0];
+            p.sprinting = true;
+        };
+        set(&mut app);
+        app.slow_after_hit(8);
+        let p = app.game.player.as_ref().unwrap();
+        assert_eq!((p.vel, p.sprinting), ([1.0, 0.5, -1.0], true), "mob hit");
+        app.slow_after_hit(7);
+        let p = app.game.player.as_ref().unwrap();
+        assert_eq!(
+            (p.vel, p.sprinting),
+            ([0.6, 0.5, -0.6], false),
+            "player hit"
+        );
+    }
+
     #[test]
     fn leaving_server_discards_its_statistics() {
         let mut app = App::new(Args {

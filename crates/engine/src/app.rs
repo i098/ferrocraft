@@ -635,8 +635,12 @@ impl App {
         };
         let dir = look_vector(yaw, pitch);
         let store = &self.game.store;
-        let dist =
-            world::dig::camera_distance(&|p| store.get_block(p[0], p[1], p[2]), eye, dir, max_dist);
+        let dist = world::camera::camera_distance(
+            &|p| store.get_block(p[0], p[1], p[2]),
+            eye,
+            dir,
+            max_dist,
+        );
         Camera {
             pos: [0, 1, 2].map(|i| eye[i] - dir[i] * dist),
             yaw,

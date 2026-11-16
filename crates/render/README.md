@@ -23,10 +23,11 @@ Fireworks: the engine calls `Particles::firework(pos, vel, explosions)` for a bl
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
 Food crumbs: the engine calls `Particles::eat_crumbs(count, feet, eye, (yaw, pitch), item)` for the local player's eating ticks and finish. For each remote player that holds food with the use flag set, it calls it on the ticks where `remote_crumbs_due(ticks_in_use)` is true.
-Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.
+Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow` (radius 10 columns, 5 on Fast graphics); sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
 Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
+`set_fancy_graphics` applies the Graphics option: Fast makes leaves solid cubes that hide shared faces.
 `set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.
 `set_shadow_view` supplies the view entity's feet, so the F5 camera offset does not change the distance fade.
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.

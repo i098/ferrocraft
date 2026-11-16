@@ -360,9 +360,9 @@ impl Creative {
         true
     }
 
-    /// The search tab, whose field takes key repeats.
-    pub fn searching(&self) -> bool {
-        self.tab == SEARCH
+    #[cfg(test)]
+    pub(super) fn open_item_tab(&mut self) {
+        self.select(0);
     }
 
     /// `GuiContainerCreative.keyTyped`.

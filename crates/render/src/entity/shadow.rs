@@ -78,9 +78,14 @@ fn brightness(level: i32) -> f64 {
 }
 
 /// The same table as `f32`, the color factor of `Entity.getBrightness`.
-pub(super) fn light_brightness(level: i32) -> f32 {
+pub(crate) fn light_brightness(level: i32) -> f32 {
     let f = 1.0 - level.clamp(0, 15) as f32 / 15.0;
     (1.0 - f) / (f * 3.0 + 1.0)
+}
+
+/// `Entity.getBrightness`: the table value of `[sky, block]` light with the sky reduced by `subtracted`.
+pub(crate) fn eye_light_brightness([sky, block]: [i32; 2], subtracted: i32) -> f32 {
+    light_brightness((sky - subtracted).max(block))
 }
 
 /// The alpha of the shadow on the top face of the block at height `block_y`, or `None` below zero:
@@ -175,6 +180,22 @@ fn quad(mesh: &mut MeshData, c: &Caster, [bx, by, bz]: [i32; 3], a: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eye_brightness_follows_vanilla_table_at_night() {
+        let night = skylight_subtracted(18000, 0.0, 0.0);
+        assert_eq!(night, 11);
+        // Sky 15 minus 11 = level 4 in the open at night: 4/15 / (11/15 * 3 + 1).
+        let want = (4.0 / 15.0) / ((11.0 / 15.0) * 3.0 + 1.0);
+        assert!((eye_light_brightness([15, 0], night) - want).abs() < 1e-6);
+        // A dark spot is 0, a torch-lit one is not reduced by the night, and noon sky is full.
+        assert_eq!(eye_light_brightness([0, 0], night), 0.0);
+        assert_eq!(eye_light_brightness([0, 15], night), 1.0);
+        assert_eq!(
+            eye_light_brightness([15, 0], skylight_subtracted(6000, 0.0, 0.0)),
+            1.0
+        );
+    }
 
     #[test]
     fn alpha_fades_with_height_and_light() {

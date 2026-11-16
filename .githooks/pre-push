@@ -1,0 +1,56 @@
+#!/bin/sh
+# Pre-push gate: rustfmt and clippy on the packages that the pushed commits change.
+# Install once per clone: git config core.hooksPath .githooks
+# Root build config changes, and a new branch with no base, check the whole workspace.
+set -eu
+
+zero=0000000000000000000000000000000000000000
+all=
+seen=
+set --
+
+# Git writes one line per ref: "<local ref> <local sha> <remote ref> <remote sha>".
+# shellcheck disable=SC2034 # remote_ref is part of the stdin format but unused
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ] || [ -n "$(git status --porcelain)" ]; then
+    echo "pre-push: $local_ref is not the clean checked-out HEAD; the checks would not cover the pushed commit" >&2
+    exit 1
+  fi
+  if [ "$remote_sha" != "$zero" ]; then
+    base=$remote_sha
+  else
+    base=$(git merge-base "$local_sha" origin/main 2>/dev/null) || base=
+  fi
+  if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+    all=1
+    continue
+  fi
+  for file in $(git diff --name-only "$base" "$local_sha"); do
+    case $file in
+      Cargo.toml | Cargo.lock | rust-toolchain.toml | .cargo/* | .githooks/*) all=1 ;;
+      crates/*/* | loaders/*/* | adapters/*/*)
+        dir=$(printf '%s\n' "$file" | cut -d/ -f1,2)
+        name=$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$dir/Cargo.toml" 2>/dev/null | head -n 1)
+        [ -n "$name" ] || continue
+        case " $seen " in
+          *" $name "*) ;;
+          *)
+            seen="$seen $name"
+            set -- "$@" -p "$name"
+            ;;
+        esac
+        ;;
+    esac
+  done
+done
+
+if [ -n "$all" ]; then
+  echo "pre-push: root build config or a new branch, checking the whole workspace" >&2
+  cargo fmt --all --check
+  cargo clippy --workspace --all-targets -- -D warnings
+elif [ "$#" -gt 0 ]; then
+  echo "pre-push: checking$seen" >&2
+  cargo fmt "$@" --check
+  cargo clippy "$@" --all-targets -- -D warnings
+fi

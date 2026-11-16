@@ -16,6 +16,11 @@ pub enum DebugCombo {
     PauseOnLostFocus,
     /// F3+Q: list the combos in chat.
     Help,
+    /// F3+S and F3+T: `Minecraft.reloadResources` (offsets 875 and 963 of `processKeyF3`); no chat line.
+    ReloadResources,
+    /// F3+F: `GameOptions.set(RENDER_DISTANCE, ±1)`. 1.8.9 `set` has no branch for that option and only
+    /// calls `save`, so the distance stays and no chat line prints.
+    RenderDistance,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

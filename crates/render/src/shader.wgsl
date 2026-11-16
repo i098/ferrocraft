@@ -127,6 +127,17 @@ fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
 }
 
+// `renderSky` plane and dark discs: vertex color in the world fog, linear from 0 (`setupFog(-1)`), no light map.
+@fragment
+fn fs_sky_fog(i: WorldOut) -> @location(0) vec4<f32> {
+    let d = length(i.world - g.eye.xyz);
+    var fog = clamp((g.fog.y - d) / g.fog.y, 0.0, 1.0);
+    if (g.fog.x < 0.0) {
+        fog = exp(-g.fog.y * d);
+    }
+    return vec4<f32>(mix(g.fog_color.rgb, i.color.rgb, fog), i.color.a);
+}
+
 // Clouds: vertex color and alpha in the world fog (`renderClouds` runs after `setupFog(0)`), no light map.
 @fragment
 fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {

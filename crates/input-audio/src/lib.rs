@@ -112,6 +112,8 @@ fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
         KeyCode::KeyH => DebugCombo::AdvancedTooltips,
         KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
         KeyCode::KeyQ => DebugCombo::Help,
+        KeyCode::KeyS | KeyCode::KeyT => DebugCombo::ReloadResources,
+        KeyCode::KeyF => DebugCombo::RenderDistance,
         _ => return None,
     })
 }
@@ -1017,6 +1019,26 @@ mod tests {
                 Action::Pause,
             ]
         );
+    }
+
+    /// `processKeyF3` in the 1.8.9 jar: S (31) and T (20) call `reloadResources`; F (33) calls
+    /// `GameOptions.set(RENDER_DISTANCE, ±1)`, which only saves.
+    #[test]
+    fn f3_s_t_f_queue_their_actions() {
+        for (key, combo) in [
+            (KeyCode::KeyS, DebugCombo::ReloadResources),
+            (KeyCode::KeyT, DebugCombo::ReloadResources),
+            (KeyCode::KeyF, DebugCombo::RenderDistance),
+        ] {
+            let mut s = InputState::default();
+            press(&mut s, KeyCode::F3);
+            press(&mut s, key);
+            assert_eq!(
+                s.take_actions(),
+                vec![Action::ToggleDebug, Action::Debug(combo)],
+                "{key:?}"
+            );
+        }
     }
 
     #[test]

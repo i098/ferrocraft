@@ -139,7 +139,7 @@ impl App {
     /// `Minecraft.refreshResources` after a resource pack change: a new renderer and sound system over the new
     /// packs, then the chunks, texts and screens again.
     // shortcut: mod-registered textures still come from before the change; reload them when packs need it.
-    fn refresh_resources(&mut self) {
+    pub(super) fn refresh_resources(&mut self) {
         let Some(w) = self.window.clone() else { return };
         // Drop the old renderer first: a window holds one surface at a time.
         let maps = self.renderer.as_mut().map(|r| r.take_maps());

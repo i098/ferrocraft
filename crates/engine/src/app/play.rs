@@ -1308,6 +1308,13 @@ impl App {
                 self.reload_chunks();
                 self.debug_chat("Reloading all chunks");
             }
+            DebugCombo::ReloadResources => self.refresh_resources(),
+            // `GameOptions.set` ends in `save` for options it does not handle.
+            DebugCombo::RenderDistance => {
+                if let Err(e) = self.ui.settings.save() {
+                    crate::log::line(&format!("Failed to save options: {e}"));
+                }
+            }
             _ => {}
         }
     }

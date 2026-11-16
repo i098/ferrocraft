@@ -256,6 +256,8 @@ pub enum NetEvent {
         suffix: String,
         visibility: String,
         color: i8,
+        /// Friendly flags: 1 friendly fire, 2 see friendly invisibles.
+        friendly: i8,
         members: Vec<String>,
     },
     /// S29: `pos` in blocks.

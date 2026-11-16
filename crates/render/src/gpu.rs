@@ -117,6 +117,8 @@ pub struct Renderer {
     pub(crate) entity_skins: Skins,
     entity_tex: wgpu::Texture,
     entity_mesh: Option<GpuMesh>,
+    /// Bodies of invisible entities the viewer sees, blended at `entity::GHOST_ALPHA`.
+    ghost_mesh: Option<GpuMesh>,
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
     tile_meshes: Vec<(Tex, GpuMesh)>,
@@ -451,6 +453,7 @@ impl Renderer {
             entity_skins,
             entity_tex,
             entity_mesh: None,
+            ghost_mesh: None,
             block_entities: BlockEntities::default(),
             tile_meshes: Vec::new(),
             cart_meshes: Vec::new(),
@@ -939,9 +942,10 @@ impl Renderer {
         for key in draws.iter().filter_map(|d| d.skin) {
             self.entity_skins.touch(key);
         }
-        let mesh = entity::build(draws, &self.entity_skins, self.skylight_subtracted(), |p| {
+        let mut mesh = entity::build(draws, &self.entity_skins, self.skylight_subtracted(), |p| {
             self.light_at(p)
         });
+        self.ghost_mesh = self.upload_mesh(entity::take_ghosts(&mut mesh), [0.0; 3]);
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);
         let mut glint = entity::build_glint(draws, None);
@@ -1847,6 +1851,13 @@ impl Renderer {
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(g) = &self.ghost_mesh {
+                pass.set_pipeline(&self.translucent_pipe);
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                draw_mesh(&mut pass, g);
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.opaque_pipe);
             }
             if let Some(m) = &self.aura_mesh {
                 pass.set_pipeline(&self.aura_pipe);

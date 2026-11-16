@@ -14,10 +14,12 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::LazyLock;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use sha1::{Digest, Sha1};
 
@@ -56,6 +58,7 @@ pub struct Oracle {
     dir: PathBuf,
     java: PathBuf,
     classpath: OsString,
+    session: Mutex<Option<Session>>,
 }
 
 /// One tick of harness output. Doubles are kept as raw bits so tests compare exactly.
@@ -166,13 +169,36 @@ impl Oracle {
             dir,
             java,
             classpath: std::env::join_paths(&cp)?,
+            session: Mutex::new(None),
         })
     }
 
     /// Run the harness on `script` (see `java/oracle/Harness.java`) and return its output lines.
+    ///
+    /// One JVM serves every call of the process; calls take turns. A crash, a harness error
+    /// or a call that takes longer than [`CALL_TIMEOUT`] returns an error and drops the JVM,
+    /// so the next call boots a new one.
     pub fn run(&self, script: &str) -> Result<Vec<String>> {
-        // Each run boots Minecraft once and exits: C1 only and the serial GC cut CPU time and
-        // keep parallel test threads from fighting for cores.
+        let mut slot = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(self.spawn()?);
+        }
+        let result = slot.as_mut().map(|s| s.call(script));
+        match result {
+            Some(Ok(lines)) => Ok(lines),
+            Some(Err(e)) => {
+                if let Some(mut dead) = slot.take() {
+                    let _ = dead.child.kill();
+                    let _ = dead.child.wait();
+                }
+                Err(e)
+            }
+            None => unreachable!("session was just filled"),
+        }
+    }
+
+    fn spawn(&self) -> Result<Session> {
+        // C1 only and the serial GC cut the CPU time of the one JVM boot.
         let mut child = Command::new(&self.java)
             .args(["-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC"])
             .arg("-cp")
@@ -183,18 +209,111 @@ impl Oracle {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        child
-            .stdin
-            .take()
-            .ok_or("no stdin")?
-            .write_all(script.as_bytes())?;
-        let out = child.wait_with_output()?;
-        check("harness", &out)?;
-        Ok(String::from_utf8(out.stdout)?
-            .lines()
-            .map(str::to_owned)
-            .collect())
+        let stdin = child.stdin.take().ok_or("no stdin")?;
+        let stdout = child.stdout.take().ok_or("no stdout")?;
+        let mut stderr = child.stderr.take().ok_or("no stderr")?;
+        let (tx, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        // Drain stderr so a chatty JVM never blocks on a full pipe; keep the tail for errors.
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n @ 1..) = stderr.read(&mut buf) {
+                let mut log = sink.lock().unwrap_or_else(|e| e.into_inner());
+                log.extend_from_slice(&buf[..n]);
+                let excess = log.len().saturating_sub(STDERR_TAIL);
+                log.drain(..excess);
+            }
+        });
+        Ok(Session {
+            child,
+            stdin,
+            lines,
+            log,
+        })
     }
+}
+
+/// Longest wait for one harness call. Boot, a call and a loaded host all fit well inside it.
+const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+const STDERR_TAIL: usize = 16 * 1024;
+
+/// A running harness JVM.
+struct Session {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Receiver<std::io::Result<String>>,
+    log: Arc<Mutex<Vec<u8>>>,
+}
+
+impl Session {
+    fn call(&mut self, script: &str) -> Result<Vec<String>> {
+        self.stdin
+            .write_all(script.as_bytes())
+            .and_then(|()| {
+                let end: &[u8] = if script.ends_with('\n') {
+                    b"%%run\n"
+                } else {
+                    b"\n%%run\n"
+                };
+                self.stdin.write_all(end)
+            })
+            .and_then(|()| self.stdin.flush())
+            .map_err(|e| self.fail(format!("cannot send the script: {e}")))?;
+        let deadline = Instant::now() + CALL_TIMEOUT;
+        let mut out = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.lines.recv_timeout(left) {
+                Ok(Ok(line)) if line == "%%done" => return Ok(out),
+                Ok(Ok(line)) => match line.strip_prefix("%%error ") {
+                    Some(hex) => {
+                        return Err(self.fail(format!("harness error:\n{}", unhex(hex))).into())
+                    }
+                    None => out.push(line),
+                },
+                Ok(Err(e)) => return Err(self.fail(format!("cannot read output: {e}")).into()),
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(self
+                        .fail(format!(
+                            "no answer within {}s (hung)",
+                            CALL_TIMEOUT.as_secs()
+                        ))
+                        .into())
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    let status = self
+                        .child
+                        .wait()
+                        .map_or_else(|e| e.to_string(), |s| s.to_string());
+                    return Err(self.fail(format!("JVM exited ({status})")).into());
+                }
+            }
+        }
+    }
+
+    fn fail(&self, what: String) -> String {
+        std::thread::sleep(Duration::from_millis(50)); // let the stderr thread catch up
+        let log = self.log.lock().unwrap_or_else(|e| e.into_inner());
+        format!(
+            "oracle harness: {what}\nstderr:\n{}",
+            String::from_utf8_lossy(&log)
+        )
+    }
+}
+
+fn unhex(hex: &str) -> String {
+    let bytes: Vec<u8> = (0..hex.len() / 2)
+        .filter_map(|i| u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok())
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn newer(out: &Path, src: &Path) -> bool {
@@ -379,6 +498,14 @@ mod tests {
                     c\tb\tnet/minecraft/flat/x_z_Box\n\
                     c\tc\tnet/minecraft/flat/x_w_Box\n";
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn a_bad_script_fails_with_the_java_error_and_the_next_call_still_works() {
+        let oracle = Oracle::get();
+        let err = oracle.run("nonsense\n").unwrap_err().to_string();
+        assert!(err.contains("IllegalArgumentException"), "{err}");
+        assert_eq!(oracle.run("props 0\n").unwrap().len(), 1);
     }
 
     #[test]

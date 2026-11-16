@@ -943,6 +943,10 @@ impl App {
                 })
             }),
             view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
+            respiration: self.game.respiration(),
+            water_breathing: self.game.water_breathing(),
+            flat_world: self.game.flat_world,
+            ..Environment::default()
         });
         r.set_lightning(self.game.bolts.shapes());
         r.set_border(self.game.player.as_ref().map(|p| {

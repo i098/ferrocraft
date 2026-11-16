@@ -212,6 +212,7 @@ pub struct Renderer {
     animations: Vec<Animation>,
     /// `Environment.ticks` of the last frame; the difference is the client ticks to animate.
     animated_to: Option<u64>,
+    fog_light: crate::sky::fog_light::FogLight,
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
@@ -521,6 +522,7 @@ impl Renderer {
             atlas_clock: Animator::default(),
             animations,
             animated_to: None,
+            fog_light: Default::default(),
             font,
             env_tex,
             environment: Environment::default(),
@@ -1717,7 +1719,8 @@ impl Renderer {
 
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
         let (w, h) = self.size();
-        let env = self.environment;
+        let mut env = self.environment;
+        env.fog_light = self.fog_light_now(cam, &env);
         self.advance_post(env.partial);
         let fire = self.prepare_fire(cam, w, h);
         let shadow = self.prepare_shadows(cam);

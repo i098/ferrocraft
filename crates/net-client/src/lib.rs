@@ -78,6 +78,10 @@ pub enum NetEvent {
     Respawn {
         dimension_changed: bool,
     },
+    /// Level type of `JoinGame`/`Respawn`; `flat` is superflat (case-insensitive like `WorldType.parseWorldType`).
+    LevelType {
+        flat: bool,
+    },
     /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.
     TimeUpdate {
         world_age: i64,

@@ -38,6 +38,11 @@ pub fn run(mut reader: Reader, writer: Arc<Mutex<Writer>>, tx: Sender<NetEvent>,
     let _ = tx.send(NetEvent::Disconnect(end));
 }
 
+/// `WorldType.parseWorldType` compares names case-insensitively.
+fn is_flat(level_type: &str) -> bool {
+    level_type.eq_ignore_ascii_case("flat")
+}
+
 fn handle(
     packet: cb::Packet,
     reader: &mut Reader,
@@ -65,6 +70,9 @@ fn handle(
                 NetEvent::Respawn {
                     dimension_changed: changed,
                 },
+                NetEvent::LevelType {
+                    flat: is_flat(&r.level_type),
+                },
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
                 NetEvent::Difficulty(r.difficulty),
@@ -78,14 +86,19 @@ fn handle(
         cb::Packet::JoinGame(j) => {
             *dimension = i32::from(j.dimension);
             send_brand(writer, brand)?;
-            vec![NetEvent::JoinGame {
-                entity_id: j.entity_id,
-                gamemode: j.gamemode & 7,
-                hardcore: j.gamemode & 8 != 0,
-                difficulty: j.difficulty,
-                max_players: j.max_players,
-                reduced_debug_info: j.reduced_debug_info,
-            }]
+            vec![
+                NetEvent::JoinGame {
+                    entity_id: j.entity_id,
+                    gamemode: j.gamemode & 7,
+                    hardcore: j.gamemode & 8 != 0,
+                    difficulty: j.difficulty,
+                    max_players: j.max_players,
+                    reduced_debug_info: j.reduced_debug_info,
+                },
+                NetEvent::LevelType {
+                    flat: is_flat(&j.level_type),
+                },
+            ]
         }
         cb::Packet::PluginMessage(m) => vec![NetEvent::PluginMessage {
             channel: m.channel,
@@ -283,6 +296,12 @@ fn chunk_bulk(b: &cb::MapChunkBulk) -> io::Result<Vec<NetEvent>> {
 mod tests {
     use super::*;
     use ferrocraft_protocol::PacketSet;
+
+    #[test]
+    fn level_type_is_flat_ignoring_case() {
+        assert!(is_flat("flat") && is_flat("FLAT"));
+        assert!(!is_flat("default") && !is_flat("flatten"));
+    }
 
     /// A Map Chunk Bulk frame captured from a vanilla 1.8.9 server with a flat world.
     #[test]

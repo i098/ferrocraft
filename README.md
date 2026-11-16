@@ -35,7 +35,7 @@ To build from source instead, see [crates/launcher](crates/launcher/README.md). 
 
 ## Tests
 
-Enable the pre-push hook once per clone: `git config core.hooksPath .githooks`. It runs `cargo fmt` and `cargo clippy` on the crates that your pushed commits change.
+Enable the pre-push hook once per clone: `git config core.hooksPath .githooks`. It runs `cargo fmt` and `cargo clippy` on the crates that your pushed commits change. It refuses to run unless you push the clean checked-out HEAD (untracked files count as unclean).
 
 Each ported method is tested against the real 1.8.9 jar. The test runs the real 1.8.9 client classes headless (the oracle) and compares each tick with the Rust port, bit for bit.
 

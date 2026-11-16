@@ -486,7 +486,16 @@ pub fn raycast_dist(
     pitch: f32,
     reach: f64,
 ) -> Option<(Hit, f64)> {
-    let dir = look_vector(yaw, pitch);
+    raycast_dir(state, eye, look_vector(yaw, pitch), reach)
+}
+
+/// [`raycast_dist`] along an explicit unit direction.
+pub fn raycast_dir(
+    state: &dyn Fn([i32; 3]) -> u16,
+    eye: [f64; 3],
+    dir: [f64; 3],
+    reach: f64,
+) -> Option<(Hit, f64)> {
     let mut cell = eye.map(|v| v.floor() as i32);
     let step = dir.map(|d| if d < 0.0 { -1 } else { 1 });
     let delta = dir.map(|d| {

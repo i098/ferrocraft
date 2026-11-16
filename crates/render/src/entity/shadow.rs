@@ -191,7 +191,10 @@ mod tests {
         // A dark spot is 0, a torch-lit one is not reduced by the night, and noon sky is full.
         assert_eq!(eye_light_brightness([0, 0], night), 0.0);
         assert_eq!(eye_light_brightness([0, 15], night), 1.0);
-        assert_eq!(eye_light_brightness([15, 0], skylight_subtracted(6000, 0.0, 0.0)), 1.0);
+        assert_eq!(
+            eye_light_brightness([15, 0], skylight_subtracted(6000, 0.0, 0.0)),
+            1.0
+        );
     }
 
     #[test]

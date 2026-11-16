@@ -1,12 +1,12 @@
-//! Block breaking of Minecraft 1.8.9: the block ray, bare-hand break speed and the dig state
+//! Block breaking of Minecraft 1.8.9: the block ray, break progress and the dig state
 //! machine of `PlayerControllerMP` and `Minecraft.clickMouse`/`sendClickBlockToController`.
 //!
-//! Not ported yet: held tools and enchantments (the client has no inventory, so the hand is
-//! always empty), potion effects, water, entity targets, `CanDestroy` tags of adventure mode
+//! Not ported yet: `CanDestroy` tags of adventure mode
 //! (an empty hand never digs there; the swing is kept) and the world border.
 //! The break speed of every block is checked against the real 1.8.9 jar through `oracle`.
 
 use crate::entities::Kind;
+use crate::tool::{relative_hardness, Mining};
 use crate::{cos, sin};
 
 /// Block ids 0..=197 of 1.8.9: `Block.blockHardness`, -1 for unbreakable.
@@ -49,20 +49,6 @@ pub fn requires_tool(id: u16) -> bool {
             | 118 | 120 | 121 | 128..=130 | 133 | 137 | 139 | 145 | 147 | 148 | 152..=156
             | 158 | 159 | 166..=168 | 172 | 173 | 179..=182
     )
-}
-
-/// `Block.getPlayerRelativeBlockHardness` for an empty hand: the share of the block that one
-/// tick of digging removes. At 1.0 or more the block breaks at once.
-pub fn relative_hardness(id: u16, on_ground: bool) -> f32 {
-    let h = hardness(id);
-    if h < 0.0 {
-        return 0.0;
-    }
-    let mut speed = 1.0_f32;
-    if !on_ground {
-        speed /= 5.0;
-    }
-    speed / h / if requires_tool(id) { 100.0 } else { 30.0 }
 }
 
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
@@ -580,6 +566,8 @@ pub struct Frame {
     /// Adventure or spectator: `clickBlock` refuses, but the swing still happens.
     pub no_dig: bool,
     pub on_ground: bool,
+    /// Held tool, effects and water: what `PlayerEntity.getMiningSpeed` reads.
+    pub mining: Mining,
     pub target: Option<Hit>,
     /// The entity under the crosshair; a click attacks it and `target` is then `None`.
     pub entity: Option<i32>,
@@ -684,7 +672,7 @@ impl Digger {
             }
             out.push(start(Status::Start, hit.pos));
             let id = w.state(hit.pos) >> 4;
-            if id != 0 && relative_hardness(id, f.on_ground) >= 1.0 {
+            if id != 0 && relative_hardness(id, f.on_ground, &f.mining) >= 1.0 {
                 self.destroy(hit.pos, w);
             } else {
                 self.hitting = true;
@@ -723,7 +711,7 @@ impl Digger {
                 self.hitting = false;
                 return false;
             }
-            self.progress += relative_hardness(id, f.on_ground);
+            self.progress += relative_hardness(id, f.on_ground, &f.mining);
             if self.progress >= 1.0 {
                 self.hitting = false;
                 out.push(Action::Dig {
@@ -1059,8 +1047,8 @@ mod tests {
             let id = id as u16;
             let got = (
                 hardness(id).to_bits(),
-                relative_hardness(id, true).to_bits(),
-                relative_hardness(id, false).to_bits(),
+                relative_hardness(id, true, &Mining::default()).to_bits(),
+                relative_hardness(id, false, &Mining::default()).to_bits(),
                 u32::from(!requires_tool(id)),
             );
             let want = (bits(f[0]), bits(f[1]), bits(f[2]), bits(f[3]));

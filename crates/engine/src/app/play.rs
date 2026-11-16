@@ -1,7 +1,7 @@
 //! The 20 TPS step and the player's actions: movement packets, digging, attacking, using items.
 
-use super::{boxed, App, View, MAX_TICKS_PER_FRAME, TICK};
-use crate::game::{Attack, Effect};
+use super::{boxed, screen, App, View, MAX_TICKS_PER_FRAME, TICK};
+use crate::game::{eye_height, Attack, Effect};
 use crate::weather::{precipitation_top, raining_at};
 use gui::inventory::dials::DialWorld;
 use gui::inventory::ContainerScreen;
@@ -870,7 +870,11 @@ impl App {
         let block = ray
             .and_then(|(eye, yaw, pitch, ..)| self.game.ray_dist(eye, yaw, pitch))
             .map(|(h, _)| h);
-        let (actions, effects) = self.game.dig_tick(attack, entity, block);
+        let eyes_in_water = self.game.player.as_ref().is_some_and(|p| {
+            let get = |x, y, z| self.game.store.get_block(x, y, z);
+            screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))
+        });
+        let (actions, effects) = self.game.dig_tick(attack, entity, block, eyes_in_water);
         for action in actions {
             let sent = match action {
                 DigAction::Dig { status, pos, face } => {

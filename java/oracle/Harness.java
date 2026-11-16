@@ -50,6 +50,8 @@ import net.minecraft.flat.SlimeEntity;
  *   boxes <x0> <y0> <z0> <x1> <y1> <z1>  World.getCollisions of the player in the box, one line of six doubles each, then "end"
  *   mine <block id>               hardness, empty-hand mining speed on the ground and in the air
  *                                 (float bits in hex), toolNotRequired; needs "start"
+ *   minewith <block> <held item id|0> <efficiency> <haste amp|-1> <fatigue amp|-1> <aqua 0/1>
+ *                                 mining speed on the ground and in the air (float bits in hex) with that tool and effects; needs "start"
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
  *   achievements                  AchievementList: key|column|row|parent|challenge|item id|damage per line, then the display bounds
@@ -611,6 +613,7 @@ public class Harness {
         BLOCKS.put("air", Blocks.AIR);
         BLOCKS.put("stone", Blocks.STONE);
         BLOCKS.put("ice", Blocks.ICE);
+        BLOCKS.put("water", Blocks.WATER);
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
         java.util.List<String> lines = new java.util.ArrayList<>();
         for (String line; (line = in.readLine()) != null; ) {
@@ -760,6 +763,44 @@ public class Harness {
                         + Integer.toHexString(Float.floatToRawIntBits(grounded)) + " "
                         + Integer.toHexString(Float.floatToRawIntBits(airborne)) + " "
                         + (b.getMaterial().isToolNotRequired() ? 1 : 0));
+                    break;
+                }
+                case "minewith": {
+                    // minewith <block> <held item id, 0 = none> <efficiency> <haste amp, -1 = none>
+                    //          <fatigue amp, -1 = none> <aqua affinity 0/1>
+                    Block b = Block.byId(Integer.parseInt(t[1]));
+                    BlockPos at = new BlockPos(0, 10, 0);
+                    int item = Integer.parseInt(t[2]);
+                    net.minecraft.flat.ItemStack held = null;
+                    if (item != 0) {
+                        held = new net.minecraft.flat.ItemStack(net.minecraft.flat.Item.byId(item));
+                        int eff = Integer.parseInt(t[3]);
+                        if (eff > 0) {
+                            held.addEnchantment(net.minecraft.flat.Enchantment.EFFICIENCY, eff);
+                        }
+                    }
+                    player.inventory.items[player.inventory.selectedSlot] = held;
+                    net.minecraft.flat.ItemStack helmet = null;
+                    if (t[6].equals("1")) {
+                        helmet = new net.minecraft.flat.ItemStack(net.minecraft.flat.Items.LEATHER_HELMET);
+                        helmet.addEnchantment(net.minecraft.flat.Enchantment.AQUA_AFFINITY, 1);
+                    }
+                    player.setEquipment(3, helmet);
+                    player.clearStatusEffects();
+                    int haste = Integer.parseInt(t[4]);
+                    int fatigue = Integer.parseInt(t[5]);
+                    if (haste >= 0) {
+                        player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.HASTE.id, 600, haste));
+                    }
+                    if (fatigue >= 0) {
+                        player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.MINING_FATIGUE.id, 600, fatigue));
+                    }
+                    player.onGround = true;
+                    float grounded = b.getMiningSpeed(player, world, at);
+                    player.onGround = false;
+                    float airborne = b.getMiningSpeed(player, world, at);
+                    System.out.println(Integer.toHexString(Float.floatToRawIntBits(grounded)) + " "
+                        + Integer.toHexString(Float.floatToRawIntBits(airborne)));
                     break;
                 }
                 case "shadow":

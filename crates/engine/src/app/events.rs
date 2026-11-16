@@ -1018,7 +1018,11 @@ mod tests {
         assert_eq!((p.vel, p.sprinting), ([1.0, 0.5, -1.0], true), "mob hit");
         app.slow_after_hit(7);
         let p = app.game.player.as_ref().unwrap();
-        assert_eq!((p.vel, p.sprinting), ([0.6, 0.5, -0.6], false), "player hit");
+        assert_eq!(
+            (p.vel, p.sprinting),
+            ([0.6, 0.5, -0.6], false),
+            "player hit"
+        );
     }
 
     #[test]

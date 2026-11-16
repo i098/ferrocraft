@@ -130,6 +130,12 @@ pub struct Game {
     pub entity_id: i32,
     pub entity_flags: u8,
     pub vehicle: Option<i32>,
+    /// `generic.maxHealth` per entity from S20; an entity without one has the base 20.
+    max_health: std::collections::HashMap<i32, f64>,
+    /// `getAbsorption` of the local player (metadata float 17).
+    pub absorption: f32,
+    /// `getAir` of the local player (metadata short 1).
+    pub air: i32,
     /// `Entity.entityRiderYawDelta` and `entityRiderPitchDelta`: the vehicle's turn the rider has not followed yet.
     rider_turn: [f64; 2],
     pub horse_jump: HorseJump,
@@ -227,6 +233,9 @@ impl Game {
             entity_id: -1,
             entity_flags: 0,
             vehicle: None,
+            max_health: Default::default(),
+            absorption: 0.0,
+            air: 300,
             rider_turn: [0.0; 2],
             horse_jump: HorseJump::default(),
             horse_boost: None,
@@ -395,8 +404,20 @@ impl Game {
             NetEvent::MovementSpeed { entity_id, speed } if entity_id == self.entity_id => {
                 self.speed = speed;
             }
-            // Effects and attributes of other entities are not tracked.
+            NetEvent::MaxHealth { entity_id, health } => {
+                self.max_health.insert(entity_id, health.value(false));
+            }
+            NetEvent::PlayerMeta {
+                entity_id,
+                absorption,
+                air,
+            } if entity_id == self.entity_id => {
+                self.absorption = absorption.unwrap_or(self.absorption);
+                self.air = air.map_or(self.air, i32::from);
+            }
+            // Effects and speed of other entities are not tracked.
             NetEvent::EntityEffect { .. }
+            | NetEvent::PlayerMeta { .. }
             | NetEvent::RemoveEntityEffect { .. }
             | NetEvent::MovementSpeed { .. } => {}
             other => return Err(other),
@@ -520,6 +541,9 @@ impl Game {
         (self.death_message, self.killer_id, self.score) = (None, -1, 0);
         self.effects.clear();
         self.speed = world::effects::Speed::default();
+        self.max_health.clear();
+        self.absorption = 0.0;
+        self.air = 300;
         self.potion_color = 0;
         self.potion_ambient = false;
         self.digger = Digger::default();
@@ -531,6 +555,9 @@ impl Game {
 
     fn apply_entity(&mut self, e: EntityEvent) {
         if let EntityEvent::Destroy(ids) = &e {
+            for id in ids {
+                self.max_health.remove(id);
+            }
             if self.vehicle.is_some_and(|v| ids.contains(&v)) {
                 self.vehicle = None;
             }
@@ -786,6 +813,19 @@ impl Game {
                 .vehicle
                 .and_then(|id| self.entities.get(id))
                 .is_some_and(|v| v.meta.horse_flags.is_some_and(horse::is_saddled))
+    }
+
+    /// `getMaxHealth` of an entity: the S20 value, else the base 20.
+    pub fn max_health_of(&self, id: i32) -> f32 {
+        self.max_health.get(&id).map_or(20.0, |&m| m as f32)
+    }
+
+    /// `GameGui.renderStatusBars` vehicle row: the living vehicle's health and max health.
+    pub fn mount_health(&self) -> Option<(f32, f32)> {
+        let id = self.vehicle?;
+        let v = self.entities.get(id)?;
+        matches!(v.kind, world::entities::Kind::Mob(_))
+            .then(|| (v.health.unwrap_or(20.0), self.max_health_of(id)))
     }
 
     fn set_gamemode(&mut self, mode: u8) {

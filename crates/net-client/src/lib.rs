@@ -122,6 +122,18 @@ pub enum NetEvent {
         entity_id: i32,
         score: i32,
     },
+    /// Metadata of the local player: absorption (float 17, `getAbsorption`) and air (short 1,
+    /// `getAir`). `None` when the packet does not carry the entry.
+    PlayerMeta {
+        entity_id: i32,
+        absorption: Option<f32>,
+        air: Option<i16>,
+    },
+    /// S20 EntityProperties: the `generic.maxHealth` entry, when the packet has one.
+    MaxHealth {
+        entity_id: i32,
+        health: world::effects::Speed,
+    },
     /// S06 UpdateHealth.
     Health {
         health: f32,

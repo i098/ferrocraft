@@ -6,6 +6,7 @@ mod game;
 mod game_state;
 mod link;
 mod log;
+mod outline;
 mod skins;
 mod swing;
 mod ui;

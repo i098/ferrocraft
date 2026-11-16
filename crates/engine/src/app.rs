@@ -1004,10 +1004,17 @@ impl App {
         r.set_entity_outlines(play::outline_draws(&self.game, &self.input, &draws));
         r.set_shadow_view(shadow_view);
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
+        let hide_hud = self.hide_hud;
+        let outline_ok = |game: &crate::game::Game, hit: world::dig::Hit| {
+            let [x, y, z] = hit.pos;
+            let held = game.inv.held_stack().as_ref();
+            crate::outline::draws(game.gamemode, hide_hud, held, game.store.get_block(x, y, z))
+        };
         r.set_selection(
             ray.and_then(|(eye, yaw, pitch, id, vehicle)| {
                 self.game.block_aim(eye, yaw, pitch, id, vehicle)
             })
+            .filter(|(hit, _)| outline_ok(&self.game, *hit))
             .and_then(|(hit, _)| self.game.selection(hit)),
         );
         r.set_lines(

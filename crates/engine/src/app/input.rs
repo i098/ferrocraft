@@ -130,7 +130,11 @@ impl App {
     }
 
     fn mouse_button(&mut self, down: bool, button: u8) {
-        self.mouse_down = down;
+        if button <= 2 {
+            self.mouse_down = down;
+        } else if !down {
+            return;
+        }
         if down && button == 0 && self.chat_click() {
             return;
         }

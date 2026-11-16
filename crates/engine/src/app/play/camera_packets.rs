@@ -30,38 +30,44 @@ fn server() -> (u16, Receiver<u8>, Sender<Vec<u8>>) {
         let (mut s, _) = l.accept().unwrap();
         let mut buf = [0u8; 4096];
         let _ = s.read(&mut buf);
-        let mut w = s.try_clone().unwrap();
-        std::thread::spawn(move || {
-            let mut enc = FrameEncoder::default();
-            let mut out = Vec::new();
-            let login = login::clientbound::LoginSuccess {
-                uuid: "00000000-0000-0000-0000-000000000001".into(),
-                username: "Ferro".into(),
-            };
-            enc.encode(&login::clientbound::Packet::from(login).encode(), &mut out)
-                .unwrap();
-            w.write_all(&out).unwrap();
-            while let Ok(p) = out_rx.recv() {
-                let mut out = Vec::new();
-                enc.encode(&p, &mut out).unwrap();
-                w.write_all(&out).unwrap();
-            }
-        });
-        let mut dec = FrameDecoder::default();
-        while let Ok(n) = s.read(&mut buf) {
-            if n == 0 {
-                break;
-            }
-            dec.feed(&buf[..n]);
-            while let Ok(Some(f)) = dec.next_frame() {
-                // Id 0 is the login start that the first read may have left behind.
-                if f[0] != 0 {
-                    let _ = tx.send(f[0]);
-                }
-            }
-        }
+        let w = s.try_clone().unwrap();
+        std::thread::spawn(move || write_packets(w, out_rx));
+        read_ids(s, tx);
     });
     (port, rx, out_tx)
+}
+
+/// Sends the login success, then every queued packet.
+fn write_packets(mut w: impl Write, out_rx: Receiver<Vec<u8>>) {
+    let mut enc = FrameEncoder::default();
+    let login = login::clientbound::LoginSuccess {
+        uuid: "00000000-0000-0000-0000-000000000001".into(),
+        username: "Ferro".into(),
+    };
+    let mut out = Vec::new();
+    enc.encode(&login::clientbound::Packet::from(login).encode(), &mut out)
+        .unwrap();
+    w.write_all(&out).unwrap();
+    while let Ok(p) = out_rx.recv() {
+        let mut out = Vec::new();
+        enc.encode(&p, &mut out).unwrap();
+        w.write_all(&out).unwrap();
+    }
+}
+
+/// Forwards the id of every frame the client sends.
+fn read_ids(mut s: impl Read, tx: Sender<u8>) {
+    let mut buf = [0u8; 4096];
+    let mut dec = FrameDecoder::default();
+    while let Ok(n @ 1..) = s.read(&mut buf) {
+        dec.feed(&buf[..n]);
+        while let Ok(Some(f)) = dec.next_frame() {
+            // Id 0 is the login start that the first read may have left behind.
+            if f[0] != 0 {
+                let _ = tx.send(f[0]);
+            }
+        }
+    }
 }
 
 /// Pumps the network until `done` holds.
@@ -100,6 +106,34 @@ fn send(out: &Sender<Vec<u8>>, p: cb::Packet) {
     out.send(p.encode()).unwrap();
 }
 
+fn spawn_mob() -> cb::SpawnMob {
+    cb::SpawnMob {
+        entity_id: VarInt(OTHER_ID),
+        kind: 100,
+        x: 0,
+        y: 0,
+        z: 0,
+        yaw: 0,
+        pitch: 0,
+        head_pitch: 0,
+        velocity_x: 0,
+        velocity_y: 0,
+        velocity_z: 0,
+        metadata: Metadata(vec![]),
+    }
+}
+
+/// Puts the player on a block with the screen closed and `W` and sneak held.
+fn hold_forward(app: &mut App) {
+    app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
+    let m = metrics!(app);
+    app.ui.close(&m);
+    app.input.set_screen_open(false);
+    app.input.on_key(KeyCode::KeyW, true, None);
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    assert!(!app.ui.is_open(), "screen open");
+}
+
 fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<u8>) -> App {
     let mut app = App::new(Args {
         username: "Ferro".into(),
@@ -121,21 +155,7 @@ fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<u8>) -> App {
         reduced_debug_info: false,
     };
     send(out, join.into());
-    let mob = cb::SpawnMob {
-        entity_id: VarInt(OTHER_ID),
-        kind: 100,
-        x: 0,
-        y: 0,
-        z: 0,
-        yaw: 0,
-        pitch: 0,
-        head_pitch: 0,
-        velocity_x: 0,
-        velocity_y: 0,
-        velocity_z: 0,
-        metadata: Metadata(vec![]),
-    };
-    send(out, mob.into());
+    send(out, spawn_mob().into());
     pump_until(&mut app, |a| a.game.entities.get(OTHER_ID).is_some());
     assert_eq!(app.game.entity_id, OWN_ID);
     sent_so_far(&mut app, rx); // drop what the client sent while joining
@@ -149,13 +169,7 @@ fn camera_packet_stops_and_resumes_movement_packets() {
     let mut chunk = world::chunk::Chunk::new(0, 0);
     chunk.set_block(0, 63, 0, 1 << 4);
     app.game.store.insert(chunk);
-    app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
-    let m = metrics!(app);
-    app.ui.close(&m);
-    app.input.set_screen_open(false);
-    app.input.on_key(KeyCode::KeyW, true, None);
-    app.input.on_key(KeyCode::ShiftLeft, true, None);
-    assert!(!app.ui.is_open(), "screen open");
+    hold_forward(&mut app);
 
     let camera = |id| {
         cb::Camera {

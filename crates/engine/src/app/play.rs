@@ -287,7 +287,8 @@ impl App {
         self.limb_tick();
         let host = self.host_player_tick();
         self.input.blind = self.game.effects.has(world::effects::id::BLINDNESS);
-        let input = if playing {
+        // `LocalClientPlayerEntity.tickMovement`: no movement input while `!isCamera()`.
+        let input = if playing && self.game.camera.is_none() {
             let native = |s: &mut Self| {
                 s.game
                     .player
@@ -341,7 +342,8 @@ impl App {
         self.send_state();
         if self.game.vehicle.is_some() {
             self.send_riding(input);
-        } else {
+        } else if self.game.camera.is_none() {
+            // `LocalClientPlayerEntity.sendMovementToServer`: no C03-C06 while `!isCamera()`.
             self.send_pose();
         }
         self.sound_tick();
@@ -1493,6 +1495,8 @@ fn sprint_dust_state(
     (state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block))
         .then_some(state)
 }
+#[cfg(test)]
+mod camera_packets;
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, outline_draws, sprint_dust_state, App, ContainerScreen};

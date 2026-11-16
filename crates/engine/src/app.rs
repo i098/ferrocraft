@@ -1269,7 +1269,11 @@ impl App {
                     .map(|l| (l, &[][..])),
                 reduced_debug: self.reduced_debug(),
                 fancy: self.ui.settings.fancy_graphics,
-                brightness: 1.0,
+                brightness: self.game.player.as_ref().map_or(1.0, |p| {
+                    let mut eye = p.pos;
+                    eye[1] += eye_height(self.input.sneaking());
+                    r.eye_brightness(eye)
+                }),
                 border_warning: self.game.player.as_ref().map_or(0.0, |p| {
                     let now = crate::game::now_ms();
                     self.game.border.warning(p.pos[0], p.pos[2], now)

@@ -253,9 +253,11 @@ pub struct Entity {
     pub limb_swing: f32,
     pub limb_swing_amount: f32,
     pub prev_limb_swing_amount: f32,
-    /// 0 when idle; counts up to 6 during an arm swing.
+    /// 0 when idle; counts up to `effects.arm_swing_duration()` (6 without Haste or Mining Fatigue) during an arm swing.
     pub swing_ticks: i32,
     pub swinging: bool,
+    /// Potion effects from `S1D`/`S1E`; `getArmSwingAnimationEnd` reads Haste and Mining Fatigue.
+    pub effects: crate::effects::Effects,
     /// Red-flash ticks left after a hurt status (vanilla `hurtTime`, 10 at the hit).
     pub hurt_time: i32,
     /// Ticks since death status; the model tips over for 20 ticks, then the entity is removed.
@@ -431,6 +433,7 @@ impl Entity {
             prev_limb_swing_amount: 0.0,
             swing_ticks: 0,
             swinging: false,
+            effects: Default::default(),
             hurt_time: 0,
             death_time: 0,
             sheep_timer: 0,
@@ -629,7 +632,7 @@ impl Entity {
 
         if self.swinging {
             self.swing_ticks += 1;
-            if self.swing_ticks >= 6 {
+            if self.swing_ticks >= self.effects.arm_swing_duration() {
                 self.swing_ticks = 0;
                 self.swinging = false;
             }
@@ -737,7 +740,10 @@ impl Entity {
     fn animate(&mut self, animation: u8) {
         match animation {
             // `swingItem`: restart unless a swing is already in its first half.
-            0 if !self.swinging || self.swing_ticks >= 3 || self.swing_ticks < 0 => {
+            0 if !self.swinging
+                || self.swing_ticks >= self.effects.arm_swing_duration() / 2
+                || self.swing_ticks < 0 =>
+            {
                 self.swing_ticks = -1;
                 self.swinging = true;
             }
@@ -798,7 +804,7 @@ impl Entity {
         if !self.swinging {
             return 0.0;
         }
-        (self.swing_ticks as f32 + partial) / 6.0
+        (self.swing_ticks as f32 + partial) / self.effects.arm_swing_duration() as f32
     }
 
     /// Where a rider with `rider_y_offset` (`getYOffset`) sits on this vehicle standing at `pos`: `Entity.updateRiderPosition`, and for a horse the
@@ -967,6 +973,16 @@ pub enum EntityEvent {
     Animation {
         id: i32,
         animation: u8,
+    },
+    /// `S1D`: the entity gets a potion effect.
+    Effect {
+        id: i32,
+        effect: crate::effects::Effect,
+    },
+    /// `S1E`: the entity loses the potion effect `effect_id`.
+    RemoveEffect {
+        id: i32,
+        effect_id: i8,
     },
     /// `S0D` collect item: the entity flies to the collector and is picked up.
     Pickup {
@@ -1358,26 +1374,14 @@ impl Entities {
                 }
                 self.with(id, |e| e.animate(animation))
             }
+            E::Effect { .. } | E::RemoveEffect { .. } => self.apply_effect(ev),
             E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
             E::Status { id, status } => self.handle_status(id, status),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
             E::Leash { id, holder } => self.with(id, |e| e.set_leash(holder)),
-            E::PlayerName {
-                uuid,
-                name,
-                textures,
-            } => {
-                for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
-                    e.name = Some(name.clone());
-                    e.textures = textures.clone();
-                }
-                self.names.insert(uuid, (name, textures));
-            }
-            E::PlayerRemove { uuid } => {
-                self.names.remove(&uuid);
-            }
+            E::PlayerName { .. } | E::PlayerRemove { .. } => self.apply_player(ev),
             _ => {}
         }
     }
@@ -1391,6 +1395,36 @@ impl Entities {
             self.fx.push(fx);
         }
         self.with(id, |e| e.set_status(status));
+    }
+
+    fn apply_player(&mut self, ev: EntityEvent) {
+        match ev {
+            EntityEvent::PlayerName {
+                uuid,
+                name,
+                textures,
+            } => {
+                for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
+                    e.name = Some(name.clone());
+                    e.textures = textures.clone();
+                }
+                self.names.insert(uuid, (name, textures));
+            }
+            EntityEvent::PlayerRemove { uuid } => {
+                self.names.remove(&uuid);
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_effect(&mut self, ev: EntityEvent) {
+        match ev {
+            EntityEvent::Effect { id, effect } => self.with(id, |e| e.effects.add(effect)),
+            EntityEvent::RemoveEffect { id, effect_id } => {
+                self.with(id, |e| e.effects.remove(effect_id))
+            }
+            _ => {}
+        }
     }
 
     fn firework_explode(&mut self, id: i32) {
@@ -1930,6 +1964,43 @@ mod tests {
         let mut witch = mob(66);
         witch.apply(EntityEvent::Status { id: 1, status: 15 });
         assert!(matches!(witch.take_fx().as_slice(), [Fx::Witch { .. }]));
+    }
+
+    #[test]
+    fn remote_swing_length_follows_haste_and_mining_fatigue() {
+        let effect = |id| crate::effects::Effect {
+            id,
+            amplifier: if id == crate::effects::id::HASTE {
+                1
+            } else {
+                0
+            },
+            duration: 600,
+            permanent: false,
+            ambient: false,
+            particles: true,
+        };
+        let length = |id: Option<i8>| {
+            let mut es = Entities::default();
+            spawn(&mut es, 3, [0; 3]);
+            if let Some(id) = id {
+                es.apply(EntityEvent::Effect {
+                    id: 3,
+                    effect: effect(id),
+                });
+            }
+            es.apply(EntityEvent::Animation {
+                id: 3,
+                animation: 0,
+            });
+            (1..).find(|_| {
+                es.tick();
+                !es.get(3).unwrap().swinging
+            })
+        };
+        assert_eq!(length(None), Some(7));
+        assert_eq!(length(Some(crate::effects::id::HASTE)), Some(5));
+        assert_eq!(length(Some(crate::effects::id::MINING_FATIGUE)), Some(9));
     }
 
     #[test]

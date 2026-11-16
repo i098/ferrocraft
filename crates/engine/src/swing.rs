@@ -1,6 +1,4 @@
-//! Arm swing: `EntityLivingBase.swingItem` and `updateArmSwingProgress` of 1.8.9 (6 ticks, no Haste or Mining Fatigue).
-
-const DURATION: i32 = 6;
+//! Arm swing: `EntityLivingBase.swingItem` and `updateArmSwingProgress` of 1.8.9 (`duration` ticks from `getArmSwingAnimationEnd`: 6, less with Haste, more with Mining Fatigue).
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Swing {
@@ -12,25 +10,25 @@ pub struct Swing {
 
 impl Swing {
     /// Left click: restart only when no swing runs or it is at least half done.
-    pub fn start(&mut self) {
-        if !self.in_progress || self.ticks >= DURATION / 2 || self.ticks < 0 {
+    pub fn start(&mut self, duration: i32) {
+        if !self.in_progress || self.ticks >= duration / 2 || self.ticks < 0 {
             self.ticks = -1;
             self.in_progress = true;
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, duration: i32) {
         self.prev = self.now;
         if self.in_progress {
             self.ticks += 1;
-            if self.ticks >= DURATION {
+            if self.ticks >= duration {
                 self.ticks = 0;
                 self.in_progress = false;
             }
         } else {
             self.ticks = 0;
         }
-        self.now = self.ticks as f32 / DURATION as f32;
+        self.now = self.ticks as f32 / duration as f32;
     }
 
     /// `swingProgress > 0`: the arm is mid-swing.
@@ -55,10 +53,10 @@ mod tests {
     #[test]
     fn swing_runs_six_ticks_then_rests() {
         let mut s = Swing::default();
-        s.start();
+        s.start(6);
         let mut seen = Vec::new();
         for _ in 0..7 {
-            s.tick();
+            s.tick(6);
             seen.push(s.progress(1.0));
         }
         assert_eq!(seen[0], 0.0);
@@ -66,7 +64,38 @@ mod tests {
         assert!((seen[5] - 5.0 / 6.0).abs() < 1e-6);
         // The wrap tick interpolates upward to 1 instead of jumping back, then the arm rests.
         assert!((seen[6] - 1.0).abs() < 1e-6);
-        s.tick();
+        s.tick(6);
+        assert_eq!(s.progress(1.0), 0.0);
+    }
+
+    #[test]
+    fn haste_two_swings_four_ticks_and_fatigue_one_eight() {
+        use world::effects::{id, Effect, Effects};
+        let duration = |id, amplifier| {
+            let mut fx = Effects::default();
+            fx.add(Effect {
+                id,
+                amplifier,
+                duration: 600,
+                permanent: false,
+                ambient: false,
+                particles: true,
+            });
+            fx.arm_swing_duration()
+        };
+        assert_eq!(Effects::default().arm_swing_duration(), 6);
+        assert_eq!(duration(id::HASTE, 1), 4);
+        assert_eq!(duration(id::MINING_FATIGUE, 0), 8);
+        let mut s = Swing::default();
+        s.start(4);
+        let seen: Vec<f32> = (0..5)
+            .map(|_| {
+                s.tick(4);
+                s.progress(1.0)
+            })
+            .collect();
+        assert_eq!(seen, [0.0, 0.25, 0.5, 0.75, 1.0]);
+        s.tick(4);
         assert_eq!(s.progress(1.0), 0.0);
     }
 }

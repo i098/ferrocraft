@@ -32,7 +32,16 @@ impl Renderer {
     /// The fog light of this frame: the light at the viewer's block, smoothed over ticks.
     pub(super) fn fog_light_now(&mut self, cam: &Camera, env: &Environment) -> f32 {
         let [x, z] = [cam.pos[0], cam.pos[2]].map(|v| v.floor() as i32);
-        let [sky, block] = self.light_levels(x, env.view_y.floor() as i32, z);
+        // Vanilla EmptyChunk light is full sky light, not 0.
+        let lit = self
+            .meshes
+            .get(&(x >> 4, z >> 4))
+            .is_some_and(|m| m.light.is_some());
+        let [sky, block] = if lit {
+            self.light_levels(x, env.view_y.floor() as i32, z)
+        } else {
+            [15, 0]
+        };
         let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
         self.fog_light.advance(
             env.ticks,

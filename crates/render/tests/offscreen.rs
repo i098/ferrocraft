@@ -33,10 +33,6 @@ fn renders_synthetic_chunks_to_png() {
     // Optional 1.8.9 client jar (or extracted assets dir) for real textures and the ascii.png font.
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
     let mut r = Renderer::new_offscreen(854, 480, jar.as_deref());
-    r.set_environment(Environment {
-        render_distance_chunks: 32,
-        ..Environment::default()
-    });
     for cx in -1..=1 {
         for cz in 0..=2 {
             r.upload_chunk(&Synthetic(cx, cz));
@@ -1469,11 +1465,7 @@ fn held_bow_and_rod_change_picture_with_draw_and_cast() {
 /// blocks over the eye in the same fog.
 #[test]
 fn sky_plane_and_lower_disc_sit_in_linear_fog() {
-    // 32 chunks pull the camera light to 1 in this world without chunks, so the fog keeps its color.
-    let env = Environment {
-        render_distance_chunks: 32,
-        ..Environment::default()
-    };
+    let env = Environment::default();
     let s = env.sky_state(0.8, [0.0, -1.0, 0.0]);
     let far = (env.render_distance_chunks * 16) as f32;
     let expect = |color: [f32; 3], d: f32| {

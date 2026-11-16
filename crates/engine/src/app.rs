@@ -320,9 +320,7 @@ impl App {
                     crate::log::line(d);
                 }
                 self.sound = Some(s);
-                if let (Some(s), Some(p)) = (&mut self.sound, &self.game.player) {
-                    s.set_listener(p.pos);
-                }
+                self.sync_listener();
                 self.apply_settings();
                 return;
             }

@@ -1,8 +1,8 @@
 //! Vanilla 1.8.9 `SoundHandler` port: `sounds.json` events, category volumes, distance
 //! attenuation, local block sounds and the music ticker, played through rodio.
 //!
-//! Skipped versus vanilla: stereo panning (sounds are centered) and streaming of `.ogg` files
-//! from the jar (assets are read from the launcher's `assets/objects`).
+//! Skipped versus vanilla: streaming of `.ogg` files from the jar (assets are read from the
+//! launcher's `assets/objects`). Sources are panned by the listener basis (eye and look vector).
 pub mod blocks;
 pub mod index;
 pub mod music;
@@ -10,9 +10,30 @@ pub mod music;
 use blocks::{effect_sound, wire_pitch, BlockSound};
 use index::{Category, Pack, SoundIndex};
 use music::MusicTicker;
+use rodio::source::ChannelVolume;
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::collections::HashMap;
 use std::path::Path;
+
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+/// Left and right gains of a source: the pan is the source direction on the listener's right
+/// axis, `look x up` (the OpenAL basis `updateListenerPosition` sets). Centered gives 1 and 1.
+fn pan_gains(eye: [f64; 3], look: [f64; 3], src: [f64; 3]) -> [f32; 2] {
+    let (rx, rz) = (-look[2], look[0]);
+    let rn = rx.hypot(rz);
+    let d = distance(eye, src);
+    if rn < 1e-6 || d < 1e-6 {
+        return [1.0, 1.0];
+    }
+    let pan = (((src[0] - eye[0]) * rx + (src[2] - eye[2]) * rz) / (rn * d)).clamp(-1.0, 1.0);
+    [
+        (1.0 - pan).sqrt().min(1.0) as f32,
+        (1.0 + pan).sqrt().min(1.0) as f32,
+    ]
+}
 
 /// Vanilla caps concurrent non-stream sounds at 28.
 const MAX_SOUNDS: usize = 28;
@@ -25,6 +46,7 @@ pub struct Sound {
     ticker: MusicTicker,
     volumes: HashMap<Category, f32>,
     listener: [f64; 3],
+    look: [f64; 3],
     rng: u32,
 }
 
@@ -51,6 +73,7 @@ impl Sound {
             ticker: MusicTicker::new(seed),
             volumes: Category::ALL.iter().map(|c| (*c, 1.0)).collect(),
             listener: [0.0; 3],
+            look: [0.0, 0.0, 1.0],
             rng: seed,
         };
         // Vanilla default: music slider at 100% is shipped as 1.0; keep it.
@@ -75,8 +98,10 @@ impl Sound {
         self.roll() - self.roll()
     }
 
-    pub fn set_listener(&mut self, pos: [f64; 3]) {
-        self.listener = pos;
+    /// `SoundEngine.updateListenerPosition`: the eye position and the look vector.
+    pub fn set_listener(&mut self, eye: [f64; 3], look: [f64; 3]) {
+        self.listener = eye;
+        self.look = look;
     }
 
     /// Slider value 0.0..=1.0, as `options.txt` `soundCategory_*`.
@@ -116,17 +141,16 @@ impl Sound {
         };
         let Some(v) = ev.pick(roll) else { return };
         let mut gain = (volume * v.volume).clamp(0.0, 1.0) * self.gain(ev.category);
+        let mut pan = None;
         if let Some(p) = at {
             // Vanilla: linear falloff over 16 blocks, scaled by volume when above 1.
             let range = 16.0 * f64::from(volume.max(1.0));
-            let d = ((p[0] - self.listener[0]).powi(2)
-                + (p[1] - self.listener[1]).powi(2)
-                + (p[2] - self.listener[2]).powi(2))
-            .sqrt();
+            let d = distance(self.listener, p);
             if d >= range {
                 return;
             }
             gain *= (1.0 - d / range) as f32;
+            pan = Some(pan_gains(self.listener, self.look, p));
         }
         if gain <= 0.0 {
             return;
@@ -143,7 +167,11 @@ impl Sound {
         };
         let player = Player::connect_new(self.sink.mixer());
         player.set_volume(gain);
-        player.append(dec.speed((pitch * v.pitch).clamp(0.5, 2.0)));
+        let src = dec.speed((pitch * v.pitch).clamp(0.5, 2.0));
+        match pan {
+            Some([l, r]) => player.append(ChannelVolume::new(src, vec![l, r])),
+            None => player.append(src),
+        }
         self.players.push(player);
     }
 
@@ -240,5 +268,28 @@ impl Sound {
         player.set_volume(self.gain(Category::Music) * v.volume);
         player.append(dec);
         self.music = Some(player);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_on_the_right_has_the_higher_right_gain() {
+        // Yaw 0 faces +z; the player's right is -x.
+        let [l, r] = pan_gains([0.0; 3], [0.0, 0.0, 1.0], [-4.0, 0.0, 0.0]);
+        assert!(r > l);
+        let [l, r] = pan_gains([0.0; 3], [0.0, 0.0, 1.0], [4.0, 0.0, 0.0]);
+        assert!(l > r);
+        assert_eq!(
+            pan_gains([0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 4.0]),
+            [1.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn distance_is_from_the_eye() {
+        assert_eq!(distance([0.0, 1.62, 0.0], [0.0, 1.62, 3.0]), 3.0);
     }
 }

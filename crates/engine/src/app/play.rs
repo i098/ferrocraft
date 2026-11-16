@@ -614,12 +614,20 @@ impl App {
         }
     }
 
-    fn sound_tick(&mut self) {
-        let at = self.game.player.as_ref().map(|p| p.pos);
+    /// `SoundManager.setListener`: the eye position and the look vector of the local player.
+    pub(super) fn sync_listener(&mut self) {
+        let (Some(eye), Some(p)) = (self.eye(1.0), self.game.player.as_ref()) else {
+            return;
+        };
+        let look = look_vector(p.yaw, self.game.pitch);
         if let Some(s) = &mut self.sound {
-            if let Some(at) = at {
-                s.set_listener(at);
-            }
+            s.set_listener(eye, look);
+        }
+    }
+
+    fn sound_tick(&mut self) {
+        self.sync_listener();
+        if let Some(s) = &mut self.sound {
             s.tick(self.ui.in_world);
         }
     }

@@ -59,6 +59,8 @@ const MAX_TICKS_PER_FRAME: u32 = 10;
 const THIRD_PERSON_DISTANCE: f64 = 4.0;
 /// `Item.getItemFromBlock(Blocks.pumpkin)`: worn on the head it draws the blur overlay.
 const PUMPKIN: i16 = 86;
+/// Potion id of Water Breathing.
+const WATER_BREATHING: i8 = 13;
 
 /// Quads, textures they registered and effects they raised.
 type Overlay = (
@@ -941,7 +943,8 @@ impl App {
             view_y: self.game.player.as_ref().map_or(64.0, |p| p.pos[1] as f32),
             // Window 0 slots 5 to 8 are the worn armor; Respiration is enchantment 5.
             respiration: world::dig::highest_enchant_level(&self.game.inv.player[5..=8], 5),
-            water_breathing: self.game.effects.has(Fx::WATER_BREATHING),
+            water_breathing: self.game.effects.has(WATER_BREATHING),
+            flat_world: self.game.flat_world,
             ..Environment::default()
         });
         r.set_lightning(self.game.bolts.shapes());

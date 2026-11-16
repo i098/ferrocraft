@@ -1,6 +1,8 @@
 //! Day/night sky, fog, sun, moon, stars and clouds, ported from vanilla 1.8.9
 //! (`World.getSkyColor`, `RenderGlobal.renderSky`, `RenderGlobal.renderClouds`).
 
+pub(crate) mod fog_light;
+
 use crate::assets::{decode_png, AssetSource, Image};
 use crate::jrandom::JavaRandom;
 use crate::mesh::Vertex;
@@ -45,6 +47,8 @@ pub struct Environment {
     pub respiration: i32,
     /// Water Breathing is active.
     pub water_breathing: bool,
+    /// Superflat level type: no void darkening above y 1.
+    pub flat_world: bool,
 }
 
 impl Default for Environment {
@@ -67,6 +71,7 @@ impl Default for Environment {
             fog_light: 1.0,
             respiration: 0,
             water_breathing: false,
+            flat_world: false,
         }
     }
 }
@@ -85,8 +90,8 @@ fn blind_fog(far: f32, ticks: i32) -> (f32, f32) {
 
 /// `updateFogColor`: the color goes dark below y 32, as `(y / 32)^2`; Blindness scales the depth
 /// down over its last second and removes it before that.
-fn void_darkness(view_y: f32, blindness: Option<i32>) -> f32 {
-    let mut depth = f64::from(view_y) * 0.03125;
+fn void_darkness(view_y: f32, blindness: Option<i32>, flat: bool) -> f32 {
+    let mut depth = f64::from(view_y) * if flat { 1.0 } else { 0.03125 };
     if let Some(ticks) = blindness {
         depth = if ticks < 20 {
             depth * f64::from(1.0 - ticks as f32 / 20.0)
@@ -103,10 +108,11 @@ fn void_darkness(view_y: f32, blindness: Option<i32>) -> f32 {
 
 /// `updateFogColor`: Night Vision scales the color until its brightest channel is 1, by `strength`.
 fn night_vision_fog(fog: [f32; 3], strength: f32) -> [f32; 3] {
-    if strength <= 0.0 || fog.iter().any(|c| *c <= 0.0) {
+    // Java's 1/0 is +Inf, so zero channels drop out of the min; an all-zero fog stays black.
+    let boost = fog.iter().filter(|c| **c > 0.0).map(|c| 1.0 / c).fold(f32::INFINITY, f32::min);
+    if strength <= 0.0 || boost.is_infinite() {
         return fog;
     }
-    let boost = fog.iter().map(|c| 1.0 / c).fold(f32::INFINITY, f32::min);
     fog.map(|c| c * (1.0 - strength) + c * boost * strength)
 }
 
@@ -299,7 +305,7 @@ impl Environment {
             Some(Fluid::Lava) => ([0.6, 0.1, 0.0], Some(2.0)),
             None => (fog, None),
         };
-        let dark = self.fog_light * void_darkness(self.view_y, self.blindness);
+        let dark = self.fog_light * void_darkness(self.view_y, self.blindness, self.flat_world);
         let fog = night_vision_fog(fog.map(|c| c * dark), self.night_vision);
         let far = (self.render_distance_chunks * 16) as f32;
         match self.blindness {
@@ -961,6 +967,17 @@ mod tests {
         assert_eq!(fog_with(|e| e.view_y = -5.0), [0.0; 3]);
     }
 
+    /// Oracle: vanilla `Dimension.getFogSize` is 1 on FLAT worlds, so `y * 1` is at least 1 from y 1 up.
+    #[test]
+    fn superflat_fog_keeps_its_color_above_y1() {
+        let top = fog_with(|_| {});
+        assert_eq!(fog_with(|e| e.flat_world = true), top);
+        assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 16.0)), top);
+        assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 1.0)), top);
+        assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 0.0)), [0.0; 3]);
+        assert_ne!(fog_with(|e| e.view_y = 16.0), top);
+    }
+
     #[test]
     fn fog_follows_the_camera_light() {
         let top = fog_with(|_| {});
@@ -990,6 +1007,15 @@ mod tests {
         });
         assert!((half[2] - base[2] * (0.5 + 0.5 * boost)).abs() < 1e-5);
         assert_eq!(fog_with(|e| e.night_vision = 0.0), fog_with(|_| {}));
+    }
+
+    #[test]
+    fn night_vision_in_lava_scales_to_the_red_channel() {
+        let lit = night_vision_fog([0.6, 0.1, 0.0], 1.0);
+        for (got, want) in lit.iter().zip([1.0, 0.1 / 0.6, 0.0]) {
+            assert!((got - want).abs() < 1e-5);
+        }
+        assert_eq!(night_vision_fog([0.0; 3], 1.0), [0.0; 3]);
     }
 
     #[test]

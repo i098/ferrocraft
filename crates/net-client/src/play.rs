@@ -64,6 +64,7 @@ fn handle(
             vec![
                 NetEvent::Respawn {
                     dimension_changed: changed,
+                    flat: r.level_type == "flat",
                 },
                 NetEvent::Entity(EntityEvent::Clear),
                 NetEvent::GameMode(r.gamemode & 7),
@@ -83,6 +84,7 @@ fn handle(
                 gamemode: j.gamemode & 7,
                 hardcore: j.gamemode & 8 != 0,
                 difficulty: j.difficulty,
+                flat: j.level_type == "flat",
                 max_players: j.max_players,
                 reduced_debug_info: j.reduced_debug_info,
             }]

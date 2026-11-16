@@ -174,6 +174,8 @@ pub struct Game {
     pub spawn: [i32; 3],
     /// `EntityPlayer.hasReducedDebug`: from `JoinGame` and entity status 22/23.
     pub reduced_debug: bool,
+    /// Level type `flat` from `JoinGame`/`Respawn`: `Dimension.getFogSize` is 1 instead of 1/32.
+    pub flat_world: bool,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
     pub ticks: u64,
     pub inv: Inventory,
@@ -258,6 +260,7 @@ impl Game {
             daylight_cycle: true,
             spawn: [0; 3],
             reduced_debug: false,
+            flat_world: false,
             ticks: 0,
             inv: Inventory::default(),
             broken: Vec::new(),
@@ -340,6 +343,7 @@ impl Game {
                 hardcore,
                 difficulty,
                 reduced_debug_info,
+                flat,
                 ..
             } => {
                 self.entity_id = entity_id;
@@ -351,6 +355,7 @@ impl Game {
                 self.hardcore = hardcore;
                 self.difficulty = difficulty;
                 self.reduced_debug = reduced_debug_info;
+                self.flat_world = flat;
                 self.inv = Inventory::default();
                 self.set_gamemode(gamemode);
             }
@@ -503,8 +508,12 @@ impl Game {
     /// Chunks, blocks, entities, time, weather, chat and disconnects.
     fn apply_world(&mut self, ev: NetEvent) -> Option<Effect> {
         match ev {
-            NetEvent::Respawn { dimension_changed } => {
-                return Some(self.respawn(dimension_changed))
+            NetEvent::Respawn {
+                dimension_changed,
+                flat,
+            } => {
+                self.flat_world = flat;
+                return Some(self.respawn(dimension_changed));
             }
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
@@ -1181,6 +1190,7 @@ mod tests {
         g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
         assert_eq!(
             g.apply(NetEvent::Respawn {
+                flat: false,
                 dimension_changed: false
             }),
             Some(Effect::Clear)
@@ -1382,6 +1392,7 @@ mod tests {
             .unwrap()
             .contains("Steve was slain by Bob"));
         g.apply(NetEvent::Respawn {
+            flat: false,
             dimension_changed: false,
         });
         assert_eq!(g.death_message, None);
@@ -1395,6 +1406,7 @@ mod tests {
             difficulty: 1,
             max_players: 20,
             reduced_debug_info: false,
+            flat: false,
         });
         assert_eq!(
             (g.death_message.as_deref(), g.killer_id, g.score),
@@ -1425,6 +1437,7 @@ mod tests {
         assert_eq!(g.entity_flags, 0);
         g.apply(flags(7, Some(1)));
         g.apply(NetEvent::Respawn {
+            flat: false,
             dimension_changed: false,
         });
         assert_eq!(g.entity_flags, 0);
@@ -1470,10 +1483,12 @@ mod tests {
         g.apply(NetEvent::WorldBorder(world::border::Update::SetSize(100.0)));
         assert_ne!(g.border, WorldBorder::default());
         g.apply(NetEvent::Respawn {
+            flat: false,
             dimension_changed: false,
         });
         assert_ne!(g.border, WorldBorder::default());
         g.apply(NetEvent::Respawn {
+            flat: false,
             dimension_changed: true,
         });
         assert_eq!(g.border, WorldBorder::default());

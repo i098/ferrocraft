@@ -52,6 +52,7 @@ impl App {
             }
             NetEvent::Respawn {
                 dimension_changed: true,
+                ..
             } => {
                 for e in [
                     ModEvent::WorldUnload,

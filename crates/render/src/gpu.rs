@@ -212,7 +212,7 @@ pub struct Renderer {
     animations: Vec<Animation>,
     /// `Environment.ticks` of the last frame; the difference is the client ticks to animate.
     animated_to: Option<u64>,
-    fog_light: crate::fog_light::FogLight,
+    fog_light: crate::sky::fog_light::FogLight,
     font: Option<Font>,
     env_tex: EnvTexture,
     environment: Environment,
@@ -1201,7 +1201,7 @@ impl Renderer {
         let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
         self.fog_light.advance(
             env.ticks,
-            crate::fog_light::light_brightness(level as u8),
+            crate::sky::fog_light::light_brightness(level as u8),
             env.render_distance_chunks,
         );
         self.fog_light.at(env.partial)

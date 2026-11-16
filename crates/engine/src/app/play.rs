@@ -255,6 +255,32 @@ impl App {
         }
     }
 
+    /// `EntityPlayerSP.updateEntityActionState`: no movement input unless `isCurrentViewEntity()`.
+    fn movement_input(
+        &mut self,
+        playing: bool,
+        host: Option<ferrocraft_modhost::PlayerInput>,
+    ) -> world::Input {
+        if !(playing && self.game.camera.is_none()) {
+            self.input.set_host_sneak(host.map(|h| h.sneaking));
+            return world::Input::default();
+        }
+        if let Some(h) = host {
+            return self.input.movement_from_host(h.sprinting, h.sneaking);
+        }
+        self.game
+            .player
+            .as_ref()
+            .map_or_else(world::Input::default, |p| {
+                self.input.movement(
+                    p.on_ground,
+                    p.collided_horizontally,
+                    self.game.food > 6,
+                    self.use_ticks > 0,
+                )
+            })
+    }
+
     fn tick_once(&mut self) {
         self.chat_tick();
         self.tick_block_entities();
@@ -287,28 +313,7 @@ impl App {
         self.limb_tick();
         let host = self.host_player_tick();
         self.input.blind = self.game.effects.has(world::effects::id::BLINDNESS);
-        let input = if playing {
-            let native = |s: &mut Self| {
-                s.game
-                    .player
-                    .as_ref()
-                    .map_or_else(world::Input::default, |p| {
-                        s.input.movement(
-                            p.on_ground,
-                            p.collided_horizontally,
-                            s.game.food > 6,
-                            s.use_ticks > 0,
-                        )
-                    })
-            };
-            match host {
-                Some(h) => self.input.movement_from_host(h.sprinting, h.sneaking),
-                None => native(self),
-            }
-        } else {
-            self.input.set_host_sneak(host.map(|h| h.sneaking));
-            world::Input::default()
-        };
+        let input = self.movement_input(playing, host);
         let input = world::Input {
             using_item: self.use_ticks > 0,
             ..input
@@ -341,7 +346,8 @@ impl App {
         self.send_state();
         if self.game.vehicle.is_some() {
             self.send_riding(input);
-        } else {
+        } else if self.game.camera.is_none() {
+            // `EntityPlayerSP.onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
             self.send_pose();
         }
         self.sound_tick();
@@ -1493,6 +1499,8 @@ fn sprint_dust_state(
     (state >> 4 != 0 && !world::motion_sound::in_water(pos, f64::from(height), block))
         .then_some(state)
 }
+#[cfg(test)]
+mod camera_packets;
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, outline_draws, sprint_dust_state, App, ContainerScreen};

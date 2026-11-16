@@ -1,4 +1,5 @@
-//! `EntityRenderer.isDrawBlockOutline` of 1.8.9: when the block under the crosshair gets an outline.
+//! `GameRenderer.shouldRenderBlockOutline` of 1.8.9 (javap offsets 17-44 hideGui, 51-57 `abilities.canModifyWorld`, 132-173 spectator
+//! `Block.hasBlockEntity` + `Inventory`, 176-203 `ItemStack.hasMineBlockOverride` / `hasPlaceOnBlockOverride`).
 
 use crate::game::Game;
 use world::inventory::items;

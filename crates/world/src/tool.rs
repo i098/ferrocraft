@@ -47,32 +47,33 @@ enum Kind {
     Shears,
 }
 
-/// Tool kind and tier (wood 0, stone 1, iron 2, diamond 3, gold 0) of an item id.
+/// Item id, tool kind and tier (wood 0, stone 1, iron 2, diamond 3, gold 0).
+const TOOLS: [(i16, Kind, u8); 21] = [
+    (270, Kind::Pickaxe, 0),
+    (274, Kind::Pickaxe, 1),
+    (257, Kind::Pickaxe, 2),
+    (278, Kind::Pickaxe, 3),
+    (285, Kind::Pickaxe, 0),
+    (269, Kind::Shovel, 0),
+    (273, Kind::Shovel, 1),
+    (256, Kind::Shovel, 2),
+    (277, Kind::Shovel, 3),
+    (284, Kind::Shovel, 0),
+    (271, Kind::Axe, 0),
+    (275, Kind::Axe, 1),
+    (258, Kind::Axe, 2),
+    (279, Kind::Axe, 3),
+    (286, Kind::Axe, 0),
+    (268, Kind::Sword, 0),
+    (272, Kind::Sword, 1),
+    (267, Kind::Sword, 2),
+    (276, Kind::Sword, 3),
+    (283, Kind::Sword, 0),
+    (359, Kind::Shears, 0),
+];
+
 fn tool(item: i16) -> Option<(Kind, u8)> {
-    Some(match item {
-        270 => (Kind::Pickaxe, 0),
-        274 => (Kind::Pickaxe, 1),
-        257 => (Kind::Pickaxe, 2),
-        278 => (Kind::Pickaxe, 3),
-        285 => (Kind::Pickaxe, 0),
-        269 => (Kind::Shovel, 0),
-        273 => (Kind::Shovel, 1),
-        256 => (Kind::Shovel, 2),
-        277 => (Kind::Shovel, 3),
-        284 => (Kind::Shovel, 0),
-        271 => (Kind::Axe, 0),
-        275 => (Kind::Axe, 1),
-        258 => (Kind::Axe, 2),
-        279 => (Kind::Axe, 3),
-        286 => (Kind::Axe, 0),
-        268 => (Kind::Sword, 0),
-        272 => (Kind::Sword, 1),
-        267 => (Kind::Sword, 2),
-        276 => (Kind::Sword, 3),
-        283 => (Kind::Sword, 0),
-        359 => (Kind::Shears, 0),
-        _ => return None,
-    })
+    TOOLS.iter().find(|t| t.0 == item).map(|&(_, k, t)| (k, t))
 }
 
 /// `ToolMaterial.efficiencyOnProperMaterial` by tier; gold (tier 0) is the exception.
@@ -91,13 +92,37 @@ fn tool_speed(item: Option<i16>, id: u16) -> f32 {
     };
     let fast = tier_speed(item, tier);
     match kind {
-        Kind::Pickaxe if pickaxe_digs(id) => fast,
-        Kind::Shovel if matches!(id, 2 | 3 | 12 | 13 | 60 | 78 | 80 | 82 | 88 | 110) => fast,
-        Kind::Axe if axe_digs(id) => fast,
-        Kind::Sword if id == 30 => 15.0,
-        Kind::Sword if matches!(id, 18 | 86 | 91 | 103 | 106 | 127 | 161) => 1.5,
-        Kind::Shears if matches!(id, 18 | 30 | 161) => 15.0,
-        Kind::Shears if id == 35 => 5.0,
+        Kind::Pickaxe => on(pickaxe_digs(id), fast),
+        Kind::Shovel => on(
+            matches!(id, 2 | 3 | 12 | 13 | 60 | 78 | 80 | 82 | 88 | 110),
+            fast,
+        ),
+        Kind::Axe => on(axe_digs(id), fast),
+        Kind::Sword => sword_speed(id),
+        Kind::Shears => shears_speed(id),
+    }
+}
+
+fn on(digs: bool, fast: f32) -> f32 {
+    if digs {
+        fast
+    } else {
+        1.0
+    }
+}
+
+fn sword_speed(id: u16) -> f32 {
+    match id {
+        30 => 15.0,
+        18 | 86 | 91 | 103 | 106 | 127 | 161 => 1.5,
+        _ => 1.0,
+    }
+}
+
+fn shears_speed(id: u16) -> f32 {
+    match id {
+        18 | 30 | 161 => 15.0,
+        35 => 5.0,
         _ => 1.0,
     }
 }
@@ -124,16 +149,33 @@ fn can_harvest(item: Option<i16>, id: u16) -> bool {
         return false;
     };
     match kind {
-        Kind::Pickaxe => match id {
-            49 => tier == 3,
-            14 | 41 | 56 | 57 | 73 | 74 | 129 | 133 => tier >= 2,
-            15 | 21 | 22 | 42 => tier >= 1,
-            _ => pickaxe_digs(id),
-        },
+        Kind::Pickaxe => pickaxe_harvests(id, tier),
         Kind::Shovel => matches!(id, 78 | 80),
         Kind::Sword | Kind::Shears => id == 30,
         Kind::Axe => false,
     }
+}
+
+fn pickaxe_harvests(id: u16, tier: u8) -> bool {
+    match id {
+        49 => tier == 3,
+        14 | 41 | 56 | 57 | 73 | 74 | 129 | 133 => tier >= 2,
+        15 | 21 | 22 | 42 => tier >= 1,
+        _ => pickaxe_digs(id),
+    }
+}
+
+fn haste_factor(m: &Mining) -> f32 {
+    m.haste.map_or(1.0, |a| 1.0 + (f32::from(a) + 1.0) * 0.2)
+}
+
+fn fatigue_factor(m: &Mining) -> f32 {
+    m.fatigue.map_or(1.0, |a| match a {
+        0 => 0.3,
+        1 => 0.09,
+        2 => 0.0027,
+        _ => 8.1E-4,
+    })
 }
 
 /// `PlayerEntity.getMiningSpeed`.
@@ -142,17 +184,8 @@ fn player_speed(id: u16, on_ground: bool, m: &Mining) -> f32 {
     if speed > 1.0 && m.efficiency > 0 && m.item.is_some() {
         speed += (m.efficiency * m.efficiency + 1) as f32;
     }
-    if let Some(amp) = m.haste {
-        speed *= 1.0 + (f32::from(amp) + 1.0) * 0.2;
-    }
-    if let Some(amp) = m.fatigue {
-        speed *= match amp {
-            0 => 0.3,
-            1 => 0.09,
-            2 => 0.0027,
-            _ => 8.1E-4,
-        };
-    }
+    speed *= haste_factor(m);
+    speed *= fatigue_factor(m);
     if m.slowed_by_water {
         speed /= 5.0;
     }

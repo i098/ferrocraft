@@ -239,6 +239,45 @@ public class Harness {
         return (Double) shadowAlphaMethod.invoke(null, alpha, y, blockY, brightness);
     }
 
+    /** One line of {@code minewith}: the mining speed on the ground and in the air. */
+    static void minewithCommand(PlayerEntity player, String[] t) {
+        // minewith <block> <held item id, 0 = none> <efficiency> <haste amp, -1 = none>
+        //          <fatigue amp, -1 = none> <aqua affinity 0/1>
+        Block b = Block.byId(Integer.parseInt(t[1]));
+        BlockPos at = new BlockPos(0, 10, 0);
+        int item = Integer.parseInt(t[2]);
+        net.minecraft.flat.ItemStack held = null;
+        if (item != 0) {
+            held = new net.minecraft.flat.ItemStack(net.minecraft.flat.Item.byId(item));
+            int eff = Integer.parseInt(t[3]);
+            if (eff > 0) {
+                held.addEnchantment(net.minecraft.flat.Enchantment.EFFICIENCY, eff);
+            }
+        }
+        player.inventory.items[player.inventory.selectedSlot] = held;
+        net.minecraft.flat.ItemStack helmet = null;
+        if (t[6].equals("1")) {
+            helmet = new net.minecraft.flat.ItemStack(net.minecraft.flat.Items.LEATHER_HELMET);
+            helmet.addEnchantment(net.minecraft.flat.Enchantment.AQUA_AFFINITY, 1);
+        }
+        player.setEquipment(3, helmet);
+        player.clearStatusEffects();
+        int haste = Integer.parseInt(t[4]);
+        int fatigue = Integer.parseInt(t[5]);
+        if (haste >= 0) {
+            player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.HASTE.id, 600, haste));
+        }
+        if (fatigue >= 0) {
+            player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.MINING_FATIGUE.id, 600, fatigue));
+        }
+        player.onGround = true;
+        float grounded = b.getMiningSpeed(player, world, at);
+        player.onGround = false;
+        float airborne = b.getMiningSpeed(player, world, at);
+        System.out.println(Integer.toHexString(Float.floatToRawIntBits(grounded)) + " "
+            + Integer.toHexString(Float.floatToRawIntBits(airborne)));
+    }
+
     /** `shadow <alpha> <y> <blockY> <light>`: the shadow alpha with the brightness table entry of `light`. */
     static void shadowCommand(String[] t) throws Exception {
         java.lang.reflect.Method init = Dimension.class.getDeclaredMethod("initBrightnessTable");
@@ -765,44 +804,9 @@ public class Harness {
                         + (b.getMaterial().isToolNotRequired() ? 1 : 0));
                     break;
                 }
-                case "minewith": {
-                    // minewith <block> <held item id, 0 = none> <efficiency> <haste amp, -1 = none>
-                    //          <fatigue amp, -1 = none> <aqua affinity 0/1>
-                    Block b = Block.byId(Integer.parseInt(t[1]));
-                    BlockPos at = new BlockPos(0, 10, 0);
-                    int item = Integer.parseInt(t[2]);
-                    net.minecraft.flat.ItemStack held = null;
-                    if (item != 0) {
-                        held = new net.minecraft.flat.ItemStack(net.minecraft.flat.Item.byId(item));
-                        int eff = Integer.parseInt(t[3]);
-                        if (eff > 0) {
-                            held.addEnchantment(net.minecraft.flat.Enchantment.EFFICIENCY, eff);
-                        }
-                    }
-                    player.inventory.items[player.inventory.selectedSlot] = held;
-                    net.minecraft.flat.ItemStack helmet = null;
-                    if (t[6].equals("1")) {
-                        helmet = new net.minecraft.flat.ItemStack(net.minecraft.flat.Items.LEATHER_HELMET);
-                        helmet.addEnchantment(net.minecraft.flat.Enchantment.AQUA_AFFINITY, 1);
-                    }
-                    player.setEquipment(3, helmet);
-                    player.clearStatusEffects();
-                    int haste = Integer.parseInt(t[4]);
-                    int fatigue = Integer.parseInt(t[5]);
-                    if (haste >= 0) {
-                        player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.HASTE.id, 600, haste));
-                    }
-                    if (fatigue >= 0) {
-                        player.addStatusEffect(new net.minecraft.flat.StatusEffectInstance(net.minecraft.flat.StatusEffect.MINING_FATIGUE.id, 600, fatigue));
-                    }
-                    player.onGround = true;
-                    float grounded = b.getMiningSpeed(player, world, at);
-                    player.onGround = false;
-                    float airborne = b.getMiningSpeed(player, world, at);
-                    System.out.println(Integer.toHexString(Float.floatToRawIntBits(grounded)) + " "
-                        + Integer.toHexString(Float.floatToRawIntBits(airborne)));
+                case "minewith":
+                    minewithCommand(player, t);
                     break;
-                }
                 case "shadow":
                     shadowCommand(t);
                     break;

@@ -714,19 +714,29 @@ impl Digger {
             self.creative_break(hit, w);
             self.hit_delay = HIT_DELAY;
         } else if !self.is_hitting_position(f, hit.pos) {
-            if self.hitting {
-                out.push(start(Status::Abort, self.current));
-            }
-            out.push(start(Status::Start, hit.pos));
-            let id = w.state(hit.pos) >> 4;
-            if id != 0 && relative_hardness(id, f.on_ground, &f.mining) >= 1.0 {
-                self.destroy(hit.pos, w);
-            } else {
-                self.hitting = true;
-                self.current = hit.pos;
-                self.tool = f.tool.cloned();
-                self.progress = 0.0;
-            }
+            self.start_dig(f, hit, w, out);
+        }
+    }
+
+    /// The survival branch of `clickBlock`: abort the old dig, send START, and begin or finish.
+    fn start_dig(&mut self, f: &Frame, hit: Hit, w: &mut impl DigWorld, out: &mut Vec<Action>) {
+        let start = |status, pos| Action::Dig {
+            status,
+            pos,
+            face: hit.face,
+        };
+        if self.hitting {
+            out.push(start(Status::Abort, self.current));
+        }
+        out.push(start(Status::Start, hit.pos));
+        let id = w.state(hit.pos) >> 4;
+        if id != 0 && relative_hardness(id, f.on_ground, &f.mining) >= 1.0 {
+            self.destroy(hit.pos, w);
+        } else {
+            self.hitting = true;
+            self.current = hit.pos;
+            self.tool = f.tool.cloned();
+            self.progress = 0.0;
         }
     }
 
@@ -754,25 +764,37 @@ impl Digger {
             });
             self.creative_break(hit, w);
         } else if self.is_hitting_position(f, hit.pos) {
-            let id = w.state(hit.pos) >> 4;
-            if id == 0 {
-                self.hitting = false;
-                return false;
-            }
-            self.progress += relative_hardness(id, f.on_ground, &f.mining);
-            if self.progress >= 1.0 {
-                self.hitting = false;
-                out.push(Action::Dig {
-                    status: Status::Stop,
-                    pos: hit.pos,
-                    face: hit.face,
-                });
-                self.destroy(hit.pos, w);
-                self.progress = 0.0;
-                self.hit_delay = HIT_DELAY;
-            }
+            return self.advance_dig(f, hit, w, out);
         } else {
             self.click_block(f, hit, w, out);
+        }
+        true
+    }
+
+    /// The progress branch of `onPlayerDamageBlock`: false when the block is gone.
+    fn advance_dig(
+        &mut self,
+        f: &Frame,
+        hit: Hit,
+        w: &mut impl DigWorld,
+        out: &mut Vec<Action>,
+    ) -> bool {
+        let id = w.state(hit.pos) >> 4;
+        if id == 0 {
+            self.hitting = false;
+            return false;
+        }
+        self.progress += relative_hardness(id, f.on_ground, &f.mining);
+        if self.progress >= 1.0 {
+            self.hitting = false;
+            out.push(Action::Dig {
+                status: Status::Stop,
+                pos: hit.pos,
+                face: hit.face,
+            });
+            self.destroy(hit.pos, w);
+            self.progress = 0.0;
+            self.hit_delay = HIT_DELAY;
         }
         true
     }

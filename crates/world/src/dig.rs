@@ -555,7 +555,7 @@ pub trait DigWorld {
 
 /// Inputs of one client tick.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Frame {
+pub struct Frame<'a> {
     /// Attack key is down with the game focused.
     pub held: bool,
     /// Attack key presses since the last tick.
@@ -569,6 +569,8 @@ pub struct Frame {
     /// Held tool, effects and water: what `PlayerEntity.getMiningSpeed` reads.
     pub mining: Mining,
     pub target: Option<Hit>,
+    /// The held stack: `getDisplayItemInHand`, compared by `same_tool`.
+    pub tool: Option<&'a crate::inventory::ItemStack>,
     /// The entity under the crosshair; a click attacks it and `target` is then `None`.
     pub entity: Option<i32>,
 }
@@ -578,6 +580,8 @@ pub struct Frame {
 pub struct Digger {
     hitting: bool,
     current: [i32; 3],
+    /// `currentItemHittingBlock`: the stack held when the dig began.
+    tool: Option<crate::inventory::ItemStack>,
     progress: f32,
     hit_delay: i32,
     click_delay: i32,
@@ -604,7 +608,50 @@ const MISS_DELAY: i32 = 10;
 /// released, which resets it.
 const FOCUS_DELAY: i32 = 10000;
 
+/// `Item.isDamageable`: a positive max damage and no `Unbreakable` tag.
+fn damageable(s: &crate::inventory::ItemStack) -> bool {
+    use crate::inventory::Tag;
+    const MAX_DAMAGE: [(i16, i16); 9] = [
+        (256, 259),
+        (261, 261),
+        (267, 279),
+        (283, 286),
+        (290, 294),
+        (298, 317),
+        (346, 346),
+        (359, 359),
+        (398, 398),
+    ];
+    let unbreakable = |n: &crate::inventory::Nbt| {
+        n.root
+            .iter()
+            .any(|(k, t)| k == "Unbreakable" && matches!(t, Tag::Byte(b) if *b != 0))
+    };
+    MAX_DAMAGE.iter().any(|&(lo, hi)| (lo..=hi).contains(&s.id))
+        && !s.nbt.as_ref().is_some_and(unbreakable)
+}
+
+/// `PlayerControllerMP.isHittingPosition` tool test: same item, same NBT, and the same metadata
+/// unless the item is damageable.
+fn same_tool(
+    saved: &Option<crate::inventory::ItemStack>,
+    held: Option<&crate::inventory::ItemStack>,
+) -> bool {
+    match (saved, held) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.id == b.id && a.nbt == b.nbt && (damageable(a) || a.damage == b.damage)
+        }
+        _ => false,
+    }
+}
+
 impl Digger {
+    /// `isHittingPosition`: the block being dug is `pos` and the tool is unchanged.
+    fn is_hitting_position(&self, f: &Frame, pos: [i32; 3]) -> bool {
+        self.hitting && self.current == pos && same_tool(&self.tool, f.tool)
+    }
+
     /// One client tick, in vanilla order: focus, counter, clicks, then the held key.
     pub fn tick(&mut self, f: &Frame, w: &mut impl DigWorld, out: &mut Vec<Action>) {
         if f.grabbed {
@@ -666,7 +713,7 @@ impl Digger {
             out.push(start(Status::Start, hit.pos));
             self.creative_break(hit, w);
             self.hit_delay = HIT_DELAY;
-        } else if !self.hitting || self.current != hit.pos {
+        } else if !self.is_hitting_position(f, hit.pos) {
             if self.hitting {
                 out.push(start(Status::Abort, self.current));
             }
@@ -677,6 +724,7 @@ impl Digger {
             } else {
                 self.hitting = true;
                 self.current = hit.pos;
+                self.tool = f.tool.cloned();
                 self.progress = 0.0;
             }
         }
@@ -705,7 +753,7 @@ impl Digger {
                 face: hit.face,
             });
             self.creative_break(hit, w);
-        } else if self.hitting && self.current == hit.pos {
+        } else if self.is_hitting_position(f, hit.pos) {
             let id = w.state(hit.pos) >> 4;
             if id == 0 {
                 self.hitting = false;
@@ -909,7 +957,7 @@ mod tests {
         face: 1,
     };
 
-    fn held(creative: bool) -> Frame {
+    fn held(creative: bool) -> Frame<'static> {
         Frame {
             held: true,
             creative,
@@ -943,6 +991,74 @@ mod tests {
             }
         }
         None
+    }
+
+    fn stack(id: i16, damage: i16) -> crate::inventory::ItemStack {
+        crate::inventory::ItemStack {
+            id,
+            count: 1,
+            damage,
+            nbt: None,
+        }
+    }
+
+    /// `isHittingPosition`: a changed tool aborts and restarts the dig; a damaged copy of the same
+    /// damageable item does not, but another metadata of a non-damageable item does.
+    #[test]
+    fn changing_tool_restarts_the_dig() {
+        let mut w = Blocks(HashMap::from([(AT.pos, STONE)]));
+        let mut d = Digger::default();
+        let mut out = vec![];
+        let (pick, worn, dirt, dirt2) = (stack(278, 0), stack(278, 5), stack(3, 0), stack(3, 1));
+        let with = |tool, press| Frame {
+            presses: press,
+            tool,
+            ..held(false)
+        };
+        d.tick(&with(None, 1), &mut w, &mut out);
+        d.tick(&with(None, 0), &mut w, &mut out);
+        assert!(d.progress > 0.0);
+        out.clear();
+        d.tick(&with(Some(&pick), 0), &mut w, &mut out);
+        let dig = |status, pos| Action::Dig {
+            status,
+            pos,
+            face: 1,
+        };
+        assert_eq!(
+            out[..2],
+            [dig(Status::Abort, AT.pos), dig(Status::Start, AT.pos)]
+        );
+        let restarted = d.progress;
+        assert_eq!(restarted, 0.0, "progress restarts");
+
+        out.clear();
+        d.tick(&with(Some(&worn), 0), &mut w, &mut out);
+        assert_eq!(out, [Action::Swing], "same damageable item keeps digging");
+        assert!(d.progress > restarted);
+    }
+
+    #[test]
+    fn changing_metadata_of_a_plain_item_restarts_the_dig() {
+        let mut w = Blocks(HashMap::from([(AT.pos, STONE)]));
+        let mut d = Digger::default();
+        let mut out = vec![];
+        let (dirt, dirt2) = (stack(3, 0), stack(3, 1));
+        let with = |tool, press| Frame {
+            presses: press,
+            tool,
+            ..held(false)
+        };
+        d.tick(&with(Some(&dirt), 1), &mut w, &mut out);
+        out.clear();
+        d.tick(&with(Some(&dirt2), 0), &mut w, &mut out);
+        assert!(matches!(
+            out.first(),
+            Some(Action::Dig {
+                status: Status::Abort,
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -979,6 +979,7 @@ impl Game {
                 eyes_in_water,
             ),
             target: block.filter(|_| entity.is_none()),
+            tool: self.inv.held_stack().as_ref(),
             entity,
         };
         let mut local = Local {

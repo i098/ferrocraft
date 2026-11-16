@@ -9,6 +9,17 @@ use std::io;
 use world::entities::{EntityEvent, FireworkExplosion, ItemRef, SizeMeta};
 use world::vehicle::VehicleMeta;
 
+/// `SkullOwner.Id` of a skull item, the dashed UUID of its profile.
+fn skull_owner(nbt: &Nbt) -> Option<u128> {
+    let Some((_, Tag::Compound(owner))) = nbt.root.iter().find(|(k, _)| k == "SkullOwner") else {
+        return None;
+    };
+    let Some((_, Tag::String(id))) = owner.iter().find(|(k, _)| k == "Id") else {
+        return None;
+    };
+    u128::from_str_radix(&id.replace('-', ""), 16).ok()
+}
+
 fn item(slot: &Slot) -> Option<ItemRef> {
     slot.as_ref().map(|s| ItemRef {
         id: s.id,
@@ -16,6 +27,7 @@ fn item(slot: &Slot) -> Option<ItemRef> {
         count: s.count.max(0) as u8,
         dye: s.nbt.as_ref().and_then(|n| n.dye()),
         glint: world::inventory::glint(s),
+        owner: s.nbt.as_ref().and_then(skull_owner),
     })
 }
 

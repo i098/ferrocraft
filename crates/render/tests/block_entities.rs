@@ -186,6 +186,7 @@ fn skulls_and_banners() {
         head_yaw: 20.0,
         pitch: 10.0,
         sneaking: false,
+        child: false,
         scale: 0.9375,
         kind: 3,
         owner: Some(7),

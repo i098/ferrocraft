@@ -169,10 +169,12 @@ impl Renderer {
         self.head_meshes = self.upload_batches(batches);
     }
 
-    /// The chests that minecarts carry, for the next frames (`MinecartRenderer`).
+    /// The block entities that entities carry, for the next frames: the chests of minecarts
+    /// (`MinecartRenderer`) and the skulls on heads (`LayerCustomHead`).
     pub(super) fn set_cart_chests(&mut self, draws: &[EntityDraw]) {
         let batches = crate::blockent::build_cart_chests(draws, |p| self.light_at(p));
         self.cart_meshes = self.upload_batches(batches);
+        self.set_worn_heads(&crate::entity::helmet::worn_heads(draws));
     }
 
     fn upload_batches(&mut self, batches: Vec<(Tex, MeshData)>) -> Vec<(Tex, GpuMesh)> {

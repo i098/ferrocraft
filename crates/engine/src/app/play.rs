@@ -1124,8 +1124,9 @@ impl App {
         Some(place::use_item(&at, s.id, s.damage, click, yaw, &bodies))
     }
 
-    /// The client half of `ItemBlock.onItemUse`: set the blocks, play the place sound, use up
-    /// the item. The server's `BlockChange` corrects any difference.
+    /// The client half of `ItemBlock.onItemUse`: set the blocks, use up the item. The server
+    /// plays the place sound (S29); the vanilla client plays none. Its `BlockChange` corrects
+    /// any difference.
     fn placed(&mut self, blocks: &[([i32; 3], u16)]) {
         for effect in self.game.place_blocks(blocks) {
             if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {
@@ -1133,9 +1134,6 @@ impl App {
                     r.upload_chunk(&View(c));
                 }
             }
-        }
-        if let (Some(s), Some(&(pos, state))) = (&mut self.sound, blocks.first()) {
-            s.dig(state >> 4, pos.map(|v| f64::from(v) + 0.5));
         }
     }
 

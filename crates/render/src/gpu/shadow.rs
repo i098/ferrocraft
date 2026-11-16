@@ -66,12 +66,12 @@ impl Renderer {
     /// `Entity.getBrightness`: the light table value `0..=1` of the block at the eye `eye`, with the sky light reduced by
     /// the time of day. 0 light in unloaded chunks, like vanilla.
     pub fn eye_brightness(&self, eye: [f64; 3]) -> f32 {
-        let [sky, block] = self.light_levels(
+        let light = self.light_levels(
             eye[0].floor() as i32,
             eye[1].floor() as i32,
             eye[2].floor() as i32,
         );
-        entity::shadow::light_brightness((sky - self.skylight_subtracted()).max(block))
+        entity::shadow::eye_light_brightness(light, self.skylight_subtracted())
     }
 
     /// The shadow blobs of this frame's entities (`Render.renderShadow`); `None` when off or none are cast.

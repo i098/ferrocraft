@@ -825,10 +825,7 @@ impl App {
         let ray = self.view_ray(frac).filter(|_| player_view);
         let pointed = ray
             .and_then(|(eye, yaw, pitch, id, vehicle)| self.game.aim(eye, yaw, pitch, id, vehicle))
-            .and_then(|a| match a {
-                Aim::Entity(id, _) => Some(id),
-                _ => None,
-            });
+            .and_then(Aim::entity);
         let skins = &mut self.skins;
         let size = self.renderer.as_ref().map_or((0, 0), |r| r.size());
         let mut renderer = self.renderer.as_mut();

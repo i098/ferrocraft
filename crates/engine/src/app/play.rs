@@ -847,14 +847,8 @@ impl App {
         let aim = ray.and_then(|(eye, yaw, pitch, skip, vehicle)| {
             self.game.aim(eye, yaw, pitch, skip, vehicle)
         });
-        let entity = match aim {
-            Some(Aim::Entity(id, _)) => Some(id),
-            _ => None,
-        };
-        let block = match aim {
-            Some(Aim::Block(h, _)) => Some(h),
-            _ => None,
-        };
+        let entity = aim.and_then(Aim::entity);
+        let block = aim.and_then(Aim::block);
         let eyes_in_water = self.game.player.as_ref().is_some_and(|p| {
             let get = |x, y, z| self.game.store.get_block(x, y, z);
             screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))

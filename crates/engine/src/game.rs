@@ -133,6 +133,22 @@ pub enum Aim {
     Miss,
 }
 
+impl Aim {
+    pub fn entity(self) -> Option<i32> {
+        match self {
+            Aim::Entity(id, _) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn block(self) -> Option<Hit> {
+        match self {
+            Aim::Block(h, _) => Some(h),
+            _ => None,
+        }
+    }
+}
+
 pub struct Game {
     pub store: ChunkStore,
     pub entities: Entities,

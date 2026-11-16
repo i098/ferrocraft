@@ -109,7 +109,11 @@ fn void_darkness(view_y: f32, blindness: Option<i32>, flat: bool) -> f32 {
 /// `updateFogColor`: Night Vision scales the color until its brightest channel is 1, by `strength`.
 fn night_vision_fog(fog: [f32; 3], strength: f32) -> [f32; 3] {
     // Java's 1/0 is +Inf, so zero channels drop out of the min; an all-zero fog stays black.
-    let boost = fog.iter().filter(|c| **c > 0.0).map(|c| 1.0 / c).fold(f32::INFINITY, f32::min);
+    let boost = fog
+        .iter()
+        .filter(|c| **c > 0.0)
+        .map(|c| 1.0 / c)
+        .fold(f32::INFINITY, f32::min);
     if strength <= 0.0 || boost.is_infinite() {
         return fog;
     }
@@ -974,7 +978,10 @@ mod tests {
         assert_eq!(fog_with(|e| e.flat_world = true), top);
         assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 16.0)), top);
         assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 1.0)), top);
-        assert_eq!(fog_with(|e| (e.flat_world, e.view_y) = (true, 0.0)), [0.0; 3]);
+        assert_eq!(
+            fog_with(|e| (e.flat_world, e.view_y) = (true, 0.0)),
+            [0.0; 3]
+        );
         assert_ne!(fog_with(|e| e.view_y = 16.0), top);
     }
 

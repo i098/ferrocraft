@@ -23,7 +23,7 @@ Fireworks: the engine calls `Particles::firework(pos, vel, explosions)` for a bl
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
 Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow`; sky and fog colors follow the biome.
-Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
+Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it. Fog also follows camera light (`fog_light`), void depth below y 32 (`view_y`, no scaling on `flat_world`), night vision, and water fog by Respiration and Water Breathing.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
 Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
 `set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.

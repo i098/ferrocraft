@@ -43,7 +43,12 @@ jobs:
           path: target/oracle
           key: oracle-1.8.9-${{ hashFiles('crates/oracle/src/lib.rs', 'java/oracle/**') }}
       - run: cargo fmt --all --check
+      - name: Match file times to git for the persistent target dir
+        run: ci/warm-target.sh start
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --no-run
+      - name: Record the built tree
+        run: ci/warm-target.sh done
       - run: cargo test --workspace
 
   quality-gate:

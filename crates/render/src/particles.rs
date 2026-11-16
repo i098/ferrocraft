@@ -1229,6 +1229,22 @@ impl Particles {
         }
     }
 
+    /// `PlayerEntity.onConsumeItem` of food: `count` `ITEM_CRACK` crumbs at the mouth of the player at
+    /// `feet`. `item` is `id | damage << 16`; the damage counts only for items with subtypes.
+    pub fn eat_crumbs(
+        &mut self,
+        count: u32,
+        feet: [f64; 3],
+        eye: f32,
+        look: (f32, f32),
+        item: i32,
+    ) {
+        let mut rng = crate::JavaRandom::new((self.rand() * 9.0e15) as i64);
+        for c in crate::crumbs::crumbs(count, feet, eye, look, &mut rng, || self.rand()) {
+            self.spawn(Kind::ItemCrack, c.at, c.motion, item);
+        }
+    }
+
     /// Arrows, thrown entities and fireballs in water: 4 bubbles a quarter step behind `pos`, moving with `vel`.
     pub fn bubble_trail(&mut self, pos: [f64; 3], vel: [f64; 3]) {
         for _ in 0..4 {

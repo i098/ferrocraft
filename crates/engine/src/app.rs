@@ -8,6 +8,7 @@ macro_rules! metrics {
     };
 }
 
+mod crumbs;
 mod crystal;
 mod events;
 mod input;

@@ -51,6 +51,11 @@ impl Ui {
         self.screens.is_open()
     }
 
+    /// `currentScreen instanceof GuiGameOver`.
+    pub fn is_game_over(&self) -> bool {
+        self.screens.is_game_over()
+    }
+
     /// `currentScreen.doesGuiPauseGame()`.
     pub fn pauses(&self) -> bool {
         self.screens.pauses()

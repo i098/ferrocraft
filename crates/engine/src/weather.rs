@@ -33,6 +33,11 @@ impl Weather {
         }
     }
 
+    /// A new `WorldClient` starts dry: rain 0, thunder 0, not raining (`World` field defaults).
+    pub fn reset(&mut self) {
+        *self = Weather::default();
+    }
+
     /// `World.setRainStrength`: the previous value follows at once, so there is no fade.
     fn set_rain(&mut self, v: f32) {
         self.prev_rain = v;

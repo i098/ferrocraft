@@ -236,6 +236,16 @@ impl Sound {
         }
     }
 
+    /// `SoundManager.stopAllSounds`, called by `Minecraft.loadWorld`: world sounds and music end.
+    pub fn stop_all(&mut self) {
+        for p in self.players.drain(..) {
+            p.stop();
+        }
+        if let Some(p) = self.music.take() {
+            p.stop();
+        }
+    }
+
     /// Call once per game tick (20 Hz).
     pub fn tick(&mut self, in_world: bool) {
         if self.music.as_ref().is_some_and(Player::empty) {

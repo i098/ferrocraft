@@ -587,6 +587,7 @@ impl Game {
         self.vehicle = None;
         if dimension_changed {
             self.border = WorldBorder::default();
+            self.weather.reset();
         }
         self.camera = None;
         (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);

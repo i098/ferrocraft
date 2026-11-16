@@ -343,6 +343,10 @@ pub trait Screen {
     fn scroll(&mut self, _dir: i32, _ctx: &mut Ctx) {}
     /// `onGuiClosed`.
     fn closed(&mut self, _ctx: &mut Ctx) {}
+    /// `currentScreen instanceof GuiGameOver`.
+    fn is_game_over(&self) -> bool {
+        false
+    }
     /// `doesGuiPauseGame`.
     fn pauses(&self) -> bool {
         true
@@ -377,6 +381,10 @@ pub struct Screens {
 impl Screens {
     pub fn is_open(&self) -> bool {
         self.current.is_some()
+    }
+
+    pub fn is_game_over(&self) -> bool {
+        self.current.as_ref().is_some_and(|s| s.is_game_over())
     }
 
     /// The game pauses only in singleplayer; the engine uses this for cursor release and tick logic.

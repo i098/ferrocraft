@@ -551,7 +551,19 @@ impl ContainerScreen {
         }
     }
 
-    /// `GuiContainer.keyTyped`; `typed` is the character the key types, if any.
+    /// A key repeat reaches only the creative search field.
+    fn repeat_key(&mut self, key: Key, typed: Option<char>) {
+        let Some(cr) = self.creative.as_mut().filter(|cr| cr.searching()) else {
+            return;
+        };
+        if matches!(cr.key(key, typed), creative::KeyUse::Hotbar) {
+            cr.type_text(None, typed);
+        }
+    }
+
+    /// `GuiContainer.keyTyped`; `typed` is the character the key types, if any. `repeat` marks an
+    /// OS key repeat: vanilla enables repeat events only for the anvil name field and the creative
+    /// search field, so every other key acts once per physical press.
     pub fn key(
         &mut self,
         inv: &mut Inventory,
@@ -559,10 +571,15 @@ impl ContainerScreen {
         typed: Option<char>,
         mods: Mods,
         m: &dyn Metrics,
+        repeat: bool,
     ) -> Vec<Request> {
         let mut out = Vec::new();
         if let Some(reqs) = self.extras.key(inv, key, typed, mods, m) {
             return reqs;
+        }
+        if repeat {
+            self.repeat_key(key, typed);
+            return out;
         }
         if let Some(cr) = &mut self.creative {
             match cr.key(key, typed) {
@@ -890,5 +907,42 @@ impl ContainerScreen {
             Kind::Anvil | Kind::Beacon => {}
         }
         self.extras.draw_fore(c, inv, icons);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Mono;
+    impl Metrics for Mono {
+        fn width(&self, s: &str) -> i32 {
+            s.chars().count() as i32 * 6
+        }
+    }
+
+    fn chest() -> (Inventory, ContainerScreen) {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(1, "minecraft:chest", "Chest".into(), 27));
+        *inv.slot_mut(0) = Some(ItemStack {
+            id: 1,
+            count: 5,
+            damage: 0,
+            nbt: None,
+        });
+        let mut screen = ContainerScreen::new(&inv, 427, 240);
+        screen.hovered = Some(0);
+        (inv, screen)
+    }
+
+    #[test]
+    fn a_repeat_of_a_hotbar_key_or_q_sends_no_click() {
+        for key in [Key::Hotbar(2), Key::Drop] {
+            let (mut inv, mut screen) = chest();
+            let mods = Mods::default();
+            let first = screen.key(&mut inv, key, None, mods, &Mono, false);
+            assert_eq!(first.len(), 1, "{key:?} acts on the physical press");
+            let again = screen.key(&mut inv, key, None, mods, &Mono, true);
+            assert!(again.is_empty(), "{key:?} repeat sends nothing");
+        }
     }
 }

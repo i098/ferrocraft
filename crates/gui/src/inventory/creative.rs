@@ -360,6 +360,11 @@ impl Creative {
         true
     }
 
+    /// The search tab, whose field takes key repeats.
+    pub fn searching(&self) -> bool {
+        self.tab == SEARCH
+    }
+
     /// `GuiContainerCreative.keyTyped`.
     pub fn key(&mut self, key: Key, typed: Option<char>) -> KeyUse {
         if self.tab != SEARCH {

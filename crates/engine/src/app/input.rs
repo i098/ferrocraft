@@ -241,6 +241,7 @@ impl App {
                 typed,
                 mods,
                 &m,
+                repeat,
             );
             self.send_requests(reqs);
             return;

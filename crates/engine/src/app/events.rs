@@ -1120,7 +1120,6 @@ mod tests {
         app.sprint_sent = true;
         app.note_session_state(&NetEvent::Respawn {
             dimension_changed: false,
-            flat: false,
         });
         assert!(!app.sneak_sent && !app.sprint_sent);
     }

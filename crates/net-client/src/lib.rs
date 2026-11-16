@@ -50,8 +50,6 @@ pub enum NetEvent {
         max_players: u8,
         /// `reducedDebugInfo` game rule: F3 hides coordinates.
         reduced_debug_info: bool,
-        /// Level type `flat` (superflat).
-        flat: bool,
     },
     /// S3F custom payload: the channel and its raw bytes; the engine acts on `MC|BOpen` only.
     PluginMessage {
@@ -79,6 +77,9 @@ pub enum NetEvent {
     /// Respawn or dimension change: every loaded chunk is gone.
     Respawn {
         dimension_changed: bool,
+    },
+    /// Level type of `JoinGame`/`Respawn`; `flat` is superflat (case-insensitive like `WorldType.parseWorldType`).
+    LevelType {
         flat: bool,
     },
     /// Time Update: `time_of_day` is negative while the daylight cycle is frozen.

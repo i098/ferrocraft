@@ -267,9 +267,7 @@ impl Hud {
 
     /// `renderVignette`: darkens the screen edges more the darker the player's spot is.
     fn draw_vignette(&mut self, gui: &mut Gui, brightness: f32, border_warning: f32) {
-        let level = brightness.clamp(0.0, 1.0);
-        self.vignette_lag += (level - self.vignette_lag) * 0.01;
-        let v = ((1.0 - self.vignette_lag).clamp(0.0, 1.0) * 255.0) as u32;
+        let v = vignette_shade(&mut self.vignette_lag, brightness);
         // Inside the border's warning band the vignette is cyan: `color(0, f, f, 1)`.
         let tint = if border_warning > 0.0 {
             let c = (border_warning.min(1.0) * 255.0) as u32;
@@ -313,4 +311,29 @@ pub fn hotbar_item_pos(gui: &Gui, i: i32) -> (i32, i32) {
         gui.scale.width / 2 - 90 + i * 20 + 2,
         gui.scale.height - 16 - 3,
     )
+}
+
+/// One frame of `renderVignette`'s smoothing: `lag` follows `brightness` by 1% and the shade `0..=255` is `1 - lag`.
+fn vignette_shade(lag: &mut f32, brightness: f32) -> u32 {
+    *lag += (brightness.clamp(0.0, 1.0) - *lag) * 0.01;
+    ((1.0 - *lag).clamp(0.0, 1.0) * 255.0) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vignette_shade;
+
+    fn settle(brightness: f32) -> u32 {
+        let mut lag = 0.0;
+        (0..2000)
+            .map(|_| vignette_shade(&mut lag, brightness))
+            .last()
+            .unwrap()
+    }
+
+    #[test]
+    fn dark_spot_gives_full_vignette_and_bright_spot_none() {
+        assert!(settle(0.0) >= 254);
+        assert!(settle(1.0) <= 1);
+    }
 }

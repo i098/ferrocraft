@@ -78,7 +78,7 @@ fn brightness(level: i32) -> f64 {
 }
 
 /// The same table as `f32`, the color factor of `Entity.getBrightness`.
-pub(super) fn light_brightness(level: i32) -> f32 {
+pub(crate) fn light_brightness(level: i32) -> f32 {
     let f = 1.0 - level.clamp(0, 15) as f32 / 15.0;
     (1.0 - f) / (f * 3.0 + 1.0)
 }

@@ -398,6 +398,7 @@ impl App {
                 s.stop_all();
             }
             self.particles.clear();
+            self.game.player = None;
             self.awaiting_terrain = true;
             q = self.ui.joined(&m);
         } else if self.ui.is_game_over() {
@@ -1176,6 +1177,7 @@ mod tests {
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
         });
         app.ui.in_world = true;
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
         app.container = Some(ContainerScreen::new(&app.game.inv, 320, 240));
         app.game.weather.apply(7, 1.0);
         app.game.weather.apply(8, 1.0);
@@ -1223,5 +1225,12 @@ mod tests {
         app.game.player = Some(world::Player::new([0.0; 3], 0.0));
         app.finish_terrain_wait();
         assert!(!app.ui.is_open() && !app.awaiting_terrain);
+    }
+
+    #[test]
+    fn dimension_respawn_keeps_terrain_screen_until_new_position() {
+        let mut app = respawned(true);
+        app.finish_terrain_wait();
+        assert!(app.ui.is_open() && app.awaiting_terrain);
     }
 }

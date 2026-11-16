@@ -2,6 +2,7 @@
 
 mod app;
 mod args;
+mod arm_look;
 mod game;
 mod game_state;
 mod link;

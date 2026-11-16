@@ -355,4 +355,30 @@ mod tests {
         app.screen_key(KeyCode::F2, None, false);
         assert_eq!(app.input.take_actions(), vec![Action::Screenshot]);
     }
+
+    #[test]
+    fn side_buttons_leave_left_drag_alone_in_a_container() {
+        let mut app = App::new(Args {
+            username: "Player".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
+        app.mouse_button(true, 0);
+        assert!(app.mouse_down);
+        let held = Some(world::inventory::ItemStack { id: 1, count: 5, damage: 0, nbt: None });
+        app.game.inv.cursor = held.clone();
+        let slots = app.game.inv.player.clone();
+        for button in [3, 4] {
+            app.mouse_button(true, button);
+            assert!(app.mouse_down);
+            app.mouse_button(false, button);
+            assert!(app.mouse_down);
+        }
+        // The cursor sits outside the window: a container click would have dropped the stack.
+        assert_eq!(app.game.inv.cursor, held);
+        assert_eq!(app.game.inv.player, slots);
+    }
 }

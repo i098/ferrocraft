@@ -171,7 +171,10 @@ impl Oracle {
 
     /// Run the harness on `script` (see `java/oracle/Harness.java`) and return its output lines.
     pub fn run(&self, script: &str) -> Result<Vec<String>> {
+        // Each run boots Minecraft once and exits: C1 only and the serial GC cut CPU time and
+        // keep parallel test threads from fighting for cores.
         let mut child = Command::new(&self.java)
+            .args(["-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC"])
             .arg("-cp")
             .arg(&self.classpath)
             .arg("Harness")

@@ -47,7 +47,7 @@ jobs:
       - run: cargo test --workspace
 
   quality-gate:
-    timeout-minutes: 2
+    timeout-minutes: 2 # last 150 runs: p50 9 s, p95 14 s total; 2 min is far above 2x p95
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -12,6 +12,7 @@ mod crystal;
 mod events;
 mod input;
 mod leash;
+mod limbs;
 mod mod_boot;
 mod mod_events;
 mod mod_lists;
@@ -22,6 +23,8 @@ mod play;
 mod screen;
 mod skull;
 mod vehicle;
+
+use limbs::Limbs;
 
 use crate::args::Args;
 use crate::game::{eye_height, Game};
@@ -63,24 +66,6 @@ type Overlay = (
     Vec<(String, Vec<u8>)>,
     Vec<gui::screens::Effect>,
 );
-
-/// `EntityPlayer.limbSwing` for the local player, so the third-person model walks.
-#[derive(Default)]
-struct Limbs {
-    swing: f32,
-    amount: f32,
-    prev_amount: f32,
-    /// `renderYawOffset` and its previous value.
-    body_yaw: f32,
-    prev_body_yaw: f32,
-}
-
-impl Limbs {
-    /// `renderYawOffset` between the previous and current tick, the short way round.
-    fn body_yaw(&self, partial: f32) -> f32 {
-        self.prev_body_yaw + world::body::wrap_degrees(self.body_yaw - self.prev_body_yaw) * partial
-    }
-}
 
 /// Item shown in the hand: id, damage, glint and leather `display.color`.
 type HandItem = (i16, i16, bool, Option<i32>);

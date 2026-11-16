@@ -2,6 +2,11 @@
 //! and its head, ported from `LivingEntity.tick` / `bodyMovement` (players) and `BodyControl.tick`
 //! (mobs).
 
+/// Yaw between the previous and current tick, the short way round.
+pub fn lerp_yaw(prev: f32, cur: f32, partial: f32) -> f32 {
+    prev + wrap_degrees(cur - prev) * partial
+}
+
 /// `MathHelper.wrapDegrees`.
 pub fn wrap_degrees(v: f32) -> f32 {
     let mut v = v % 360.0;

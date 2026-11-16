@@ -1374,28 +1374,14 @@ impl Entities {
                 }
                 self.with(id, |e| e.animate(animation))
             }
-            E::Effect { id, effect } => self.with(id, |e| e.effects.add(effect)),
-            E::RemoveEffect { id, effect_id } => self.with(id, |e| e.effects.remove(effect_id)),
+            E::Effect { .. } | E::RemoveEffect { .. } => self.apply_effect(ev),
             E::Firework { id, explosions } => self.with(id, |e| e.explosions = explosions),
             E::Status { id, status } => self.handle_status(id, status),
             E::Attach { id, vehicle } => {
                 self.with(id, |e| e.vehicle = (vehicle >= 0).then_some(vehicle));
             }
             E::Leash { id, holder } => self.with(id, |e| e.set_leash(holder)),
-            E::PlayerName {
-                uuid,
-                name,
-                textures,
-            } => {
-                for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
-                    e.name = Some(name.clone());
-                    e.textures = textures.clone();
-                }
-                self.names.insert(uuid, (name, textures));
-            }
-            E::PlayerRemove { uuid } => {
-                self.names.remove(&uuid);
-            }
+            E::PlayerName { .. } | E::PlayerRemove { .. } => self.apply_player(ev),
             _ => {}
         }
     }
@@ -1409,6 +1395,36 @@ impl Entities {
             self.fx.push(fx);
         }
         self.with(id, |e| e.set_status(status));
+    }
+
+    fn apply_player(&mut self, ev: EntityEvent) {
+        match ev {
+            EntityEvent::PlayerName {
+                uuid,
+                name,
+                textures,
+            } => {
+                for e in self.map.values_mut().filter(|e| e.uuid == Some(uuid)) {
+                    e.name = Some(name.clone());
+                    e.textures = textures.clone();
+                }
+                self.names.insert(uuid, (name, textures));
+            }
+            EntityEvent::PlayerRemove { uuid } => {
+                self.names.remove(&uuid);
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_effect(&mut self, ev: EntityEvent) {
+        match ev {
+            EntityEvent::Effect { id, effect } => self.with(id, |e| e.effects.add(effect)),
+            EntityEvent::RemoveEffect { id, effect_id } => {
+                self.with(id, |e| e.effects.remove(effect_id))
+            }
+            _ => {}
+        }
     }
 
     fn firework_explode(&mut self, id: i32) {

@@ -771,6 +771,10 @@ impl App {
             line: None,
             look: Look {
                 riding: self.game.vehicle.is_some(),
+                stand: StandLook {
+                    head_damage: self.game.inv.player[5].as_ref().map_or(0, |s| s.damage),
+                    ..StandLook::default()
+                },
                 ..Look::default()
             },
         })
@@ -1538,14 +1542,19 @@ fn remote_using(e: &Entity) -> Option<UseAction> {
     (e.flags & flag::USING_ITEM != 0).then(|| use_action(e.equipment[0].map_or(0, |i| i.id)))
 }
 
-/// Flags, pose and helmet of an armor stand; any other entity keeps the defaults.
+/// Flags and pose of an armor stand. The worn item's damage (the skull type, or the block variant)
+/// is read for every entity, because `LayerCustomHead` serves players and mobs too.
 fn stand_look(e: &Entity) -> StandLook {
+    let head_damage = e.equipment[4].map_or(0, |i| i.damage);
     if e.kind != Kind::Object(78) {
-        return StandLook::default();
+        return StandLook {
+            head_damage,
+            ..StandLook::default()
+        };
     }
     StandLook {
         flags: e.meta.stand.unwrap_or(0),
-        head_damage: e.equipment[4].map_or(0, |i| i.damage),
+        head_damage,
         ..StandLook::default()
     }
     .with_pose(e.meta.pose)
@@ -1639,6 +1648,7 @@ fn entity_draw(
             },
             cape: Some(CapeSway::default()),
             stand: stand_look(e),
+            head_owner: e.equipment[4].and_then(|i| i.owner),
             id: e.id,
             arrows: e.meta.arrows.unwrap_or(0),
             collar: match e.kind {

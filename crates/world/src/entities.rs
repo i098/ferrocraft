@@ -201,6 +201,8 @@ pub struct ItemRef {
     pub dye: Option<i32>,
     /// `ItemStack.hasEffect`: the enchantment glint.
     pub glint: bool,
+    /// `SkullOwner.Id` of a skull item: the profile whose skin the head shows.
+    pub owner: Option<u128>,
 }
 
 /// One `Fireworks.Explosions` entry of a rocket (`Type`, `Trail`, `Flicker`, `Colors`, `FadeColors`).
@@ -1255,6 +1257,7 @@ impl Entities {
                         count: 1,
                         dye: None,
                         glint: false,
+                        owner: None,
                     });
                 }
                 (id, e)
@@ -1318,6 +1321,7 @@ impl Entities {
                         count: 1,
                         dye: None,
                         glint: false,
+                        owner: None,
                     });
                 }
                 (id, e)

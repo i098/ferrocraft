@@ -182,8 +182,7 @@ impl App {
         self.awaiting_terrain = false;
         self.pending_pack = None;
         self.perspective = 0;
-        self.sneak_sent = false;
-        self.sprint_sent = false;
+        self.reset_sent_state();
         self.use_ticks = 0;
         // `Minecraft.loadWorld(null)` drops the server pack and reloads.
         if self.server_pack.take().is_some() {
@@ -380,6 +379,11 @@ impl App {
         }
     }
 
+    fn reset_sent_state(&mut self) {
+        self.sneak_sent = false;
+        self.sprint_sent = false;
+    }
+
     /// Join, held slot and difficulty change the menus and the container before `Game` sees them.
     fn note_session_state(&mut self, ev: &NetEvent) {
         match ev {
@@ -396,11 +400,14 @@ impl App {
                 self.ui.in_world = true;
                 self.awaiting_terrain = true;
                 self.synced_held = 0;
+                self.reset_sent_state();
                 let m = metrics!(self);
                 let q = self.ui.joined(&m);
                 self.run_effects(q);
                 self.send_client_settings();
             }
+            // `Minecraft.respawnPlayer` builds a new `EntityPlayerSP`: `sentSneaking` and `sentSprinting` start false.
+            NetEvent::Respawn { .. } => self.reset_sent_state(),
             NetEvent::ResourcePack { url, hash } => self.offer_server_pack(url, hash),
             NetEvent::ResourcePackReady { hash, path } => {
                 // The loader skips a pack it cannot open, as vanilla does; the server still hears about it.
@@ -1097,5 +1104,23 @@ mod tests {
             app.ui.is_open(),
             "prompt opens once the terrain screen closes"
         );
+    }
+
+    /// A new player entity has not told the server about sneak or sprint, so the next `send_state` must.
+    #[test]
+    fn respawn_clears_sent_sneak_and_sprint() {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.sneak_sent = true;
+        app.sprint_sent = true;
+        app.note_session_state(&NetEvent::Respawn {
+            dimension_changed: false,
+        });
+        assert!(!app.sneak_sent && !app.sprint_sent);
     }
 }

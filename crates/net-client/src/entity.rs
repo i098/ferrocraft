@@ -317,7 +317,10 @@ fn state_event(packet: &cb::Packet) -> Option<EntityEvent> {
             id: p.entity_id.0,
             animation: p.animation,
         },
-        P::CollectItem(p) => EntityEvent::Pickup { id: p.collected.0 },
+        P::CollectItem(p) => EntityEvent::Pickup {
+            id: p.collected.0,
+            collector: p.collector.0,
+        },
         P::EntityStatus(p) => EntityEvent::Status {
             id: p.entity_id,
             status: p.status,
@@ -495,6 +498,12 @@ mod tests {
             collector: VarInt(1),
         });
         let decoded = cb::Packet::decode(&p.encode()).unwrap();
-        assert_eq!(events(&decoded), vec![EntityEvent::Pickup { id: 9 }]);
+        assert_eq!(
+            events(&decoded),
+            vec![EntityEvent::Pickup {
+                id: 9,
+                collector: 1
+            }]
+        );
     }
 }

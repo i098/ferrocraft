@@ -342,7 +342,7 @@ impl App {
                 id,
                 status: s @ (2 | 3),
             } => (*id, Some(*s)),
-            EntityEvent::Pickup { id } => (*id, None),
+            EntityEvent::Pickup { id, .. } => (*id, None),
             _ => return,
         };
         let own = id == self.game.entity_id;

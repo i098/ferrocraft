@@ -1552,3 +1552,53 @@ fn held_item_shading_follows_the_look() {
         }
     }
 }
+
+/// The hand sways when the eased arm look lags the look (`EntityPlayerSP.renderArmPitch/Yaw`).
+#[test]
+fn held_item_sways_when_the_arm_look_lags() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut frame = |arm_pitch: f32, arm_yaw: f32| {
+        r.set_hand(Some(Hand {
+            held: Some(HeldKind::Item {
+                id: 276,
+                damage: 0,
+                dye: None,
+            }),
+            swing: 0.0,
+            lowered: 0.0,
+            using: None,
+            glint: false,
+            look: render::HandLook {
+                pitch: 10.0,
+                yaw: 20.0,
+                arm_pitch,
+                arm_yaw,
+            },
+        }));
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let (still, swayed) = (frame(10.0, 20.0), frame(-30.0, -40.0));
+    assert_ne!(still, swayed);
+    if let Some(dir) = std::env::var_os("RENDER_HAND_DIR") {
+        let dir = std::path::Path::new(&dir);
+        for (name, rgba) in [("sway_still", &still), ("sway_lagging", &swayed)] {
+            encode_png(&dir.join(format!("{name}.png")), 854, 480, rgba).unwrap();
+        }
+    }
+}

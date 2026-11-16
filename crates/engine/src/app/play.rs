@@ -827,7 +827,7 @@ impl App {
     }
 
     /// Knockback slowdown of the attacker: 0.6 on x and z and the sprint ends (`dig::attack_slowdown`).
-    fn slow_after_hit(&mut self, target: i32) {
+    pub(super) fn slow_after_hit(&mut self, target: i32) {
         let g = &mut self.game;
         let is_player = g
             .entities

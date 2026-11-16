@@ -58,6 +58,8 @@ import net.minecraft.flat.SlimeEntity;
  *   stats                         Stats: G|key|formatter, M|item id|key, U|item id|key, A<m|c|u|b>|id|key per array slot, I|item id|registry name|translation key, E|entity key|kill key|killed-by key
  *   statfmt <kind> <ints...>      Stat.format of the formatter (number, time, distance, tenth): one line per int
  *   mip <levels> <side> <hex of side*side ARGB ints>  TextureUtil.generateMipmaps: one line per level 1.., hex ARGB ints
+ *   eat <yaw> <pitch> <seed> <count> <item id>  PlayerEntity.onConsumeItem of that food: one line per ITEM_CRACK particle,
+ *                                 "x y z vx vy vz" as decimal doubles; needs "start"
  *   rail <x> <y> <z> <offset|none>  MinecartEntity.snapPositionToRail (or ...WithOffset) of a minecart there: "null" or three doubles as
  *                                 16 hex digits each; needs "start"
  *   squish <magma 0/1> <ticks> <kick tick>  a slime or magma cube dropped from y 66 onto the floor, which gets a jump
@@ -285,6 +287,26 @@ public class Harness {
         init.invoke(world.dimension);
         System.out.println(shadowAlpha(Float.parseFloat(t[1]), Double.parseDouble(t[2]),
             Integer.parseInt(t[3]), world.dimension.getBrightnessTable()[Integer.parseInt(t[4])]));
+    }
+
+    /** `eat <yaw> <pitch> <seed> <count> <item id>`: the particles the real `onConsumeItem` adds for that food. */
+    static void eatCommand(PlayerEntity player, String[] t) throws Exception {
+        player.yaw = Float.parseFloat(t[1]);
+        player.pitch = Float.parseFloat(t[2]);
+        java.lang.reflect.Field random = net.minecraft.flat.Entity.class.getDeclaredField("random");
+        random.setAccessible(true);
+        ((java.util.Random) random.get(player)).setSeed(Long.parseLong(t[3]));
+        world.addEventListener((net.minecraft.flat.WorldEventListener) Proxy.newProxyInstance(
+            Harness.class.getClassLoader(), new Class<?>[] {net.minecraft.flat.WorldEventListener.class}, (proxy, m, args) -> {
+                if (m.getName().equals("addParticle")) {
+                    System.out.println(args[2] + " " + args[3] + " " + args[4] + " " + args[5] + " " + args[6] + " " + args[7]);
+                }
+                Class<?> r = m.getReturnType();
+                return r == boolean.class ? (Object) false : r == int.class ? (Object) 0 : null;
+            }));
+        java.lang.reflect.Method m = PlayerEntity.class.getDeclaredMethod("onConsumeItem", net.minecraft.flat.ItemStack.class, int.class);
+        m.setAccessible(true);
+        m.invoke(player, new net.minecraft.flat.ItemStack(net.minecraft.flat.Item.byId(Integer.parseInt(t[5]))), Integer.parseInt(t[4]));
     }
 
     /** `SlimeEntity.tick`: the squish state after each tick of a real slime or magma cube. */
@@ -806,6 +828,9 @@ public class Harness {
                 }
                 case "minewith":
                     minewithCommand(player, t);
+                    break;
+                case "eat":
+                    eatCommand(player, t);
                     break;
                 case "shadow":
                     shadowCommand(t);

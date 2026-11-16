@@ -17,9 +17,9 @@ use world::inventory::ItemStack;
 use world::place::{self, Click, Outcome};
 
 /// Items with the EAT use action: every food of 1.8.9.
-pub(super) const FOOD: [i16; 26] = [
-    260, 282, 297, 319, 320, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392, 393, 394,
-    396, 400, 411, 412, 413, 423, 424,
+pub(super) const FOOD: [i16; 27] = [
+    260, 282, 297, 319, 320, 322, 349, 350, 357, 360, 363, 364, 365, 366, 367, 375, 391, 392, 393,
+    394, 396, 400, 411, 412, 413, 423, 424,
 ];
 
 /// `rightClickDelayTimer` after a use.
@@ -327,6 +327,7 @@ impl App {
             self.use_ticks = 0;
         }
         self.consume_sounds();
+        self.remote_eat_crumbs();
         self.use_ticks = (self.use_ticks - 1).max(0);
         self.boss_tick();
         self.step_sound();

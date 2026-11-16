@@ -2,8 +2,9 @@
 //! swimming, landing, and eating or drinking. The server plays the same sounds for other players
 //! through Sound Effect (0x29), which `events.rs` already handles.
 
+use super::crumbs::crumb_item;
 use super::play::FOOD;
-use super::App;
+use super::{eye_height, App};
 use world::motion_sound::{self, Fall};
 
 /// Player hitbox height (sneaking does not change the box in 1.8.9).
@@ -15,16 +16,17 @@ const CONSUME_FROM: i32 = 25;
 
 #[derive(Clone, Copy)]
 enum Consume {
-    Eat,
+    /// Carries the `ITEM_CRACK` data of the food.
+    Eat(i32),
     Drink,
 }
 
 impl Consume {
     /// `Item.getItemUseAction` of the held item: milk and potions drink, food eats.
-    fn of(item: i16) -> Option<Self> {
+    fn of(item: i16, damage: i16) -> Option<Self> {
         match item {
             335 | 373 => Some(Self::Drink),
-            id if FOOD.contains(&id) => Some(Self::Eat),
+            id if FOOD.contains(&id) => Some(Self::Eat(crumb_item(id, damage))),
             _ => None,
         }
     }
@@ -122,29 +124,40 @@ impl App {
             return;
         };
         if self.use_ticks > 0 {
-            let held = self.game.inv.held_stack().as_ref().map(|s| s.id);
-            if let Some(c) = held.and_then(Consume::of) {
+            let held = self
+                .game
+                .inv
+                .held_stack()
+                .as_ref()
+                .map(|s| (s.id, s.damage));
+            if let Some(c) = held.and_then(|(id, damage)| Consume::of(id, damage)) {
                 self.own_sounds.consuming = Some(c);
                 if self.use_ticks <= CONSUME_FROM && self.use_ticks % 4 == 0 {
-                    self.play_consume(c, at);
+                    self.play_consume(c, at, 5);
                 }
             }
         }
         if std::mem::take(&mut self.game.finished_use) {
             if let Some(c) = self.own_sounds.consuming.take() {
-                self.play_consume(c, at);
+                self.play_consume(c, at, 16);
             }
         }
     }
 
-    /// `EntityPlayer.onConsumeItem`: drink at half volume; eat at 0.5 or 1.0.
-    fn play_consume(&mut self, c: Consume, at: [f64; 3]) {
+    /// `EntityPlayer.onConsumeItem(stack, count)`: drink at half volume; eat `count` crumbs and a sound at 0.5 or 1.0.
+    /// `finishUsingItem` passes 16, the use tick 5.
+    fn play_consume(&mut self, c: Consume, at: [f64; 3], count: u32) {
         match c {
             Consume::Drink => {
                 let pitch = self.roll() * 0.1 + 0.9;
                 self.play_own("random.drink", at, 0.5, pitch);
             }
-            Consume::Eat => {
+            Consume::Eat(item) => {
+                if let Some(p) = &self.game.player {
+                    let eye = eye_height(self.input.sneaking()) as f32;
+                    self.particles
+                        .eat_crumbs(count, p.pos, eye, (p.yaw, self.game.pitch), item);
+                }
                 let volume = if self.roll() < 0.5 { 0.5 } else { 1.0 };
                 let pitch = self.pitch_jitter(0.2);
                 self.play_own("random.eat", at, volume, pitch);

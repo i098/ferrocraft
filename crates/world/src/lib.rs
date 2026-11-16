@@ -60,11 +60,11 @@ static SIN_TABLE: LazyLock<Vec<f32>> = LazyLock::new(|| {
         .collect()
 });
 
-fn sin(v: f32) -> f32 {
+pub fn sin(v: f32) -> f32 {
     SIN_TABLE[((v * 10430.378_f32) as i32 & 65535) as usize]
 }
 
-fn cos(v: f32) -> f32 {
+pub fn cos(v: f32) -> f32 {
     SIN_TABLE[((v * 10430.378_f32 + 16384.0_f32) as i32 & 65535) as usize]
 }
 

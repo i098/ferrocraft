@@ -6,7 +6,7 @@ The `ferrocraft-engine` binary: the game loop of the Ferrocraft 1.8.9 client.
 It opens the title screen and joins a server from the menus or from the launch arguments with `net-client`, keeps the chunks in `world::chunk::ChunkStore`,
 runs `world::Player` physics at 20 TPS, sends the position back, and draws with `render`.
 The HUD comes from `gui`. The `input-audio` actions drive it: F1 hides it, F3 shows the debug screen, and the hotbar keys and the mouse wheel select the slot.
-Each tick it also runs block breaking (`world::dig`): the left button digs the targeted block, the engine sends `PlayerDigging` and `Animation`, removes the block locally, and draws the selection outline. The server's `BlockChange` stays the truth.
+Each tick it also runs block breaking (`world::dig`): the left button digs the targeted block, the engine sends `PlayerDigging` and `Animation`, removes the block locally, and draws the selection outline (`outline.rs`: hidden by a hidden HUD, and gated by gamemode: adventure needs CanDestroy or CanPlaceOn, spectator draws inventory blocks only). The server's `BlockChange` stays the truth.
 The right button places blocks (`world::place`): the engine sends `PlayerBlockPlacement` (C08) with the face and the cursor, applies the same placement rules and orientation locally, and swings the arm only on success. Changing the held slot or stack ends an item use in progress (bow, food).
 Input and chat come from `input-audio`.
 

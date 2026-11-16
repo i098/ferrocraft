@@ -60,7 +60,11 @@ pub fn selection(game: &Game, hide_hud: bool, ray: Option<Ray>) -> Option<[f64; 
     let (hit, _) = game.block_aim(eye, yaw, pitch, id, vehicle)?;
     let [x, y, z] = hit.pos;
     let held = game.inv.held_stack().as_ref();
-    let mode = if game.camera.is_some() { 0 } else { game.gamemode };
+    let mode = if game.camera.is_some() {
+        0
+    } else {
+        game.gamemode
+    };
     if !draws(mode, hide_hud, held, game.store.get_block(x, y, z)) {
         return None;
     }
@@ -130,5 +134,20 @@ mod tests {
         assert!(!draws(3, false, None, STONE));
         assert!(draws(3, false, None, CHEST));
         assert!(draws(3, false, None, 158 << 4 | 3));
+    }
+
+    /// A spectator whose camera follows another player gets the vanilla outline of that player's view: every block.
+    #[test]
+    fn spectating_a_player_outlines_stone_but_not_with_hidden_hud() {
+        let mut g = Game::new();
+        let mut c = world::chunk::Chunk::new(0, 0);
+        c.set_block(0, 64, 4, STONE);
+        g.store.insert(c);
+        g.gamemode = SPECTATOR;
+        let ray = Some(([0.5, 64.5, 0.0], 0.0, 0.0, 0, None));
+        assert_eq!(g.outline(false, ray), None);
+        g.camera = Some(9);
+        assert!(g.outline(false, ray).is_some());
+        assert_eq!(g.outline(true, ray), None);
     }
 }

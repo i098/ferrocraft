@@ -29,7 +29,10 @@ fn pan_gains(eye: [f64; 3], look: [f64; 3], src: [f64; 3]) -> [f32; 2] {
         return [1.0, 1.0];
     }
     let pan = (((src[0] - eye[0]) * rx + (src[2] - eye[2]) * rz) / (rn * d)).clamp(-1.0, 1.0);
-    [(1.0 - pan).sqrt().min(1.0) as f32, (1.0 + pan).sqrt().min(1.0) as f32]
+    [
+        (1.0 - pan).sqrt().min(1.0) as f32,
+        (1.0 + pan).sqrt().min(1.0) as f32,
+    ]
 }
 
 /// Vanilla caps concurrent non-stream sounds at 28.
@@ -279,7 +282,10 @@ mod tests {
         assert!(r > l);
         let [l, r] = pan_gains([0.0; 3], [0.0, 0.0, 1.0], [4.0, 0.0, 0.0]);
         assert!(l > r);
-        assert_eq!(pan_gains([0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 4.0]), [1.0, 1.0]);
+        assert_eq!(
+            pan_gains([0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 4.0]),
+            [1.0, 1.0]
+        );
     }
 
     #[test]

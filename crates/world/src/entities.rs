@@ -924,6 +924,7 @@ pub enum EntityEvent {
     /// `S0D` collect item: the entity flies to the collector and is picked up.
     Pickup {
         id: i32,
+        collector: i32,
     },
     /// `S1A`: 2 hurt, 3 dead.
     Status {
@@ -961,6 +962,28 @@ pub struct Entities {
     emitters: Vec<Emitter>,
     /// Particle requests of the last ticks; the engine drains them with `take_fx`.
     fx: Vec<Fx>,
+    /// `EntityPickupParticle`s: items that fly to their collector for `PICKUP_TICKS`.
+    pickups: Vec<Pickup>,
+}
+
+/// `EntityPickupParticle`: the removed entity, frozen where it was, and the entity it flies to.
+struct Pickup {
+    entity: Entity,
+    collector: i32,
+    age: u8,
+}
+
+/// `EntityPickupParticle.maxAge`.
+const PICKUP_TICKS: u8 = 3;
+/// The `yOffset` `handleEntityPickup` gives the particle: the target is half a block above the collector's feet.
+const PICKUP_Y_OFFSET: f64 = 0.5;
+
+/// `EntityPickupParticle.renderParticle`: the entity's position `age` ticks and `partial` into the flight,
+/// moving from `from` to `to` by `((age + partial) / 3)^2`.
+pub fn pickup_pos(age: u8, partial: f32, from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+    let f = (f32::from(age) + partial) / f32::from(PICKUP_TICKS);
+    let f = f64::from(f * f);
+    std::array::from_fn(|i| from[i] + (to[i] - from[i]) * f)
 }
 
 /// `EmitterParticle`: one burst per tick for `EMITTER_TICKS` ticks, started by animation 4 (crit) or 5 (enchant crit).
@@ -1140,7 +1163,19 @@ impl Entities {
             E::Destroy(ids) => ids.iter().for_each(|id| {
                 self.map.remove(id);
             }),
-            E::Clear => self.map.clear(),
+            E::Clear => {
+                self.map.clear();
+                self.pickups.clear();
+            }
+            E::Pickup { id, collector } => {
+                if let Some(entity) = self.map.remove(&id) {
+                    self.pickups.push(Pickup {
+                        entity,
+                        collector,
+                        age: 0,
+                    });
+                }
+            }
             other => self.apply_state(other),
         }
     }
@@ -1354,6 +1389,10 @@ impl Entities {
         for i in 0..self.emitters.len() {
             self.burst(i);
         }
+        self.pickups.retain_mut(|p| {
+            p.age += 1;
+            p.age < PICKUP_TICKS
+        });
         self.emitters
             .retain(|m| m.age < EMITTER_TICKS && self.map.contains_key(&m.id));
         let fx = &mut self.fx;
@@ -1389,6 +1428,28 @@ impl Entities {
                 size: e.size(),
             });
         }
+    }
+
+    /// The entities flying to their collector, each placed by `pickup_pos`. `collector_pos` gives the interpolated
+    /// feet position of a collector id; `None` leaves the entity in place.
+    pub fn pickup_ghosts(
+        &self,
+        partial: f32,
+        collector_pos: impl Fn(i32) -> Option<[f64; 3]>,
+    ) -> Vec<Entity> {
+        self.pickups
+            .iter()
+            .map(|p| {
+                let mut e = p.entity.clone();
+                if let Some(c) = collector_pos(p.collector) {
+                    let to = [c[0], c[1] + PICKUP_Y_OFFSET, c[2]];
+                    e.pos = pickup_pos(p.age, partial, e.pos, to);
+                }
+                e.prev_pos = e.pos;
+                (e.prev_yaw, e.prev_pitch) = (e.yaw, e.pitch);
+                e
+            })
+            .collect()
     }
 
     /// The particle requests since the last call.
@@ -1495,6 +1556,39 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pickup_eases_toward_a_moving_collector() {
+        let mut es = Entities::default();
+        let item = Entity::new(7, Kind::Object(2), [10 * 32, 64 * 32, 0], 0, 0);
+        es.map.insert(7, item);
+        es.apply(EntityEvent::Pickup {
+            id: 7,
+            collector: 1,
+        });
+        assert!(es.get(7).is_none());
+        // The collector walks 4 blocks on x per tick from x = 0; its feet are at y = 64.
+        let expect = |age: u8, partial: f32| {
+            let x = 4.0 * (f64::from(age) + f64::from(partial));
+            let f = f64::from(((f32::from(age) + partial) / 3.0).powi(2));
+            [10.0 + (x - 10.0) * f, 64.0 + 0.5 * f, 0.0]
+        };
+        for age in 0..3u8 {
+            for partial in [0.0f32, 0.5] {
+                let x = 4.0 * (f64::from(age) + f64::from(partial));
+                let g = es.pickup_ghosts(partial, |_| Some([x, 64.0, 0.0]));
+                let want = expect(age, partial);
+                for i in 0..3 {
+                    assert!(
+                        (g[0].pos[i] - want[i]).abs() < 1e-6,
+                        "age {age} {partial} axis {i}"
+                    );
+                }
+            }
+            es.tick();
+        }
+        assert!(es.pickup_ghosts(0.0, |_| Some([0.0; 3])).is_empty());
+    }
+
     /// Oracle: `EntityHorse.updateRiderPosition` worked by hand. The rearing amount of the last tick is 0 after one
     /// angry tick and 0.45 after two (`0 + (1 - 0) * 0.4 + 0.05`); a horse facing west (yaw 90) shifts the rider
     /// 0.7 * 0.45 along +x and 0.15 * 0.45 up. The rider rests at 0.75 * 1.6 - 0.35 above the feet.

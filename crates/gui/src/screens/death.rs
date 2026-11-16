@@ -35,6 +35,10 @@ impl Death {
 }
 
 impl Screen for Death {
+    fn is_game_over(&self) -> bool {
+        true
+    }
+
     fn init(&mut self, ctx: &mut Ctx) {
         let (w, h) = (ctx.width, ctx.height);
         self.buttons = if ctx.hardcore {

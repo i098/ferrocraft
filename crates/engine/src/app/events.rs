@@ -384,6 +384,29 @@ impl App {
         self.sprint_sent = false;
     }
 
+    /// `handlePlayerRespawn`: a dimension change builds a new `WorldClient`, and `Minecraft.loadWorld` stops
+    /// the sounds and clears the particles, then opens `GuiDownloadingTerrain`. Every respawn closes
+    /// `GuiGameOver`; the new player has no open container.
+    fn respawn_screens(&mut self, dimension_changed: bool) {
+        self.reset_sent_state();
+        self.container = None;
+        self.game.inv.close_window();
+        let m = metrics!(self);
+        let mut q = Vec::new();
+        if dimension_changed {
+            if let Some(s) = &mut self.sound {
+                s.stop_all();
+            }
+            self.particles.clear();
+            self.game.player = None;
+            self.awaiting_terrain = true;
+            q = self.ui.joined(&m);
+        } else if self.ui.is_game_over() {
+            q = self.ui.close(&m);
+        }
+        self.run_effects(q);
+    }
+
     /// Join, held slot and difficulty change the menus and the container before `Game` sees them.
     fn note_session_state(&mut self, ev: &NetEvent) {
         match ev {
@@ -407,7 +430,7 @@ impl App {
                 self.send_client_settings();
             }
             // `Minecraft.respawnPlayer` builds a new `EntityPlayerSP`: `sentSneaking` and `sentSprinting` start false.
-            NetEvent::Respawn { .. } => self.reset_sent_state(),
+            NetEvent::Respawn { dimension_changed } => self.respawn_screens(*dimension_changed),
             NetEvent::ResourcePack { url, hash } => self.offer_server_pack(url, hash),
             NetEvent::ResourcePackReady { hash, path } => {
                 // The loader skips a pack it cannot open, as vanilla does; the server still hears about it.
@@ -1142,5 +1165,72 @@ mod tests {
             dimension_changed: false,
         });
         assert!(!app.sneak_sent && !app.sprint_sent);
+    }
+
+    /// An app in a world with a chest screen, a death screen, rain, thunder and particles, then a `Respawn`.
+    fn respawned(dimension_changed: bool) -> App {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        app.ui.in_world = true;
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
+        app.container = Some(ContainerScreen::new(&app.game.inv, 320, 240));
+        app.game.weather.apply(7, 1.0);
+        app.game.weather.apply(8, 1.0);
+        app.particles
+            .spawn_packet(41, [0.0; 3], [0.0; 3], 0.0, 0, &[]);
+        assert!(!app.particles.is_empty());
+        let m = metrics!(app);
+        app.ui.open(&m, boxed(Death::new(None, 0)));
+        assert!(app.ui.is_game_over());
+        app.on_event(
+            NetEvent::Respawn { dimension_changed },
+            &mut false,
+            &mut Dirty::new(),
+        );
+        app
+    }
+
+    #[test]
+    fn dimension_respawn_ends_rain_thunder_particles_and_container() {
+        let app = respawned(true);
+        assert_eq!(app.game.weather.strengths(1.0), (0.0, 0.0));
+        assert!(app.particles.is_empty());
+        assert!(app.container.is_none());
+    }
+
+    #[test]
+    fn dimension_respawn_opens_the_terrain_screen_over_the_death_screen() {
+        let app = respawned(true);
+        assert!(app.awaiting_terrain);
+        assert!(app.ui.is_open() && !app.ui.is_game_over());
+    }
+
+    #[test]
+    fn same_dimension_respawn_closes_death_screen_and_container_but_keeps_weather() {
+        let app = respawned(false);
+        assert!(!app.ui.is_open());
+        assert!(!app.awaiting_terrain);
+        assert!(app.container.is_none());
+        assert_eq!(app.game.weather.strengths(1.0).0, 1.0);
+    }
+
+    #[test]
+    fn first_position_packet_closes_the_terrain_screen() {
+        let mut app = respawned(true);
+        app.game.player = Some(world::Player::new([0.0; 3], 0.0));
+        app.finish_terrain_wait();
+        assert!(!app.ui.is_open() && !app.awaiting_terrain);
+    }
+
+    #[test]
+    fn dimension_respawn_keeps_terrain_screen_until_new_position() {
+        let mut app = respawned(true);
+        app.finish_terrain_wait();
+        assert!(app.ui.is_open() && app.awaiting_terrain);
     }
 }

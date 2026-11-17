@@ -42,6 +42,7 @@ pub(super) fn layers(d: &EntityDraw) -> Vec<Layer> {
             (0.0, 0.0),
         )],
         bright: false,
+        colors_when_damaged: true,
     }]
 }
 

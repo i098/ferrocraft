@@ -36,6 +36,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         tint: FLEECE[15 - usize::from(d.look.collar & 15)],
         parts: m.parts.clone(),
         bright: false,
+        colors_when_damaged: true,
     }]
 }
 

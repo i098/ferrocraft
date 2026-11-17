@@ -1076,10 +1076,18 @@ pub fn build(
             }
             None => d,
         };
-        let bright = draw_entity(&mut out, d, skins);
-        let bright = bright.max(start);
+        let drawn = draw_entity(&mut out, d, skins);
+        let bright = drawn.bright.max(start);
         for v in &mut out.vertices[start..bright] {
             v.light = level;
+        }
+        // `LivingEntityRenderer.renderLayers` skips the hurt overlay for layers whose
+        // `colorsWhenDamaged()` is false: armor, cape, stuck arrows, carried block.
+        let plain = light_level(d, &light, false);
+        for r in drawn.plain {
+            for v in &mut out.vertices[r] {
+                v.light = plain;
+            }
         }
         for v in &mut out.vertices[bright..] {
             v.light = [1.0, 1.0];
@@ -1407,13 +1415,28 @@ fn emit_carried(out: &mut MeshData, xf: &Xf, block: u16, v_off: f32) {
 
 /// Meshes one entity into `out` and returns the index of the first full-bright vertex (the eye
 /// layers), or the vertex count when there are none.
-fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
+fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
     if other_drawer(out, d, skins) {
-        return out.vertices.len();
+        return Drawn::all(out.vertices.len());
     }
-    let bright = draw_body(out, d, skins);
+    let drawn = draw_body(out, d, skins);
     leash::rope(out, d, skins);
-    bright
+    drawn
+}
+
+/// Where the full-bright vertices start, and the vertex ranges that stay free of the hurt flag.
+pub(super) struct Drawn {
+    pub bright: usize,
+    pub plain: Vec<std::ops::Range<usize>>,
+}
+
+impl Drawn {
+    fn all(bright: usize) -> Self {
+        Self {
+            bright,
+            plain: Vec::new(),
+        }
+    }
 }
 
 /// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
@@ -1480,7 +1503,7 @@ fn emit_body(
 }
 
 /// The body model, its armor and layers; returns where the full-bright layers start.
-fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
+fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
     if d.class == Class::Object(78) {
         return armorstand::draw(out, d, skins);
     }
@@ -1501,14 +1524,18 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> usize {
         d.class,
         Class::Player { .. } | Class::Mob(53 | 54 | 57 | 51)
     );
+    let armor_start = out.vertices.len();
     if holds {
         emit_armor(out, &xf, &m, d, skins);
     }
-    emit_layers(out, &xf, &m, d, skins, white)
+    let armor = armor_start..out.vertices.len();
+    let mut drawn = emit_layers(out, &xf, &m, d, skins, white);
+    drawn.plain.push(armor);
+    drawn
 }
 
-/// The held item bar, the cape, the carried block and the model layers; returns where the
-/// full-bright layers start.
+/// The cape, stuck arrows, the carried block and the model layers; returns where the full-bright
+/// layers start and which vertices stay free of the hurt flag.
 fn emit_layers(
     out: &mut MeshData,
     xf: &Xf,
@@ -1516,7 +1543,8 @@ fn emit_layers(
     d: &EntityDraw,
     skins: &Skins,
     white: f32,
-) -> usize {
+) -> Drawn {
+    let first = out.vertices.len();
     if let (Some(sway), Some(cape)) = (d.look.cape, d.skin.and_then(|k| skins.cape(k))) {
         if cape_shown(d) {
             emit_cape(out, xf, d, sway, skins.v_offset(cape));
@@ -1526,6 +1554,8 @@ fn emit_layers(
     if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
         emit_carried(out, xf, d.look.carried, white);
     }
+    let mut plain = Vec::new();
+    plain.push(first..out.vertices.len());
     let mut bright = None;
     let layers = mobs::layers(d, m).into_iter().chain(mobs3::layers(d, m));
     for layer in layers.filter(|l| skins.has(l.skin)) {
@@ -1533,11 +1563,18 @@ fn emit_layers(
             bright.get_or_insert(out.vertices.len());
         }
         let v_off = skins.v_offset(layer.skin);
+        let from = out.vertices.len();
         for part in &layer.parts {
             emit_part(out, xf, part, part.inflate, layer.tint, v_off);
         }
+        if !layer.colors_when_damaged {
+            plain.push(from..out.vertices.len());
+        }
     }
-    bright.unwrap_or(out.vertices.len())
+    Drawn {
+        bright: bright.unwrap_or(out.vertices.len()),
+        plain,
+    }
 }
 
 /// (slot: boots, leggings, chest, helmet), part indices, grow, texture layer
@@ -2172,6 +2209,26 @@ pub(crate) mod tests {
         assert_eq!(count([0, 0, 307, 0]) - bare, 3 * 24);
         assert_eq!(count([0, 0, 0, 306]) - bare, 24);
         assert_eq!(count([309, 308, 307, 306]) - bare, 9 * 24);
+    }
+
+    #[test]
+    fn hurt_flag_covers_the_body_but_not_armor() {
+        let flagged = |armor: [i16; 4], hurt: bool| {
+            let mut d = steve();
+            d.armor = armor;
+            d.hurt = hurt;
+            mesh(&d)
+                .vertices
+                .iter()
+                .map(|v| v.light[1] >= HURT_FLAG)
+                .collect::<Vec<_>>()
+        };
+        let bare = flagged([0; 4], true);
+        let armored = flagged([309, 308, 307, 306], true);
+        assert!(bare.iter().all(|&f| f));
+        assert_eq!(armored.len(), bare.len() + 9 * 24);
+        assert!(armored[..bare.len()].iter().all(|&f| f));
+        assert!(armored[bare.len()..].iter().all(|&f| !f));
     }
 
     #[test]

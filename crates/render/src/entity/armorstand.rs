@@ -216,9 +216,9 @@ fn drawn(index: usize, flags: u8) -> bool {
     }
 }
 
-/// The body unless the stand is invisible, then its armor; returns where full-bright vertices
-/// start, which is the end since a stand has none.
-pub(super) fn draw(out: &mut MeshData, d: &super::EntityDraw, skins: &Skins) -> usize {
+/// The body unless the stand is invisible, then its armor, which stays free of the hurt flag
+/// (`LayerArmorBase.shouldCombineTextures` is false). A stand has no full-bright vertices.
+pub(super) fn draw(out: &mut MeshData, d: &super::EntityDraw, skins: &Skins) -> super::Drawn {
     let xf = Xf::new(d, false);
     if !d.invisible {
         let body = model(d);
@@ -232,8 +232,13 @@ pub(super) fn draw(out: &mut MeshData, d: &super::EntityDraw, skins: &Skins) -> 
             }
         }
     }
+    let armor = out.vertices.len();
     emit_armor(out, &xf, &armor_model(d), d, skins);
-    out.vertices.len()
+    let end = out.vertices.len();
+    super::Drawn {
+        bright: end,
+        plain: std::iter::once(armor..end).collect(),
+    }
 }
 
 #[cfg(test)]

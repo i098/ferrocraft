@@ -696,6 +696,9 @@ impl App {
         if let Some((name, max, health)) = boss {
             self.hud.set_boss(name, (health / max).clamp(0.0, 1.0));
         }
+        // `WitherRenderer` calls `BossBar.update(entity, true)`; the Ender Dragon passes false.
+        let wither = self.game.entities.iter().any(|e| e.kind == Kind::Mob(64));
+        self.sky_darkness.tick(wither);
     }
 
     /// `EntityPlayerSP.func_110318_g`: the horse jump charge goes out as `EntityAction` 5 on key release.
@@ -779,21 +782,6 @@ impl App {
         let dy = p.pos[1] - self.game.prev_pos[1];
         let alive = self.game.health > 0.0;
         self.view_bob.tick([dx, dy, dz], p.on_ground, alive);
-    }
-
-    /// `ItemRenderer.updateEquippedItem`: the hand lowers on a change of item and rises again.
-    fn equip_tick(&mut self) {
-        let held = self.game.inv.held_stack().as_ref().map(|s| {
-            let dye = s.nbt.as_ref().and_then(|n| n.dye());
-            (s.id, s.damage, world::inventory::glint(s), dye)
-        });
-        let (cur, _, shown) = self.equip;
-        let same = shown.map(|s| s.0) == held.map(|h| h.0);
-        let target = if same { 1.0 } else { 0.0 };
-        let next = cur + (target - cur).clamp(-0.4, 0.4);
-        let shown = if next <= 0.0 && !same { held } else { shown };
-        let shown = if same { held } else { shown };
-        self.equip = (next, cur, shown);
     }
 
     /// `EntityPlayerSP.onUpdateWalkingPlayer`: `C03`, `C04`, `C05` or `C06` by what changed since the last send.
@@ -922,6 +910,7 @@ impl App {
                 DigAction::Attack(id) => {
                     self.predict_hit_particles(id);
                     self.slow_after_hit(id);
+                    self.wear_after_hit(id);
                     self.mod_attack(id);
                     self.session_send(|s| s.attack_entity(id))
                 }
@@ -1101,6 +1090,7 @@ impl App {
             self.in_use = self.use_ticks > 0;
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
             self.send_result(r);
+            self.after_item_use(s);
             // `ItemFishingRod.onItemRightClick` swings for the cast and the reel.
             if s.id == 346 {
                 self.swing_arm();
@@ -1156,6 +1146,9 @@ impl App {
         }
         if handled {
             self.swing_arm();
+        }
+        if let Some(s) = held {
+            self.after_block_use(s);
         }
         handled || held.is_none()
     }

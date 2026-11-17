@@ -49,6 +49,8 @@ pub struct Environment {
     pub water_breathing: bool,
     /// Superflat level type: no void darkening above y 1.
     pub flat_world: bool,
+    /// `GameRenderer.skyDarkness` at the partial tick: a Wither dims the lightmap and the fog.
+    pub sky_darkness: f32,
 }
 
 impl Default for Environment {
@@ -72,6 +74,7 @@ impl Default for Environment {
             respiration: 0,
             water_breathing: false,
             flat_world: false,
+            sky_darkness: 0.0,
         }
     }
 }
@@ -268,7 +271,9 @@ impl Environment {
             fog_light::fluid_fog(self.fluid, self.respiration, self.water_breathing, fog);
         let dark =
             self.fog_light * fog_light::void_darkness(self.view_y, self.blindness, self.flat_world);
-        let fog = fog_light::night_vision_fog(fog.map(|c| c * dark), self.night_vision);
+        let fog = fog.map(|c| c * dark);
+        let fog = fog_light::boss_fog(fog, self.sky_darkness);
+        let fog = fog_light::night_vision_fog(fog, self.night_vision);
         let far = (self.render_distance_chunks * 16) as f32;
         match self.blindness {
             Some(ticks) => {

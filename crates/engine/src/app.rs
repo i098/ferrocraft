@@ -10,6 +10,7 @@ macro_rules! metrics {
 
 mod crumbs;
 mod crystal;
+mod equip;
 mod events;
 mod input;
 mod leash;
@@ -24,6 +25,7 @@ mod pack;
 mod play;
 mod screen;
 mod skull;
+mod sky_darkness;
 mod use_entity;
 mod vehicle;
 
@@ -146,6 +148,10 @@ pub struct App {
     last_frame: Instant,
     /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
     equip: (f32, f32, Option<HandItem>),
+    /// `GameRenderer.skyDarkness`: the Wither's dimming of the lightmap and the fog.
+    sky_darkness: sky_darkness::SkyDarkness,
+    /// `ItemInHandRenderer.itemInHand`: the stack the hand shows or is lowering.
+    hand_stack: world::inventory::Slot,
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
     /// A server pack offer that arrived before that screen closed; the prompt opens once it has.
@@ -220,6 +226,8 @@ impl App {
             view_bob: play::ViewBob::default(),
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
+            sky_darkness: Default::default(),
+            hand_stack: None,
             awaiting_terrain: false,
             pending_pack: None,
             cursor: (0.0, 0.0),
@@ -341,6 +349,7 @@ impl App {
         let s = &self.ui.settings;
         self.input.set_sensitivity(s.mouse_sensitivity);
         self.input.set_pause_on_lost_focus(s.pause_on_lost_focus);
+        self.input.set_chat_allowed(s.chat_visibility != 2);
         self.input
             .set_bindings(input_audio::KeyBindings::from_options_txt(&s.to_text()));
         if let Some(sound) = &mut self.sound {
@@ -978,6 +987,7 @@ impl App {
             respiration: self.game.respiration(),
             water_breathing: self.game.water_breathing(),
             flat_world: self.game.flat_world,
+            sky_darkness: self.sky_darkness.at(frac as f32),
             ..Environment::default()
         });
         r.set_lightning(self.game.bolts.shapes());

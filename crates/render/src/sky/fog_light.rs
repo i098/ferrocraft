@@ -67,6 +67,12 @@ pub(super) fn void_darkness(view_y: f32, blindness: Option<i32>, flat: bool) -> 
     }
 }
 
+/// `updateFogColor`: a Wither's `skyDarkness` `d` scales red by 0.7 and green and blue by 0.6.
+pub(super) fn boss_fog(fog: [f32; 3], d: f32) -> [f32; 3] {
+    let scale = |c: f32, k: f32| c * (1.0 - d) + c * k * d;
+    [scale(fog[0], 0.7), scale(fog[1], 0.6), scale(fog[2], 0.6)]
+}
+
 /// `updateFogColor`: Night Vision scales the color until its brightest channel is 1, by `strength`.
 pub(super) fn night_vision_fog(fog: [f32; 3], strength: f32) -> [f32; 3] {
     // Java's 1/0 is +Inf, so zero channels drop out of the min; an all-zero fog stays black.
@@ -161,6 +167,16 @@ mod tests {
             [0.0; 3]
         );
         assert_ne!(fog_with(|e| e.view_y = 16.0), top);
+    }
+
+    #[test]
+    fn a_wither_scales_the_fog_by_seven_and_six_tenths() {
+        let top = fog_with(|_| {});
+        assert_eq!(fog_with(|e| e.sky_darkness = 0.0), top);
+        let dark = fog_with(|e| e.sky_darkness = 1.0);
+        for (i, k) in [0.7, 0.6, 0.6].into_iter().enumerate() {
+            assert!((dark[i] - top[i] * k).abs() < 1e-6, "{i}");
+        }
     }
 
     #[test]

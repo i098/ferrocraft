@@ -1555,12 +1555,16 @@ impl Entities {
     }
 }
 
+/// `Entity.hasCollision`: what a ray or a thrown entity can hit. `ArmorStandEntity.hasCollision`
+/// is false for a marker stand.
 fn collidable(e: &Entity) -> bool {
-    !matches!(
-        e.kind,
-        Kind::ExperienceOrb
-            | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
-    )
+    let marker = e.kind == Kind::Object(78) && e.meta.stand.unwrap_or(0) & stand::MARKER != 0;
+    !marker
+        && !matches!(
+            e.kind,
+            Kind::ExperienceOrb
+                | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
+        )
 }
 
 fn velocity(v: [i16; 3]) -> [f64; 3] {
@@ -2121,6 +2125,44 @@ mod tests {
             });
             assert_eq!(size(&es), want, "{status}");
         }
+    }
+
+    #[test]
+    fn a_ray_passes_through_a_marker_armor_stand() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0, 0, 5 * 32]);
+        es.apply(EntityEvent::SpawnObject {
+            id: 5,
+            kind: 78,
+            pos: [0, 0, 3 * 32],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        let set = |es: &mut Entities, status| {
+            es.apply(EntityEvent::Metadata {
+                id: 5,
+                flags: None,
+                name: None,
+                health: None,
+                stack: None,
+                size: SizeMeta {
+                    stand: Some(status),
+                    ..SizeMeta::default()
+                },
+            });
+        };
+        let (eye, dir) = ([0.0, 0.9, 0.0], look_vector(0.0, 0.0));
+        let nearest = |es: &Entities| es.pick(eye, dir, 6.0, 0, None, None).map(|h| h.0);
+        // A plain stand blocks the ray; a marker stand does not (`hasCollision` is false).
+        assert_eq!(nearest(&es), Some(5));
+        set(&mut es, stand::MARKER);
+        assert_eq!(nearest(&es), Some(1));
+        assert_eq!(
+            es.hit_along([0.0, 0.9, 0.0], [0.0, 0.9, 4.0], false, None),
+            None
+        );
     }
 
     #[test]

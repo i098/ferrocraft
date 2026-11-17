@@ -195,7 +195,7 @@ impl App {
         self.pending_pack = None;
         self.perspective = 0;
         self.reset_sent_state();
-        self.use_ticks = 0;
+        self.end_use();
         // `Minecraft.loadWorld(null)` drops the server pack and reloads.
         if self.server_pack.take().is_some() {
             self.refresh_resources();

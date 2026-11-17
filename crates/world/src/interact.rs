@@ -332,7 +332,10 @@ mod tests {
         assert!(click(&grown, &stack(391)), "a baby takes food");
         let mut tied = pig.clone();
         tied.leash = Some(5);
-        assert!(client_item_interact(&tied, None, 5), "own leash is taken off");
+        assert!(
+            client_item_interact(&tied, None, 5),
+            "own leash is taken off"
+        );
         assert!(!client_item_interact(&tied, Some(&stack(LEAD)), 6));
     }
 }

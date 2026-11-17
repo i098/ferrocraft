@@ -446,9 +446,11 @@ impl Session {
             &self.writer,
             sb::Packet::from(sb::TabComplete {
                 text: text.to_owned(),
-                looked_at: ferrocraft_protocol::codec::Opt(
-                    looked_at.map(|[x, y, z]| Position { x, y, z }),
-                ),
+                looked_at: ferrocraft_protocol::codec::Opt(looked_at.map(|[x, y, z]| Position {
+                    x,
+                    y,
+                    z,
+                })),
             }),
         )
     }

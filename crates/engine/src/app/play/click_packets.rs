@@ -1,9 +1,9 @@
 //! Left and right clicks run in the tick, checked as the bytes the client sends.
 use super::camera_packets::{idle_app, sent_frames, server};
 use crate::app::App;
+use input_audio::Action;
 use std::sync::mpsc::Receiver;
 use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
-use input_audio::Action;
 use world::entities::EntityEvent;
 use world::inventory::ItemStack;
 
@@ -211,7 +211,11 @@ fn tab_complete_carries_the_block_under_the_crosshair() {
         let f = frames.iter().find(|f| f[0] == TAB_COMPLETE).unwrap();
         f[1 + 1 + 3..].to_vec()
     };
-    assert_eq!(tab(&mut app, &rx), [0], "no block ahead: has_position false");
+    assert_eq!(
+        tab(&mut app, &rx),
+        [0],
+        "no block ahead: has_position false"
+    );
     // Looking straight down from (0.5, 64, 0.5) at the block (0, 63, 0).
     app.game.pitch = 90.0;
     let packed = 63_u64 << 26;
@@ -224,7 +228,9 @@ fn tab_complete_carries_the_block_under_the_crosshair() {
 fn border_away(app: &mut App) {
     use world::border::Update;
     let now = crate::game::now_ms();
-    app.game.border.apply(Update::SetCenter { x: 100.0, z: 100.0 }, now);
+    app.game
+        .border
+        .apply(Update::SetCenter { x: 100.0, z: 100.0 }, now);
     app.game.border.apply(Update::SetSize(20.0), now);
 }
 

@@ -45,6 +45,8 @@ pub enum Effect {
     Clear,
     Chat(Vec<Styled>),
     ActionBar(String),
+    /// The local player boarded a vehicle: `mount.onboard` goes to the action bar.
+    Mounted,
     OpenWindow,
     CloseWindow,
     /// The server opened a window type this client lacks: answer with `CloseWindow(id)`.
@@ -607,6 +609,9 @@ impl Game {
             NetEvent::Tile(t) => return Some(Effect::Tile(t)),
             NetEvent::Chat(m) => return Some(Effect::Chat(m)),
             NetEvent::ActionBar(m) => return Some(Effect::ActionBar(m)),
+            NetEvent::Entity(EntityEvent::Attach { id, vehicle }) if id == self.entity_id => {
+                return self.attach_own(vehicle)
+            }
             NetEvent::BlockBreakAnim { id, pos, stage } => self.set_crack(id, pos, stage),
             NetEvent::Lightning { pos } => self.strike(pos),
             ev => self.apply_state(ev),
@@ -647,13 +652,21 @@ impl Game {
                 self.vehicle = None;
             }
         }
-        if let EntityEvent::Attach { id, vehicle } = &e {
-            if *id == self.entity_id {
-                self.vehicle = (*vehicle >= 0).then_some(*vehicle);
-                self.rider_turn = [0.0; 2];
-            }
-        }
         self.entities.apply(e)
+    }
+
+    /// `handleEntityAttach` for the local player: `startRiding(null)` for an unknown vehicle, and the
+    /// dismount hint when the player goes from no vehicle to a known one.
+    fn attach_own(&mut self, vehicle: i32) -> Option<Effect> {
+        let known = self.entities.get(vehicle).is_some();
+        let boarded = self.vehicle.is_none() && known;
+        self.vehicle = known.then_some(vehicle);
+        self.rider_turn = [0.0; 2];
+        self.entities.apply(EntityEvent::Attach {
+            id: self.entity_id,
+            vehicle,
+        });
+        boarded.then_some(Effect::Mounted)
     }
 
     fn apply_state(&mut self, ev: NetEvent) {

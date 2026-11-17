@@ -702,6 +702,14 @@ impl App {
             }
             Effect::Chat(runs) => self.print_chat(runs),
             Effect::ActionBar(text) => self.hud.set_action_bar(text),
+            Effect::Mounted => {
+                let key = self.ui.settings.keys.iter().find(|k| k.desc == "key.sneak");
+                let name = key.map_or(String::new(), |k| {
+                    gui::screens::key_name(k.code, &self.ui.texts)
+                });
+                self.hud
+                    .set_action_bar(self.ui.texts.fmt("mount.onboard", &[&name]));
+            }
             Effect::OpenWindow => {
                 self.close_screens();
                 self.container = Some(ContainerScreen::new(
@@ -1320,5 +1328,39 @@ mod tests {
         );
         assert!(app.input.chat_input().is_none());
         assert!(app.container.is_some());
+    }
+
+    /// `handleEntityAttach`: a known vehicle mounts and shows the hint; an unknown id dismounts.
+    #[test]
+    fn attach_to_a_known_horse_shows_the_dismount_hint_and_an_unknown_id_does_not_mount() {
+        let mut app = chat_app();
+        app.ui.texts = gui::screens::Texts::parse("mount.onboard=Press %1$s to dismount", "");
+        let own = app.game.entity_id;
+        let attach =
+            |vehicle| NetEvent::Entity(world::entities::EntityEvent::Attach { id: own, vehicle });
+        app.on_event(attach(99), &mut false, &mut Dirty::new());
+        assert_eq!(app.game.vehicle, None);
+        assert_eq!(app.hud.action_bar(), None);
+        app.game
+            .entities
+            .apply(world::entities::EntityEvent::SpawnMob {
+                id: 99,
+                kind: 100,
+                pos: [0; 3],
+                yaw: 0,
+                pitch: 0,
+                head_yaw: 0,
+                vel: [0; 3],
+                flags: None,
+                name: None,
+                health: None,
+                size: Default::default(),
+            });
+        app.on_event(attach(99), &mut false, &mut Dirty::new());
+        assert_eq!(app.game.vehicle, Some(99));
+        assert_eq!(
+            app.hud.action_bar().map(|a| a.0),
+            Some("Press LSHIFT to dismount")
+        );
     }
 }

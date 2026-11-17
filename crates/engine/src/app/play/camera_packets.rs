@@ -17,12 +17,12 @@ use winit::keyboard::KeyCode;
 const CHAT: u8 = 0x01;
 const POSE: u8 = 0x06;
 const ENTITY_ACTION: u8 = 0x0B;
-const OWN_ID: i32 = 1;
-const OTHER_ID: i32 = 7;
+pub(super) const OWN_ID: i32 = 1;
+pub(super) const OTHER_ID: i32 = 7;
 
 /// A server that accepts the login, sends every packet queued on the returned sender, and reports the
 /// id of every packet the client sends after the login.
-fn server() -> (u16, Receiver<Vec<u8>>, Sender<Vec<u8>>) {
+pub(super) fn server() -> (u16, Receiver<Vec<u8>>, Sender<Vec<u8>>) {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
     let (tx, rx) = channel();
@@ -72,7 +72,7 @@ fn read_ids(mut s: impl Read, tx: Sender<Vec<u8>>) {
 }
 
 /// Pumps the network until `done` holds.
-fn pump_until(app: &mut App, done: impl Fn(&App) -> bool) {
+pub(super) fn pump_until(app: &mut App, done: impl Fn(&App) -> bool) {
     let end = Instant::now() + Duration::from_secs(10);
     while !done(app) {
         assert!(Instant::now() < end, "server packet never applied");
@@ -82,7 +82,7 @@ fn pump_until(app: &mut App, done: impl Fn(&App) -> bool) {
 }
 
 /// Packets arrive in order, so a chat marks the end of everything the client sent before it.
-fn sent_frames(app: &mut App, rx: &Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
+pub(super) fn sent_frames(app: &mut App, rx: &Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
     app.link.session().unwrap().send_chat("end").unwrap();
     let mut frames = Vec::new();
     loop {
@@ -107,7 +107,7 @@ fn tick(app: &mut App, rx: &Receiver<Vec<u8>>) -> (Vec<u8>, [f64; 2]) {
     (ids, [p.pos[0] - before[0], p.pos[2] - before[2]])
 }
 
-fn send(out: &Sender<Vec<u8>>, p: cb::Packet) {
+pub(super) fn send(out: &Sender<Vec<u8>>, p: cb::Packet) {
     out.send(p.encode()).unwrap();
 }
 
@@ -139,7 +139,7 @@ fn hold_forward(app: &mut App) {
     assert!(!app.ui.is_open(), "screen open");
 }
 
-fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
+pub(super) fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
     let mut app = App::new(Args {
         username: "Ferro".into(),
         auth: None,

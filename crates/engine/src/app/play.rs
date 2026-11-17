@@ -1509,6 +1509,8 @@ fn sprint_dust_state(
 #[cfg(test)]
 mod camera_packets;
 #[cfg(test)]
+mod transaction_packets;
+#[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, outline_draws, sprint_dust_state, App, ContainerScreen};
     use crate::game::Game;

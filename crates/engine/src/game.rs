@@ -549,7 +549,11 @@ impl Game {
                 window,
                 action,
                 accepted,
-            } => (!accepted).then_some(Effect::Confirm { window, action }),
+            } => {
+                // `handleInventoryMenuConfirm`: the player menu (0) or the open menu answers, no other id.
+                let known = window == 0 || window == self.inv.window_id();
+                (known && !accepted).then_some(Effect::Confirm { window, action })
+            }
             other => return Err(other),
         };
         Ok(effect)
@@ -1728,7 +1732,10 @@ mod tests {
         for n in 1..=5 {
             g.tick(IDLE);
             let y = g.player.as_ref().unwrap().pos[1];
-            assert!((y - (80.0 - 0.098 * f64::from(n))).abs() < 1e-5, "tick {n}: {y}");
+            assert!(
+                (y - (80.0 - 0.098 * f64::from(n))).abs() < 1e-5,
+                "tick {n}: {y}"
+            );
         }
         let mut g = unloaded_player(0.0);
         for _ in 0..5 {
@@ -1748,5 +1755,38 @@ mod tests {
             g.tick(go);
         }
         assert!(g.player.as_ref().unwrap().pos[2] > 0.5);
+    }
+
+    #[test]
+    fn transaction_is_answered_only_for_the_player_menu_and_the_open_window() {
+        let tx = |window| NetEvent::Transaction {
+            window,
+            action: 3,
+            accepted: false,
+        };
+        let mut g = Game::new();
+        assert!(g.apply(tx(5)).is_none());
+        assert!(matches!(
+            g.apply(tx(0)),
+            Some(Effect::Confirm {
+                window: 0,
+                action: 3
+            })
+        ));
+        g.apply(NetEvent::OpenWindow {
+            id: 5,
+            kind: "minecraft:chest".into(),
+            title: String::new(),
+            slots: 27,
+            horse: None,
+        });
+        assert!(matches!(
+            g.apply(tx(5)),
+            Some(Effect::Confirm {
+                window: 5,
+                action: 3
+            })
+        ));
+        assert!(g.apply(tx(6)).is_none());
     }
 }

@@ -1,5 +1,5 @@
 //! Item use, rod swing, the inventory key and the join packets, checked as the bytes the client sends.
-use super::camera_packets::{idle_app, pump_until, send, sent_frames, server, OWN_ID};
+use super::camera_packets::{idle_app, join_app, pump_until, send, sent_frames, server, OWN_ID};
 use crate::app::App;
 use ferrocraft_protocol::play::clientbound as cb;
 use std::sync::mpsc::Receiver;
@@ -11,7 +11,9 @@ const USE_ITEM: u8 = 0x08;
 const SWING: u8 = 0x0A;
 const RELEASE: u8 = 0x07;
 const ENTITY_ACTION: u8 = 0x0B;
+const CLIENT_SETTINGS: u8 = 0x15;
 const CLIENT_STATUS: u8 = 0x16;
+const PLUGIN_MESSAGE: u8 = 0x17;
 
 fn hold(app: &mut App, id: i16) {
     let slot = 36 + usize::from(app.game.inv.held);
@@ -129,4 +131,15 @@ fn inventory_key_on_a_horse_sends_only_the_horse_request() {
     assert_eq!(frames.len(), 1);
     assert_eq!(frames[0][..], [ENTITY_ACTION, OWN_ID as u8, 6, 0]);
     assert!(app.container.is_none());
+}
+
+/// `handleJoinGame`: `syncClientSettings` (C15), then `MC|Brand` (C17).
+#[test]
+fn join_sends_client_settings_before_the_brand() {
+    let (port, rx, out) = server();
+    let mut app = join_app(port, &out);
+    let sent = ids(&mut app, &rx);
+    let at = |id| sent.iter().position(|&i| i == id).unwrap();
+    assert_eq!(sent.iter().filter(|&&i| i == PLUGIN_MESSAGE).count(), 1);
+    assert!(at(CLIENT_SETTINGS) < at(PLUGIN_MESSAGE), "{sent:?}");
 }

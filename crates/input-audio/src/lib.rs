@@ -144,6 +144,8 @@ pub struct InputState {
     look: (f32, f32),
     /// `GuiChat.inputField`.
     chat: Option<TextField>,
+    /// `chatVisibility != HIDDEN`: the chat and command keys open the chat only then.
+    chat_allowed: bool,
     gui_size: (i32, i32),
     shift_down: bool,
     autocomplete: autocomplete::Autocomplete,
@@ -188,6 +190,7 @@ impl InputState {
             scroll_px: 0.0,
             look: (0.0, 0.0),
             chat: None,
+            chat_allowed: true,
             gui_size: DEFAULT_GUI_SIZE,
             shift_down: false,
             submit: None,
@@ -206,6 +209,11 @@ impl InputState {
 
     pub fn set_sensitivity(&mut self, sensitivity: f32) {
         self.sensitivity = sensitivity;
+    }
+
+    /// `Minecraft.runTick`: `chatVisibility != HIDDEN` gates both chat keys.
+    pub fn set_chat_allowed(&mut self, allowed: bool) {
+        self.chat_allowed = allowed;
     }
 
     /// `options.txt` `pauseOnLostFocus`.
@@ -437,6 +445,7 @@ impl InputState {
             return;
         }
         match bind {
+            _ if !self.chat_allowed => {}
             Bind::Chat => self.open_chat(String::new()),
             Bind::Command => self.open_chat("/".into()),
             _ => {}
@@ -936,6 +945,18 @@ mod tests {
         assert_eq!(s.take_chat_submit().as_deref(), Some("hi"));
         assert_eq!(s.take_chat_submit(), None);
         assert!(s.wants_cursor_grab());
+    }
+
+    #[test]
+    fn hidden_chat_ignores_chat_and_command_keys() {
+        let mut s = InputState::default();
+        s.set_chat_allowed(false);
+        press(&mut s, KeyCode::KeyT);
+        press(&mut s, KeyCode::Slash);
+        assert_eq!(s.chat_input(), None);
+        s.set_chat_allowed(true);
+        press(&mut s, KeyCode::KeyT);
+        assert_eq!(s.chat_input(), Some(""));
     }
 
     #[test]

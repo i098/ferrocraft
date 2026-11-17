@@ -341,6 +341,7 @@ impl App {
         let s = &self.ui.settings;
         self.input.set_sensitivity(s.mouse_sensitivity);
         self.input.set_pause_on_lost_focus(s.pause_on_lost_focus);
+        self.input.set_chat_allowed(s.chat_visibility != 2);
         self.input
             .set_bindings(input_audio::KeyBindings::from_options_txt(&s.to_text()));
         if let Some(sound) = &mut self.sound {

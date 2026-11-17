@@ -1437,10 +1437,14 @@ fn draw_name_tags(
     draws: &[EntityDraw],
     (w, h): (u32, u32),
     factor: f32,
+    team_only: bool,
 ) {
     let Some(player) = &game.player else { return };
     let vp = render::view_proj(cam, w as f32 / h as f32);
     for tag in render::nametags(draws, player.pos, &vp, cam.fov_deg, w as f32, h as f32) {
+        if team_only && !tag.team {
+            continue;
+        }
         let blocked = game.line_blocked(cam.pos, tag.anchor);
         // A sneaking tag keeps the depth test: blocks hide its plate and faint text too.
         if tag.sneaking && blocked {

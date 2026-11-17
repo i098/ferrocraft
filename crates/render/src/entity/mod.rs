@@ -1841,6 +1841,9 @@ pub struct NameTag {
     pub scale: f32,
     pub anchor: [f64; 3],
     pub sneaking: bool,
+    /// A player on a team: `LivingEntityRenderer.shouldRenderNameTag` returns the team's visibility
+    /// before it reaches the `isGuiEnabled` test, so F1 does not hide this tag.
+    pub team: bool,
     pub text: String,
 }
 
@@ -1939,6 +1942,7 @@ impl TagView<'_> {
             scale: 0.026_666_67 * self.px_per_block / c[3],
             anchor,
             sneaking: d.sneaking,
+            team: matches!(d.class, Class::Player { .. }) && d.team_tag.shown.is_some(),
             text: text.into(),
         })
     }

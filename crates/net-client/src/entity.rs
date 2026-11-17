@@ -372,7 +372,24 @@ fn player_list(action: &PlayerListAction) -> Vec<EntityEvent> {
 }
 
 impl Session {
-    /// C05 `PlayerLook`: `EntityPlayerSP.onUpdate` sends it instead of a position while riding.
+    /// C03 `Player`: only the ground flag; sent on a tick without a move or a turn.
+    pub fn send_player(&mut self, on_ground: bool) -> io::Result<()> {
+        send(&self.writer, sb::Packet::from(sb::Player { on_ground }))
+    }
+
+    /// C04 `PlayerPosition`.
+    pub fn send_player_position(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        on_ground: bool,
+    ) -> io::Result<()> {
+        let p = sb::PlayerPosition { x, y, z, on_ground };
+        send(&self.writer, sb::Packet::from(p))
+    }
+
+    /// C05 `PlayerLook`: sent on a turn without a move, and instead of a position while riding.
     pub fn send_look(&mut self, yaw: f32, pitch: f32, on_ground: bool) -> io::Result<()> {
         let p = sb::PlayerLook {
             yaw,

@@ -1,5 +1,5 @@
-//! `EntityPlayerSP.onUpdateWalkingPlayer` and `updateEntityActionState` while the camera is another entity,
-//! and the `handlePlayerMove` reply to S08.
+//! The packets `EntityPlayerSP.onUpdate`, `onUpdateWalkingPlayer` and `updateEntityActionState` send each tick
+//! (including while the camera is another entity), and the `handlePlayerMove` reply to S08.
 use crate::app::App;
 use crate::args::Args;
 use crate::link::Link;
@@ -15,7 +15,11 @@ use std::time::{Duration, Instant};
 use winit::keyboard::KeyCode;
 
 const CHAT: u8 = 0x01;
+const PLAYER: u8 = 0x03;
+const POS: u8 = 0x04;
+const LOOK: u8 = 0x05;
 const POSE: u8 = 0x06;
+const STEER: u8 = 0x0C;
 const ENTITY_ACTION: u8 = 0x0B;
 pub(super) const OWN_ID: i32 = 1;
 pub(super) const OTHER_ID: i32 = 7;
@@ -191,7 +195,7 @@ fn camera_packet_stops_and_resumes_movement_packets() {
     send(&out, camera(OWN_ID));
     pump_until(&mut app, |a| a.game.camera.is_none());
     let (ids, moved) = tick(&mut app, &rx);
-    assert_eq!(ids, [POSE]);
+    assert_eq!(ids, [POS]);
     assert_ne!(moved, [0.0, 0.0]);
 }
 
@@ -231,4 +235,104 @@ fn position_packet_keeps_ground_state_and_echoes_wrapped_yaw_off_ground() {
     assert!(p.on_ground, "the player keeps its own flag");
     assert_eq!(p.vel[0], vx, "relative x keeps its velocity");
     assert_eq!((p.vel[1], p.vel[2]), (0.0, 0.0));
+}
+
+/// A player standing on a block in a loaded chunk, with the screen closed and no key held.
+fn idle_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
+    let mut app = joined_app(port, out, rx);
+    let mut chunk = world::chunk::Chunk::new(0, 0);
+    chunk.set_block(0, 63, 0, 1 << 4);
+    app.game.store.insert(chunk);
+    app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
+    let m = metrics!(app);
+    app.ui.close(&m);
+    app.input.set_screen_open(false);
+    app
+}
+
+/// `onUpdateWalkingPlayer`: the packet type follows what changed since the last position and look sent.
+#[test]
+fn movement_packet_type_follows_what_changed() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    let ids = |app: &mut App| tick(app, &rx).0;
+    assert_eq!(ids(&mut app), [POS], "first tick reports the position");
+    for n in 0..20 {
+        assert_eq!(ids(&mut app), [PLAYER], "still tick {n}");
+    }
+    assert_eq!(ids(&mut app), [POS], "the 20-tick refresh");
+    assert_eq!(ids(&mut app), [PLAYER]);
+    app.game.player.as_mut().unwrap().yaw = 30.0;
+    assert_eq!(ids(&mut app), [LOOK]);
+    app.input.on_key(KeyCode::KeyW, true, None);
+    assert_eq!(ids(&mut app), [POS], "walking");
+    app.game.player.as_mut().unwrap().yaw = 60.0;
+    assert_eq!(ids(&mut app), [POSE]);
+}
+
+/// `onUpdateWalkingPlayer` sends the sprint change before the sneak change.
+#[test]
+fn sprint_goes_before_sneak() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    app.game.player.as_mut().unwrap().sprinting = true;
+    app.send_state();
+    let actions: Vec<_> = sent_frames(&mut app, &rx)
+        .iter()
+        .map(|f| (f[0], f[2]))
+        .collect();
+    assert_eq!(actions, [(ENTITY_ACTION, 3), (ENTITY_ACTION, 0)]);
+}
+
+/// While riding `onUpdate` sends the look and the steering, never an `EntityAction`.
+#[test]
+fn riding_sends_no_entity_action() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    app.game.vehicle = Some(OTHER_ID);
+    let (ids, _) = tick(&mut app, &rx);
+    assert_eq!(ids, [LOOK, STEER]);
+}
+
+/// `handlePlayerMove` echoes `C06` without touching the sent position, so the next tick reports it.
+#[test]
+fn packet_after_a_teleport_reports_the_new_position() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    tick(&mut app, &rx);
+    assert_eq!(tick(&mut app, &rx).0, [PLAYER]);
+    let tp = cb::PlayerPositionAndLook {
+        x: 5.5,
+        y: 64.0,
+        z: 0.5,
+        yaw: 0.0,
+        pitch: 0.0,
+        flags: 0,
+    };
+    send(&out, tp.into());
+    pump_until(&mut app, |a| a.game.player.as_ref().unwrap().pos[0] == 5.5);
+    assert_eq!(sent_so_far(&mut app, &rx), [POSE], "the echo");
+    assert_eq!(tick(&mut app, &rx).0, [POS]);
+}
+
+/// `ClientChunkCache.hasChunk` always returns true, so `onUpdate` sends over an unloaded chunk.
+#[test]
+fn packets_are_sent_over_an_unloaded_chunk() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.player.as_mut().unwrap().pos = [100.5, 64.0, 100.5];
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    let ids = |app: &mut App| tick(app, &rx).0;
+    assert_eq!(
+        ids(&mut app),
+        [ENTITY_ACTION, POS],
+        "start sneak, then the position"
+    );
+    for n in 0..3 {
+        assert_eq!(ids(&mut app), [PLAYER], "still tick {n}");
+    }
+    app.game.player.as_mut().unwrap().yaw = 30.0;
+    assert_eq!(ids(&mut app), [LOOK]);
 }

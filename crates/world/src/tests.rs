@@ -41,6 +41,8 @@ struct Scenario {
     steps: Vec<(u32, Input)>,
     /// Depth Strider level of the worn boots.
     boots: i32,
+    /// Spectator body: `Entity.noClip`, never on the ground.
+    no_clip: bool,
 }
 
 impl Scenario {
@@ -52,6 +54,7 @@ impl Scenario {
             yaw: 0.0,
             steps,
             boots: 0,
+            no_clip: false,
         }
     }
 
@@ -63,6 +66,11 @@ impl Scenario {
         let [x, y, z] = self.start;
         writeln!(s, "start {x:?} {y:?} {z:?} {:?}", self.yaw).unwrap();
         writeln!(s, "boots {}", self.boots).unwrap();
+        // The real `pushAwayFrom` runs at every tick, as `LocalClientPlayerEntity` does.
+        s.push_str("pushout\n");
+        if self.no_clip {
+            s.push_str("noclip\n");
+        }
         for (n, i) in &self.steps {
             writeln!(
                 s,
@@ -87,6 +95,7 @@ impl Scenario {
         };
         let mut p = Player::new(self.start, self.yaw);
         p.depth_strider = self.boots;
+        p.no_clip = self.no_clip;
         let mut out = Vec::new();
         for (n, input) in &self.steps {
             for _ in 0..*n {
@@ -527,4 +536,110 @@ fn sneak_walk_on_slime_is_not_slowed() {
 #[test]
 fn sprint_jumping_on_slime() {
     slime_floor(vec![(80, input(1.0, 0.0, true, true))]).check("slime jump");
+}
+
+/// A player at (0.5, 64.5, 0.5) in a two-high stone column; only the cell at x = -1 is open.
+fn walled_in() -> Scenario {
+    let mut s = Scenario::new(vec![(8, IDLE)]);
+    s.start = [0.5, 64.5, 0.5];
+    for (x, z) in [(0, 0), (1, 0), (0, -1), (0, 1)] {
+        for y in [64, 65] {
+            s.blocks.push(((x, y, z), STONE));
+        }
+    }
+    s
+}
+
+#[test]
+fn player_in_stone_is_pushed_to_the_open_side() {
+    let s = walled_in();
+    let world = TestWorld {
+        floor: s.floor,
+        blocks: s.blocks.iter().copied().collect(),
+    };
+    let mut p = Player::new(s.start, 0.0);
+    p.push_out_of_blocks_at_corners(&world);
+    assert_eq!(p.vel, [f64::from(-0.1_f32), 0.0, 0.0]);
+    s.check("pushed out of stone");
+}
+
+#[test]
+fn player_in_stone_is_pushed_north_when_west_is_closed() {
+    // West and east are stone; north and south are open, and north is the nearer (0.29) from most corners.
+    let mut s = walled_in();
+    s.blocks
+        .retain(|((x, _, z), _)| (*x, *z) != (0, -1) && (*x, *z) != (0, 1));
+    s.blocks
+        .extend([((-1, 64, 0), STONE), ((-1, 65, 0), STONE)]);
+    s.check("pushed out of stone to the north");
+}
+
+/// A spectator in flight through a wall (z = 3, high) and down through the stone floor.
+#[test]
+fn spectator_flies_through_walls_and_floor_like_the_real_player() {
+    let fly = |forward, sneak| Input {
+        forward,
+        sneak,
+        fly_speed: Some(0.05),
+        ..IDLE
+    };
+    let mut s = Scenario::new(vec![
+        (3, fly(0.0, false)),
+        (25, fly(1.0, false)),
+        (40, fly(0.0, true)),
+        (5, fly(0.0, false)),
+    ]);
+    s.start = [0.5, 70.0, 0.5];
+    s.no_clip = true;
+    for y in 64..80 {
+        for x in -1..=1 {
+            s.blocks.push(((x, y, 3), STONE));
+        }
+    }
+    s.check("spectator");
+}
+
+#[test]
+fn no_clip_moves_the_box_by_the_full_delta() {
+    let wall = TestWorld {
+        floor: STONE,
+        blocks: (-5..5)
+            .flat_map(|y| (0..3).map(move |z| ((1, 60 + y, z), STONE)))
+            .collect(),
+    };
+    let start = [0.5, 64.0, 0.5];
+    let mut p = Player::new(start, 0.0);
+    p.no_clip = true;
+    let motion = [0.25, -0.5, 0.125];
+    for _ in 0..40 {
+        p.on_ground = false;
+        p.move_entity(&wall, motion);
+    }
+    assert_eq!(p.pos, [10.5, 44.0, 5.5]);
+    assert!(!p.on_ground && !p.collided_horizontally && !p.collided_vertically);
+}
+
+/// An empty world with boat boxes in it.
+struct Boats(Vec<[f64; 6]>);
+
+impl World for Boats {
+    fn block(&self, _: i32, _: i32, _: i32) -> u16 {
+        0
+    }
+
+    fn entity_boxes(&self) -> &[[f64; 6]] {
+        &self.0
+    }
+}
+
+#[test]
+fn player_above_a_boat_stands_on_it() {
+    let boat = [-0.75, 62.0, -0.75, 0.75, 62.6, 0.75];
+    let world = Boats(vec![boat]);
+    let mut p = Player::new([0.0, 66.0, 0.0], 0.0);
+    for _ in 0..40 {
+        p.tick(&world, IDLE);
+    }
+    assert!(p.on_ground);
+    assert_eq!(p.pos[1], 62.6);
 }

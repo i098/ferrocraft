@@ -17,6 +17,7 @@ import net.minecraft.flat.Block;
 import net.minecraft.flat.Blocks;
 import net.minecraft.flat.BlockState;
 import net.minecraft.flat.PlayerEntity;
+import net.minecraft.flat.LocalClientPlayerEntity;
 import net.minecraft.flat.BlockPos;
 import net.minecraft.flat.Profiler;
 import net.minecraft.flat.World;
@@ -43,6 +44,8 @@ import net.minecraft.flat.SlimeEntity;
  *   start <x> <y> <z> <yaw>           spawn the player and build the world
  *   tick <n> <fwd> <strafe> <jump> <sprint> <fly speed, 0 = not flying> <sneak> <using item>
  *                                 a flying player also gets the vertical keys of EntityPlayerSP.onLivingUpdate
+ *   pushout                       each tick, the real LocalClientPlayerEntity.pushAwayFrom runs at the four corners of the box
+ *   noclip                        the player moves with noClip set and onGround false each tick, as a spectator does
  *   state <x> <y> <z> <id> <meta>  like block, any block state of 1.8.9; prints ok, or bad for a meta the block rejects
  *   boots <level>                 wear leather boots with Depth Strider <level> (0 = none); needs "start"
  *   other <x> <y> <z>             spawn a still second player; must come after "start"
@@ -82,6 +85,11 @@ public class Harness {
     static final Map<Long, BlockState> EXTRA = new HashMap<>();
     static Block floor;
     static World world;
+    /** `pushout`: run the real `LocalClientPlayerEntity.pushAwayFrom` at its four corners each tick. */
+    static boolean pushOut;
+    /** `noclip`: the player is a spectator body (`Entity.noClip`, never on the ground). */
+    static boolean noClip;
+    static LocalClientPlayerEntity pusher;
 
     static String fromHex(String hexText) {
         byte[] raw = new byte[hexText.length() / 2];
@@ -658,6 +666,44 @@ public class Harness {
         };
     }
 
+    /**
+     * The four `pushAwayFrom` calls of `LocalClientPlayerEntity.onLivingUpdate` (bytecode offsets 376-546), on the real method.
+     * A client player needs a running game, so a bare instance borrows the harness player's world, flags and velocity.
+     */
+    static void pushOutOfBlocks(PlayerEntity player) throws Exception {
+        if (pusher == null) {
+            Field unsafe = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            unsafe.setAccessible(true);
+            pusher = (LocalClientPlayerEntity) ((sun.misc.Unsafe) unsafe.get(null)).allocateInstance(LocalClientPlayerEntity.class);
+        }
+        java.lang.reflect.Method push = LocalClientPlayerEntity.class.getDeclaredMethod("pushAwayFrom", double.class, double.class, double.class);
+        push.setAccessible(true);
+        pusher.world = player.world;
+        pusher.noClip = player.noClip;
+        pusher.velocityX = player.velocityX;
+        pusher.velocityZ = player.velocityZ;
+        double w = (double) player.width * 0.35D;
+        double y = player.getShape().minY + 0.5D;
+        push.invoke(pusher, player.x - w, y, player.z + w);
+        push.invoke(pusher, player.x - w, y, player.z - w);
+        push.invoke(pusher, player.x + w, y, player.z - w);
+        push.invoke(pusher, player.x + w, y, player.z + w);
+        player.velocityX = pusher.velocityX;
+        player.velocityZ = pusher.velocityZ;
+    }
+
+    /** What runs between the tick's input and `mobTick`: the spectator flags, water, the pushes out of blocks. */
+    static void beforeMobTick(PlayerEntity player) throws Exception {
+        if (noClip) {
+            player.noClip = true;
+            player.onGround = false;
+        }
+        player.checkWaterCollisions();
+        if (pushOut) {
+            pushOutOfBlocks(player);
+        }
+    }
+
     static String hex(double d) {
         return String.format("%016x", Double.doubleToRawLongBits(d));
     }
@@ -683,6 +729,8 @@ public class Harness {
                 continue;
             }
             floor = Blocks.STONE;
+            pushOut = false;
+            noClip = false;
             world = null;
             EXTRA.clear();
             CHUNKS.clear();
@@ -721,6 +769,12 @@ public class Harness {
                         }
                     };
                     player.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), Float.parseFloat(t[4]), 0f);
+                    break;
+                case "pushout":
+                    pushOut = true;
+                    break;
+                case "noclip":
+                    noClip = true;
                     break;
                 case "boots": {
                     net.minecraft.flat.ItemStack boots = new net.minecraft.flat.ItemStack(net.minecraft.flat.Items.LEATHER_BOOTS);
@@ -795,7 +849,7 @@ public class Harness {
                             }
                         }
                         // Entity.onEntityUpdate runs handleWaterMovement before onLivingUpdate.
-                        player.checkWaterCollisions();
+                        beforeMobTick(player);
                         player.mobTick();
                         System.out.println(hex(player.x) + " " + hex(player.y) + " " + hex(player.z) + " "
                             + hex(player.velocityX) + " " + hex(player.velocityY) + " " + hex(player.velocityZ) + " "

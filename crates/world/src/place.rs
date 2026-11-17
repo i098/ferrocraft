@@ -73,7 +73,7 @@ fn is_slab(id: u16) -> bool {
 /// `Block.isNormalCube`: opaque full cube that cannot power (redstone block only; redstone ore
 /// does not override `canProvidePower`). Torches use `World.isBlockNormalCube(pos, true)`
 /// instead: plain `opaque_cube`.
-fn normal_cube(state: u16) -> bool {
+pub(crate) fn normal_cube(state: u16) -> bool {
     let id = state >> 4;
     opaque_cube(id) && id != 152
 }

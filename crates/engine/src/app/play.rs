@@ -787,18 +787,6 @@ impl App {
         }
     }
 
-    /// `ClientPlayNetworkHandler.handlePlayerMove` answers a teleport with `C06` and `onGround` false, straight
-    /// to the connection: the sent-position state stays, so the next tick reports the new position.
-    pub(super) fn send_teleport_echo(&mut self) {
-        let Some(p) = &self.game.player else { return };
-        let [x, y, z] = p.pos;
-        let (yaw, pitch) = (p.yaw, self.game.pitch);
-        if let Some(s) = self.link.session() {
-            let r = s.send_position_look(x, y, z, yaw, pitch, false);
-            self.send_result(r);
-        }
-    }
-
     /// `EntityPlayerSP.onUpdate` while riding: the look, then `PacketInput` with the steering keys; sneak asks
     /// the server to dismount. The vehicle's own movement stays with the server.
     fn send_riding(&mut self, input: world::Input) {

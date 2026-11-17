@@ -254,6 +254,21 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("death.fell.accident.vines", "%1$s fell off some vines"),
     ("death.fell.accident.water", "%1$s fell out of the water"),
     ("death.fell.killer", "%1$s was doomed to fall"),
+    ("container.inventory", "Inventory"),
+    ("container.hopper", "Item Hopper"),
+    ("container.crafting", "Crafting"),
+    ("container.dispenser", "Dispenser"),
+    ("container.dropper", "Dropper"),
+    ("container.furnace", "Furnace"),
+    ("container.enchant", "Enchant"),
+    ("container.repair", "Repair & Name"),
+    ("container.brewing", "Brewing Stand"),
+    ("container.chest", "Chest"),
+    ("container.chestDouble", "Large Chest"),
+    ("container.minecart", "Minecart"),
+    ("container.enderchest", "Ender Chest"),
+    ("container.beacon", "Beacon"),
+    ("entity.Villager.name", "Villager"),
 ];
 
 fn translation(key: &str) -> Option<&'static str> {
@@ -339,6 +354,15 @@ mod tests {
     fn array_siblings_inherit_first_style() {
         let runs = styled(r#"[{"text":"a","color":"red"},"b"]"#);
         assert_eq!(formatted_text(&runs), "\u{a7}ca\u{a7}r\u{a7}cb\u{a7}r");
+    }
+
+    #[test]
+    fn container_titles_use_the_en_us_value() {
+        assert_eq!(
+            plain_text(r#"{"translate":"container.chestDouble"}"#),
+            "Large Chest"
+        );
+        assert_eq!(plain_text(r#"{"translate":"container.repair"}"#), "Repair & Name");
     }
 
     #[test]

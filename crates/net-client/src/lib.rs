@@ -180,7 +180,7 @@ pub enum NetEvent {
         window: u8,
         items: Vec<world::inventory::Slot>,
     },
-    /// S2D: `title` is plain text; an untranslated key such as `container.chest` stays the key.
+    /// S2D: `title` is plain text.
     OpenWindow {
         id: u8,
         kind: String,

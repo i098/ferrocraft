@@ -262,6 +262,19 @@ impl App {
         playing: bool,
         host: Option<ferrocraft_modhost::PlayerInput>,
     ) -> world::Input {
+        if let Some(sprinting) = self.game.sprint_sync.take() {
+            self.input.set_sprint_flag(sprinting);
+        }
+        let input = self.read_movement(playing, host);
+        self.sync_sprint_modifier();
+        input
+    }
+
+    fn read_movement(
+        &mut self,
+        playing: bool,
+        host: Option<ferrocraft_modhost::PlayerInput>,
+    ) -> world::Input {
         if !(playing && self.game.camera.is_none()) {
             self.input.set_host_sneak(host.map(|h| h.sneaking));
             return world::Input::default();
@@ -280,6 +293,13 @@ impl App {
                     self.use_ticks > 0,
                 )
             })
+    }
+
+    /// A local `setSprinting` call changes the speed attribute's sprint modifier.
+    fn sync_sprint_modifier(&mut self) {
+        if let Some(sprinting) = self.input.take_sprint_change() {
+            self.game.speed.set_sprint(sprinting);
+        }
     }
 
     fn tick_once(&mut self) {
@@ -848,6 +868,7 @@ impl App {
         if dig::attack_slowdown(g.inv.held_stack(), p.sprinting, is_player, &mut p.vel) {
             p.sprinting = false;
             self.input.stop_sprint();
+            self.sync_sprint_modifier();
         }
     }
 
@@ -970,7 +991,7 @@ impl App {
                 f *= 1.1;
             }
             // `getEntityAttribute(movementSpeed).getAttributeValue()`: speed potions and the sprint boost.
-            let speed = self.game.speed.value(p.sprinting);
+            let speed = self.game.speed.value();
             let walk = self.game.walk_speed;
             f = (f64::from(f) * ((speed / f64::from(walk) + 1.0) / 2.0)) as f32;
             if walk == 0.0 || !f.is_finite() {

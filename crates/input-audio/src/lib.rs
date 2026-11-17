@@ -127,6 +127,8 @@ pub struct InputState {
     ctrl_down: bool,
     f3_down: bool,
     sprinting: bool,
+    /// The last `setSprinting` call, for the speed attribute's sprint modifier; see `take_sprint_change`.
+    sprint_change: Option<bool>,
     sprint_timer: u8,
     /// Blindness: the sprint latch cannot start (`EntityPlayerSP.onLivingUpdate`); a running sprint goes on.
     pub blind: bool,
@@ -171,6 +173,7 @@ impl InputState {
             ctrl_down: false,
             f3_down: false,
             sprinting: false,
+            sprint_change: None,
             sprint_timer: 0,
             blind: false,
             host_sneak: None,
@@ -636,7 +639,7 @@ impl InputState {
         self.sprint_timer = self.sprint_timer.saturating_sub(1);
         self.update_sprint(on_ground, can_sprint && full && !self.blind, sprint_key);
         if self.sprinting && (!full || collided || !can_sprint) {
-            self.sprinting = false;
+            self.set_sprinting(false);
         }
         self.was_full_forward = full;
         self.was_sneaking = sneak;
@@ -656,7 +659,9 @@ impl InputState {
     pub fn movement_from_host(&mut self, sprint: bool, sneak: bool) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
         self.host_sneak = Some(sneak);
-        self.sprinting = sprint;
+        if sprint != self.sprinting {
+            self.set_sprinting(sprint);
+        }
         self.was_full_forward = self.is_held(Bind::Forward) && !self.is_held(Bind::Back) && !sneak;
         self.was_sneaking = sneak;
         world::Input {
@@ -677,7 +682,23 @@ impl InputState {
 
     /// `setSprinting(false)`: a held sprint key starts the sprint again on the next `movement` call.
     pub fn stop_sprint(&mut self) {
-        self.sprinting = false;
+        self.set_sprinting(false);
+    }
+
+    /// `EntityLivingBase.setSprinting`: the flag and the speed modifier change together.
+    fn set_sprinting(&mut self, sprinting: bool) {
+        self.sprinting = sprinting;
+        self.sprint_change = Some(sprinting);
+    }
+
+    /// The newest `setSprinting` argument since the last call; the caller applies it with `Speed::set_sprint`.
+    pub fn take_sprint_change(&mut self) -> Option<bool> {
+        self.sprint_change.take()
+    }
+
+    /// An own S1C entity flag write (`handleEntityData`): sets the sprint flag, not the speed modifier.
+    pub fn set_sprint_flag(&mut self, sprinting: bool) {
+        self.sprinting = sprinting;
     }
 
     fn update_sprint(&mut self, on_ground: bool, can_start: bool, sprint_key: bool) {
@@ -686,11 +707,11 @@ impl InputState {
             if self.sprint_timer == 0 && !sprint_key {
                 self.sprint_timer = 7;
             } else {
-                self.sprinting = true;
+                self.set_sprinting(true);
             }
         }
         if !self.sprinting && can_start && sprint_key {
-            self.sprinting = true;
+            self.set_sprinting(true);
         }
     }
 
@@ -948,6 +969,19 @@ mod tests {
         assert!(!s.wants_cursor_grab());
         s.on_mouse_motion(10.0, 10.0);
         assert_eq!(s.take_look_delta(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn server_flag_write_clears_sprint_without_a_modifier_change() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(s.movement(true, false, true, false).sprint);
+        assert_eq!(s.take_sprint_change(), Some(true));
+        s.on_key(KeyCode::ControlLeft, false, None);
+        s.set_sprint_flag(false);
+        assert_eq!(s.take_sprint_change(), None);
+        assert!(!s.movement(true, false, true, false).sprint);
     }
 
     #[test]

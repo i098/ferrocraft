@@ -26,6 +26,7 @@ pub mod mob_anim;
 pub mod motion_sound;
 pub mod place;
 pub mod potion_brew;
+pub mod projectile;
 pub mod shape;
 pub mod squid;
 pub mod squish;

@@ -32,7 +32,7 @@ impl Kind {
             Kind::Player => (0.6, 1.8),
             Kind::ExperienceOrb | Kind::Painting => (0.5, 0.5),
             Kind::Object(2) => (0.25, 0.25),
-            Kind::Object(60 | 61 | 62 | 65 | 90) => (0.25, 0.25),
+            Kind::Object(60 | 61 | 62 | 65 | 73 | 75 | 90) => (0.25, 0.25),
             Kind::Object(78) => (0.5, 1.975),
             Kind::Object(1) => (1.5, 0.6),
             Kind::Object(51) => (2.0, 2.0),
@@ -294,6 +294,8 @@ pub struct Entity {
     pub squid: crate::squid::Squid,
     /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
     pub dragon: Option<Box<crate::mob_anim::Dragon>>,
+    /// Arrows, thrown objects, items, TNT, falling blocks and bobbers: the client-side flight state.
+    pub(crate) proj: crate::projectile::State,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -456,6 +458,7 @@ impl Entity {
             squish: crate::squish::Squish::default(),
             squid: crate::squid::Squid::new(id, yaw),
             dragon: (kind == Kind::Mob(63)).then(Box::default),
+            proj: Default::default(),
         }
     }
 
@@ -580,7 +583,13 @@ impl Entity {
         self.target.pos = raw.map(fixed);
         self.target.yaw = yaw;
         self.target.pitch = pitch;
-        self.target.steps = STEPS;
+        if crate::projectile::snaps(self.kind) {
+            // `Entity.lerpPositionAndAngles` of a non-living entity sets the pose at once.
+            (self.pos, self.yaw, self.pitch) = (self.target.pos, yaw, pitch);
+            self.target.steps = 0;
+        } else {
+            self.target.steps = STEPS;
+        }
     }
 
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
@@ -611,6 +620,8 @@ impl Entity {
             self.yaw += wrap(self.target.yaw - self.yaw) / k;
             self.pitch += (self.target.pitch - self.pitch) / k;
             self.target.steps -= 1;
+        } else {
+            crate::projectile::step(self, at);
         }
 
         // `EntityLivingBase.onUpdate` -> `updateLimbSwing`.
@@ -1171,9 +1182,10 @@ impl Entities {
                 let small = (to[0] - e.pos[0]).abs() < 0.03125
                     && (to[1] - e.pos[1]).abs() < 0.015625
                     && (to[2] - e.pos[2]).abs() < 0.03125;
+                let here = e.pos;
                 e.set_target(pos, angle(yaw), angle(pitch));
                 if small {
-                    e.target.pos = e.pos;
+                    (e.pos, e.target.pos) = (here, here);
                 }
                 e.on_ground = on_ground;
             }),

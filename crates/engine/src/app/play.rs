@@ -1559,12 +1559,10 @@ mod tests {
             vel: [0; 3],
             data: 0,
         });
-        g.entities.apply(EntityEvent::Teleport {
+        // A third of a block per tick toward +x: the client moves a pearl by its velocity (`ThrownEntity.tick`).
+        g.entities.apply(EntityEvent::Velocity {
             id: 7,
-            pos: [48, 2048, 16],
-            yaw: 0,
-            pitch: 0,
-            on_ground: false,
+            vel: [2667, 0, 0],
         });
         g.entities.tick();
         (g, Particles::new())

@@ -10,6 +10,7 @@ macro_rules! metrics {
 
 mod crumbs;
 mod crystal;
+mod equip;
 mod events;
 mod input;
 mod leash;
@@ -149,6 +150,8 @@ pub struct App {
     equip: (f32, f32, Option<HandItem>),
     /// `GameRenderer.skyDarkness`: the Wither's dimming of the lightmap and the fog.
     sky_darkness: sky_darkness::SkyDarkness,
+    /// `ItemInHandRenderer.itemInHand`: the stack the hand shows or is lowering.
+    hand_stack: world::inventory::Slot,
     /// `GuiDownloadingTerrain` stays until the first position packet.
     awaiting_terrain: bool,
     /// A server pack offer that arrived before that screen closed; the prompt opens once it has.
@@ -224,6 +227,7 @@ impl App {
             last_frame: Instant::now(),
             equip: (1.0, 1.0, None),
             sky_darkness: Default::default(),
+            hand_stack: None,
             awaiting_terrain: false,
             pending_pack: None,
             cursor: (0.0, 0.0),

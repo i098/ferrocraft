@@ -323,6 +323,9 @@ impl App {
             self.send_requests(reqs);
         }
         let playing = self.game.player.is_some() && !self.ui.is_open() && self.container.is_none();
+        if self.game.player.is_some() {
+            self.sync_held_slot();
+        }
         if playing {
             self.dig();
             self.use_tick();
@@ -875,6 +878,7 @@ impl App {
 
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
     fn dig(&mut self) {
+        self.sync_held_slot();
         let presses = std::mem::take(&mut self.attack_presses);
         if self.use_ticks > 0 {
             return;
@@ -987,7 +991,7 @@ impl App {
     /// `EntityRenderer.updateFovModifierHand` toward `AbstractClientPlayer.getFovModifier`.
     fn fov_tick(&mut self) {
         let mut f = 1.0_f32;
-        if let Some(p) = &self.game.player {
+        if self.game.player.is_some() {
             if self.game.abilities & 2 != 0 {
                 f *= 1.1;
             }
@@ -1045,6 +1049,7 @@ impl App {
             return;
         }
         self.use_delay = USE_DELAY;
+        self.sync_held_slot();
         let sneaking = self.input.sneaking();
         let Some((eye, yaw, pitch, skip, vehicle)) = self.view_ray(1.0) else {
             return;
@@ -1476,10 +1481,18 @@ impl App {
             return;
         }
         self.game.inv.held = n;
-        self.synced_held = n;
         self.use_ticks = 0;
-        let r = self.session_send(|s| s.held_item_change(n));
-        self.send_result(r);
+    }
+
+    /// `PlayerControllerMP.syncCurrentPlayItem`: C09 goes out when the slot differs from the last one sent.
+    /// `runTick`, attack, use and dig call it, so an S09 slot echoes on the next tick.
+    pub(super) fn sync_held_slot(&mut self) {
+        let held = self.game.inv.held;
+        if held != self.synced_held {
+            self.synced_held = held;
+            let r = self.session_send(|s| s.held_item_change(held));
+            self.send_result(r);
+        }
     }
 
     fn open_inventory(&mut self) {
@@ -1541,6 +1554,8 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod camera_packets;
+#[cfg(test)]
+mod held_slot;
 #[cfg(test)]
 mod transaction_packets;
 #[cfg(test)]

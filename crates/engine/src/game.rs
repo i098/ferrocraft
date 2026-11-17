@@ -514,8 +514,8 @@ impl Game {
     fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         let effect = match ev {
             NetEvent::HeldItem(slot) => {
-                self.held_replaced |= self.inv.held != slot.min(8);
-                self.inv.held = slot.min(8);
+                self.held_replaced |= self.inv.held != slot;
+                self.inv.held = slot;
                 None
             }
             NetEvent::SetSlot { window, slot, item } => {

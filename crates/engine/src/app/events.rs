@@ -457,7 +457,6 @@ impl App {
                 let r = self.session_send(|s| s.send_pack_status(hash, status));
                 self.send_result(r);
             }
-            NetEvent::HeldItem(n) => self.synced_held = (*n).min(8),
             NetEvent::Difficulty(d) => self.ui.difficulty = Some(*d),
             NetEvent::TabComplete(names) => {
                 if let Some(line) = self.input.tab_response(names, &metrics!(self)) {

@@ -4,11 +4,14 @@ use crate::app::App;
 use ferrocraft_protocol::play::clientbound as cb;
 use std::sync::mpsc::Receiver;
 use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
+use winit::keyboard::KeyCode;
 use world::inventory::ItemStack;
 
 const USE_ITEM: u8 = 0x08;
 const SWING: u8 = 0x0A;
 const RELEASE: u8 = 0x07;
+const ENTITY_ACTION: u8 = 0x0B;
+const CLIENT_STATUS: u8 = 0x16;
 
 fn hold(app: &mut App, id: i16) {
     let slot = 36 + usize::from(app.game.inv.held);
@@ -97,4 +100,33 @@ fn rod_click_sends_use_then_swing_and_swings_the_arm() {
     hold(&mut app, 267);
     app.use_item();
     assert_eq!(ids(&mut app, &rx), [USE_ITEM], "a sword does not swing");
+}
+
+/// `Minecraft.runTick`: the inventory key sends C16 action 2 before the screen opens; on a horse
+/// only the horse inventory request goes out.
+#[test]
+fn inventory_key_sends_the_status_then_opens() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    ids(&mut app, &rx);
+    app.input.on_key(KeyCode::KeyE, true, None);
+    app.handle_actions();
+    let frames = sent_frames(&mut app, &rx);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0][..], [CLIENT_STATUS, 2]);
+    assert!(app.container.is_some());
+}
+
+#[test]
+fn inventory_key_on_a_horse_sends_only_the_horse_request() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.vehicle = Some(super::camera_packets::OTHER_ID);
+    ids(&mut app, &rx);
+    app.input.on_key(KeyCode::KeyE, true, None);
+    app.handle_actions();
+    let frames = sent_frames(&mut app, &rx);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0][..], [ENTITY_ACTION, OWN_ID as u8, 6, 0]);
+    assert!(app.container.is_none());
 }

@@ -1,3 +1,13 @@
+    /// `C16PacketClientStatus(OPEN_INVENTORY_ACHIEVEMENT)`: the inventory key, sent before the screen opens.
+    pub fn open_inventory_status(&mut self) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::ClientStatus {
+                action_id: VarInt(2),
+            }),
+        )
+    }
+
 //! Client session for Minecraft 1.8.9 (protocol 47): login (offline, or online with an [`Auth`]
 //! from the launcher), then a reader thread that answers keepalive and turns play packets into
 //! [`NetEvent`] values.

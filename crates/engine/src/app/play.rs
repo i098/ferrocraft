@@ -1523,6 +1523,8 @@ impl App {
             let r = self.session_send(|s| s.entity_action(id, 6, 0));
             self.send_result(r);
         } else {
+            let r = self.session_send(|s| s.open_inventory_status());
+            self.send_result(r);
             self.container = Some(ContainerScreen::new(
                 &self.game.inv,
                 self.ui.width,

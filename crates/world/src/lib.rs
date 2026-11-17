@@ -140,6 +140,8 @@ pub struct Player {
     pub jump_boost: f32,
     /// `EnchantmentHelper.getDepthStriderLevel`: the highest Depth Strider level on the worn armor.
     pub depth_strider: i32,
+    /// `getChunk(pos).isLoaded()`: false for the empty chunk that stands in for a missing one.
+    pub chunk_loaded: bool,
     jump_movement_factor: f32,
     jump_ticks: i32,
     /// `Entity.inWater`, set by `handleWaterMovement` at the start of each tick.
@@ -176,6 +178,7 @@ impl Player {
             speed_attr: None,
             jump_boost: 0.0,
             depth_strider: 0,
+            chunk_loaded: true,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
             in_water: false,
@@ -352,7 +355,14 @@ impl Player {
         if self.collided_horizontally && self.is_climbing(world) {
             self.vel[1] = 0.2;
         }
-        self.vel[1] -= 0.08;
+        // `LivingEntity.travel`: a client without the loaded chunk under the player sinks at -0.1 (0 at y <= 0).
+        self.vel[1] = if self.chunk_loaded {
+            self.vel[1] - 0.08
+        } else if self.pos[1] > 0.0 {
+            -0.1
+        } else {
+            0.0
+        };
         self.vel[1] *= f64::from(0.98_f32);
         self.vel[0] *= f64::from(friction);
         self.vel[2] *= f64::from(friction);

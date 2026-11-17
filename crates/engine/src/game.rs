@@ -819,7 +819,9 @@ impl Game {
             );
             p.yaw += turn[0];
             self.pitch += turn[1];
-        } else if self.store.get(cx, cz).is_some() {
+        } else {
+            // `ClientChunkCache.hasChunk` is always true, so the player ticks; only `isLoaded` differs.
+            p.chunk_loaded = self.store.get(cx, cz).is_some();
             let flying = self.abilities & 2 != 0;
             let input = world::Input {
                 fly_speed: flying.then_some(self.fly_speed),
@@ -1709,5 +1711,42 @@ mod tests {
         assert!(swim(Some(8), 1) > bare && swim(Some(8), 1) < worn);
         assert_eq!(swim(Some(36), 3), bare, "a hotbar stack is not armor");
         assert_eq!(swim(Some(5), 3), worn, "any armor slot counts");
+    }
+
+    fn unloaded_player(y: f64) -> Game {
+        let mut g = Game::new();
+        g.player = Some(world::Player::new([0.5, y, 0.5], 0.0));
+        g
+    }
+
+    #[test]
+    fn player_sinks_in_an_unloaded_chunk_and_rests_at_y_0() {
+        // `LivingEntity.travel`: no loaded chunk gives a vertical speed of -0.1, times 0.98F.
+        let mut g = unloaded_player(80.0);
+        g.tick(IDLE);
+        assert_eq!(g.player.as_ref().unwrap().pos[1], 80.0);
+        for n in 1..=5 {
+            g.tick(IDLE);
+            let y = g.player.as_ref().unwrap().pos[1];
+            assert!((y - (80.0 - 0.098 * f64::from(n))).abs() < 1e-5, "tick {n}: {y}");
+        }
+        let mut g = unloaded_player(0.0);
+        for _ in 0..5 {
+            g.tick(IDLE);
+        }
+        assert_eq!(g.player.as_ref().unwrap().pos[1], 0.0);
+    }
+
+    #[test]
+    fn horizontal_input_moves_the_player_in_an_unloaded_chunk() {
+        let mut g = unloaded_player(80.0);
+        let go = Input {
+            forward: 1.0,
+            ..IDLE
+        };
+        for _ in 0..5 {
+            g.tick(go);
+        }
+        assert!(g.player.as_ref().unwrap().pos[2] > 0.5);
     }
 }

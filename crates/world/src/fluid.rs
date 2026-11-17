@@ -10,7 +10,7 @@ fn floor(v: f64) -> i32 {
     v.floor() as i32
 }
 
-fn is_water(id: u16) -> bool {
+pub(crate) fn is_water(id: u16) -> bool {
     matches!(id, 8 | 9)
 }
 

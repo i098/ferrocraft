@@ -190,6 +190,19 @@ impl Player {
         p
     }
 
+    /// `Entity.updatePositionAndAngles` as `handlePlayerMove` calls it: position, yaw, box; velocity
+    /// is zeroed on the axes that are not relative (`keep_vel`). Every other field stays.
+    pub fn teleport(&mut self, pos: [f64; 3], yaw: f32, keep_vel: [bool; 3]) {
+        for (v, keep) in self.vel.iter_mut().zip(keep_vel) {
+            if !keep {
+                *v = 0.0;
+            }
+        }
+        // `Entity.setRotation`
+        self.yaw = yaw % 360.0;
+        self.set_position(pos);
+    }
+
     /// `Entity.setPosition`.
     fn set_position(&mut self, pos: [f64; 3]) {
         self.pos = pos;

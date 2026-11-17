@@ -705,9 +705,13 @@ impl Game {
             }
         }
         let yaw = if rel(3) { old_yaw + yaw } else { yaw };
-        self.pitch = if rel(4) { self.pitch + pitch } else { pitch };
-        // `Player::new` rebuilds the private bounding box, which a bare `pos` write would not.
-        self.player = Some(Player::new(at, yaw));
+        // `Entity.setRotation`: both angles wrap with `% 360.0f`.
+        self.pitch = (if rel(4) { self.pitch + pitch } else { pitch }) % 360.0;
+        let keep_vel = [rel(0), rel(1), rel(2)];
+        match &mut self.player {
+            Some(p) => p.teleport(at, yaw, keep_vel),
+            None => self.player = Some(Player::new(at, yaw % 360.0)),
+        }
         self.prev_pos = at;
         self.teleported = true;
     }

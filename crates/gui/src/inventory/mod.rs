@@ -5,6 +5,7 @@
 //! container is open, feeds it mouse and key events in GUI units, and sends the returned
 //! [`Request`]s to the server.
 
+mod attributes;
 mod creative;
 pub mod dials;
 pub mod icons;

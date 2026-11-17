@@ -62,7 +62,14 @@ impl TitleState {
                 self.fade_out = 0;
                 self.timer = 0;
             }
-            4 => *self = TitleState::default(),
+            4 => {
+                // displayTitle("", "", -1, -1, -1): a non-null title restarts the timer with the old
+                // times and leaves the subtitle; then func_175177_a resets the times to 10/70/20.
+                self.title.clear();
+                self.timer = self.fade_in + self.stay + self.fade_out;
+                let d = TitleState::default();
+                (self.fade_in, self.stay, self.fade_out) = (d.fade_in, d.stay, d.fade_out);
+            }
             _ => {}
         }
     }
@@ -109,5 +116,23 @@ impl TitleState {
         gui.text(&self.subtitle, x as f32, 5.0, color);
         gui.pop();
         gui.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TitleState;
+
+    #[test]
+    fn reset_keeps_subtitle_and_old_timer() {
+        let mut t = TitleState::default();
+        t.set_title(2, None, 5, 30, 7);
+        t.set_title(0, Some("big".into()), 0, 0, 0);
+        t.set_title(1, Some("x".into()), 0, 0, 0);
+        t.set_title(4, None, 0, 0, 0);
+        assert_eq!(t.title, "");
+        assert_eq!(t.subtitle, "x");
+        assert_eq!(t.timer, 42);
+        assert_eq!((t.fade_in, t.stay, t.fade_out), (10, 70, 20));
     }
 }

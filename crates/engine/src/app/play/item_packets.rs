@@ -7,6 +7,7 @@ use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
 use world::inventory::ItemStack;
 
 const USE_ITEM: u8 = 0x08;
+const SWING: u8 = 0x0A;
 const RELEASE: u8 = 0x07;
 
 fn hold(app: &mut App, id: i16) {
@@ -78,4 +79,22 @@ fn eating_holds_the_use_until_status_9() {
     let sent = ids(&mut app, &rx);
     assert_eq!(sent.iter().filter(|&&i| i == USE_ITEM).count(), 1);
     assert!(!sent.contains(&RELEASE));
+}
+
+/// `ItemFishingRod.onItemRightClick` swings for the cast and the reel: C08, then C0A.
+#[test]
+fn rod_click_sends_use_then_swing_and_swings_the_arm() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    hold(&mut app, 346);
+    ids(&mut app, &rx);
+    app.use_item();
+    assert_eq!(ids(&mut app, &rx), [USE_ITEM, SWING]);
+    app.tick_once();
+    app.tick_once(); // the first tick moves the swing counter from -1 to 0
+    assert!(app.game.swing.active(), "the first-person arm swings");
+    ids(&mut app, &rx);
+    hold(&mut app, 267);
+    app.use_item();
+    assert_eq!(ids(&mut app, &rx), [USE_ITEM], "a sword does not swing");
 }

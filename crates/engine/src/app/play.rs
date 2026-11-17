@@ -1079,6 +1079,10 @@ impl App {
             self.in_use = self.use_ticks > 0;
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
             self.send_result(r);
+            // `ItemFishingRod.onItemRightClick` swings for the cast and the reel.
+            if s.id == 346 {
+                self.swing_arm();
+            }
         }
     }
 
@@ -1125,13 +1129,18 @@ impl App {
             self.toggle_openable(h.pos);
         }
         if handled {
-            self.game
-                .swing
-                .start(self.game.effects.arm_swing_duration());
-            let r = self.session_send(|s| s.send_swing());
-            self.send_result(r);
+            self.swing_arm();
         }
         handled || held.is_none()
+    }
+
+    /// `EntityPlayerSP.swingItem`: the local swing, then C0A.
+    fn swing_arm(&mut self) {
+        self.game
+            .swing
+            .start(self.game.effects.arm_swing_duration());
+        let r = self.session_send(|s| s.send_swing());
+        self.send_result(r);
     }
 
     /// What the client does with a click before it sends C08: `None` when

@@ -197,3 +197,26 @@ fn a_spectator_sends_no_drop_and_no_air_use() {
     assert!(!app.in_use);
 }
 
+/// `GuiChat.sendAutocompleteRequest`: C14 is the text, then has_position and the packed block position
+/// of the crosshair block, or false.
+#[test]
+fn tab_complete_carries_the_block_under_the_crosshair() {
+    const TAB_COMPLETE: u8 = 0x14;
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    let tab = |app: &mut App, rx: &Receiver<Vec<u8>>| {
+        sent_frames(app, rx);
+        app.send_tab_complete("/he");
+        let frames = sent_frames(app, rx);
+        let f = frames.iter().find(|f| f[0] == TAB_COMPLETE).unwrap();
+        f[1 + 1 + 3..].to_vec()
+    };
+    assert_eq!(tab(&mut app, &rx), [0], "no block ahead: has_position false");
+    // Looking straight down from (0.5, 64, 0.5) at the block (0, 63, 0).
+    app.game.pitch = 90.0;
+    let packed = 63_u64 << 26;
+    let mut want = vec![1];
+    want.extend(packed.to_be_bytes());
+    assert_eq!(tab(&mut app, &rx), want);
+}
+

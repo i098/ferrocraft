@@ -575,10 +575,7 @@ impl App {
             }
         }
         if let Some(text) = self.input.take_tab_request() {
-            if let Some(s) = self.link.session() {
-                let r = s.send_tab_complete(&text);
-                self.send_result(r);
-            }
+            self.send_tab_complete(&text);
         }
         if let Some(names) = self.input.take_chat_note() {
             self.chat_note(&names);
@@ -589,6 +586,19 @@ impl App {
             self.hud.chat.reset_scroll();
         }
         self.chat_open = chat_open;
+    }
+
+    /// `GuiChat.sendAutocompleteRequest`: C14 carries the block under the crosshair when the crosshair is on one.
+    fn send_tab_complete(&mut self, text: &str) {
+        let looked_at = self
+            .view_ray(1.0)
+            .and_then(|(eye, yaw, pitch, skip, vehicle)| {
+                self.game.aim(eye, yaw, pitch, skip, vehicle)
+            })
+            .and_then(Aim::block)
+            .map(|h| h.pos);
+        let r = self.session_send(|s| s.send_tab_complete(text, looked_at));
+        self.send_result(r);
     }
 
     /// `EntityRenderer.addRainParticles`, run once per client tick.

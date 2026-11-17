@@ -24,8 +24,9 @@ impl App {
         let handled = gamemode != 3 && e.kind == Kind::Object(78);
         let rider = world::interact::rider_of(&self.game.entities, self.game.vehicle, id);
         let held_id = held.as_ref().map(|s| s.id);
-        let consumed =
-            gamemode != 3 && world::interact::client_interact(e, held_id, sneaking, rider);
+        let consumed = gamemode != 3
+            && (world::interact::client_interact(e, held_id, sneaking, rider)
+                || world::interact::client_item_interact(e, held.as_ref(), self.game.entity_id));
         let r = self.session_send(|s| s.interact_entity_at(id, at));
         self.send_result(r);
         if handled {

@@ -333,6 +333,7 @@ impl App {
         self.fov_tick();
         if !playing {
             self.attack_presses = 0;
+            self.use_presses = 0;
         }
         self.limb_tick();
         let host = self.host_player_tick();
@@ -574,10 +575,7 @@ impl App {
             }
         }
         if let Some(text) = self.input.take_tab_request() {
-            if let Some(s) = self.link.session() {
-                let r = s.send_tab_complete(&text);
-                self.send_result(r);
-            }
+            self.send_tab_complete(&text);
         }
         if let Some(names) = self.input.take_chat_note() {
             self.chat_note(&names);
@@ -588,6 +586,19 @@ impl App {
             self.hud.chat.reset_scroll();
         }
         self.chat_open = chat_open;
+    }
+
+    /// `GuiChat.sendAutocompleteRequest`: C14 carries the block under the crosshair when the crosshair is on one.
+    fn send_tab_complete(&mut self, text: &str) {
+        let looked_at = self
+            .view_ray(1.0)
+            .and_then(|(eye, yaw, pitch, skip, vehicle)| {
+                self.game.aim(eye, yaw, pitch, skip, vehicle)
+            })
+            .and_then(Aim::block)
+            .map(|h| h.pos);
+        let r = self.session_send(|s| s.send_tab_complete(text, looked_at));
+        self.send_result(r);
     }
 
     /// `EntityRenderer.addRainParticles`, run once per client tick.
@@ -881,13 +892,10 @@ impl App {
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
     fn dig(&mut self) {
         self.sync_held_slot();
-        let presses = std::mem::take(&mut self.attack_presses);
-        if self.in_use {
-            return;
-        }
         let attack = Attack {
             held: self.input.attack_held(),
-            presses,
+            presses: std::mem::take(&mut self.attack_presses),
+            using: self.in_use,
         };
         let ray = self.view_ray(1.0);
         let aim = ray.and_then(|(eye, yaw, pitch, skip, vehicle)| {
@@ -921,13 +929,16 @@ impl App {
             self.send_result(sent);
         }
         self.broken_effects();
-        if attack.held && !self.game.creative {
-            self.dig_ticks += 1;
-            if self.dig_ticks.is_multiple_of(4) {
-                self.hit_shard();
+        // No dig runs while an item is in use, so no hit shards either.
+        if !self.in_use {
+            if attack.held && !self.game.creative {
+                self.dig_ticks += 1;
+                if self.dig_ticks.is_multiple_of(4) {
+                    self.hit_shard();
+                }
+            } else {
+                self.dig_ticks = 0;
             }
-        } else {
-            self.dig_ticks = 0;
         }
         for effect in effects {
             if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {
@@ -975,17 +986,27 @@ impl App {
         }
     }
 
-    /// Right button held: use or place again every `USE_DELAY` ticks; releasing ends an item use.
+    /// `Minecraft.runTick` after the attack clicks: while an item is in use the use clicks are dropped and
+    /// letting go of the button stops the use. Otherwise each click uses the item, then the held button
+    /// repeats every `USE_DELAY` ticks.
     fn use_tick(&mut self) {
         if self.use_delay > 0 {
             self.use_delay -= 1;
         }
+        let presses = std::mem::take(&mut self.use_presses);
         let held = self.input.use_held();
-        if self.in_use && !held {
-            self.end_use();
-            let r = self.session_send(|s| s.release_use_item());
-            self.send_result(r);
-        } else if held && self.use_delay == 0 && !self.in_use {
+        if self.in_use {
+            if !held {
+                self.end_use();
+                let r = self.session_send(|s| s.release_use_item());
+                self.send_result(r);
+            }
+            return;
+        }
+        for _ in 0..presses {
+            self.use_item();
+        }
+        if held && self.use_delay == 0 && !self.in_use {
             self.use_item();
         }
     }
@@ -1074,7 +1095,8 @@ impl App {
                 return;
             }
         }
-        if let Some(s) = &held {
+        // `PlayerControllerMP.sendUseItem` returns false for a spectator before any packet.
+        if let Some(s) = held.as_ref().filter(|_| self.game.gamemode != 3) {
             self.use_ticks = self.use_duration(s);
             self.in_use = self.use_ticks > 0;
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
@@ -1097,6 +1119,10 @@ impl App {
         sneaking: bool,
         held: &Option<ItemStack>,
     ) -> bool {
+        // `PlayerControllerMP.onPlayerRightClick` returns false outside the border, before any packet.
+        if self.game.outside_border(h.pos) {
+            return false;
+        }
         let gamemode = self.game.gamemode;
         let held_id = held.as_ref().map(|s| s.id);
         let cursor = [0, 1, 2].map(|a| (eye[a] + dir[a] * dist - f64::from(h.pos[a])) as f32);
@@ -1279,11 +1305,7 @@ impl App {
         }
         match action {
             Action::Attack => self.attack_presses += 1,
-            Action::Use => {
-                if !self.in_use {
-                    self.use_item();
-                }
-            }
+            Action::Use => self.use_presses += 1,
             Action::PickBlock => self.pick_block(),
             Action::Hotbar(n) => self.select_slot(n),
             Action::HotbarScroll(step) => self.select_slot(scroll_slot(self.game.inv.held, step)),
@@ -1434,7 +1456,7 @@ impl App {
         }
     }
 
-    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar.
+    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar; the drop key does nothing.
     fn spectator_action(&mut self, action: Action) -> bool {
         if self.game.gamemode != 3 {
             return false;
@@ -1447,6 +1469,8 @@ impl App {
                 self.spectator_menu(|g, now, tab, sb| g.select_slot(i32::from(n), now, tab, sb));
             }
             Action::HotbarScroll(step) => self.spectator_scroll(step),
+            // `Minecraft.runTick` skips the drop key for a spectator.
+            Action::Drop { .. } => {}
             _ => return false,
         }
         true
@@ -1574,6 +1598,8 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod camera_packets;
+#[cfg(test)]
+mod click_packets;
 #[cfg(test)]
 mod held_slot;
 #[cfg(test)]

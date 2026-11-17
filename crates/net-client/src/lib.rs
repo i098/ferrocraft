@@ -440,13 +440,17 @@ impl Session {
         )
     }
 
-    /// `C14PacketTabComplete`: the chat text before the cursor, no looked-at block.
-    pub fn send_tab_complete(&mut self, text: &str) -> io::Result<()> {
+    /// `C14PacketTabComplete`: the chat text before the cursor and the block under the crosshair, if any.
+    pub fn send_tab_complete(&mut self, text: &str, looked_at: Option<[i32; 3]>) -> io::Result<()> {
         send(
             &self.writer,
             sb::Packet::from(sb::TabComplete {
                 text: text.to_owned(),
-                looked_at: ferrocraft_protocol::codec::Opt(None),
+                looked_at: ferrocraft_protocol::codec::Opt(looked_at.map(|[x, y, z]| Position {
+                    x,
+                    y,
+                    z,
+                })),
             }),
         )
     }

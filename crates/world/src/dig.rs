@@ -571,9 +571,13 @@ pub struct Frame<'a> {
     pub presses: u32,
     /// The mouse was grabbed by a click this tick: `setIngameFocus`.
     pub grabbed: bool,
+    /// An item is in use: `isUsingItem`. The counter still runs, but clicks and digging do not.
+    pub using: bool,
     pub creative: bool,
     /// Adventure or spectator: `clickBlock` refuses, but the swing still happens.
     pub no_dig: bool,
+    /// The block under the crosshair is outside the world border: `WorldBorder.contains` is false.
+    pub outside_border: bool,
     pub on_ground: bool,
     /// Held tool, effects and water: what `PlayerEntity.getMiningSpeed` reads.
     pub mining: Mining,
@@ -669,6 +673,14 @@ impl Digger {
         if self.click_delay > 0 {
             self.click_delay -= 1;
         }
+        if f.using {
+            // `sendClickBlockToController` zeroes the counter when the button is up, before the
+            // `isUsingItem` test; the clicks of this tick are dropped.
+            if !f.held {
+                self.click_delay = 0;
+            }
+            return;
+        }
         for _ in 0..f.presses {
             self.click_mouse(f, w, out);
         }
@@ -710,7 +722,7 @@ impl Digger {
 
     /// `PlayerControllerMP.clickBlock`.
     fn click_block(&mut self, f: &Frame, hit: Hit, w: &mut impl DigWorld, out: &mut Vec<Action>) {
-        if f.no_dig {
+        if f.no_dig || f.outside_border {
             return;
         }
         let start = |status, pos| Action::Dig {
@@ -764,7 +776,7 @@ impl Digger {
             self.hit_delay -= 1;
             return true;
         }
-        if f.creative {
+        if f.creative && !f.outside_border {
             self.hit_delay = HIT_DELAY;
             out.push(Action::Dig {
                 status: Status::Start,
@@ -775,7 +787,9 @@ impl Digger {
         } else if self.is_hitting_position(f, hit.pos) {
             return self.advance_dig(f, hit, w, out);
         } else {
+            // `clickBlock` returns false outside the border: no swing.
             self.click_block(f, hit, w, out);
+            return !f.outside_border;
         }
         true
     }

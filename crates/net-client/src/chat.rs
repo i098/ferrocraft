@@ -362,7 +362,10 @@ mod tests {
             plain_text(r#"{"translate":"container.chestDouble"}"#),
             "Large Chest"
         );
-        assert_eq!(plain_text(r#"{"translate":"container.repair"}"#), "Repair & Name");
+        assert_eq!(
+            plain_text(r#"{"translate":"container.repair"}"#),
+            "Repair & Name"
+        );
     }
 
     #[test]

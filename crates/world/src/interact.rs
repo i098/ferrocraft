@@ -4,10 +4,12 @@
 //!
 //! Ported from `VillagerEntity.interactMob`, `BoatEntity.interact`, `RideableMinecartEntity.interact`,
 //! `InventoryMinecartEntity.interact`, `HopperMinecartEntity.interact`, `FurnaceMinecartEntity.interact`
-//! and `HorseBaseEntity.interactMob`.
+//! and `HorseBaseEntity.interactMob`; the held-item half from `MobEntity.interact`, `NameTagItem.interact`,
+//! `SaddleItem.interact`, `DyeItem.interact`, `PassiveEntity.interactMob` and `AnimalEntity.interactMob`.
 
 use crate::entities::{is_baby, Entities, Entity, Kind};
 use crate::horse;
+use crate::inventory::{ItemStack, Tag};
 
 /// Who sits on the clicked entity (`Entity.rider`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +24,11 @@ pub enum Rider {
 }
 
 const SPAWN_EGG: i16 = 383;
+const LEAD: i16 = 420;
+const NAME_TAG: i16 = 421;
+const DYE: i16 = 351;
+const PIG: u8 = 90;
+const SHEEP: u8 = 91;
 const SADDLE: i16 = 329;
 const CHEST_BLOCK: i16 = 54;
 /// Iron, golden and diamond horse armor.
@@ -58,8 +65,72 @@ pub fn client_interact(e: &Entity, held: Option<i16>, sneaking: bool, rider: Rid
         Kind::Mob(100) => horse_click(e, held, sneaking, rider),
         Kind::Object(1) => true,
         Kind::Object(10..=12) => cart(e, rider),
+        // `ItemFrameEntity.interact` and `LeadKnotEntity.interact` always return true.
+        Kind::Object(71 | 77) => true,
         _ => false,
     }
+}
+
+/// True when the held stack makes the mob take the click: `MobEntity.interact` (a lead, or the leash
+/// the player holds), then `PlayerEntity.interact`'s `ItemStack.interact` (name tag, saddle, dye), then
+/// `PassiveEntity.interactMob` (spawn egg) and `AnimalEntity.interactMob` (breeding food).
+///
+/// shortcut: wolves and ocelots (owner and tame state decide) and the breed timer (`inLoveTimer`, not
+/// synced) are not modelled; upgrade when those are tracked.
+pub fn client_item_interact(e: &Entity, held: Option<&ItemStack>, own_id: i32) -> bool {
+    let Kind::Mob(mob) = e.kind else {
+        return false;
+    };
+    if e.leash == Some(own_id) {
+        return true;
+    }
+    let Some(item) = held else {
+        return false;
+    };
+    match item.id {
+        LEAD => leashable(e, mob),
+        NAME_TAG => has_display_name(item),
+        DYE => mob == SHEEP,
+        SPAWN_EGG => passive(mob),
+        SADDLE => mob == PIG,
+        id => breeds_on(e, mob, id),
+    }
+}
+
+/// `MobEntity.isTameable` for the mobs whose answer the client can tell: not leashed and not a monster.
+fn leashable(e: &Entity, mob: u8) -> bool {
+    let monster = (50..=68).contains(&mob);
+    // Bat, wolf, ocelot, horse and villager answer from state that the client lacks.
+    let other = matches!(mob, 65 | 95 | 98 | 100 | 120);
+    e.leash.is_none() && !monster && !other
+}
+
+/// `PassiveEntity` subclasses: animals, wolf, ocelot, horse and villager.
+fn passive(mob: u8) -> bool {
+    matches!(mob, 90..=93 | 95 | 96 | 98 | 100 | 101 | 120)
+}
+
+/// `ItemStack.hasCustomHoverName`: a `display.Name` string.
+fn has_display_name(item: &ItemStack) -> bool {
+    let Some(nbt) = &item.nbt else { return false };
+    nbt.root.iter().any(|(k, t)| {
+        k == "display"
+            && matches!(t, Tag::Compound(c) if c.iter().any(|(k, t)| k == "Name" && matches!(t, Tag::String(_))))
+    })
+}
+
+/// `AnimalEntity.interactMob`: breeding food for an adult that is ready (`getBreedingAge() == 0`) or any
+/// baby. `isBreedingItem` of pig, cow, sheep, mooshroom, chicken and rabbit.
+fn breeds_on(e: &Entity, mob: u8, item: i16) -> bool {
+    let food: &[i16] = match mob {
+        PIG => &[391],
+        SHEEP | 92 | 96 => &[296],
+        93 => &[295],
+        101 => &[37, 391, 396],
+        _ => return false,
+    };
+    let age = e.meta.age.map_or(0, |a| a as i8);
+    food.contains(&item) && age <= 0
 }
 
 fn villager(e: &Entity, held: Option<i16>) -> bool {
@@ -205,5 +276,63 @@ mod tests {
             !client_interact(&h, None, false, Rider::None),
             "wild zombie horse"
         );
+    }
+
+    fn stack(id: i16) -> ItemStack {
+        ItemStack {
+            id,
+            count: 1,
+            damage: 0,
+            nbt: None,
+        }
+    }
+
+    fn mob(kind: u8) -> Entity {
+        let mut es = Entities::default();
+        spawn_mob(&mut es, 1, kind);
+        es.get(1).unwrap().clone()
+    }
+
+    #[test]
+    fn frames_and_knots_are_always_clicked() {
+        let mut e = mob(90);
+        for kind in [71, 77] {
+            e.kind = Kind::Object(kind);
+            assert!(client_interact(&e, Some(267), false, Rider::None));
+            assert!(client_interact(&e, None, false, Rider::None));
+        }
+    }
+
+    #[test]
+    fn held_items_decide_a_click_on_a_mob() {
+        let named = ItemStack {
+            nbt: Some(crate::inventory::Nbt {
+                name: String::new(),
+                root: vec![(
+                    "display".into(),
+                    Tag::Compound(vec![("Name".into(), Tag::String("Bob".into()))]),
+                )],
+            }),
+            ..stack(NAME_TAG)
+        };
+        let (pig, sheep, zombie) = (mob(90), mob(91), mob(54));
+        let click = |e: &Entity, s: &ItemStack| client_item_interact(e, Some(s), 5);
+        assert!(click(&zombie, &named), "name tag on any mob");
+        assert!(!click(&zombie, &stack(NAME_TAG)), "name tag without a name");
+        assert!(click(&pig, &stack(SADDLE)) && !click(&sheep, &stack(SADDLE)));
+        assert!(click(&sheep, &stack(DYE)) && !click(&pig, &stack(DYE)));
+        assert!(click(&pig, &stack(LEAD)) && !click(&zombie, &stack(LEAD)));
+        assert!(click(&pig, &stack(SPAWN_EGG)) && !click(&zombie, &stack(SPAWN_EGG)));
+        assert!(click(&pig, &stack(391)) && !click(&pig, &stack(296)));
+        assert!(!click(&pig, &stack(267)), "a sword is not taken");
+        let mut grown = pig.clone();
+        grown.meta.age = Some(1);
+        assert!(!click(&grown, &stack(391)), "an adult on cooldown");
+        grown.meta.age = Some(255);
+        assert!(click(&grown, &stack(391)), "a baby takes food");
+        let mut tied = pig.clone();
+        tied.leash = Some(5);
+        assert!(client_item_interact(&tied, None, 5), "own leash is taken off");
+        assert!(!client_item_interact(&tied, Some(&stack(LEAD)), 6));
     }
 }

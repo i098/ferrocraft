@@ -8,6 +8,7 @@ const ITALIC: &str = "\u{a7}o";
 const RESET: &str = "\u{a7}r";
 const GRAY: &str = "\u{a7}7";
 const BLUE: &str = "\u{a7}9";
+const DARK_GRAY: &str = "\u{a7}8";
 const DARK_PURPLE: &str = "\u{a7}5";
 /// `EnumRarity` colors: common, uncommon, rare, epic.
 const RARITY: [&str; 4] = ["\u{a7}f", "\u{a7}e", "\u{a7}b", "\u{a7}d"];
@@ -196,6 +197,12 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
             item.max_damage
         ));
     }
+    if advanced {
+        out.push(format!("{DARK_GRAY}minecraft:{}", item.key));
+        if let Some(t) = t {
+            out.push(format!("{DARK_GRAY}NBT: {} tag(s)", t.len()));
+        }
+    }
     // GuiScreen.renderToolTip colors line 0 by rarity and the rest gray.
     out[0].insert_str(0, rarity(s));
     out[1..].iter_mut().for_each(|l| l.insert_str(0, GRAY));
@@ -279,10 +286,13 @@ mod tests {
         assert_eq!(lines(&stack(1, 1, None), false), ["\u{a7}fGranite\u{a7}r"]);
         assert_eq!(
             lines(&stack(1, 1, None), true),
-            ["\u{a7}fGranite\u{a7}r (#0001/1)"]
+            [
+                "\u{a7}fGranite\u{a7}r (#0001/1)",
+                "\u{a7}7\u{a7}8minecraft:stone"
+            ]
         );
         let sword = lines(&stack(276, 10, None), true);
-        assert_eq!(sword.last().unwrap(), "\u{a7}7Durability: 1551 / 1561");
+        assert_eq!(sword[sword.len() - 2], "\u{a7}7Durability: 1551 / 1561");
         assert!(sword.contains(&"\u{a7}7".to_string()));
         let ench = vec![(
             "ench".to_string(),
@@ -337,6 +347,23 @@ mod tests {
         assert_eq!(
             l[2..],
             ["\u{a7}7\u{a7}c-4 Max Health", "\u{a7}7\u{a7}9+50% Speed"]
+        );
+    }
+
+    #[test]
+    fn advanced_tooltip_ends_with_registry_id_and_nbt_count() {
+        let l = lines(&stack(276, 0, Some(sharpness(5))), true);
+        assert_eq!(
+            l[l.len() - 2..],
+            [
+                "\u{a7}7\u{a7}8minecraft:diamond_sword",
+                "\u{a7}7\u{a7}8NBT: 1 tag(s)"
+            ]
+        );
+        let plain = lines(&stack(276, 0, None), true);
+        assert_eq!(
+            plain.last().unwrap(),
+            "\u{a7}7\u{a7}8minecraft:diamond_sword"
         );
     }
 }

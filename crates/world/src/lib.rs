@@ -140,6 +140,8 @@ pub struct Player {
     pub jump_boost: f32,
     /// `EnchantmentHelper.getDepthStriderLevel`: the highest Depth Strider level on the worn armor.
     pub depth_strider: i32,
+    /// `getChunk(pos).isLoaded()`: false for the empty chunk that stands in for a missing one.
+    pub chunk_loaded: bool,
     jump_movement_factor: f32,
     jump_ticks: i32,
     /// `Entity.inWater`, set by `handleWaterMovement` at the start of each tick.
@@ -176,6 +178,7 @@ impl Player {
             speed_attr: None,
             jump_boost: 0.0,
             depth_strider: 0,
+            chunk_loaded: true,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
             in_water: false,
@@ -352,7 +355,14 @@ impl Player {
         if self.collided_horizontally && self.is_climbing(world) {
             self.vel[1] = 0.2;
         }
-        self.vel[1] -= 0.08;
+        // `LivingEntity.travel`: a client without the loaded chunk under the player sinks at -0.1 (0 at y <= 0).
+        self.vel[1] = if self.chunk_loaded {
+            self.vel[1] - 0.08
+        } else if self.pos[1] > 0.0 {
+            -0.1
+        } else {
+            0.0
+        };
         self.vel[1] *= f64::from(0.98_f32);
         self.vel[0] *= f64::from(friction);
         self.vel[2] *= f64::from(friction);
@@ -591,7 +601,8 @@ impl Player {
             self.vel = [0.0; 3];
         }
         let original = self.bb;
-        if self.on_ground && self.sneaking {
+        let sneak_edge = self.on_ground && self.sneaking;
+        if sneak_edge {
             motion = self.edge_guard(world, motion);
         }
         let mut d = motion;
@@ -616,6 +627,9 @@ impl Player {
         ];
         self.bb = bb;
         self.set_collisions(world, motion, d);
+        if self.makes_steps() && !sneak_edge {
+            self.on_stepped_on(Self::block_below(world, self.pos));
+        }
         self.block_collisions(world);
     }
 
@@ -689,7 +703,21 @@ impl Player {
         }
     }
 
-    /// `Block.onEntityCollidedWithBlock` of cobweb, soul sand and slime for one cell.
+    /// `PlayerEntity.makesSteps`: a flying player does not step on blocks.
+    fn makes_steps(&self) -> bool {
+        self.pushed_by_water
+    }
+
+    /// `Block.onSteppedOn` of the block under an on-ground entity; only `SlimeBlock` acts.
+    fn on_stepped_on(&mut self, id: u16) {
+        if self.on_ground && id == 165 && self.vel[1].abs() < 0.1 && !self.sneaking {
+            let slow = 0.4 + self.vel[1].abs() * 0.2;
+            self.vel[0] *= slow;
+            self.vel[2] *= slow;
+        }
+    }
+
+    /// `Block.onEntityCollidedWithBlock` of cobweb and soul sand for one cell.
     fn collide_with(&mut self, id: u16) {
         match id {
             30 => self.in_web = true,
@@ -697,16 +725,11 @@ impl Player {
                 self.vel[0] *= 0.4;
                 self.vel[2] *= 0.4;
             }
-            165 if self.vel[1].abs() < 0.1 && !self.sneaking => {
-                let slow = 0.4 + self.vel[1].abs() * 0.2;
-                self.vel[0] *= slow;
-                self.vel[2] *= slow;
-            }
             _ => {}
         }
     }
 
-    /// `Entity.doBlockCollisions`: cobweb, soul sand and slime act on a player inside their cell.
+    /// `Entity.doBlockCollisions`: cobweb and soul sand act on a player inside their cell.
     fn block_collisions(&mut self, world: &dyn World) {
         let lo = [0, 1, 2].map(|a| floor(self.bb.min[a] + 0.001));
         let hi = [0, 1, 2].map(|a| floor(self.bb.max[a] - 0.001));

@@ -127,9 +127,15 @@ pub struct InputState {
     ctrl_down: bool,
     f3_down: bool,
     sprinting: bool,
+    /// The last `setSprinting` call, for the speed attribute's sprint modifier; see `take_sprint_change`.
+    sprint_change: Option<bool>,
+    /// `sprintingTicksLeft`: 600 after `setSprinting(true)`, 0 after `setSprinting(false)`.
+    sprint_ticks: u16,
     sprint_timer: u8,
     /// Blindness: the sprint latch cannot start (`EntityPlayerSP.onLivingUpdate`); a running sprint goes on.
     pub blind: bool,
+    /// `isRiding()`: item use then keeps the double-tap window.
+    pub riding: bool,
     /// Sneak as the mod host's `EntityPlayerSP` left it this tick; `None` without a host.
     host_sneak: Option<bool>,
     was_full_forward: bool,
@@ -171,8 +177,11 @@ impl InputState {
             ctrl_down: false,
             f3_down: false,
             sprinting: false,
+            sprint_change: None,
+            sprint_ticks: 0,
             sprint_timer: 0,
             blind: false,
+            riding: false,
             host_sneak: None,
             was_full_forward: false,
             was_sneaking: false,
@@ -619,7 +628,7 @@ impl InputState {
     }
 
     /// Call once per game tick: `EntityPlayerSP.onLivingUpdate` sprint latch.
-    /// `can_sprint` is `foodLevel > 6 || allowFlying`.
+    /// `can_sprint` is `foodLevel > 6 || canFly`; `using_item` is `isUsingItem()`.
     pub fn movement(
         &mut self,
         on_ground: bool,
@@ -633,10 +642,19 @@ impl InputState {
         let sneak = self.sneaking();
         let full = forward > 0.0 && !sneak && !using_item;
         let sprint_key = self.is_held(Bind::Sprint);
+        if self.sprint_ticks > 0 {
+            self.sprint_ticks -= 1;
+            if self.sprint_ticks == 0 {
+                self.set_sprinting(false);
+            }
+        }
         self.sprint_timer = self.sprint_timer.saturating_sub(1);
+        if using_item && !self.riding {
+            self.sprint_timer = 0;
+        }
         self.update_sprint(on_ground, can_sprint && full && !self.blind, sprint_key);
         if self.sprinting && (!full || collided || !can_sprint) {
-            self.sprinting = false;
+            self.set_sprinting(false);
         }
         self.was_full_forward = full;
         self.was_sneaking = sneak;
@@ -656,7 +674,9 @@ impl InputState {
     pub fn movement_from_host(&mut self, sprint: bool, sneak: bool) -> world::Input {
         let axis = |pos: bool, neg: bool| f32::from(u8::from(pos)) - f32::from(u8::from(neg));
         self.host_sneak = Some(sneak);
-        self.sprinting = sprint;
+        if sprint != self.sprinting {
+            self.set_sprinting(sprint);
+        }
         self.was_full_forward = self.is_held(Bind::Forward) && !self.is_held(Bind::Back) && !sneak;
         self.was_sneaking = sneak;
         world::Input {
@@ -677,7 +697,24 @@ impl InputState {
 
     /// `setSprinting(false)`: a held sprint key starts the sprint again on the next `movement` call.
     pub fn stop_sprint(&mut self) {
-        self.sprinting = false;
+        self.set_sprinting(false);
+    }
+
+    /// `EntityLivingBase.setSprinting`: the flag and the speed modifier change together.
+    fn set_sprinting(&mut self, sprinting: bool) {
+        self.sprinting = sprinting;
+        self.sprint_ticks = if sprinting { 600 } else { 0 };
+        self.sprint_change = Some(sprinting);
+    }
+
+    /// The newest `setSprinting` argument since the last call; the caller applies it with `Speed::set_sprint`.
+    pub fn take_sprint_change(&mut self) -> Option<bool> {
+        self.sprint_change.take()
+    }
+
+    /// An own S1C entity flag write (`handleEntityData`): sets the sprint flag, not the speed modifier.
+    pub fn set_sprint_flag(&mut self, sprinting: bool) {
+        self.sprinting = sprinting;
     }
 
     fn update_sprint(&mut self, on_ground: bool, can_start: bool, sprint_key: bool) {
@@ -686,11 +723,11 @@ impl InputState {
             if self.sprint_timer == 0 && !sprint_key {
                 self.sprint_timer = 7;
             } else {
-                self.sprinting = true;
+                self.set_sprinting(true);
             }
         }
         if !self.sprinting && can_start && sprint_key {
-            self.sprinting = true;
+            self.set_sprinting(true);
         }
     }
 
@@ -951,6 +988,19 @@ mod tests {
     }
 
     #[test]
+    fn server_flag_write_clears_sprint_without_a_modifier_change() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(s.movement(true, false, true, false).sprint);
+        assert_eq!(s.take_sprint_change(), Some(true));
+        s.on_key(KeyCode::ControlLeft, false, None);
+        s.set_sprint_flag(false);
+        assert_eq!(s.take_sprint_change(), None);
+        assert!(!s.movement(true, false, true, false).sprint);
+    }
+
+    #[test]
     fn double_tap_forward_latches_sprint() {
         let mut s = InputState::default();
         let tick = |s: &mut InputState| s.movement(true, false, true, false).sprint;
@@ -982,6 +1032,54 @@ mod tests {
         }
         press(&mut s, KeyCode::KeyW);
         assert!(!tick(&mut s));
+    }
+
+    /// `sprintingTicksLeft`: a double-tap sprint ends after 600 ticks; a held sprint key starts it again.
+    #[test]
+    fn sprint_ends_after_600_ticks_unless_the_key_is_held() {
+        let tick = |s: &mut InputState| s.movement(true, false, true, false).sprint;
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        tick(&mut s);
+        s.on_key(KeyCode::KeyW, false, None);
+        tick(&mut s);
+        press(&mut s, KeyCode::KeyW);
+        assert!(tick(&mut s));
+        for _ in 0..599 {
+            assert!(tick(&mut s));
+        }
+        assert!(!tick(&mut s), "tick 600 ends the sprint");
+        assert_eq!(s.take_sprint_change(), Some(false));
+
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(tick(&mut s));
+        for _ in 0..1300 {
+            assert!(tick(&mut s));
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: item use sets `sprintToggleTimer` to 0 unless riding.
+    #[test]
+    fn using_an_item_clears_the_double_tap_window() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        s.movement(true, false, true, false);
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, true);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        assert!(!s.movement(true, false, true, false).sprint);
+        s.riding = true;
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        s.movement(true, false, true, true);
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        assert!(s.movement(true, false, true, false).sprint);
     }
 
     #[test]

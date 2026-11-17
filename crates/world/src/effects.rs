@@ -134,20 +134,22 @@ impl Default for Speed {
 }
 
 impl Speed {
+    /// `EntityLivingBase.setSprinting`: drops the sprint modifier, then applies it again when sprinting.
+    pub fn set_sprint(&mut self, sprinting: bool) {
+        self.modifiers.retain(|m| m.uuid != SPRINT_MODIFIER);
+        if sprinting {
+            self.modifiers.push(Modifier {
+                uuid: SPRINT_MODIFIER,
+                amount: SPRINT_AMOUNT,
+                operation: 2,
+            });
+        }
+    }
+
     /// `ModifiableAttributeInstance.computeValue`, clamped by `RangedAttribute(0, 0, Double.MAX_VALUE)`.
-    /// `sprinting` adds the sprint boost that `EntityLivingBase.setSprinting` keeps on the instance.
-    pub fn value(&self, sprinting: bool) -> f64 {
-        let sprint = Modifier {
-            uuid: SPRINT_MODIFIER,
-            amount: SPRINT_AMOUNT,
-            operation: 2,
-        };
-        let mods = || {
-            self.modifiers
-                .iter()
-                .filter(|m| m.uuid != SPRINT_MODIFIER)
-                .chain(sprinting.then_some(&sprint))
-        };
+    /// The list is what the server sent (`handleEntityAttributes` clears and refills it) plus local sprint changes.
+    pub fn value(&self) -> f64 {
+        let mods = || self.modifiers.iter();
         let mut x = self.base;
         for m in mods().filter(|m| m.operation == 0) {
             x += m.amount;
@@ -296,15 +298,14 @@ mod tests {
             operation: 2,
         });
         let walk = 0.100_000_001_490_116_12 * 1.2;
-        assert!((s.value(false) - walk).abs() < 1e-12);
-        assert!((s.value(true) - walk * 1.300_000_011_920_929).abs() < 1e-12);
-        // A server-sent sprint boost is not counted twice.
-        s.modifiers.push(Modifier {
-            uuid: SPRINT_MODIFIER,
-            amount: SPRINT_AMOUNT,
-            operation: 2,
-        });
-        assert!((s.value(true) - walk * 1.300_000_011_920_929).abs() < 1e-12);
+        assert!((s.value() - walk).abs() < 1e-12);
+        s.set_sprint(true);
+        assert!((s.value() - walk * 1.300_000_011_920_929).abs() < 1e-12);
+        // A repeated start does not count the boost twice.
+        s.set_sprint(true);
+        assert!((s.value() - walk * 1.300_000_011_920_929).abs() < 1e-12);
+        s.set_sprint(false);
+        assert!((s.value() - walk).abs() < 1e-12);
     }
 
     #[test]

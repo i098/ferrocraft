@@ -140,7 +140,8 @@ fn window_event(packet: &cb::Packet) -> Option<NetEvent> {
                 .collect(),
         ),
         P::TabComplete(p) => NetEvent::TabComplete(p.matches.clone()),
-        P::HeldItemChange(p) => NetEvent::HeldItem(p.slot as u8),
+        // `handleSelectSlot` applies only 0 <= slot < 9; anything else does nothing.
+        P::HeldItemChange(p) if (0..9).contains(&p.slot) => NetEvent::HeldItem(p.slot as u8),
         _ => return container_event(packet),
     })
 }

@@ -156,6 +156,8 @@ pub struct Game {
     /// The local player's entity id, from `JoinGame`.
     pub entity_id: i32,
     pub entity_flags: u8,
+    /// Sprint bit of the newest own S1C, until the input takes it (`Entity.isSprinting` reads the flag).
+    pub sprint_sync: Option<bool>,
     pub vehicle: Option<i32>,
     /// `generic.maxHealth` per entity from S20; an entity without one has the base 20.
     max_health: std::collections::HashMap<i32, f64>,
@@ -285,6 +287,7 @@ impl Game {
             entities: Entities::default(),
             entity_id: -1,
             entity_flags: 0,
+            sprint_sync: None,
             vehicle: None,
             max_health: Default::default(),
             absorption: 0.0,
@@ -413,6 +416,9 @@ impl Game {
             NetEvent::Difficulty(d) => self.difficulty = d,
             NetEvent::Entity(EntityEvent::Metadata { id, flags, .. }) if id == self.entity_id => {
                 self.entity_flags = flags.unwrap_or(self.entity_flags);
+                if let Some(f) = flags {
+                    self.sprint_sync = Some(f & world::entities::flag::SPRINTING != 0);
+                }
             }
             NetEvent::Health {
                 health,
@@ -460,7 +466,7 @@ impl Game {
                 self.speed = speed;
             }
             NetEvent::MaxHealth { entity_id, health } => {
-                self.max_health.insert(entity_id, health.value(false));
+                self.max_health.insert(entity_id, health.value());
             }
             NetEvent::PlayerMeta {
                 entity_id,
@@ -508,8 +514,8 @@ impl Game {
     fn apply_window(&mut self, ev: NetEvent) -> Result<Option<Effect>, NetEvent> {
         let effect = match ev {
             NetEvent::HeldItem(slot) => {
-                self.held_replaced |= self.inv.held != slot.min(8);
-                self.inv.held = slot.min(8);
+                self.held_replaced |= self.inv.held != slot;
+                self.inv.held = slot;
                 None
             }
             NetEvent::SetSlot { window, slot, item } => {
@@ -831,7 +837,7 @@ impl Game {
                 fly_speed: flying.then_some(self.fly_speed),
                 ..input
             };
-            p.speed_attr = Some(self.speed.value(input.sprint));
+            p.speed_attr = Some(self.speed.value());
             // Window 0 slots 5 to 8 are the worn armor; Depth Strider is enchantment 8.
             p.depth_strider = world::dig::highest_enchant_level(&self.inv.player[5..=8], 8);
             p.jump_boost = self
@@ -1610,6 +1616,46 @@ mod tests {
             (g.death_message.as_deref(), g.killer_id, g.score),
             (None, -1, 0)
         );
+    }
+
+    /// `handleEntityAttributes` replaces the modifier list: a server list without the sprint entry drops the boost
+    /// until the next local `setSprinting`.
+    #[test]
+    fn own_speed_packet_replaces_the_local_sprint_modifier() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        let base = world::effects::Speed::default();
+        g.speed.set_sprint(true);
+        g.apply(NetEvent::MovementSpeed {
+            entity_id: 7,
+            speed: base.clone(),
+        });
+        assert!((g.speed.value() - 0.100_000_001_490_116_12).abs() < 1e-12);
+        g.speed.set_sprint(false);
+        g.speed.set_sprint(true);
+        assert!((g.speed.value() - 0.13).abs() < 1e-7);
+    }
+
+    #[test]
+    fn own_flag_metadata_reports_the_sprint_bit() {
+        let mut g = Game::new();
+        g.entity_id = 7;
+        let flags = |f| {
+            NetEvent::Entity(EntityEvent::Metadata {
+                id: 7,
+                flags: f,
+                name: None,
+                health: None,
+                stack: None,
+                size: world::entities::SizeMeta::default(),
+            })
+        };
+        g.apply(flags(Some(8)));
+        assert_eq!(g.sprint_sync.take(), Some(true));
+        g.apply(flags(None));
+        assert_eq!(g.sprint_sync, None);
+        g.apply(flags(Some(0)));
+        assert_eq!(g.sprint_sync.take(), Some(false));
     }
 
     #[test]

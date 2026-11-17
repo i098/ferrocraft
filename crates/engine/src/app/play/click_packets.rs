@@ -3,6 +3,7 @@ use super::camera_packets::{idle_app, sent_frames, server};
 use crate::app::App;
 use std::sync::mpsc::Receiver;
 use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
+use input_audio::Action;
 use world::entities::EntityEvent;
 use world::inventory::ItemStack;
 
@@ -177,6 +178,22 @@ fn a_click_on_an_item_frame_sends_no_use_item() {
         clicks(&mut app, &rx),
         [(USE_ENTITY, INTERACT_AT), (USE_ENTITY, INTERACT)]
     );
+    assert!(!app.in_use);
+}
+
+/// `Minecraft.runTick` skips the drop key for a spectator and `sendUseItem` returns false before any
+/// packet.
+#[test]
+fn a_spectator_sends_no_drop_and_no_air_use() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.gamemode = 3;
+    hold(&mut app, 267);
+    sent_frames(&mut app, &rx);
+    app.game_action(Action::Drop { whole_stack: false });
+    app.game_action(Action::Drop { whole_stack: true });
+    app.use_item();
+    assert!(sent_frames(&mut app, &rx).is_empty());
     assert!(!app.in_use);
 }
 

@@ -1085,7 +1085,8 @@ impl App {
                 return;
             }
         }
-        if let Some(s) = &held {
+        // `PlayerControllerMP.sendUseItem` returns false for a spectator before any packet.
+        if let Some(s) = held.as_ref().filter(|_| self.game.gamemode != 3) {
             self.use_ticks = self.use_duration(s);
             self.in_use = self.use_ticks > 0;
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
@@ -1441,7 +1442,7 @@ impl App {
         }
     }
 
-    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar.
+    /// The middle click, number keys and wheel of a spectator drive the menu instead of the hotbar; the drop key does nothing.
     fn spectator_action(&mut self, action: Action) -> bool {
         if self.game.gamemode != 3 {
             return false;
@@ -1454,6 +1455,8 @@ impl App {
                 self.spectator_menu(|g, now, tab, sb| g.select_slot(i32::from(n), now, tab, sb));
             }
             Action::HotbarScroll(step) => self.spectator_scroll(step),
+            // `Minecraft.runTick` skips the drop key for a spectator.
+            Action::Drop { .. } => {}
             _ => return false,
         }
         true

@@ -1,5 +1,6 @@
 //! Server events and menu effects: what the network and the screens ask the client to do.
 
+use super::movement::SentMovement;
 use super::{boxed, App, View};
 use crate::game::Game;
 use crate::game::{eye_height, Effect};
@@ -393,6 +394,7 @@ impl App {
     fn reset_sent_state(&mut self) {
         self.sneak_sent = false;
         self.sprint_sent = false;
+        self.sent_move = SentMovement::default();
     }
 
     /// `handlePlayerRespawn`: a dimension change builds a new `WorldClient`, and `Minecraft.loadWorld` stops

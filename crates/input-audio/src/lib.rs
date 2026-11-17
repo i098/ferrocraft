@@ -129,9 +129,13 @@ pub struct InputState {
     sprinting: bool,
     /// The last `setSprinting` call, for the speed attribute's sprint modifier; see `take_sprint_change`.
     sprint_change: Option<bool>,
+    /// `sprintingTicksLeft`: 600 after `setSprinting(true)`, 0 after `setSprinting(false)`.
+    sprint_ticks: u16,
     sprint_timer: u8,
     /// Blindness: the sprint latch cannot start (`EntityPlayerSP.onLivingUpdate`); a running sprint goes on.
     pub blind: bool,
+    /// `isRiding()`: item use then keeps the double-tap window.
+    pub riding: bool,
     /// Sneak as the mod host's `EntityPlayerSP` left it this tick; `None` without a host.
     host_sneak: Option<bool>,
     was_full_forward: bool,
@@ -174,8 +178,10 @@ impl InputState {
             f3_down: false,
             sprinting: false,
             sprint_change: None,
+            sprint_ticks: 0,
             sprint_timer: 0,
             blind: false,
+            riding: false,
             host_sneak: None,
             was_full_forward: false,
             was_sneaking: false,
@@ -622,7 +628,7 @@ impl InputState {
     }
 
     /// Call once per game tick: `EntityPlayerSP.onLivingUpdate` sprint latch.
-    /// `can_sprint` is `foodLevel > 6 || allowFlying`.
+    /// `can_sprint` is `foodLevel > 6 || canFly`; `using_item` is `isUsingItem()`.
     pub fn movement(
         &mut self,
         on_ground: bool,
@@ -636,7 +642,16 @@ impl InputState {
         let sneak = self.sneaking();
         let full = forward > 0.0 && !sneak && !using_item;
         let sprint_key = self.is_held(Bind::Sprint);
+        if self.sprint_ticks > 0 {
+            self.sprint_ticks -= 1;
+            if self.sprint_ticks == 0 {
+                self.set_sprinting(false);
+            }
+        }
         self.sprint_timer = self.sprint_timer.saturating_sub(1);
+        if using_item && !self.riding {
+            self.sprint_timer = 0;
+        }
         self.update_sprint(on_ground, can_sprint && full && !self.blind, sprint_key);
         if self.sprinting && (!full || collided || !can_sprint) {
             self.set_sprinting(false);
@@ -688,6 +703,7 @@ impl InputState {
     /// `EntityLivingBase.setSprinting`: the flag and the speed modifier change together.
     fn set_sprinting(&mut self, sprinting: bool) {
         self.sprinting = sprinting;
+        self.sprint_ticks = if sprinting { 600 } else { 0 };
         self.sprint_change = Some(sprinting);
     }
 
@@ -1016,6 +1032,54 @@ mod tests {
         }
         press(&mut s, KeyCode::KeyW);
         assert!(!tick(&mut s));
+    }
+
+    /// `sprintingTicksLeft`: a double-tap sprint ends after 600 ticks; a held sprint key starts it again.
+    #[test]
+    fn sprint_ends_after_600_ticks_unless_the_key_is_held() {
+        let tick = |s: &mut InputState| s.movement(true, false, true, false).sprint;
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        tick(&mut s);
+        s.on_key(KeyCode::KeyW, false, None);
+        tick(&mut s);
+        press(&mut s, KeyCode::KeyW);
+        assert!(tick(&mut s));
+        for _ in 0..599 {
+            assert!(tick(&mut s));
+        }
+        assert!(!tick(&mut s), "tick 600 ends the sprint");
+        assert_eq!(s.take_sprint_change(), Some(false));
+
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        press(&mut s, KeyCode::ControlLeft);
+        assert!(tick(&mut s));
+        for _ in 0..1300 {
+            assert!(tick(&mut s));
+        }
+    }
+
+    /// `EntityPlayerSP.onLivingUpdate`: item use sets `sprintToggleTimer` to 0 unless riding.
+    #[test]
+    fn using_an_item_clears_the_double_tap_window() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::KeyW);
+        s.movement(true, false, true, false);
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, true);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        assert!(!s.movement(true, false, true, false).sprint);
+        s.riding = true;
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        s.movement(true, false, true, true);
+        s.on_key(KeyCode::KeyW, false, None);
+        s.movement(true, false, true, false);
+        press(&mut s, KeyCode::KeyW);
+        assert!(s.movement(true, false, true, false).sprint);
     }
 
     #[test]

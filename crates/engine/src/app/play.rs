@@ -289,7 +289,7 @@ impl App {
                 self.input.movement(
                     p.on_ground,
                     p.collided_horizontally,
-                    self.game.food > 6,
+                    self.game.food > 6 || self.game.abilities & 4 != 0,
                     self.use_ticks > 0,
                 )
             })
@@ -334,6 +334,7 @@ impl App {
         self.limb_tick();
         let host = self.host_player_tick();
         self.input.blind = self.game.effects.has(world::effects::id::BLINDNESS);
+        self.input.riding = self.game.vehicle.is_some();
         let input = self.movement_input(playing, host);
         let input = world::Input {
             using_item: self.use_ticks > 0,

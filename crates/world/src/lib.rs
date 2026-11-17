@@ -519,8 +519,13 @@ impl Player {
         self.in_water = in_water;
     }
 
+    /// `Entity.isInWeb` after the last move: a cobweb cell touched the body.
+    pub fn in_web(&self) -> bool {
+        self.in_web
+    }
+
     /// `Entity.isInLava`.
-    fn in_lava(&self, world: &dyn World) -> bool {
+    pub fn in_lava(&self, world: &dyn World) -> bool {
         let (min, max) = (self.bb.min, self.bb.max);
         let (grow, drop) = (0.100_000_001_490_116_12, 0.400_000_005_960_464_5);
         let lo = [min[0] + grow, min[1] + drop, min[2] + grow];

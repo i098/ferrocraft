@@ -5,7 +5,9 @@
 use super::crumbs::crumb_item;
 use super::play::FOOD;
 use super::{eye_height, App};
+use world::chunk::ChunkStore;
 use world::motion_sound::{self, Fall};
+use world::World;
 
 /// Player hitbox height (sneaking does not change the box in 1.8.9).
 const HEIGHT: f64 = 1.8;
@@ -13,6 +15,15 @@ const HEIGHT: f64 = 1.8;
 const CAN_FLY: u8 = 4;
 /// Use time left at which a consume sound repeats: `itemUseTimer <= 25 && itemUseTimer % 4 == 0`.
 const CONSUME_FROM: i32 = 25;
+
+/// The loaded chunks as the block source of the physics queries.
+struct Blocks<'a>(&'a ChunkStore);
+
+impl World for Blocks<'_> {
+    fn block(&self, x: i32, y: i32, z: i32) -> u16 {
+        self.0.get_block(x, y, z)
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Consume {
@@ -61,9 +72,7 @@ impl App {
         let splash = now && self.own_sounds.water == Some(false) && self.game.gamemode != 3;
         let (at, vel) = (p.pos, p.vel);
         self.own_sounds.water = Some(now);
-        if now {
-            self.own_sounds.fall.reset();
-        }
+        self.terrain_fall(now);
         if splash {
             let pitch = self.pitch_jitter(0.4);
             self.play_own(
@@ -75,18 +84,45 @@ impl App {
         }
     }
 
+    /// Fall-distance rules of the terrain around the player: water and `Entity.onEntityUpdate`'s lava halving,
+    /// and `moveEntityWithHeading`'s reset on a ladder or vine.
+    fn terrain_fall(&mut self, in_water: bool) {
+        let Some(p) = &self.game.player else { return };
+        let store = &self.game.store;
+        let fall = &mut self.own_sounds.fall;
+        if in_water {
+            fall.reset();
+        }
+        if p.in_lava(&Blocks(store)) {
+            fall.halve();
+        }
+        let feet = store.get_block(
+            p.pos[0].floor() as i32,
+            p.pos[1].floor() as i32,
+            p.pos[2].floor() as i32,
+        );
+        if motion_sound::climbing(feet, self.game.gamemode == 3) {
+            fall.reset();
+        }
+    }
+
     /// `Entity.moveEntity`'s fall check after the move; a landing that hurts plays the fall
     /// sound and the step sound of the block below.
     pub(super) fn fall_sounds(&mut self) {
         let Some(p) = &self.game.player else { return };
         if self.game.vehicle.is_some() {
+            self.own_sounds.fall.reset();
             return;
         }
-        let Some(dist) = self
+        let dist = self
             .own_sounds
             .fall
-            .step(p.pos[1] - self.game.prev_pos[1], p.on_ground)
-        else {
+            .step(p.pos[1] - self.game.prev_pos[1], p.on_ground);
+        // `Entity.setInWeb` runs in `doBlockCollisions`, after the fall check of the move.
+        if p.in_web() {
+            self.own_sounds.fall.reset();
+        }
+        let Some(dist) = dist else {
             return;
         };
         if self.game.abilities & CAN_FLY != 0 {
@@ -98,7 +134,8 @@ impl App {
             (at[1] - 0.2).floor() as i32,
             at[2].floor() as i32,
         );
-        let Some(name) = motion_sound::landing(dist, block, self.input.sneaking()) else {
+        let Some(name) = motion_sound::landing(dist, block, self.input.sneaking(), p.jump_boost)
+        else {
             return;
         };
         self.play_own(name, at, 1.0, 1.0);

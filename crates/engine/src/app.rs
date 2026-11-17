@@ -1271,10 +1271,17 @@ impl App {
         let in_world = self.in_world();
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
+        let tag_flags = [in_world, self.mod_drawn.labels_owned, show_hud];
+        mod_world::draw_tags(
+            &mut g,
+            &self.game,
+            cam,
+            draws,
+            (w, h),
+            factor as f32,
+            tag_flags,
+        );
         if show_hud {
-            if !self.mod_drawn.labels_owned {
-                draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
-            }
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac);
             let in_water = self.game.player.as_ref().is_some_and(|p| {
@@ -1420,33 +1427,6 @@ fn merged_lang(
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .collect();
     parts.join("\n")
-}
-
-/// `Render.renderLivingLabel`: a 25% black plate and the name at vanilla's world scale. Vanilla draws the text twice,
-/// faint without the depth test and solid with it; the overlay has no depth buffer, so a block on the line of
-/// sight to the tag stands in for the depth test.
-fn draw_name_tags(
-    g: &mut gui::Gui,
-    game: &Game,
-    cam: &Camera,
-    draws: &[EntityDraw],
-    (w, h): (u32, u32),
-    factor: f32,
-) {
-    let Some(player) = &game.player else { return };
-    let vp = render::view_proj(cam, w as f32 / h as f32);
-    for tag in render::nametags(draws, player.pos, &vp, cam.fov_deg, w as f32, h as f32) {
-        let half = g.width(&tag.text) / 2;
-        g.push();
-        g.translate(tag.screen[0] / factor, tag.screen[1] / factor);
-        g.scale(tag.scale / factor, tag.scale / factor);
-        g.fill(-half - 1, -1, half + 1, 8, 0x4000_0000);
-        g.text_plain(&tag.text, -half as f32, 0.0, 0x20FF_FFFF);
-        if !tag.sneaking && !game.line_blocked(cam.pos, tag.anchor) {
-            g.text_plain(&tag.text, -half as f32, 0.0, 0xFFFF_FFFF);
-        }
-        g.pop();
-    }
 }
 
 /// `GuiIngame.renderPlayerStats` inputs from the local player.

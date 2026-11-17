@@ -6,6 +6,8 @@
 const WIDTH: f64 = 0.6;
 /// `Block.SLIME` id.
 const SLIME: u16 = 165;
+const LADDER: u16 = 65;
+const VINE: u16 = 106;
 
 /// `Entity.checkWaterCollisions`: the hitbox grown by -0.4 below and contracted by 0.001
 /// touches a water block whose surface is not below the top of that box (`World.applyLiquidDrag`).
@@ -71,6 +73,11 @@ impl Fall {
         self.0 = 0.0;
     }
 
+    /// Lava, like `Entity.onEntityUpdate`, halves the distance each tick (`fallDistance *= 0.5F`).
+    pub fn halve(&mut self) {
+        self.0 *= 0.5;
+    }
+
     /// `Entity.checkFallDamage`: grows while moving down, and on landing returns the distance fallen.
     pub fn step(&mut self, dy: f64, on_ground: bool) -> Option<f32> {
         if on_ground {
@@ -85,15 +92,22 @@ impl Fall {
     }
 }
 
+/// `LivingEntity.isClimbing`: the feet block is a ladder or a vine, never for a spectator. Each
+/// climbing tick sets `fallDistance = 0`.
+pub fn climbing(feet_block: u16, spectator: bool) -> bool {
+    !spectator && matches!(feet_block >> 4, LADDER | VINE)
+}
+
 /// Sound of landing after `distance` blocks on `block` (`LivingEntity.takeFallDamage`, player
-/// override of `getFallSound`). Slime absorbs the fall unless the player sneaks.
-pub fn landing(distance: f32, block: u16, sneaking: bool) -> Option<&'static str> {
+/// override of `getFallSound`). Slime absorbs the fall unless the player sneaks; `jump_boost` is
+/// the Jump Boost amplifier plus one, or 0.
+pub fn landing(distance: f32, block: u16, sneaking: bool, jump_boost: f32) -> Option<&'static str> {
     let multiplier = if block >> 4 == SLIME && !sneaking {
         0.0
     } else {
         1.0
     };
-    let damage = ((distance - 3.0) * multiplier).ceil();
+    let damage = ((distance - 3.0 - jump_boost) * multiplier).ceil();
     (damage > 0.0).then_some(if damage > 4.0 {
         "game.player.hurt.fall.big"
     } else {
@@ -131,24 +145,73 @@ mod tests {
 
     #[test]
     fn landing_sound_follows_damage_and_slime() {
-        assert_eq!(landing(3.0, 1 << 4, false), None);
+        assert_eq!(landing(3.0, 1 << 4, false, 0.0), None);
         assert_eq!(
-            landing(3.5, 1 << 4, false),
+            landing(3.5, 1 << 4, false, 0.0),
             Some("game.player.hurt.fall.small")
         );
         assert_eq!(
-            landing(7.0, 1 << 4, false),
+            landing(7.0, 1 << 4, false, 0.0),
             Some("game.player.hurt.fall.small")
         );
         assert_eq!(
-            landing(7.5, 1 << 4, false),
+            landing(7.5, 1 << 4, false, 0.0),
             Some("game.player.hurt.fall.big")
         );
-        assert_eq!(landing(20.0, SLIME << 4, false), None);
+        assert_eq!(landing(20.0, SLIME << 4, false, 0.0), None);
         assert_eq!(
-            landing(20.0, SLIME << 4, true),
+            landing(20.0, SLIME << 4, true, 0.0),
             Some("game.player.hurt.fall.big")
         );
+    }
+
+    #[test]
+    fn jump_boost_forgives_one_more_block_per_level() {
+        // Jump Boost II is amplifier 1, so `jump_boost` is 2.
+        assert_eq!(landing(5.0, 1 << 4, false, 2.0), None);
+        assert_eq!(
+            landing(7.0, 1 << 4, false, 2.0),
+            Some("game.player.hurt.fall.small")
+        );
+    }
+
+    /// One tick of a fall: the vertical move, then the landing check, with `reset` as the ladder
+    /// or cobweb contact of that tick.
+    fn tick(f: &mut Fall, dy: f64, on_ground: bool, reset: bool) -> Option<&'static str> {
+        let dist = f.step(dy, on_ground);
+        if reset {
+            f.reset();
+        }
+        landing(dist?, 1 << 4, false, 0.0)
+    }
+
+    #[test]
+    fn ladder_and_cobweb_contact_leave_no_fall_sound() {
+        assert!(climbing(65 << 4 | 2, false) && climbing(106 << 4, false));
+        assert!(!climbing(65 << 4, true) && !climbing(1 << 4, false));
+        let mut f = Fall::default();
+        for _ in 0..100 {
+            assert_eq!(tick(&mut f, -0.1, false, true), None);
+        }
+        assert_eq!(tick(&mut f, 0.0, true, false), None);
+        // 20 blocks fall in 40 ticks, a cobweb zeroes the distance on each one.
+        for _ in 0..40 {
+            assert_eq!(tick(&mut f, -0.5, false, true), None);
+        }
+        assert_eq!(tick(&mut f, 0.0, true, false), None);
+        // Without contact the same 10 blocks hurt.
+        for _ in 0..100 {
+            tick(&mut f, -0.1, false, false);
+        }
+        assert!(tick(&mut f, 0.0, true, false).is_some());
+    }
+
+    #[test]
+    fn lava_halves_the_distance() {
+        let mut f = Fall::default();
+        f.step(-8.0, false);
+        f.halve();
+        assert_eq!(f.distance(), 4.0);
     }
 
     #[test]

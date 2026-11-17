@@ -24,6 +24,8 @@ pub(super) struct Layer {
     pub parts: Vec<Part>,
     /// Drawn full-bright (`LayerSpiderEyes`, `LayerEndermanEyes`).
     pub bright: bool,
+    /// `Layer.colorsWhenDamaged()`: the hurt overlay also covers this layer.
+    pub colors_when_damaged: bool,
 }
 
 pub(super) fn head_rot(d: &EntityDraw) -> [f32; 3] {
@@ -368,6 +370,7 @@ fn sheep_wool(d: &EntityDraw) -> Layer {
         tint: fleece(d),
         parts,
         bright: false,
+        colors_when_damaged: true,
     }
 }
 
@@ -505,6 +508,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         tint: [1.0; 3],
         parts: m.parts.clone(),
         bright: true,
+        colors_when_damaged: false,
     };
     match id {
         SHEEP if d.look.variant & 16 == 0 && !d.invisible => vec![sheep_wool(d)],

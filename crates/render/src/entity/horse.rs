@@ -96,6 +96,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
         tint: [1.0; 3],
         parts,
         bright: false,
+        colors_when_damaged: true,
     }]
 }
 

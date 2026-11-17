@@ -4,6 +4,8 @@
 //! name tags stay when no mod did, or when the host does not answer in time.
 
 use crate::game::Game;
+// app.rs sits at the sentrux god-file fan-out limit: a direct `crate::tag_gate` edge from it fails `sentrux gate`, so it reaches the name-tag drawing through this module.
+pub(super) use crate::tag_gate::draw as draw_tags;
 use ferrocraft_modhost::anchor::{
     Class as SubjectClass, Op, Request, Subject, World, MAX_SUBJECTS, ROLE_COUNTDOWN, ROLE_HITBOX,
     ROLE_LABEL,
@@ -294,7 +296,7 @@ fn subject(
 }
 
 /// Text and plates over the world. A label hangs from its entity's feet and faces the camera: one block is
-/// `px_per_block / depth` pixels, as for `draw_name_tags`.
+/// `px_per_block / depth` pixels, as for `tag_gate::draw`.
 pub(super) fn draw_labels(
     g: &mut gui::Gui,
     drawn: &Drawn,

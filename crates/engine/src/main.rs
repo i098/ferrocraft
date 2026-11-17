@@ -10,6 +10,7 @@ mod log;
 mod outline;
 mod skins;
 mod swing;
+mod tag_gate;
 mod ui;
 mod weather;
 

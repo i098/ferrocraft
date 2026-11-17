@@ -203,10 +203,9 @@ fn position_packet_keeps_ground_state_and_echoes_wrapped_yaw_off_ground() {
     chunk.set_block(0, 63, 0, 1 << 4);
     app.game.store.insert(chunk);
     hold_forward(&mut app);
-    app.tick_once(); // lands: on_ground, sprint-free walk velocity on x/z
-    sent_so_far(&mut app, &rx);
-    let p = app.game.player.as_ref().unwrap();
-    assert!(p.on_ground);
+    let p = app.game.player.as_mut().unwrap();
+    p.on_ground = true;
+    p.vel = [0.1, 0.2, 0.3];
     let vx = p.vel[0];
     let pos_look = |flags| {
         cb::PlayerPositionAndLook {

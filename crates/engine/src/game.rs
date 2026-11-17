@@ -1086,6 +1086,11 @@ impl Game {
             .collect()
     }
 
+    /// `!WorldBorder.contains(BlockPos)`: digging and block use refuse a block outside the border.
+    pub fn outside_border(&self, pos: [i32; 3]) -> bool {
+        !WorldBorder::contains_block(self.border.bounds(now_ms()), pos[0], pos[2])
+    }
+
     /// `PlayerControllerMP.getIsHittingBlock`: right click does nothing while a block is dug.
     pub fn is_hitting_block(&self) -> bool {
         self.digger.is_hitting()
@@ -1113,6 +1118,7 @@ impl Game {
             using: attack.using,
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
+            outside_border: block.is_some_and(|h| self.outside_border(h.pos)),
             on_ground: p.on_ground,
             mining: Mining::of_player(
                 self.inv.held_stack(),

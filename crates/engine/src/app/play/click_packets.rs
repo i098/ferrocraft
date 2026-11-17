@@ -220,3 +220,51 @@ fn tab_complete_carries_the_block_under_the_crosshair() {
     assert_eq!(tab(&mut app, &rx), want);
 }
 
+/// Moves the world border so that the block under the player is outside it.
+fn border_away(app: &mut App) {
+    use world::border::Update;
+    let now = crate::game::now_ms();
+    app.game.border.apply(Update::SetCenter { x: 100.0, z: 100.0 }, now);
+    app.game.border.apply(Update::SetSize(20.0), now);
+}
+
+/// `startMiningBlock` returns false outside the border: the click still swings (C0A), but sends no
+/// C07 START_DESTROY_BLOCK and the block stays.
+#[test]
+fn digging_outside_the_border_sends_no_dig_and_keeps_the_block() {
+    const DIG: u8 = 0x07;
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.pitch = 90.0;
+    border_away(&mut app);
+    sent_frames(&mut app, &rx);
+    app.attack_presses = 1;
+    app.tick_once();
+    let ids: Vec<u8> = sent_frames(&mut app, &rx).iter().map(|f| f[0]).collect();
+    assert!(ids.contains(&SWING) && !ids.contains(&DIG), "{ids:?}");
+    assert_eq!(app.game.store.get_block(0, 63, 0), 1 << 4);
+}
+
+/// `useBlock` returns false outside the border before C08: the click falls back to the air use (face 255);
+/// inside the border it sends the block face.
+#[test]
+fn block_use_outside_the_border_sends_no_block_use_item() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    hold(&mut app, 1);
+    // A wall block two blocks ahead of the eye, hit on its north face: the stone fits in front of it.
+    let mut chunk = world::chunk::Chunk::new(0, 0);
+    chunk.set_block(0, 64, 3, 1 << 4);
+    app.game.store.insert(chunk);
+    app.game.pitch = 15.0;
+    let face = |app: &mut App, rx: &Receiver<Vec<u8>>| {
+        hold(app, 1); // a placed stone uses the item up
+        sent_frames(app, rx);
+        app.use_item();
+        let frames = sent_frames(app, rx);
+        frames.iter().find(|f| f[0] == USE_ITEM).unwrap()[9]
+    };
+    assert_eq!(face(&mut app, &rx), 2, "inside the border: the north face");
+    border_away(&mut app);
+    assert_eq!(face(&mut app, &rx), 255, "outside the border: the air use");
+}

@@ -1119,6 +1119,10 @@ impl App {
         sneaking: bool,
         held: &Option<ItemStack>,
     ) -> bool {
+        // `PlayerControllerMP.onPlayerRightClick` returns false outside the border, before any packet.
+        if self.game.outside_border(h.pos) {
+            return false;
+        }
         let gamemode = self.game.gamemode;
         let held_id = held.as_ref().map(|s| s.id);
         let cursor = [0, 1, 2].map(|a| (eye[a] + dir[a] * dist - f64::from(h.pos[a])) as f32);

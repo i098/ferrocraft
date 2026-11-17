@@ -38,6 +38,12 @@ use std::sync::LazyLock;
 /// Block lookup for the simulation: the 1.8 block state, `id << 4 | metadata`.
 pub trait World {
     fn block(&self, x: i32, y: i32, z: i32) -> u16;
+
+    /// `Entity.getCollisionShape` of the entities that are solid for a mover: boats.
+    /// `World.getCollisions` adds those that touch the query box.
+    fn entity_boxes(&self) -> &[[f64; 6]] {
+        &[]
+    }
 }
 
 /// Player input for one tick, as the client sets it before `onLivingUpdate`.
@@ -599,6 +605,17 @@ impl Player {
                 }
             }
         }
+        // Then the entities (`getCollisionShape`) that intersect the box.
+        boxes.extend(
+            world
+                .entity_boxes()
+                .iter()
+                .map(|b| Aabb {
+                    min: [b[0], b[1], b[2]],
+                    max: [b[3], b[4], b[5]],
+                })
+                .filter(|b| (0..3).all(|a| b.max[a] > area.min[a] && b.min[a] < area.max[a])),
+        );
         boxes
     }
 

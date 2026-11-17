@@ -481,6 +481,16 @@ impl Entity {
         }
     }
 
+    /// `Entity.getCollisionShape` (jar offset 0 of `BoatEntity.getCollisionShape`): only a boat returns its box
+    /// (`[x0, y0, z0, x1, y1, z1]`), which `World.getCollisions` adds for a mover. `MinecartEntity.getCollisionShape`
+    /// is null; its `getCollisionAgainstShape` only counts when the minecart is the mover.
+    pub fn collision_box(&self) -> Option<[f64; 6]> {
+        matches!(self.kind, Kind::Object(1)).then(|| {
+            let (min, max) = self.bounds();
+            [min[0], min[1], min[2], max[0], max[1], max[2]]
+        })
+    }
+
     pub fn sneaking(&self) -> bool {
         self.flags & flag::SNEAKING != 0
     }

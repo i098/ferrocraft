@@ -618,3 +618,28 @@ fn no_clip_moves_the_box_by_the_full_delta() {
     assert_eq!(p.pos, [10.5, 44.0, 5.5]);
     assert!(!p.on_ground && !p.collided_horizontally && !p.collided_vertically);
 }
+
+/// An empty world with boat boxes in it.
+struct Boats(Vec<[f64; 6]>);
+
+impl World for Boats {
+    fn block(&self, _: i32, _: i32, _: i32) -> u16 {
+        0
+    }
+
+    fn entity_boxes(&self) -> &[[f64; 6]] {
+        &self.0
+    }
+}
+
+#[test]
+fn player_above_a_boat_stands_on_it() {
+    let boat = [-0.75, 62.0, -0.75, 0.75, 62.6, 0.75];
+    let world = Boats(vec![boat]);
+    let mut p = Player::new([0.0, 66.0, 0.0], 0.0);
+    for _ in 0..40 {
+        p.tick(&world, IDLE);
+    }
+    assert!(p.on_ground);
+    assert_eq!(p.pos[1], 62.6);
+}

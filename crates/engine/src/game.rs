@@ -65,6 +65,8 @@ pub enum Effect {
 struct Collision<'a> {
     store: &'a ChunkStore,
     walls: Option<[f64; 4]>,
+    /// `Entity.getCollisionShape` of every boat.
+    entities: &'a [[f64; 6]],
 }
 
 impl World for Collision<'_> {
@@ -76,6 +78,10 @@ impl World for Collision<'_> {
             return 1 << 4;
         }
         self.store.get_block(x, y, z)
+    }
+
+    fn entity_boxes(&self) -> &[[f64; 6]] {
+        self.entities
     }
 }
 
@@ -852,9 +858,15 @@ impl Game {
             // `isInsideBorder` decides, and `setOutsideBorder` remembers, whether the walls are solid.
             let inside = WorldBorder::inside(walls, p.pos[0], p.pos[2], self.border_outside);
             self.border_outside = !inside;
+            let solid: Vec<[f64; 6]> = self
+                .entities
+                .iter()
+                .filter_map(world::entities::Entity::collision_box)
+                .collect();
             let collision = Collision {
                 store: &self.store,
                 walls: inside.then_some(walls),
+                entities: &solid,
             };
             p.tick(&collision, input);
         }

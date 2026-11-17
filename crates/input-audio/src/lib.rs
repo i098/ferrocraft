@@ -764,6 +764,11 @@ impl InputState {
         self.is_held(Bind::SpectatorOutlines)
     }
 
+    /// `displayGuiScreen(null)` while `GuiChat` is open: the server closes or replaces the screen.
+    pub fn close_chat(&mut self) {
+        self.chat = None;
+    }
+
     pub fn chat_input(&self) -> Option<&str> {
         self.chat.as_ref().map(|f| f.text.as_str())
     }

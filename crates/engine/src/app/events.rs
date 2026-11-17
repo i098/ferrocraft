@@ -108,6 +108,16 @@ impl App {
         self.send_result(r.unwrap_or(Ok(())));
     }
 
+    /// `LocalClientPlayerEntity.doCloseMenu` and the openers: `displayGuiScreen` replaces chat and any menu.
+    fn close_screens(&mut self) {
+        self.input.close_chat();
+        if self.ui.is_open() {
+            let m = metrics!(self);
+            let q = self.ui.close(&m);
+            self.run_effects(q);
+        }
+    }
+
     fn open_sign_editor(&mut self, pos: [i32; 3]) {
         let state = self.game.store.get_block(pos[0], pos[1], pos[2]);
         let m = metrics!(self);
@@ -693,14 +703,21 @@ impl App {
             Effect::Chat(runs) => self.print_chat(runs),
             Effect::ActionBar(text) => self.hud.set_action_bar(text),
             Effect::OpenWindow => {
+                self.close_screens();
                 self.container = Some(ContainerScreen::new(
                     &self.game.inv,
                     self.ui.width,
                     self.ui.height,
                 ));
             }
-            Effect::CloseWindow => self.container = None,
-            Effect::EditSign(pos) => self.open_sign_editor(pos),
+            Effect::CloseWindow => {
+                self.close_screens();
+                self.container = None;
+            }
+            Effect::EditSign(pos) => {
+                self.close_screens();
+                self.open_sign_editor(pos)
+            }
             Effect::RejectWindow(id) => {
                 self.container = None;
                 let r = self.session_send(|s| s.close_window(id));
@@ -1265,5 +1282,43 @@ mod tests {
         let mut app = respawned(true);
         app.finish_terrain_wait();
         assert!(app.ui.is_open() && app.awaiting_terrain);
+    }
+
+    fn chat_app() -> App {
+        let mut app = App::new(Args {
+            username: "Ferro".into(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        });
+        let m = metrics!(app);
+        app.ui.close(&m);
+        app.input.on_key(winit::keyboard::KeyCode::KeyT, true, None);
+        assert!(app.input.chat_input().is_some());
+        app
+    }
+
+    /// `doCloseMenu` (S2E) and `openChestMenu` (S2D) replace the chat screen.
+    #[test]
+    fn s2e_closes_chat_and_s2d_shows_the_container_without_chat() {
+        let mut app = chat_app();
+        app.on_event(NetEvent::CloseWindow, &mut false, &mut Dirty::new());
+        assert!(app.input.chat_input().is_none());
+
+        let mut app = chat_app();
+        app.on_event(
+            NetEvent::OpenWindow {
+                id: 1,
+                kind: "minecraft:chest".into(),
+                title: String::new(),
+                slots: 27,
+                horse: None,
+            },
+            &mut false,
+            &mut Dirty::new(),
+        );
+        assert!(app.input.chat_input().is_none());
+        assert!(app.container.is_some());
     }
 }

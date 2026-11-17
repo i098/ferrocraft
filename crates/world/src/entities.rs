@@ -583,13 +583,62 @@ impl Entity {
         self.target.pos = raw.map(fixed);
         self.target.yaw = yaw;
         self.target.pitch = pitch;
-        if crate::projectile::snaps(self.kind) {
+        if matches!(self.kind, Kind::Object(t) if crate::projectile::snaps(t)) {
             // `Entity.lerpPositionAndAngles` of a non-living entity sets the pose at once.
             (self.pos, self.yaw, self.pitch) = (self.target.pos, yaw, pitch);
             self.target.steps = 0;
         } else {
             self.target.steps = STEPS;
         }
+    }
+
+    /// `handleEntityTeleport`: a teleport within 1/32 (x, z) and 1/64 (y) of the entity eases to where it already is.
+    fn teleport(&mut self, raw: [i32; 3], yaw: f32, pitch: f32, on_ground: bool) {
+        let to = raw.map(fixed);
+        let small = (to[0] - self.pos[0]).abs() < 0.03125
+            && (to[1] - self.pos[1]).abs() < 0.015625
+            && (to[2] - self.pos[2]).abs() < 0.03125;
+        let here = self.pos;
+        self.set_target(raw, yaw, pitch);
+        if small {
+            (self.pos, self.target.pos) = (here, here);
+        }
+        self.on_ground = on_ground;
+    }
+
+    /// `handleEntityMove`: a move without angles keeps the current yaw and pitch, so a turn in progress stops.
+    fn relative_move(&mut self, delta: [i8; 3], look: Option<(i8, i8)>, on_ground: bool) {
+        let raw = std::array::from_fn(|i| self.server_pos[i] + i32::from(delta[i]));
+        let (yaw, pitch) = look.map_or((self.yaw, self.pitch), |(y, p)| (angle(y), angle(p)));
+        self.set_target(raw, yaw, pitch);
+        self.on_ground = on_ground;
+    }
+
+    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers.
+    fn fly(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+        let Kind::Object(object) = self.kind else {
+            return;
+        };
+        if !crate::projectile::simulated(object) {
+            return;
+        }
+        let mut b = crate::projectile::Body {
+            id: self.id,
+            age: self.age,
+            size: self.size(),
+            pos: self.pos,
+            vel: self.vel,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            prev_yaw: self.prev_yaw,
+            prev_pitch: self.prev_pitch,
+            on_ground: self.on_ground,
+            proj: std::mem::take(&mut self.proj),
+        };
+        crate::projectile::step(object, &mut b, at);
+        (self.pos, self.vel, self.yaw, self.pitch) = (b.pos, b.vel, b.yaw, b.pitch);
+        (self.prev_yaw, self.prev_pitch, self.on_ground, self.proj) =
+            (b.prev_yaw, b.prev_pitch, b.on_ground, b.proj);
     }
 
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
@@ -621,7 +670,7 @@ impl Entity {
             self.pitch += (self.target.pitch - self.pitch) / k;
             self.target.steps -= 1;
         } else {
-            crate::projectile::step(self, at);
+            self.fly(at);
         }
 
         // `EntityLivingBase.onUpdate` -> `updateLimbSwing`.
@@ -1155,12 +1204,7 @@ impl Entities {
                 delta,
                 look,
                 on_ground,
-            } => self.with(id, |e| {
-                let raw = std::array::from_fn(|i| e.server_pos[i] + i32::from(delta[i]));
-                let (yaw, pitch) = look.map_or((e.yaw, e.pitch), |(y, p)| (angle(y), angle(p)));
-                e.set_target(raw, yaw, pitch);
-                e.on_ground = on_ground;
-            }),
+            } => self.with(id, |e| e.relative_move(delta, look, on_ground)),
             E::Look {
                 id,
                 yaw,
@@ -1176,19 +1220,7 @@ impl Entities {
                 yaw,
                 pitch,
                 on_ground,
-            } => self.with(id, |e| {
-                // A teleport within 1/32 (x, z) and 1/64 (y) of the entity eases to where it already is.
-                let to = pos.map(fixed);
-                let small = (to[0] - e.pos[0]).abs() < 0.03125
-                    && (to[1] - e.pos[1]).abs() < 0.015625
-                    && (to[2] - e.pos[2]).abs() < 0.03125;
-                let here = e.pos;
-                e.set_target(pos, angle(yaw), angle(pitch));
-                if small {
-                    (e.pos, e.target.pos) = (here, here);
-                }
-                e.on_ground = on_ground;
-            }),
+            } => self.with(id, |e| e.teleport(pos, angle(yaw), angle(pitch), on_ground)),
             E::HeadLook { id, head_yaw } => self.with(id, |e| e.head_yaw = angle(head_yaw)),
             E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
             E::Destroy(ids) => ids.iter().for_each(|id| {
@@ -1614,6 +1646,68 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+
+    fn spawn_object(es: &mut Entities, kind: i8, pos: [i32; 3], vel: [i16; 3]) {
+        es.apply(EntityEvent::SpawnObject {
+            id: 5,
+            kind,
+            pos,
+            yaw: 0,
+            pitch: 0,
+            vel,
+            data: 0,
+        });
+    }
+
+    fn open_air(_: [i32; 3]) -> u16 {
+        0
+    }
+
+    /// `ArrowEntity.tick` in open air: add the motion, then scale by 0.99 and drop 0.05, every tick.
+    #[test]
+    fn an_arrow_flies_with_drag_and_gravity_between_packets() {
+        let mut es = Entities::default();
+        spawn_object(&mut es, 60, [0, 100 * 32, 0], [8000, 0, 0]);
+        let (mut x, mut y, mut vx, mut vy) = (0.0_f64, 100.0_f64, 1.0_f64, 0.0_f64);
+        for _ in 0..20 {
+            es.tick_in(&open_air);
+            x += vx;
+            y += vy;
+            (vx, vy) = (vx * 0.99, vy * 0.99 - 0.05);
+            let a = es.get(5).unwrap();
+            assert!((a.pos[0] - x).abs() < 1e-9 && (a.pos[1] - y).abs() < 1e-9);
+        }
+    }
+
+    /// `ItemEntity.tick`: gravity 0.04, then drag 0.98; a stone floor stops the fall and the item rests on it.
+    #[test]
+    fn a_dropped_item_falls_and_rests_on_a_block() {
+        let stone = |p: [i32; 3]| if p[1] < 64 { 1 << 4 } else { 0 };
+        let mut es = Entities::default();
+        spawn_object(&mut es, 2, [0, 66 * 32, 0], [0; 3]);
+        es.tick_in(&stone);
+        let first = es.get(5).unwrap();
+        assert!((first.pos[1] - (66.0 - 0.039_999_999_105_930_33)).abs() < 1e-12);
+        for _ in 0..60 {
+            es.tick_in(&stone);
+        }
+        let item = es.get(5).unwrap();
+        assert_eq!(item.pos[1], 64.0);
+        assert!(item.on_ground);
+    }
+
+    /// `ThrownEntity.tick`: a snowball falls 0.03 per tick under drag 0.99 and ignores blocks on the client.
+    #[test]
+    fn a_snowball_uses_gravity_0_03() {
+        let mut es = Entities::default();
+        spawn_object(&mut es, 61, [0, 100 * 32, 0], [0; 3]);
+        es.tick_in(&open_air);
+        es.tick_in(&open_air);
+        let s = es.get(5).unwrap();
+        assert!((s.pos[1] - 99.97).abs() < 1e-7);
+        assert!((s.vel[1] - (-0.03 * 0.99 - 0.03)).abs() < 1e-7);
+    }
+
     #[test]
     fn pickup_eases_toward_a_moving_collector() {
         let mut es = Entities::default();

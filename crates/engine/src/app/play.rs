@@ -333,6 +333,7 @@ impl App {
         self.fov_tick();
         if !playing {
             self.attack_presses = 0;
+            self.use_presses = 0;
         }
         self.limb_tick();
         let host = self.host_player_tick();
@@ -975,17 +976,27 @@ impl App {
         }
     }
 
-    /// Right button held: use or place again every `USE_DELAY` ticks; releasing ends an item use.
+    /// `Minecraft.runTick` after the attack clicks: while an item is in use the use clicks are dropped and
+    /// letting go of the button stops the use. Otherwise each click uses the item, then the held button
+    /// repeats every `USE_DELAY` ticks.
     fn use_tick(&mut self) {
         if self.use_delay > 0 {
             self.use_delay -= 1;
         }
+        let presses = std::mem::take(&mut self.use_presses);
         let held = self.input.use_held();
-        if self.in_use && !held {
-            self.end_use();
-            let r = self.session_send(|s| s.release_use_item());
-            self.send_result(r);
-        } else if held && self.use_delay == 0 && !self.in_use {
+        if self.in_use {
+            if !held {
+                self.end_use();
+                let r = self.session_send(|s| s.release_use_item());
+                self.send_result(r);
+            }
+            return;
+        }
+        for _ in 0..presses {
+            self.use_item();
+        }
+        if held && self.use_delay == 0 && !self.in_use {
             self.use_item();
         }
     }
@@ -1279,11 +1290,7 @@ impl App {
         }
         match action {
             Action::Attack => self.attack_presses += 1,
-            Action::Use => {
-                if !self.in_use {
-                    self.use_item();
-                }
-            }
+            Action::Use => self.use_presses += 1,
             Action::PickBlock => self.pick_block(),
             Action::Hotbar(n) => self.select_slot(n),
             Action::HotbarScroll(step) => self.select_slot(scroll_slot(self.game.inv.held, step)),
@@ -1574,6 +1581,8 @@ fn sprint_dust_state(
 }
 #[cfg(test)]
 mod camera_packets;
+#[cfg(test)]
+mod click_packets;
 #[cfg(test)]
 mod held_slot;
 #[cfg(test)]

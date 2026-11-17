@@ -1,0 +1,106 @@
+//! Left and right clicks run in the tick, checked as the bytes the client sends.
+use super::camera_packets::{idle_app, sent_frames, server};
+use crate::app::App;
+use std::sync::mpsc::Receiver;
+use winit::event::{DeviceId, ElementState, MouseButton, WindowEvent};
+use world::entities::EntityEvent;
+use world::inventory::ItemStack;
+
+const USE_ENTITY: u8 = 0x02;
+const USE_ITEM: u8 = 0x08;
+const SWING: u8 = 0x0A;
+/// Ids of the packets that clicks send; the tick also sends movement.
+const CLICK_IDS: [u8; 3] = [USE_ENTITY, USE_ITEM, SWING];
+/// C02 action (`ATTACK`) is the second byte after the entity id VarInt.
+const ATTACK: u8 = 1;
+
+pub(super) fn hold(app: &mut App, id: i16) {
+    let slot = 36 + usize::from(app.game.inv.held);
+    app.game.inv.player[slot] = Some(ItemStack {
+        id,
+        count: 1,
+        damage: 0,
+        nbt: None,
+    });
+}
+
+/// Yaw 0 faces +z: the mob stands about three blocks ahead of the eye.
+pub(super) fn spawn_ahead(app: &mut App, id: i32, kind: u8) {
+    app.game.entities.apply(EntityEvent::SpawnMob {
+        id,
+        kind,
+        pos: [16, 2048, 96],
+        yaw: 0,
+        pitch: 0,
+        head_yaw: 0,
+        vel: [0; 3],
+        flags: None,
+        name: None,
+        health: None,
+        size: Default::default(),
+    });
+}
+
+pub(super) fn hold_right_button(app: &mut App) {
+    let click = |pressed| WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: if pressed {
+            ElementState::Pressed
+        } else {
+            ElementState::Released
+        },
+        button: MouseButton::Right,
+    };
+    for pressed in [true, false, true] {
+        app.input.on_window_event(&click(pressed));
+    }
+}
+
+/// The packets the clicks sent, as `(id, C02 action)`; the action is 255 for other packets.
+pub(super) fn clicks(app: &mut App, rx: &Receiver<Vec<u8>>) -> Vec<(u8, u8)> {
+    sent_frames(app, rx)
+        .iter()
+        .filter(|f| CLICK_IDS.contains(&f[0]))
+        .map(|f| (f[0], if f[0] == USE_ENTITY { f[2] } else { 255 }))
+        .collect()
+}
+
+/// `Minecraft.runTick`: the attack click runs first (C0A, C02), then the use click (C08).
+#[test]
+fn attack_and_use_in_one_tick_send_the_attack_before_the_use() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    hold(&mut app, 267);
+    spawn_ahead(&mut app, 9, 54);
+    clicks(&mut app, &rx);
+    app.attack_presses = 1;
+    app.use_presses = 1;
+    app.tick_once();
+    let sent = clicks(&mut app, &rx);
+    let at = |p| sent.iter().position(|s| *s == p).unwrap();
+    assert!(
+        at((SWING, 255)) < at((USE_ENTITY, ATTACK)),
+        "swing before attack"
+    );
+    assert!(at((USE_ENTITY, ATTACK)) < at((USE_ITEM, 255)), "{sent:?}");
+}
+
+/// `rightClickDelayTimer` is set to 4 by the click and counts down at the start of each tick: the held
+/// button repeats at T, T+4 and T+8.
+#[test]
+fn held_right_click_repeats_every_four_ticks() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    hold(&mut app, 1);
+    hold_right_button(&mut app);
+    clicks(&mut app, &rx);
+    app.use_presses = 1;
+    let mut uses = vec![];
+    for tick in 0..9 {
+        app.tick_once();
+        if clicks(&mut app, &rx).contains(&(USE_ITEM, 255)) {
+            uses.push(tick);
+        }
+    }
+    assert_eq!(uses, [0, 4, 8]);
+}

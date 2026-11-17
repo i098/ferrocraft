@@ -102,6 +102,8 @@ pub struct App {
     grabbed: bool,
     /// Left-click presses since the last tick that did not hit an entity.
     attack_presses: u32,
+    /// Right-click presses since the last tick: `Minecraft.runTick` handles them in the tick.
+    use_presses: u32,
     show_debug: bool,
     /// F3+B: vanilla shows the hitboxes of entities.
     show_hitboxes: bool,
@@ -193,6 +195,7 @@ impl App {
             next_tick: Instant::now(),
             grabbed: false,
             attack_presses: 0,
+            use_presses: 0,
             show_debug: false,
             show_hitboxes: false,
             hide_hud: false,

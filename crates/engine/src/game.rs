@@ -838,6 +838,8 @@ impl Game {
                 ..input
             };
             p.speed_attr = Some(self.speed.value());
+            // `PlayerEntity.onUpdate`: `noClip = isSpectator()`.
+            p.no_clip = self.gamemode == SPECTATOR;
             // Window 0 slots 5 to 8 are the worn armor; Depth Strider is enchantment 8.
             p.depth_strider = world::dig::highest_enchant_level(&self.inv.player[5..=8], 8);
             p.jump_boost = self

@@ -573,3 +573,48 @@ fn player_in_stone_is_pushed_north_when_west_is_closed() {
         .extend([((-1, 64, 0), STONE), ((-1, 65, 0), STONE)]);
     s.check("pushed out of stone to the north");
 }
+
+/// A spectator in flight through a wall (z = 3, high) and down through the stone floor.
+#[test]
+fn spectator_flies_through_walls_and_floor_like_the_real_player() {
+    let fly = |forward, sneak| Input {
+        forward,
+        sneak,
+        fly_speed: Some(0.05),
+        ..IDLE
+    };
+    let mut s = Scenario::new(vec![
+        (3, fly(0.0, false)),
+        (25, fly(1.0, false)),
+        (40, fly(0.0, true)),
+        (5, fly(0.0, false)),
+    ]);
+    s.start = [0.5, 70.0, 0.5];
+    s.no_clip = true;
+    for y in 64..80 {
+        for x in -1..=1 {
+            s.blocks.push(((x, y, 3), STONE));
+        }
+    }
+    s.check("spectator");
+}
+
+#[test]
+fn no_clip_moves_the_box_by_the_full_delta() {
+    let wall = TestWorld {
+        floor: STONE,
+        blocks: (-5..5)
+            .flat_map(|y| (0..3).map(move |z| ((1, 60 + y, z), STONE)))
+            .collect(),
+    };
+    let start = [0.5, 64.0, 0.5];
+    let mut p = Player::new(start, 0.0);
+    p.no_clip = true;
+    let motion = [0.25, -0.5, 0.125];
+    for _ in 0..40 {
+        p.on_ground = false;
+        p.move_entity(&wall, motion);
+    }
+    assert_eq!(p.pos, [10.5, 44.0, 5.5]);
+    assert!(!p.on_ground && !p.collided_horizontally && !p.collided_vertically);
+}

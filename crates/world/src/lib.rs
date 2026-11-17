@@ -476,14 +476,14 @@ impl Player {
         shape::slipperiness(below >> 4)
     }
 
-    /// `LivingEntity.isClimbing`: the feet are in a ladder or a vine.
+    /// `LivingEntity.isClimbing`: the feet are in a ladder or a vine; never for a spectator.
     fn is_climbing(&self, world: &dyn World) -> bool {
         let id = world.block(
             floor(self.pos[0]),
             floor(self.bb.min[1]),
             floor(self.pos[2]),
         ) >> 4;
-        matches!(id, 65 | 106)
+        !self.no_clip && matches!(id, 65 | 106)
     }
 
     /// `Entity.handleWaterMovement`: set `in_water` and let flowing water push the player.
@@ -644,6 +644,18 @@ impl Player {
 
     /// `Entity.moveEntity`.
     fn move_entity(&mut self, world: &dyn World, mut motion: [f64; 3]) {
+        // `Entity.moveEntity` with `noClip`: the box moves by the full delta; no collision, flag or block effect.
+        if self.no_clip {
+            for (axis, d) in motion.into_iter().enumerate() {
+                self.bb = self.bb.offset(axis, d);
+            }
+            self.pos = [
+                (self.bb.min[0] + self.bb.max[0]) / 2.0,
+                self.bb.min[1],
+                (self.bb.min[2] + self.bb.max[2]) / 2.0,
+            ];
+            return;
+        }
         if self.in_web {
             self.in_web = false;
             motion = [

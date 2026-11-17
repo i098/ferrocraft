@@ -42,6 +42,11 @@ pub(super) fn spawn_ahead(app: &mut App, id: i32, kind: u8) {
 }
 
 pub(super) fn hold_right_button(app: &mut App) {
+    hold_button(app, MouseButton::Right);
+}
+
+/// The first click only regains the mouse grab (`setIngameFocus`), so click twice.
+fn hold_button(app: &mut App, button: MouseButton) {
     let click = |pressed| WindowEvent::MouseInput {
         device_id: DeviceId::dummy(),
         state: if pressed {
@@ -49,7 +54,7 @@ pub(super) fn hold_right_button(app: &mut App) {
         } else {
             ElementState::Released
         },
-        button: MouseButton::Right,
+        button,
     };
     for pressed in [true, false, true] {
         app.input.on_window_event(&click(pressed));
@@ -104,3 +109,45 @@ fn held_right_click_repeats_every_four_ticks() {
     }
     assert_eq!(uses, [0, 4, 8]);
 }
+
+fn release(app: &mut App, button: MouseButton) {
+    app.input.on_window_event(&WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state: ElementState::Released,
+        button,
+    });
+}
+
+/// `Minecraft.runTick` counts `leftClickCounter` down every tick and zeroes it when the button is up,
+/// also while an item is in use: a miss, three ticks of blocking with the button up, then a click attacks.
+#[test]
+fn the_miss_cooldown_runs_while_an_item_is_in_use() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    hold(&mut app, 267);
+    hold_button(&mut app, MouseButton::Left);
+    clicks(&mut app, &rx);
+    app.attack_presses = 1;
+    app.tick_once();
+    assert_eq!(clicks(&mut app, &rx), [(SWING, 255)], "the miss swings");
+
+    hold_right_button(&mut app);
+    app.in_use = true;
+    app.use_ticks = 72_000;
+    release(&mut app, MouseButton::Left);
+    for _ in 0..3 {
+        app.tick_once();
+    }
+    release(&mut app, MouseButton::Right);
+    app.end_use();
+    spawn_ahead(&mut app, 9, 54);
+    clicks(&mut app, &rx);
+    app.attack_presses = 1;
+    app.tick_once();
+    assert_eq!(
+        clicks(&mut app, &rx),
+        [(SWING, 255), (USE_ENTITY, ATTACK)],
+        "the click attacks"
+    );
+}
+

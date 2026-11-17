@@ -571,6 +571,8 @@ pub struct Frame<'a> {
     pub presses: u32,
     /// The mouse was grabbed by a click this tick: `setIngameFocus`.
     pub grabbed: bool,
+    /// An item is in use: `isUsingItem`. The counter still runs, but clicks and digging do not.
+    pub using: bool,
     pub creative: bool,
     /// Adventure or spectator: `clickBlock` refuses, but the swing still happens.
     pub no_dig: bool,
@@ -668,6 +670,14 @@ impl Digger {
         }
         if self.click_delay > 0 {
             self.click_delay -= 1;
+        }
+        if f.using {
+            // `sendClickBlockToController` zeroes the counter when the button is up, before the
+            // `isUsingItem` test; the clicks of this tick are dropped.
+            if !f.held {
+                self.click_delay = 0;
+            }
+            return;
         }
         for _ in 0..f.presses {
             self.click_mouse(f, w, out);

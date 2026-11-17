@@ -33,6 +33,8 @@ const SPECTATOR: u8 = 3;
 pub struct Attack {
     pub held: bool,
     pub presses: u32,
+    /// `isUsingItem`: only the click counter runs.
+    pub using: bool,
 }
 
 /// Changes that the renderer or the HUD must mirror.
@@ -1108,6 +1110,7 @@ impl Game {
             held: attack.held,
             presses: attack.presses,
             grabbed: false,
+            using: attack.using,
             creative: self.creative,
             no_dig: self.gamemode > CREATIVE,
             on_ground: p.on_ground,

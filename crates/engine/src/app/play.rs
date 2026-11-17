@@ -882,13 +882,10 @@ impl App {
     /// One tick of block breaking: packets, local removal, hit shards and break sounds.
     fn dig(&mut self) {
         self.sync_held_slot();
-        let presses = std::mem::take(&mut self.attack_presses);
-        if self.in_use {
-            return;
-        }
         let attack = Attack {
             held: self.input.attack_held(),
-            presses,
+            presses: std::mem::take(&mut self.attack_presses),
+            using: self.in_use,
         };
         let ray = self.view_ray(1.0);
         let aim = ray.and_then(|(eye, yaw, pitch, skip, vehicle)| {
@@ -922,13 +919,16 @@ impl App {
             self.send_result(sent);
         }
         self.broken_effects();
-        if attack.held && !self.game.creative {
-            self.dig_ticks += 1;
-            if self.dig_ticks.is_multiple_of(4) {
-                self.hit_shard();
+        // No dig runs while an item is in use, so no hit shards either.
+        if !self.in_use {
+            if attack.held && !self.game.creative {
+                self.dig_ticks += 1;
+                if self.dig_ticks.is_multiple_of(4) {
+                    self.hit_shard();
+                }
+            } else {
+                self.dig_ticks = 0;
             }
-        } else {
-            self.dig_ticks = 0;
         }
         for effect in effects {
             if let (Effect::Upload(x, z), Some(r)) = (effect, &mut self.renderer) {

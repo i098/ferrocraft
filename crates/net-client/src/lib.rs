@@ -329,6 +329,8 @@ pub struct Session {
     stream: TcpStream,
     /// The login ran the online-mode encryption handshake (`getIsencrypted`).
     pub encrypted: bool,
+    /// The `MC|Brand` value for [`Session::send_brand`].
+    brand: String,
 }
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(15);
@@ -369,16 +371,16 @@ impl Session {
         let (tx, events) = mpsc::channel();
         let thread_writer = Arc::clone(&writer);
         let reader_tx = tx.clone();
-        let brand = brand.to_owned();
         std::thread::Builder::new()
             .name("net-client-reader".into())
-            .spawn(move || play::run(reader, thread_writer, reader_tx, &brand))?;
+            .spawn(move || play::run(reader, thread_writer, reader_tx))?;
         Ok(Session {
             events,
             tx,
             writer,
             stream,
             encrypted,
+            brand: brand.to_owned(),
         })
     }
 
@@ -421,6 +423,21 @@ impl Session {
     /// `Animation`: the arm swing.
     pub fn send_swing(&mut self) -> io::Result<()> {
         send(&self.writer, sb::Packet::from(sb::Animation {}))
+    }
+
+    /// `handleJoinGame` after `syncClientSettings`: `MC|Brand`, the hosted `getClientModName()` with the mod host.
+    pub fn send_brand(&mut self) -> io::Result<()> {
+        play::send_brand(&self.writer, &self.brand)
+    }
+
+    /// `C16PacketClientStatus(OPEN_INVENTORY_ACHIEVEMENT)`: the inventory key, sent before the screen opens.
+    pub fn open_inventory_status(&mut self) -> io::Result<()> {
+        send(
+            &self.writer,
+            sb::Packet::from(sb::ClientStatus {
+                action_id: VarInt(2),
+            }),
+        )
     }
 
     /// `C14PacketTabComplete`: the chat text before the cursor, no looked-at block.

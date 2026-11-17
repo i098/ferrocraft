@@ -195,7 +195,7 @@ impl App {
         self.pending_pack = None;
         self.perspective = 0;
         self.reset_sent_state();
-        self.use_ticks = 0;
+        self.end_use();
         // `Minecraft.loadWorld(null)` drops the server pack and reloads.
         if self.server_pack.take().is_some() {
             self.refresh_resources();
@@ -441,6 +441,8 @@ impl App {
                 let q = self.ui.joined(&m);
                 self.run_effects(q);
                 self.send_client_settings();
+                let r = self.session_send(|s| s.send_brand());
+                self.send_result(r);
             }
             // `Minecraft.respawnPlayer` builds a new `EntityPlayerSP`: `sentSneaking` and `sentSprinting` start false.
             NetEvent::Respawn { dimension_changed } => self.respawn_screens(*dimension_changed),

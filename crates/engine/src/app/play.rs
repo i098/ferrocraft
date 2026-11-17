@@ -290,7 +290,7 @@ impl App {
                     p.on_ground,
                     p.collided_horizontally,
                     self.game.food > 6 || self.game.abilities & 4 != 0,
-                    self.use_ticks > 0,
+                    self.in_use,
                 )
             })
     }
@@ -340,7 +340,7 @@ impl App {
         self.input.riding = self.game.vehicle.is_some();
         let input = self.movement_input(playing, host);
         let input = world::Input {
-            using_item: self.use_ticks > 0,
+            using_item: self.in_use,
             ..input
         };
         let mut abilities = self.game.fly_toggle(input.jump);
@@ -354,11 +354,13 @@ impl App {
             self.send_abilities();
         }
         if std::mem::take(&mut self.game.held_replaced) {
-            self.use_ticks = 0;
+            self.end_use();
         }
         self.consume_sounds();
         self.remote_eat_crumbs();
-        self.use_ticks = (self.use_ticks - 1).max(0);
+        if self.in_use {
+            self.use_ticks -= 1;
+        }
         self.boss_tick();
         self.step_sound();
         self.rain_particles();
@@ -559,7 +561,7 @@ impl App {
             food: self.game.food,
             allow_flying: self.game.abilities & 4 != 0,
             flying: self.game.abilities & 2 != 0,
-            using_item: self.use_ticks > 0,
+            using_item: self.in_use,
         })
     }
 
@@ -880,7 +882,7 @@ impl App {
     fn dig(&mut self) {
         self.sync_held_slot();
         let presses = std::mem::take(&mut self.attack_presses);
-        if self.use_ticks > 0 {
+        if self.in_use {
             return;
         }
         let attack = Attack {
@@ -979,13 +981,19 @@ impl App {
             self.use_delay -= 1;
         }
         let held = self.input.use_held();
-        if self.use_ticks > 0 && !held {
-            self.use_ticks = 0;
+        if self.in_use && !held {
+            self.end_use();
             let r = self.session_send(|s| s.release_use_item());
             self.send_result(r);
-        } else if held && self.use_delay == 0 && self.use_ticks == 0 {
+        } else if held && self.use_delay == 0 && !self.in_use {
             self.use_item();
         }
+    }
+
+    /// `EntityPlayer.clearItemInUse`: no item is in use.
+    pub(super) fn end_use(&mut self) {
+        self.in_use = false;
+        self.use_ticks = 0;
     }
 
     /// `EntityRenderer.updateFovModifierHand` toward `AbstractClientPlayer.getFovModifier`.
@@ -1008,7 +1016,7 @@ impl App {
                 .held_stack()
                 .as_ref()
                 .is_some_and(|s| s.id == 261);
-            if self.use_ticks > 0 && bow {
+            if self.in_use && bow {
                 let t = (72_000 - self.use_ticks) as f32 / 20.0;
                 f *= 1.0 - if t > 1.0 { 1.0 } else { t * t } * 0.15;
             }
@@ -1068,8 +1076,13 @@ impl App {
         }
         if let Some(s) = &held {
             self.use_ticks = self.use_duration(s);
+            self.in_use = self.use_ticks > 0;
             let r = self.session_send(|s| s.place_block([-1, -1, -1], 255, &held, [0, 0, 0]));
             self.send_result(r);
+            // `ItemFishingRod.onItemRightClick` swings for the cast and the reel.
+            if s.id == 346 {
+                self.swing_arm();
+            }
         }
     }
 
@@ -1116,13 +1129,18 @@ impl App {
             self.toggle_openable(h.pos);
         }
         if handled {
-            self.game
-                .swing
-                .start(self.game.effects.arm_swing_duration());
-            let r = self.session_send(|s| s.send_swing());
-            self.send_result(r);
+            self.swing_arm();
         }
         handled || held.is_none()
+    }
+
+    /// `EntityPlayerSP.swingItem`: the local swing, then C0A.
+    fn swing_arm(&mut self) {
+        self.game
+            .swing
+            .start(self.game.effects.arm_swing_duration());
+        let r = self.session_send(|s| s.send_swing());
+        self.send_result(r);
     }
 
     /// What the client does with a click before it sends C08: `None` when
@@ -1199,7 +1217,7 @@ impl App {
             });
             let slot = 36 + usize::from(self.game.inv.held);
             self.game.inv.player[slot] = stack.clone();
-            self.use_ticks = 0;
+            self.end_use();
             let r = self.session_send(|s| s.creative_slot(slot as i16, &stack));
             self.send_result(r);
         }
@@ -1262,7 +1280,7 @@ impl App {
         match action {
             Action::Attack => self.attack_presses += 1,
             Action::Use => {
-                if self.use_ticks == 0 {
+                if !self.in_use {
                     self.use_item();
                 }
             }
@@ -1481,7 +1499,7 @@ impl App {
             return;
         }
         self.game.inv.held = n;
-        self.use_ticks = 0;
+        self.end_use();
     }
 
     /// `PlayerControllerMP.syncCurrentPlayItem`: C09 goes out when the slot differs from the last one sent.
@@ -1505,6 +1523,8 @@ impl App {
             let r = self.session_send(|s| s.entity_action(id, 6, 0));
             self.send_result(r);
         } else {
+            let r = self.session_send(|s| s.open_inventory_status());
+            self.send_result(r);
             self.container = Some(ContainerScreen::new(
                 &self.game.inv,
                 self.ui.width,
@@ -1556,6 +1576,8 @@ fn sprint_dust_state(
 mod camera_packets;
 #[cfg(test)]
 mod held_slot;
+#[cfg(test)]
+mod item_packets;
 #[cfg(test)]
 mod transaction_packets;
 #[cfg(test)]

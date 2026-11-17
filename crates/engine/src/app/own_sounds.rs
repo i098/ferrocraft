@@ -123,7 +123,7 @@ impl App {
         let Some(at) = self.game.player.as_ref().map(|p| p.pos) else {
             return;
         };
-        if self.use_ticks > 0 {
+        if self.in_use {
             let held = self
                 .game
                 .inv
@@ -138,6 +138,7 @@ impl App {
             }
         }
         if std::mem::take(&mut self.game.finished_use) {
+            self.end_use();
             if let Some(c) = self.own_sounds.consuming.take() {
                 self.play_consume(c, at, 16);
             }

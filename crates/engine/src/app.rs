@@ -114,9 +114,12 @@ pub struct App {
     synced_held: u8,
     /// `rightClickDelayTimer`.
     use_delay: i32,
-    /// `EntityPlayer.itemInUseCount`: ticks left of an item use that a release (`C07` status 5)
-    /// ends early; 0 while no item is in use.
+    /// `EntityPlayer.itemInUseCount`: ticks left of an item use. It goes below 0 while the server has
+    /// not sent status 9 yet; only `in_use` says whether an item is in use.
     use_ticks: i32,
+    /// `EntityPlayer.itemInUse != null` (`isUsingItem`): set by `setItemInUse`, cleared by status 9,
+    /// a slot change, a replaced held stack and a release.
+    in_use: bool,
     sneak_sent: bool,
     sprint_sent: bool,
     /// What `onUpdateWalkingPlayer` last sent: the position, the look and the ticks since the position.
@@ -198,6 +201,7 @@ impl App {
             synced_held: 0,
             use_delay: 0,
             use_ticks: 0,
+            in_use: false,
             sneak_sent: false,
             sprint_sent: false,
             sent_move: movement::SentMovement::default(),
@@ -530,7 +534,7 @@ impl App {
 
     /// The pose of a timed use of the held item (`EnumAction`), for the first-person hand.
     fn using(&self, frac: f32) -> Option<Using> {
-        if self.use_ticks <= 0 {
+        if !self.in_use {
             return None;
         }
         let id = self.game.inv.held_stack().as_ref()?.id;
@@ -564,7 +568,7 @@ impl App {
     /// The `damage` the held item model is chosen by: bow draw stage and cast rod
     /// (`ItemRenderer.renderItemInHand`).
     fn held_variant(&self, id: i16, damage: i16) -> i16 {
-        let drawn = if self.use_ticks > 0 {
+        let drawn = if self.in_use {
             72_000 - self.use_ticks
         } else {
             0

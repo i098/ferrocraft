@@ -18,6 +18,7 @@ mod mod_boot;
 mod mod_events;
 mod mod_lists;
 mod mod_world;
+mod movement;
 mod own_sounds;
 mod pack;
 mod play;
@@ -118,6 +119,8 @@ pub struct App {
     use_ticks: i32,
     sneak_sent: bool,
     sprint_sent: bool,
+    /// What `onUpdateWalkingPlayer` last sent: the position, the look and the ticks since the position.
+    sent_move: movement::SentMovement,
     /// Ticks the left button has dug at one block, for hit sounds and shards every 4 ticks.
     dig_ticks: u32,
     /// Whether the chat input was open last tick; closing it resets the chat scroll.
@@ -197,6 +200,7 @@ impl App {
             use_ticks: 0,
             sneak_sent: false,
             sprint_sent: false,
+            sent_move: movement::SentMovement::default(),
             dig_ticks: 0,
             chat_open: false,
             walked: 0.0,

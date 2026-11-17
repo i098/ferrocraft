@@ -1,5 +1,6 @@
 //! The 20 TPS step and the player's actions: movement packets, digging, attacking, using items.
 
+use super::movement::Move;
 use super::{boxed, screen, App, View, MAX_TICKS_PER_FRAME, TICK};
 use crate::game::{eye_height, Aim, Attack, Effect};
 use crate::weather::{precipitation_top, raining_at};
@@ -343,12 +344,16 @@ impl App {
         self.tick_particles();
         self.equip_tick();
         self.send_horse_jump();
-        self.send_state();
-        if self.game.vehicle.is_some() {
-            self.send_riding(input);
-        } else if self.game.camera.is_none() {
-            // `EntityPlayerSP.onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
-            self.send_pose();
+        if self.chunk_under_player() {
+            if self.game.vehicle.is_some() {
+                self.send_riding(input);
+            } else {
+                self.send_state();
+                // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
+                if self.game.camera.is_none() {
+                    self.send_movement();
+                }
+            }
         }
         self.sound_tick();
     }
@@ -679,13 +684,14 @@ impl App {
         );
         let id = self.game.entity_id;
         let mut sends = Vec::new();
-        if sneak != self.sneak_sent {
-            self.sneak_sent = sneak;
-            sends.push(if sneak { 0 } else { 1 });
-        }
+        // `onUpdateWalkingPlayer` sends the sprint change before the sneak change.
         if sprint != self.sprint_sent {
             self.sprint_sent = sprint;
             sends.push(if sprint { 3 } else { 4 });
+        }
+        if sneak != self.sneak_sent {
+            self.sneak_sent = sneak;
+            sends.push(if sneak { 0 } else { 1 });
         }
         for a in sends {
             if let Some(s) = self.link.session() {
@@ -755,13 +761,40 @@ impl App {
         self.equip = (next, cur, shown);
     }
 
-    pub(super) fn send_pose(&mut self) {
+    /// `EntityPlayerSP.onUpdate` runs nothing while the chunk at the player is not loaded.
+    fn chunk_under_player(&self) -> bool {
+        self.game.player.as_ref().is_some_and(|p| {
+            let at = |c: f64| (c.floor() as i32) >> 4;
+            self.game.store.get(at(p.pos[0]), at(p.pos[2])).is_some()
+        })
+    }
+
+    /// `EntityPlayerSP.onUpdateWalkingPlayer`: `C03`, `C04`, `C05` or `C06` by what changed since the last send.
+    fn send_movement(&mut self) {
         let Some(p) = &self.game.player else { return };
         let [x, y, z] = p.pos;
         let (yaw, on_ground) = (p.yaw, p.on_ground);
         let pitch = self.game.pitch;
+        let kind = self.sent_move.next(p.pos, yaw, pitch);
         if let Some(s) = self.link.session() {
-            let r = s.send_position_look(x, y, z, yaw, pitch, on_ground);
+            let r = match kind {
+                Move::Both => s.send_position_look(x, y, z, yaw, pitch, on_ground),
+                Move::Pos => s.send_player_position(x, y, z, on_ground),
+                Move::Look => s.send_look(yaw, pitch, on_ground),
+                Move::Still => s.send_player(on_ground),
+            };
+            self.send_result(r);
+        }
+    }
+
+    /// `ClientPlayNetworkHandler.handlePlayerMove` answers a teleport with `C06` and `onGround` false, straight
+    /// to the connection: the sent-position state stays, so the next tick reports the new position.
+    pub(super) fn send_teleport_echo(&mut self) {
+        let Some(p) = &self.game.player else { return };
+        let [x, y, z] = p.pos;
+        let (yaw, pitch) = (p.yaw, self.game.pitch);
+        if let Some(s) = self.link.session() {
+            let r = s.send_position_look(x, y, z, yaw, pitch, false);
             self.send_result(r);
         }
     }

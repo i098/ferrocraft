@@ -499,3 +499,22 @@ fn depth_strider_in_water() {
         s.check(&format!("depth strider {level}"));
     }
 }
+
+#[test]
+fn teleport_keeps_state_and_zeroes_absolute_velocity() {
+    let mut p = Player::new([0.5, 64.0, 0.5], 0.0);
+    p.on_ground = true;
+    p.in_web = true;
+    p.jump_ticks = 7;
+    p.jump_movement_factor = 0.026;
+    p.collided_horizontally = true;
+    p.vel = [0.1, 0.2, 0.3];
+    p.teleport([5.0, 70.0, 6.0], 725.0, [true, false, false]);
+    assert_eq!(p.vel, [0.1, 0.0, 0.0]);
+    assert_eq!(p.yaw, 5.0);
+    assert_eq!(p.pos, [5.0, 70.0, 6.0]);
+    assert!(p.on_ground && p.in_web && p.collided_horizontally);
+    assert_eq!((p.jump_ticks, p.jump_movement_factor), (7, 0.026));
+    p.teleport([5.0, 70.0, 6.0], 0.0, [false; 3]);
+    assert_eq!(p.vel, [0.0; 3]);
+}

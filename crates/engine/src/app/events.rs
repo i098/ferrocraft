@@ -91,6 +91,17 @@ impl App {
         self.next_shader();
     }
 
+    /// `NetHandlerPlayClient.handlePlayerMove`: the reply `C06` carries the entity's position and
+    /// angles with `onGround = false`, whatever the entity's own flag.
+    fn send_teleport_echo(&mut self) {
+        let Some(p) = &self.game.player else { return };
+        let ([x, y, z], yaw, pitch) = (p.pos, p.yaw, self.game.pitch);
+        if let Some(s) = self.link.session() {
+            let r = s.send_position_look(x, y, z, yaw, pitch, false);
+            self.send_result(r);
+        }
+    }
+
     fn respawn(&mut self) {
         let r = self.link.session().map(|s| s.respawn());
         self.send_result(r.unwrap_or(Ok(())));
@@ -272,7 +283,7 @@ impl App {
             self.on_event(ev, &mut clear, &mut dirty);
         }
         if std::mem::take(&mut self.game.teleported) {
-            self.send_pose();
+            self.send_teleport_echo();
         }
         if let Some(r) = &mut self.renderer {
             if clear {

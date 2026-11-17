@@ -1,4 +1,5 @@
-//! `EntityPlayerSP.onUpdateWalkingPlayer` and `updateEntityActionState` while the camera is another entity.
+//! `EntityPlayerSP.onUpdateWalkingPlayer` and `updateEntityActionState` while the camera is another entity,
+//! and the `handlePlayerMove` reply to S08.
 use crate::app::App;
 use crate::args::Args;
 use crate::link::Link;
@@ -21,7 +22,7 @@ const OTHER_ID: i32 = 7;
 
 /// A server that accepts the login, sends every packet queued on the returned sender, and reports the
 /// id of every packet the client sends after the login.
-fn server() -> (u16, Receiver<u8>, Sender<Vec<u8>>) {
+fn server() -> (u16, Receiver<Vec<u8>>, Sender<Vec<u8>>) {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
     let (tx, rx) = channel();
@@ -55,8 +56,8 @@ fn write_packets(mut w: impl Write, out_rx: Receiver<Vec<u8>>) {
     }
 }
 
-/// Forwards the id of every frame the client sends.
-fn read_ids(mut s: impl Read, tx: Sender<u8>) {
+/// Forwards every frame the client sends.
+fn read_ids(mut s: impl Read, tx: Sender<Vec<u8>>) {
     let mut buf = [0u8; 4096];
     let mut dec = FrameDecoder::default();
     while let Ok(n @ 1..) = s.read(&mut buf) {
@@ -64,7 +65,7 @@ fn read_ids(mut s: impl Read, tx: Sender<u8>) {
         while let Ok(Some(f)) = dec.next_frame() {
             // Id 0 is the login start that the first read may have left behind.
             if f[0] != 0 {
-                let _ = tx.send(f[0]);
+                let _ = tx.send(f.to_vec());
             }
         }
     }
@@ -81,20 +82,24 @@ fn pump_until(app: &mut App, done: impl Fn(&App) -> bool) {
 }
 
 /// Packets arrive in order, so a chat marks the end of everything the client sent before it.
-fn sent_so_far(app: &mut App, rx: &Receiver<u8>) -> Vec<u8> {
+fn sent_frames(app: &mut App, rx: &Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
     app.link.session().unwrap().send_chat("end").unwrap();
-    let mut ids = Vec::new();
+    let mut frames = Vec::new();
     loop {
-        let id = rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        if id == CHAT {
-            return ids;
+        let f = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        if f[0] == CHAT {
+            return frames;
         }
-        ids.push(id);
+        frames.push(f);
     }
 }
 
+fn sent_so_far(app: &mut App, rx: &Receiver<Vec<u8>>) -> Vec<u8> {
+    sent_frames(app, rx).iter().map(|f| f[0]).collect()
+}
+
 /// Runs one tick with `W` and sneak held and returns the packet ids sent, plus the x/z the player moved.
-fn tick(app: &mut App, rx: &Receiver<u8>) -> (Vec<u8>, [f64; 2]) {
+fn tick(app: &mut App, rx: &Receiver<Vec<u8>>) -> (Vec<u8>, [f64; 2]) {
     let before = app.game.player.as_ref().unwrap().pos;
     app.tick_once();
     let ids = sent_so_far(app, rx);
@@ -134,7 +139,7 @@ fn hold_forward(app: &mut App) {
     assert!(!app.ui.is_open(), "screen open");
 }
 
-fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<u8>) -> App {
+fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
     let mut app = App::new(Args {
         username: "Ferro".into(),
         auth: None,
@@ -188,4 +193,42 @@ fn camera_packet_stops_and_resumes_movement_packets() {
     let (ids, moved) = tick(&mut app, &rx);
     assert_eq!(ids, [POSE]);
     assert_ne!(moved, [0.0, 0.0]);
+}
+
+#[test]
+fn position_packet_keeps_ground_state_and_echoes_wrapped_yaw_off_ground() {
+    let (port, rx, out) = server();
+    let mut app = joined_app(port, &out, &rx);
+    let mut chunk = world::chunk::Chunk::new(0, 0);
+    chunk.set_block(0, 63, 0, 1 << 4);
+    app.game.store.insert(chunk);
+    hold_forward(&mut app);
+    let p = app.game.player.as_mut().unwrap();
+    p.on_ground = true;
+    p.vel = [0.1, 0.2, 0.3];
+    let vx = p.vel[0];
+    let pos_look = |flags| {
+        cb::PlayerPositionAndLook {
+            x: 0.5,
+            y: 64.0,
+            z: 0.5,
+            yaw: 725.0,
+            pitch: 10.0,
+            flags,
+        }
+        .into()
+    };
+    send(&out, pos_look(0b1)); // x relative
+    pump_until(&mut app, |a| a.game.player.as_ref().unwrap().yaw == 5.0);
+    let frames = sent_frames(&mut app, &rx);
+    let ids: Vec<u8> = frames.iter().map(|f| f[0]).collect();
+    assert_eq!(ids, [POSE], "exactly one C06 echo");
+    let f = &frames[0];
+    let yaw = f32::from_be_bytes(f[25..29].try_into().unwrap());
+    assert_eq!(yaw, 5.0);
+    assert_eq!(f[33], 0, "echo has onGround = false");
+    let p = app.game.player.as_ref().unwrap();
+    assert!(p.on_ground, "the player keeps its own flag");
+    assert_eq!(p.vel[0], vx, "relative x keeps its velocity");
+    assert_eq!((p.vel[1], p.vel[2]), (0.0, 0.0));
 }

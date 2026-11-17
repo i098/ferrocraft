@@ -660,19 +660,28 @@ impl Player {
     }
 
     /// `Entity.moveEntity`.
-    fn move_entity(&mut self, world: &dyn World, mut motion: [f64; 3]) {
-        // `Entity.moveEntity` with `noClip`: the box moves by the full delta; no collision, flag or block effect.
+    fn move_entity(&mut self, world: &dyn World, motion: [f64; 3]) {
         if self.no_clip {
-            for (axis, d) in motion.into_iter().enumerate() {
-                self.bb = self.bb.offset(axis, d);
-            }
-            self.pos = [
-                (self.bb.min[0] + self.bb.max[0]) / 2.0,
-                self.bb.min[1],
-                (self.bb.min[2] + self.bb.max[2]) / 2.0,
-            ];
-            return;
+            self.move_through_blocks(motion);
+        } else {
+            self.move_colliding(world, motion);
         }
+    }
+
+    /// `Entity.moveEntity` with `noClip`: the box moves by the full delta; no collision, flag or block effect.
+    fn move_through_blocks(&mut self, motion: [f64; 3]) {
+        for (axis, d) in motion.into_iter().enumerate() {
+            self.bb = self.bb.offset(axis, d);
+        }
+        self.pos = [
+            (self.bb.min[0] + self.bb.max[0]) / 2.0,
+            self.bb.min[1],
+            (self.bb.min[2] + self.bb.max[2]) / 2.0,
+        ];
+    }
+
+    fn move_colliding(&mut self, world: &dyn World, mut motion: [f64; 3]) {
+        // `Entity.moveEntity` with `noClip`: the box moves by the full delta; no collision, flag or block effect.
         if self.in_web {
             self.in_web = false;
             motion = [

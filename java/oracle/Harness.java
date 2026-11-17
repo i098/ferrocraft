@@ -692,6 +692,18 @@ public class Harness {
         player.velocityZ = pusher.velocityZ;
     }
 
+    /** What runs between the tick's input and `mobTick`: the spectator flags, water, the pushes out of blocks. */
+    static void beforeMobTick(PlayerEntity player) throws Exception {
+        if (noClip) {
+            player.noClip = true;
+            player.onGround = false;
+        }
+        player.checkWaterCollisions();
+        if (pushOut) {
+            pushOutOfBlocks(player);
+        }
+    }
+
     static String hex(double d) {
         return String.format("%016x", Double.doubleToRawLongBits(d));
     }
@@ -837,14 +849,7 @@ public class Harness {
                             }
                         }
                         // Entity.onEntityUpdate runs handleWaterMovement before onLivingUpdate.
-                        if (noClip) {
-                            player.noClip = true;
-                            player.onGround = false;
-                        }
-                        player.checkWaterCollisions();
-                        if (pushOut) {
-                            pushOutOfBlocks(player);
-                        }
+                        beforeMobTick(player);
                         player.mobTick();
                         System.out.println(hex(player.x) + " " + hex(player.y) + " " + hex(player.z) + " "
                             + hex(player.velocityX) + " " + hex(player.velocityY) + " " + hex(player.velocityZ) + " "

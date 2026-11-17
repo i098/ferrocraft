@@ -730,17 +730,6 @@ public class Harness {
                     player.setEquipment(1, boots);
                     break;
                 }
-                case "other": {
-                    PlayerEntity other = new PlayerEntity(world, new GameProfile(UUID.randomUUID(), "other")) {
-                        @Override
-                        public boolean isSpectator() {
-                            return false;
-                        }
-                    };
-                    other.setPositionAndAngles(Double.parseDouble(t[1]), Double.parseDouble(t[2]), Double.parseDouble(t[3]), 0f, 0f);
-                    world.addEntity(other);
-                    break;
-                }
                 case "state":
                     try {
                         EXTRA.put(blockKey(Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3])),

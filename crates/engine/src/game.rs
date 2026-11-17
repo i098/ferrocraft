@@ -849,12 +849,6 @@ impl Game {
                 walls: inside.then_some(walls),
             };
             p.tick(&collision, input);
-            // `collideWithNearbyEntities` ends `onLivingUpdate`; spectators and riders are not pushed.
-            if self.gamemode != SPECTATOR && self.vehicle.is_none() {
-                let push = self.entities.push_on(self.entity_id, p.pos, (0.6, 1.8));
-                p.vel[0] += push[0];
-                p.vel[2] += push[2];
-            }
         }
     }
 
@@ -1333,6 +1327,38 @@ mod tests {
         let p = g.player.as_ref().unwrap();
         assert_eq!(p.pos[1], 64.0);
         assert!(p.on_ground);
+    }
+
+    /// `LivingEntity.mobTick` pushes only when `!world.isClient`; the client never pushes.
+    #[test]
+    fn overlapping_player_never_pushes_the_local_player() {
+        let mut g = Game::new();
+        g.apply(NetEvent::PlayerPosLook {
+            x: 8.5,
+            y: 66.0,
+            z: 8.5,
+            yaw: 0.0,
+            pitch: 0.0,
+            flags: 0,
+        });
+        g.apply(NetEvent::Chunk(Box::new(floor_chunk())));
+        for _ in 0..40 {
+            g.tick(IDLE);
+        }
+        g.entities.apply(world::entities::EntityEvent::SpawnPlayer {
+            id: 9,
+            uuid: 9,
+            pos: [272, 64 * 32, 272],
+            yaw: 0,
+            pitch: 0,
+            held: 0,
+            flags: None,
+        });
+        for _ in 0..10 {
+            g.tick(IDLE);
+            let p = g.player.as_ref().unwrap();
+            assert_eq!((p.vel[0], p.vel[2]), (0.0, 0.0));
+        }
     }
 
     #[test]

@@ -1268,10 +1268,18 @@ impl App {
         let in_world = self.in_world();
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
+        if in_world && !self.mod_drawn.labels_owned {
+            draw_name_tags(
+                &mut g,
+                &self.game,
+                cam,
+                draws,
+                (w, h),
+                factor as f32,
+                !show_hud,
+            );
+        }
         if show_hud {
-            if !self.mod_drawn.labels_owned {
-                draw_name_tags(&mut g, &self.game, cam, draws, (w, h), factor as f32);
-            }
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac);
             let in_water = self.game.player.as_ref().is_some_and(|p| {
@@ -1433,13 +1441,18 @@ fn draw_name_tags(
     let Some(player) = &game.player else { return };
     let vp = render::view_proj(cam, w as f32 / h as f32);
     for tag in render::nametags(draws, player.pos, &vp, cam.fov_deg, w as f32, h as f32) {
+        let blocked = game.line_blocked(cam.pos, tag.anchor);
+        // A sneaking tag keeps the depth test: blocks hide its plate and faint text too.
+        if tag.sneaking && blocked {
+            continue;
+        }
         let half = g.width(&tag.text) / 2;
         g.push();
         g.translate(tag.screen[0] / factor, tag.screen[1] / factor);
         g.scale(tag.scale / factor, tag.scale / factor);
         g.fill(-half - 1, -1, half + 1, 8, 0x4000_0000);
         g.text_plain(&tag.text, -half as f32, 0.0, 0x20FF_FFFF);
-        if !tag.sneaking && !game.line_blocked(cam.pos, tag.anchor) {
+        if !tag.sneaking && !blocked {
             g.text_plain(&tag.text, -half as f32, 0.0, 0xFFFF_FFFF);
         }
         g.pop();

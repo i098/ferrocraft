@@ -39,8 +39,6 @@ struct Scenario {
     start: [f64; 3],
     yaw: f32,
     steps: Vec<(u32, Input)>,
-    /// Still second players at `[x, y, z]` in 1/32 blocks.
-    others: Vec<[i32; 3]>,
     /// Depth Strider level of the worn boots.
     boots: i32,
 }
@@ -53,7 +51,6 @@ impl Scenario {
             start: [0.5, 64.0, 0.5],
             yaw: 0.0,
             steps,
-            others: vec![],
             boots: 0,
         }
     }
@@ -66,10 +63,6 @@ impl Scenario {
         let [x, y, z] = self.start;
         writeln!(s, "start {x:?} {y:?} {z:?} {:?}", self.yaw).unwrap();
         writeln!(s, "boots {}", self.boots).unwrap();
-        for p in &self.others {
-            let [x, y, z] = p.map(|v| f64::from(v) / 32.0);
-            writeln!(s, "other {x:?} {y:?} {z:?}").unwrap();
-        }
         for (n, i) in &self.steps {
             writeln!(
                 s,
@@ -94,25 +87,10 @@ impl Scenario {
         };
         let mut p = Player::new(self.start, self.yaw);
         p.depth_strider = self.boots;
-        let mut mobs = entities::Entities::default();
-        for (i, pos) in self.others.iter().enumerate() {
-            mobs.apply(entities::EntityEvent::SpawnPlayer {
-                id: i as i32 + 2,
-                uuid: i as u128,
-                pos: *pos,
-                yaw: 0,
-                pitch: 0,
-                held: 0,
-                flags: None,
-            });
-        }
         let mut out = Vec::new();
         for (n, input) in &self.steps {
             for _ in 0..*n {
                 p.tick(&world, *input);
-                let push = mobs.push_on(1, p.pos, (0.6, 1.8));
-                p.vel[0] += push[0];
-                p.vel[2] += push[2];
                 out.push(TickState {
                     pos: p.pos.map(f64::to_bits),
                     vel: p.vel.map(f64::to_bits),
@@ -465,19 +443,6 @@ fn slabs_stairs_and_fences_collide_with_their_shape() {
         ((0, 64, 6), 85 << 4),
     ];
     s.check("shapes");
-}
-
-#[test]
-fn overlapping_players_push_each_other_like_the_jar() {
-    // Another player at x = 1.0 overlaps the grown player box; the player stands, then walks into it.
-    let mut s = Scenario::new(vec![
-        (10, IDLE),
-        (20, input(1.0, 0.0, false, false)),
-        (10, IDLE),
-    ]);
-    s.yaw = -90.0;
-    s.others = vec![[32, 64 * 32, 16], [16, 64 * 32, 40]];
-    s.check("player push");
 }
 
 /// Depth Strider 0 to 4 (4 is capped to 3): a sprint along the pool floor (halved level), a jump

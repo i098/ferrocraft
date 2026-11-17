@@ -32,7 +32,7 @@ impl Kind {
             Kind::Player => (0.6, 1.8),
             Kind::ExperienceOrb | Kind::Painting => (0.5, 0.5),
             Kind::Object(2) => (0.25, 0.25),
-            Kind::Object(60 | 61 | 62 | 65 | 90) => (0.25, 0.25),
+            Kind::Object(60 | 61 | 62 | 65 | 73 | 75 | 90) => (0.25, 0.25),
             Kind::Object(78) => (0.5, 1.975),
             Kind::Object(1) => (1.5, 0.6),
             Kind::Object(51) => (2.0, 2.0),
@@ -294,6 +294,8 @@ pub struct Entity {
     pub squid: crate::squid::Squid,
     /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
     pub dragon: Option<Box<crate::mob_anim::Dragon>>,
+    /// Arrows, thrown objects, items, TNT, falling blocks and bobbers: the client-side flight state.
+    pub(crate) proj: crate::projectile::State,
 }
 
 /// Painting motives: name, width and height in pixels, and the origin in the paintings texture.
@@ -456,15 +458,7 @@ impl Entity {
             squish: crate::squish::Squish::default(),
             squid: crate::squid::Squid::new(id, yaw),
             dragon: (kind == Kind::Mob(63)).then(Box::default),
-        }
-    }
-
-    /// `Entity.canBePushed`: living entities, boats and minecarts; not armor stands, items or arrows.
-    pub fn can_be_pushed(&self) -> bool {
-        match self.kind {
-            Kind::Player | Kind::Mob(_) => true,
-            Kind::Object(t) => matches!(t, 1 | 10..=12),
-            Kind::ExperienceOrb | Kind::Painting => false,
+            proj: Default::default(),
         }
     }
 
@@ -589,7 +583,62 @@ impl Entity {
         self.target.pos = raw.map(fixed);
         self.target.yaw = yaw;
         self.target.pitch = pitch;
-        self.target.steps = STEPS;
+        if matches!(self.kind, Kind::Object(t) if crate::projectile::snaps(t)) {
+            // `Entity.lerpPositionAndAngles` of a non-living entity sets the pose at once.
+            (self.pos, self.yaw, self.pitch) = (self.target.pos, yaw, pitch);
+            self.target.steps = 0;
+        } else {
+            self.target.steps = STEPS;
+        }
+    }
+
+    /// `handleEntityTeleport`: a teleport within 1/32 (x, z) and 1/64 (y) of the entity eases to where it already is.
+    fn teleport(&mut self, raw: [i32; 3], yaw: f32, pitch: f32, on_ground: bool) {
+        let to = raw.map(fixed);
+        let small = (to[0] - self.pos[0]).abs() < 0.03125
+            && (to[1] - self.pos[1]).abs() < 0.015625
+            && (to[2] - self.pos[2]).abs() < 0.03125;
+        let here = self.pos;
+        self.set_target(raw, yaw, pitch);
+        if small {
+            (self.pos, self.target.pos) = (here, here);
+        }
+        self.on_ground = on_ground;
+    }
+
+    /// `handleEntityMove`: a move without angles keeps the current yaw and pitch, so a turn in progress stops.
+    fn relative_move(&mut self, delta: [i8; 3], look: Option<(i8, i8)>, on_ground: bool) {
+        let raw = std::array::from_fn(|i| self.server_pos[i] + i32::from(delta[i]));
+        let (yaw, pitch) = look.map_or((self.yaw, self.pitch), |(y, p)| (angle(y), angle(p)));
+        self.set_target(raw, yaw, pitch);
+        self.on_ground = on_ground;
+    }
+
+    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers.
+    fn fly(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+        let Kind::Object(object) = self.kind else {
+            return;
+        };
+        if !crate::projectile::simulated(object) {
+            return;
+        }
+        let mut b = crate::projectile::Body {
+            id: self.id,
+            age: self.age,
+            size: self.size(),
+            pos: self.pos,
+            vel: self.vel,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            prev_yaw: self.prev_yaw,
+            prev_pitch: self.prev_pitch,
+            on_ground: self.on_ground,
+            proj: std::mem::take(&mut self.proj),
+        };
+        crate::projectile::step(object, &mut b, at);
+        (self.pos, self.vel, self.yaw, self.pitch) = (b.pos, b.vel, b.yaw, b.pitch);
+        (self.prev_yaw, self.prev_pitch, self.on_ground, self.proj) =
+            (b.prev_yaw, b.prev_pitch, b.on_ground, b.proj);
     }
 
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
@@ -620,6 +669,8 @@ impl Entity {
             self.yaw += wrap(self.target.yaw - self.yaw) / k;
             self.pitch += (self.target.pitch - self.pitch) / k;
             self.target.steps -= 1;
+        } else {
+            self.fly(at);
         }
 
         // `EntityLivingBase.onUpdate` -> `updateLimbSwing`.
@@ -859,9 +910,6 @@ fn wrap(mut d: f32) -> f32 {
     }
     d
 }
-
-/// `0.05F` widened to double: the factor `Entity.applyEntityCollision` multiplies the push by.
-const PUSH: f64 = 0.050_000_000_745_058_06;
 
 fn bounds_at(pos: [f64; 3], (w, h): (f32, f32)) -> ([f64; 3], [f64; 3]) {
     let half = f64::from(w) / 2.0;
@@ -1111,41 +1159,6 @@ impl Entities {
         self.map.get(&id)
     }
 
-    /// `EntityLivingBase.collideWithNearbyEntities` for the local player at `pos` with a box of
-    /// `size`: the velocity that `Entity.applyEntityCollision` adds to it for every pushable
-    /// entity within the box grown by 0.2 on x and z. Armor stands and items do not push.
-    pub fn push_on(&self, id: i32, pos: [f64; 3], size: (f32, f32)) -> [f64; 3] {
-        let (lo, hi) = bounds_at(pos, size);
-        let (lo, hi) = (
-            [lo[0] - 0.2, lo[1], lo[2] - 0.2],
-            [hi[0] + 0.2, hi[1], hi[2] + 0.2],
-        );
-        let mut others: Vec<&Entity> = self
-            .map
-            .values()
-            .filter(|e| e.id != id && e.can_be_pushed())
-            .collect();
-        others.sort_unstable_by_key(|e| e.id);
-        let mut push = [0.0; 3];
-        for e in others {
-            let (elo, ehi) = e.bounds();
-            if (0..3).any(|a| ehi[a] <= lo[a] || elo[a] >= hi[a]) {
-                continue;
-            }
-            let (mut d0, mut d1) = (pos[0] - e.pos[0], pos[2] - e.pos[2]);
-            let mut d2 = d0.abs().max(d1.abs());
-            if d2 >= 0.01 {
-                d2 = f64::from(d2.sqrt() as f32);
-                d0 /= d2;
-                d1 /= d2;
-                let d3 = (1.0 / d2).min(1.0);
-                push[0] += d0 * d3 * PUSH;
-                push[2] += d1 * d3 * PUSH;
-            }
-        }
-        push
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &Entity> {
         self.map.values()
     }
@@ -1191,14 +1204,7 @@ impl Entities {
                 delta,
                 look,
                 on_ground,
-            } => self.with(id, |e| {
-                let raw = std::array::from_fn(|i| e.server_pos[i] + i32::from(delta[i]));
-                let (yaw, pitch) = look.map_or((e.target.yaw, e.target.pitch), |(y, p)| {
-                    (angle(y), angle(p))
-                });
-                e.set_target(raw, yaw, pitch);
-                e.on_ground = on_ground;
-            }),
+            } => self.with(id, |e| e.relative_move(delta, look, on_ground)),
             E::Look {
                 id,
                 yaw,
@@ -1214,10 +1220,7 @@ impl Entities {
                 yaw,
                 pitch,
                 on_ground,
-            } => self.with(id, |e| {
-                e.set_target(pos, angle(yaw), angle(pitch));
-                e.on_ground = on_ground;
-            }),
+            } => self.with(id, |e| e.teleport(pos, angle(yaw), angle(pitch), on_ground)),
             E::HeadLook { id, head_yaw } => self.with(id, |e| e.head_yaw = angle(head_yaw)),
             E::Velocity { id, vel } => self.with(id, |e| e.vel = velocity(vel)),
             E::Destroy(ids) => ids.iter().for_each(|id| {
@@ -1602,12 +1605,16 @@ impl Entities {
     }
 }
 
+/// `Entity.hasCollision`: what a ray or a thrown entity can hit. `ArmorStandEntity.hasCollision`
+/// is false for a marker stand.
 fn collidable(e: &Entity) -> bool {
-    !matches!(
-        e.kind,
-        Kind::ExperienceOrb
-            | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
-    )
+    let marker = e.kind == Kind::Object(78) && e.meta.stand.unwrap_or(0) & stand::MARKER != 0;
+    !marker
+        && !matches!(
+            e.kind,
+            Kind::ExperienceOrb
+                | Kind::Object(2 | 60 | 61 | 62 | 64 | 65 | 66 | 72 | 73 | 75 | 76 | 90)
+        )
 }
 
 fn velocity(v: [i16; 3]) -> [f64; 3] {
@@ -1639,6 +1646,68 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+
+    fn spawn_object(es: &mut Entities, kind: i8, pos: [i32; 3], vel: [i16; 3]) {
+        es.apply(EntityEvent::SpawnObject {
+            id: 5,
+            kind,
+            pos,
+            yaw: 0,
+            pitch: 0,
+            vel,
+            data: 0,
+        });
+    }
+
+    fn open_air(_: [i32; 3]) -> u16 {
+        0
+    }
+
+    /// `ArrowEntity.tick` in open air: add the motion, then scale by 0.99 and drop 0.05, every tick.
+    #[test]
+    fn an_arrow_flies_with_drag_and_gravity_between_packets() {
+        let mut es = Entities::default();
+        spawn_object(&mut es, 60, [0, 100 * 32, 0], [8000, 0, 0]);
+        let (mut x, mut y, mut vx, mut vy) = (0.0_f64, 100.0_f64, 1.0_f64, 0.0_f64);
+        for _ in 0..20 {
+            es.tick_in(&open_air);
+            x += vx;
+            y += vy;
+            (vx, vy) = (vx * 0.99, vy * 0.99 - 0.05);
+            let a = es.get(5).unwrap();
+            assert!((a.pos[0] - x).abs() < 1e-9 && (a.pos[1] - y).abs() < 1e-9);
+        }
+    }
+
+    /// `ItemEntity.tick`: gravity 0.04, then drag 0.98; a stone floor stops the fall and the item rests on it.
+    #[test]
+    fn a_dropped_item_falls_and_rests_on_a_block() {
+        let stone = |p: [i32; 3]| if p[1] < 64 { 1 << 4 } else { 0 };
+        let mut es = Entities::default();
+        spawn_object(&mut es, 2, [0, 66 * 32, 0], [0; 3]);
+        es.tick_in(&stone);
+        let first = es.get(5).unwrap();
+        assert!((first.pos[1] - (66.0 - 0.039_999_999_105_930_33)).abs() < 1e-12);
+        for _ in 0..60 {
+            es.tick_in(&stone);
+        }
+        let item = es.get(5).unwrap();
+        assert_eq!(item.pos[1], 64.0);
+        assert!(item.on_ground);
+    }
+
+    /// `ThrownEntity.tick`: a snowball falls 0.03 per tick under drag 0.99 and ignores blocks on the client.
+    #[test]
+    fn a_snowball_uses_gravity_0_03() {
+        let mut es = Entities::default();
+        spawn_object(&mut es, 61, [0, 100 * 32, 0], [0; 3]);
+        es.tick_in(&open_air);
+        es.tick_in(&open_air);
+        let s = es.get(5).unwrap();
+        assert!((s.pos[1] - 99.97).abs() < 1e-7);
+        assert!((s.vel[1] - (-0.03 * 0.99 - 0.03)).abs() < 1e-7);
+    }
+
     #[test]
     fn pickup_eases_toward_a_moving_collector() {
         let mut es = Entities::default();
@@ -1827,17 +1896,6 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_mob_pushes_the_player_away_like_apply_entity_collision() {
-        let mut es = Entities::default();
-        spawn(&mut es, 5, [16, 64 * 32, 16]);
-        let push = es.push_on(1, [0.6, 64.0, 0.5], (0.6, 1.8));
-        let want = 0.1 / f64::from(0.1_f64.sqrt() as f32) * f64::from(0.05_f32);
-        assert!((push[0] - want).abs() < 1e-12);
-        assert_eq!(push[2], 0.0);
-        assert_eq!(es.push_on(1, [3.0, 64.0, 0.5], (0.6, 1.8)), [0.0; 3]);
-    }
-
-    #[test]
     fn relative_moves_accumulate_on_server_position_and_interpolate_in_three_ticks() {
         let mut es = Entities::default();
         spawn(&mut es, 7, [0, 64 * 32, 0]);
@@ -1855,6 +1913,70 @@ mod tests {
             es.tick();
         }
         assert!((es.get(7).unwrap().pos[0] - 1.0).abs() < 1e-9);
+    }
+
+    /// `handleEntityTeleport`: a teleport within 1/32 (x, z) and 1/64 (y) of the entity keeps its position.
+    #[test]
+    fn a_small_teleport_keeps_the_position_and_only_turns() {
+        let mut es = Entities::default();
+        spawn(&mut es, 7, [0, 64 * 32, 0]);
+        es.apply(EntityEvent::Move {
+            id: 7,
+            delta: [16, 0, 0],
+            look: None,
+            on_ground: true,
+        });
+        es.tick();
+        let here = es.get(7).unwrap().pos;
+        let teleport = |es: &mut Entities, x: i32| {
+            es.apply(EntityEvent::Teleport {
+                id: 7,
+                pos: [x, 64 * 32, 0],
+                yaw: 64,
+                pitch: 0,
+                on_ground: true,
+            });
+        };
+        // 5/32 = 0.15625 is 0.0104 from the entity at 0.1667: small, so the position stays.
+        teleport(&mut es, 5);
+        for _ in 0..3 {
+            es.tick();
+        }
+        let e = es.get(7).unwrap();
+        assert_eq!(e.pos, here);
+        assert!((e.yaw - 90.0).abs() < 1e-3);
+        // 2 blocks away is not small: the entity eases to the packet position.
+        teleport(&mut es, 64);
+        for _ in 0..3 {
+            es.tick();
+        }
+        assert!((es.get(7).unwrap().pos[0] - 2.0).abs() < 1e-9);
+    }
+
+    /// `handleEntityMove` with no angles passes the entity's current yaw and pitch, so a turn stops.
+    #[test]
+    fn a_move_without_look_stops_a_turn_in_progress() {
+        let mut es = Entities::default();
+        spawn(&mut es, 7, [0, 64 * 32, 0]);
+        es.apply(EntityEvent::Look {
+            id: 7,
+            yaw: 64,
+            pitch: 0,
+            on_ground: true,
+        });
+        es.tick();
+        let yaw = es.get(7).unwrap().yaw;
+        assert!(yaw > 0.0 && yaw < 90.0);
+        es.apply(EntityEvent::Move {
+            id: 7,
+            delta: [1, 0, 0],
+            look: None,
+            on_ground: true,
+        });
+        for _ in 0..3 {
+            es.tick();
+        }
+        assert_eq!(es.get(7).unwrap().yaw, yaw);
     }
 
     #[test]
@@ -2179,6 +2301,44 @@ mod tests {
             });
             assert_eq!(size(&es), want, "{status}");
         }
+    }
+
+    #[test]
+    fn a_ray_passes_through_a_marker_armor_stand() {
+        let mut es = Entities::default();
+        spawn(&mut es, 1, [0, 0, 5 * 32]);
+        es.apply(EntityEvent::SpawnObject {
+            id: 5,
+            kind: 78,
+            pos: [0, 0, 3 * 32],
+            yaw: 0,
+            pitch: 0,
+            vel: [0; 3],
+            data: 0,
+        });
+        let set = |es: &mut Entities, status| {
+            es.apply(EntityEvent::Metadata {
+                id: 5,
+                flags: None,
+                name: None,
+                health: None,
+                stack: None,
+                size: SizeMeta {
+                    stand: Some(status),
+                    ..SizeMeta::default()
+                },
+            });
+        };
+        let (eye, dir) = ([0.0, 0.9, 0.0], look_vector(0.0, 0.0));
+        let nearest = |es: &Entities| es.pick(eye, dir, 6.0, 0, None, None).map(|h| h.0);
+        // A plain stand blocks the ray; a marker stand does not (`hasCollision` is false).
+        assert_eq!(nearest(&es), Some(5));
+        set(&mut es, stand::MARKER);
+        assert_eq!(nearest(&es), Some(1));
+        assert_eq!(
+            es.hit_along([0.0, 0.9, 0.0], [0.0, 0.9, 4.0], false, None),
+            None
+        );
     }
 
     #[test]

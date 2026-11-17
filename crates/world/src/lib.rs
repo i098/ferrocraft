@@ -601,7 +601,8 @@ impl Player {
             self.vel = [0.0; 3];
         }
         let original = self.bb;
-        if self.on_ground && self.sneaking {
+        let sneak_edge = self.on_ground && self.sneaking;
+        if sneak_edge {
             motion = self.edge_guard(world, motion);
         }
         let mut d = motion;
@@ -626,6 +627,9 @@ impl Player {
         ];
         self.bb = bb;
         self.set_collisions(world, motion, d);
+        if self.makes_steps() && !sneak_edge {
+            self.on_stepped_on(Self::block_below(world, self.pos));
+        }
         self.block_collisions(world);
     }
 
@@ -699,7 +703,21 @@ impl Player {
         }
     }
 
-    /// `Block.onEntityCollidedWithBlock` of cobweb, soul sand and slime for one cell.
+    /// `PlayerEntity.makesSteps`: a flying player does not step on blocks.
+    fn makes_steps(&self) -> bool {
+        self.pushed_by_water
+    }
+
+    /// `Block.onSteppedOn` of the block under an on-ground entity; only `SlimeBlock` acts.
+    fn on_stepped_on(&mut self, id: u16) {
+        if self.on_ground && id == 165 && self.vel[1].abs() < 0.1 && !self.sneaking {
+            let slow = 0.4 + self.vel[1].abs() * 0.2;
+            self.vel[0] *= slow;
+            self.vel[2] *= slow;
+        }
+    }
+
+    /// `Block.onEntityCollidedWithBlock` of cobweb and soul sand for one cell.
     fn collide_with(&mut self, id: u16) {
         match id {
             30 => self.in_web = true,
@@ -707,16 +725,11 @@ impl Player {
                 self.vel[0] *= 0.4;
                 self.vel[2] *= 0.4;
             }
-            165 if self.vel[1].abs() < 0.1 && !self.sneaking => {
-                let slow = 0.4 + self.vel[1].abs() * 0.2;
-                self.vel[0] *= slow;
-                self.vel[2] *= slow;
-            }
             _ => {}
         }
     }
 
-    /// `Entity.doBlockCollisions`: cobweb, soul sand and slime act on a player inside their cell.
+    /// `Entity.doBlockCollisions`: cobweb and soul sand act on a player inside their cell.
     fn block_collisions(&mut self, world: &dyn World) {
         let lo = [0, 1, 2].map(|a| floor(self.bb.min[a] + 0.001));
         let hi = [0, 1, 2].map(|a| floor(self.bb.max[a] - 0.001));

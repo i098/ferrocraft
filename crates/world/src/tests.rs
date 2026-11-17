@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 const STONE: u16 = 1 << 4;
+const SLIME: u16 = 165 << 4;
 const ICE: u16 = 79 << 4;
 const WATER: u16 = 9 << 4;
 
@@ -517,4 +518,48 @@ fn teleport_keeps_state_and_zeroes_absolute_velocity() {
     assert_eq!((p.jump_ticks, p.jump_movement_factor), (7, 0.026));
     p.teleport([5.0, 70.0, 6.0], 0.0, [false; 3]);
     assert_eq!(p.vel, [0.0; 3]);
+}
+
+/// A slime floor at y 63 (`SlimeBlock.onSteppedOn` slows a walker standing on it).
+fn slime_floor(steps: Vec<(u32, Input)>) -> Scenario {
+    let mut s = Scenario::new(steps);
+    s.blocks = (-3..=3)
+        .flat_map(|x| (-3..=40).map(move |z| ((x, 63, z), SLIME)))
+        .collect();
+    s
+}
+
+#[test]
+fn walk_on_slime() {
+    slime_floor(vec![
+        (5, IDLE),
+        (40, input(1.0, 0.0, false, false)),
+        (20, IDLE),
+    ])
+    .check("slime walk");
+}
+
+#[test]
+fn sprint_on_slime() {
+    slime_floor(vec![
+        (3, IDLE),
+        (40, input(1.0, 0.0, false, true)),
+        (30, IDLE),
+    ])
+    .check("slime sprint");
+}
+
+#[test]
+fn sneak_walk_on_slime_is_not_slowed() {
+    let sneak = Input {
+        forward: 1.0,
+        sneak: true,
+        ..IDLE
+    };
+    slime_floor(vec![(3, IDLE), (40, sneak), (20, IDLE)]).check("slime sneak");
+}
+
+#[test]
+fn sprint_jumping_on_slime() {
+    slime_floor(vec![(80, input(1.0, 0.0, true, true))]).check("slime jump");
 }

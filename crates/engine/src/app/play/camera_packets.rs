@@ -323,5 +323,16 @@ fn packets_are_sent_over_an_unloaded_chunk() {
     let (port, rx, out) = server();
     let mut app = idle_app(port, &out, &rx);
     app.game.player.as_mut().unwrap().pos = [100.5, 64.0, 100.5];
-    assert!(!tick(&mut app, &rx).0.is_empty());
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    let ids = |app: &mut App| tick(app, &rx).0;
+    assert_eq!(
+        ids(&mut app),
+        [ENTITY_ACTION, POS],
+        "start sneak, then the position"
+    );
+    for n in 0..3 {
+        assert_eq!(ids(&mut app), [PLAYER], "still tick {n}");
+    }
+    app.game.player.as_mut().unwrap().yaw = 30.0;
+    assert_eq!(ids(&mut app), [LOOK]);
 }

@@ -14,6 +14,7 @@ mod block;
 pub mod crystal;
 mod dragon;
 mod endermite;
+mod layer_light;
 pub(crate) mod fire;
 mod glint_mask;
 pub(crate) mod guardian;
@@ -1077,21 +1078,10 @@ pub fn build(
             None => d,
         };
         let drawn = draw_entity(&mut out, d, skins);
-        let bright = drawn.bright.max(start);
-        for v in &mut out.vertices[start..bright] {
-            v.light = level;
-        }
         // `LivingEntityRenderer.renderLayers` skips the hurt overlay for layers whose
         // `colorsWhenDamaged()` is false: armor, cape, stuck arrows, carried block.
         let plain = light_level(d, &light, false);
-        for r in drawn.plain {
-            for v in &mut out.vertices[r] {
-                v.light = plain;
-            }
-        }
-        for v in &mut out.vertices[bright..] {
-            v.light = [1.0, 1.0];
-        }
+        layer_light::apply(&mut out.vertices, start, drawn.bright, drawn.plain, level, plain);
     }
     out
 }

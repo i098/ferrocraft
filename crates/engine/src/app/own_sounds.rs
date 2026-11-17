@@ -72,22 +72,7 @@ impl App {
         let splash = now && self.own_sounds.water == Some(false) && self.game.gamemode != 3;
         let (at, vel) = (p.pos, p.vel);
         self.own_sounds.water = Some(now);
-        if now {
-            self.own_sounds.fall.reset();
-        }
-        // `Entity.onEntityUpdate` halves the distance in lava; `moveEntityWithHeading` zeroes it on
-        // a ladder or vine.
-        if p.in_lava(&Blocks(store)) {
-            self.own_sounds.fall.halve();
-        }
-        let feet = store.get_block(
-            p.pos[0].floor() as i32,
-            p.pos[1].floor() as i32,
-            p.pos[2].floor() as i32,
-        );
-        if motion_sound::climbing(feet, self.game.gamemode == 3) {
-            self.own_sounds.fall.reset();
-        }
+        self.terrain_fall(now);
         if splash {
             let pitch = self.pitch_jitter(0.4);
             self.play_own(
@@ -96,6 +81,28 @@ impl App {
                 motion_sound::splash_volume(vel),
                 pitch,
             );
+        }
+    }
+
+    /// Fall-distance rules of the terrain around the player: water and `Entity.onEntityUpdate`'s lava halving,
+    /// and `moveEntityWithHeading`'s reset on a ladder or vine.
+    fn terrain_fall(&mut self, in_water: bool) {
+        let Some(p) = &self.game.player else { return };
+        let store = &self.game.store;
+        let fall = &mut self.own_sounds.fall;
+        if in_water {
+            fall.reset();
+        }
+        if p.in_lava(&Blocks(store)) {
+            fall.halve();
+        }
+        let feet = store.get_block(
+            p.pos[0].floor() as i32,
+            p.pos[1].floor() as i32,
+            p.pos[2].floor() as i32,
+        );
+        if motion_sound::climbing(feet, self.game.gamemode == 3) {
+            fall.reset();
         }
     }
 

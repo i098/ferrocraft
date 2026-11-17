@@ -1146,9 +1146,7 @@ impl Entities {
                 on_ground,
             } => self.with(id, |e| {
                 let raw = std::array::from_fn(|i| e.server_pos[i] + i32::from(delta[i]));
-                let (yaw, pitch) = look.map_or((e.target.yaw, e.target.pitch), |(y, p)| {
-                    (angle(y), angle(p))
-                });
+                let (yaw, pitch) = look.map_or((e.yaw, e.pitch), |(y, p)| (angle(y), angle(p)));
                 e.set_target(raw, yaw, pitch);
                 e.on_ground = on_ground;
             }),
@@ -1168,7 +1166,15 @@ impl Entities {
                 pitch,
                 on_ground,
             } => self.with(id, |e| {
+                // A teleport within 1/32 (x, z) and 1/64 (y) of the entity eases to where it already is.
+                let to = pos.map(fixed);
+                let small = (to[0] - e.pos[0]).abs() < 0.03125
+                    && (to[1] - e.pos[1]).abs() < 0.015625
+                    && (to[2] - e.pos[2]).abs() < 0.03125;
                 e.set_target(pos, angle(yaw), angle(pitch));
+                if small {
+                    e.target.pos = e.pos;
+                }
                 e.on_ground = on_ground;
             }),
             E::HeadLook { id, head_yaw } => self.with(id, |e| e.head_yaw = angle(head_yaw)),
@@ -1801,6 +1807,70 @@ mod tests {
             es.tick();
         }
         assert!((es.get(7).unwrap().pos[0] - 1.0).abs() < 1e-9);
+    }
+
+    /// `handleEntityTeleport`: a teleport within 1/32 (x, z) and 1/64 (y) of the entity keeps its position.
+    #[test]
+    fn a_small_teleport_keeps_the_position_and_only_turns() {
+        let mut es = Entities::default();
+        spawn(&mut es, 7, [0, 64 * 32, 0]);
+        es.apply(EntityEvent::Move {
+            id: 7,
+            delta: [16, 0, 0],
+            look: None,
+            on_ground: true,
+        });
+        es.tick();
+        let here = es.get(7).unwrap().pos;
+        let teleport = |es: &mut Entities, x: i32| {
+            es.apply(EntityEvent::Teleport {
+                id: 7,
+                pos: [x, 64 * 32, 0],
+                yaw: 64,
+                pitch: 0,
+                on_ground: true,
+            });
+        };
+        // 5/32 = 0.15625 is 0.0104 from the entity at 0.1667: small, so the position stays.
+        teleport(&mut es, 5);
+        for _ in 0..3 {
+            es.tick();
+        }
+        let e = es.get(7).unwrap();
+        assert_eq!(e.pos, here);
+        assert!((e.yaw - 90.0).abs() < 1e-3);
+        // 2 blocks away is not small: the entity eases to the packet position.
+        teleport(&mut es, 64);
+        for _ in 0..3 {
+            es.tick();
+        }
+        assert!((es.get(7).unwrap().pos[0] - 2.0).abs() < 1e-9);
+    }
+
+    /// `handleEntityMove` with no angles passes the entity's current yaw and pitch, so a turn stops.
+    #[test]
+    fn a_move_without_look_stops_a_turn_in_progress() {
+        let mut es = Entities::default();
+        spawn(&mut es, 7, [0, 64 * 32, 0]);
+        es.apply(EntityEvent::Look {
+            id: 7,
+            yaw: 64,
+            pitch: 0,
+            on_ground: true,
+        });
+        es.tick();
+        let yaw = es.get(7).unwrap().yaw;
+        assert!(yaw > 0.0 && yaw < 90.0);
+        es.apply(EntityEvent::Move {
+            id: 7,
+            delta: [1, 0, 0],
+            look: None,
+            on_ground: true,
+        });
+        for _ in 0..3 {
+            es.tick();
+        }
+        assert_eq!(es.get(7).unwrap().yaw, yaw);
     }
 
     #[test]

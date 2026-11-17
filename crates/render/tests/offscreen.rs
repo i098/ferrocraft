@@ -1602,3 +1602,38 @@ fn held_item_sways_when_the_arm_look_lags() {
         }
     }
 }
+
+/// `GameRenderer.updateLightmap`: at full `skyDarkness` the lightmap keeps 0.7 of red and 0.6 of green
+/// and blue (the final `*0.96 + 0.03` lifts each ratio a little).
+#[test]
+fn a_wither_darkens_the_lightmap() {
+    let frame = |sky_darkness: f32| {
+        let mut r = Renderer::new_offscreen(320, 200, None);
+        r.set_environment(Environment {
+            sky_darkness,
+            ..Environment::default()
+        });
+        for cx in -1..=1 {
+            for cz in 0..=2 {
+                r.upload_chunk(&Synthetic(cx, cz));
+            }
+        }
+        let cam = Camera {
+            pos: [8.0, 68.0, 8.0],
+            pitch: 80.0,
+            ..Camera::default()
+        };
+        let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
+        let at = ((h / 2 * w + w / 2) * 4) as usize;
+        [rgba[at], rgba[at + 1], rgba[at + 2]].map(f32::from)
+    };
+    let (plain, dark) = (frame(0.0), frame(1.0));
+    for (c, k) in [(0, 0.7), (1, 0.6), (2, 0.6)] {
+        if plain[c] < 40.0 {
+            continue;
+        }
+        let ratio = dark[c] / plain[c];
+        assert!((k - 0.02..k + 0.1).contains(&ratio), "{c}: {ratio}");
+    }
+    assert!(dark[1] < plain[1], "{plain:?} {dark:?}");
+}

@@ -696,6 +696,9 @@ impl App {
         if let Some((name, max, health)) = boss {
             self.hud.set_boss(name, (health / max).clamp(0.0, 1.0));
         }
+        // `WitherRenderer` calls `BossBar.update(entity, true)`; the Ender Dragon passes false.
+        let wither = self.game.entities.iter().any(|e| e.kind == Kind::Mob(64));
+        self.sky_darkness.tick(wither);
     }
 
     /// `EntityPlayerSP.func_110318_g`: the horse jump charge goes out as `EntityAction` 5 on key release.

@@ -144,6 +144,13 @@ fn hold_forward(app: &mut App) {
 }
 
 pub(super) fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
+    let mut app = join_app(port, out);
+    sent_so_far(&mut app, rx); // drop what the client sent while joining
+    app
+}
+
+/// A client that has applied `JoinGame` and a spawned mob; what it sent since is still unread.
+pub(super) fn join_app(port: u16, out: &Sender<Vec<u8>>) -> App {
     let mut app = App::new(Args {
         username: "Ferro".into(),
         auth: None,
@@ -167,7 +174,6 @@ pub(super) fn joined_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>
     send(out, spawn_mob().into());
     pump_until(&mut app, |a| a.game.entities.get(OTHER_ID).is_some());
     assert_eq!(app.game.entity_id, OWN_ID);
-    sent_so_far(&mut app, rx); // drop what the client sent while joining
     app
 }
 
@@ -238,7 +244,7 @@ fn position_packet_keeps_ground_state_and_echoes_wrapped_yaw_off_ground() {
 }
 
 /// A player standing on a block in a loaded chunk, with the screen closed and no key held.
-fn idle_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
+pub(super) fn idle_app(port: u16, out: &Sender<Vec<u8>>, rx: &Receiver<Vec<u8>>) -> App {
     let mut app = joined_app(port, out, rx);
     let mut chunk = world::chunk::Chunk::new(0, 0);
     chunk.set_block(0, 63, 0, 1 << 4);

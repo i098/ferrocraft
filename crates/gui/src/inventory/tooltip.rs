@@ -1,6 +1,6 @@
 //! Item tooltips: `ItemStack.getTooltip` and `GuiScreen.drawHoveringText` of 1.8.9.
 
-use super::Canvas;
+use super::{attributes, Canvas};
 use world::inventory::items::{self, ENCHANTED_BOOK};
 use world::inventory::{Compound, ItemStack, Tag};
 
@@ -17,7 +17,7 @@ pub fn get<'a>(c: &'a Compound, key: &str) -> Option<&'a Tag> {
     c.iter().find(|(k, _)| k == key).map(|(_, t)| t)
 }
 
-fn compound<'a>(c: &'a Compound, key: &str) -> Option<&'a Compound> {
+pub(super) fn compound<'a>(c: &'a Compound, key: &str) -> Option<&'a Compound> {
     match get(c, key)? {
         Tag::Compound(c) => Some(c),
         _ => None,
@@ -25,7 +25,7 @@ fn compound<'a>(c: &'a Compound, key: &str) -> Option<&'a Compound> {
 }
 
 /// `NBTTagCompound.getInteger` / `getShort`: any numeric tag, else 0.
-fn int(c: &Compound, key: &str) -> i32 {
+pub(super) fn int(c: &Compound, key: &str) -> i32 {
     match get(c, key) {
         Some(Tag::Byte(v)) => i32::from(*v),
         Some(Tag::Short(v)) => i32::from(*v),
@@ -35,7 +35,7 @@ fn int(c: &Compound, key: &str) -> i32 {
     }
 }
 
-fn list<'a>(c: &'a Compound, key: &str) -> &'a [Tag] {
+pub(super) fn list<'a>(c: &'a Compound, key: &str) -> &'a [Tag] {
     match get(c, key) {
         Some(Tag::List(l)) => l,
         _ => &[],
@@ -60,7 +60,7 @@ pub fn name(s: &ItemStack) -> (String, bool) {
 }
 
 /// `(id, level)` pairs of an enchantment list tag.
-fn enchantments(t: &Compound, key: &str) -> Vec<(i16, i16)> {
+pub(super) fn enchantments(t: &Compound, key: &str) -> Vec<(i16, i16)> {
     list(t, key)
         .iter()
         .filter_map(|e| match e {
@@ -178,10 +178,11 @@ pub fn lines(s: &ItemStack, advanced: bool) -> Vec<String> {
     if let Some(t) = t {
         tag_lines(t, hide, advanced, &mut out);
     }
-    // shortcut: AttributeModifiers tags are not read; the item defaults are shown, as for untagged stacks.
-    if let Some(v) = variant.filter(|v| !v.attributes.is_empty() && hide & 2 == 0) {
+    let defaults = variant.map_or(&[][..], |v| &v.attributes[..]);
+    let attrs = attributes::lines(t, defaults);
+    if !attrs.is_empty() && hide & 2 == 0 {
         out.push(String::new());
-        out.extend(v.attributes.iter().map(|l| (*l).to_string()));
+        out.extend(attrs);
     }
     let unbreakable = t.is_some_and(|t| int(t, "Unbreakable") != 0);
     if unbreakable && hide & 4 == 0 {
@@ -293,5 +294,49 @@ mod tests {
         let l = lines(&stack(276, 0, Some(ench)), false);
         assert_eq!(l[0], "\u{a7}bDiamond Sword\u{a7}r");
         assert_eq!(l[1], "\u{a7}7Sharpness V");
+    }
+
+    fn sharpness(lvl: i16) -> Compound {
+        vec![(
+            "ench".to_string(),
+            Tag::List(vec![Tag::Compound(vec![
+                ("id".into(), Tag::Short(16)),
+                ("lvl".into(), Tag::Short(lvl)),
+            ])]),
+        )]
+    }
+
+    #[test]
+    fn sharpness_raises_attack_damage() {
+        let diamond = lines(&stack(276, 0, Some(sharpness(5))), false);
+        assert!(diamond.contains(&"\u{a7}7\u{a7}9+13.25 Attack Damage".to_string()));
+        let iron = lines(&stack(267, 0, Some(sharpness(1))), false);
+        assert!(iron.contains(&"\u{a7}7\u{a7}9+7.25 Attack Damage".to_string()));
+    }
+
+    #[test]
+    fn attribute_modifiers_replace_the_defaults() {
+        let m = |name: &str, amount: f64, op: i32| {
+            Tag::Compound(vec![
+                ("AttributeName".into(), Tag::String(name.into())),
+                ("Name".into(), Tag::String("n".into())),
+                ("Amount".into(), Tag::Double(amount)),
+                ("Operation".into(), Tag::Int(op)),
+                ("UUIDMost".into(), Tag::Long(1)),
+                ("UUIDLeast".into(), Tag::Long(2)),
+            ])
+        };
+        let nbt = vec![(
+            "AttributeModifiers".to_string(),
+            Tag::List(vec![
+                m("generic.maxHealth", -4.0, 0),
+                m("generic.movementSpeed", 0.5, 1),
+            ]),
+        )];
+        let l = lines(&stack(276, 0, Some(nbt)), false);
+        assert_eq!(
+            l[2..],
+            ["\u{a7}7\u{a7}c-4 Max Health", "\u{a7}7\u{a7}9+50% Speed"]
+        );
     }
 }

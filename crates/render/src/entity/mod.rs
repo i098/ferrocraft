@@ -14,7 +14,6 @@ mod block;
 pub mod crystal;
 mod dragon;
 mod endermite;
-mod layer_light;
 pub(crate) mod fire;
 mod glint_mask;
 pub(crate) mod guardian;
@@ -24,6 +23,7 @@ pub mod hanging;
 pub(crate) mod helmet;
 mod horse;
 pub mod item;
+mod layer_light;
 pub mod leash;
 pub(crate) mod mobs;
 mod mobs2;
@@ -1081,7 +1081,14 @@ pub fn build(
         // `LivingEntityRenderer.renderLayers` skips the hurt overlay for layers whose
         // `colorsWhenDamaged()` is false: armor, cape, stuck arrows, carried block.
         let plain = light_level(d, &light, false);
-        layer_light::apply(&mut out.vertices, start, drawn.bright, drawn.plain, level, plain);
+        layer_light::apply(
+            &mut out.vertices,
+            start,
+            drawn.bright,
+            drawn.plain,
+            level,
+            plain,
+        );
     }
     out
 }

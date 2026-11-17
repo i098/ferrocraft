@@ -592,7 +592,8 @@ impl App {
             }
         }
         if let Some(s) = &mut self.sound {
-            s.play("random.explode", Some(pos.map(f64::from)), 4.0, 0.7);
+            let pitch = explode_pitch(s.rand_diff());
+            s.play("random.explode", Some(pos.map(f64::from)), 4.0, pitch);
         }
         let base = pos.map(|v| v as i32);
         let blocks: Vec<[i32; 3]> = records
@@ -864,6 +865,24 @@ pub(super) fn upload(r: &mut Renderer, game: &Game, dirty: Dirty) {
 }
 
 /// Hands chest, sign, skull and banner data to the renderer.
+/// `Explosion.doExplosionA`: pitch `(1 + (r1 - r2) * 0.2) * 0.7`, 0.56 to 0.84.
+fn explode_pitch(rand_diff: f32) -> f32 {
+    (1.0 + rand_diff * 0.2) * 0.7
+}
+
+#[cfg(test)]
+mod explode_pitch_tests {
+    use super::explode_pitch;
+
+    #[test]
+    fn pitch_spans_vanilla_range() {
+        assert!((explode_pitch(-1.0) - 0.56).abs() < 1e-6);
+        assert!((explode_pitch(1.0) - 0.84).abs() < 1e-6);
+        assert_ne!(explode_pitch(0.25), explode_pitch(-0.25));
+        assert!((explode_pitch(0.0) - 0.7).abs() < 1e-6);
+    }
+}
+
 fn mirror_tile(r: &mut Renderer, tile: TileEvent, difficulty: u8, world_time: i64) {
     match tile {
         TileEvent::Action {

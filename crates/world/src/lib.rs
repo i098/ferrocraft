@@ -143,6 +143,8 @@ pub struct Player {
     pub depth_strider: i32,
     /// `getChunk(pos).isLoaded()`: false for the empty chunk that stands in for a missing one.
     pub chunk_loaded: bool,
+    /// `Entity.noClip`: set for a spectator (`PlayerEntity.onUpdate`); the body moves through blocks.
+    pub no_clip: bool,
     jump_movement_factor: f32,
     jump_ticks: i32,
     /// `Entity.inWater`, set by `handleWaterMovement` at the start of each tick.
@@ -180,6 +182,7 @@ impl Player {
             jump_boost: 0.0,
             depth_strider: 0,
             chunk_loaded: true,
+            no_clip: false,
             jump_movement_factor: 0.02,
             jump_ticks: 0,
             in_water: false,
@@ -219,10 +222,15 @@ impl Player {
 
     /// One game tick: `Entity.handleWaterMovement` of `onEntityUpdate`, then `PlayerEntity.mobTick`.
     pub fn tick(&mut self, world: &dyn World, input: Input) {
+        // `PlayerEntity.onUpdate`: a spectator is never on the ground.
+        if self.no_clip {
+            self.on_ground = false;
+        }
         self.sprinting = input.sprint;
         self.sneaking = input.sneak;
         self.pushed_by_water = input.fly_speed.is_none();
         self.handle_water_movement(world);
+        self.push_out_of_blocks_at_corners(world);
         self.apply_jump_and_flight_keys(world, input);
         // `MovementInputFromOptions` (0.3 while sneaking), then `onLivingUpdate` (0.2 while using an item).
         let (mut strafe, mut forward) = (input.strafe, input.forward);
@@ -240,6 +248,50 @@ impl Player {
         if self.sprinting {
             self.jump_movement_factor =
                 (f64::from(self.jump_movement_factor) + f64::from(FLYING_SPEED) * 0.3) as f32;
+        }
+    }
+
+    /// The four `pushOutOfBlocks` calls of `LocalClientPlayerEntity.onLivingUpdate`: the corners of the box
+    /// 0.35 of its width from the centre, half a block above the feet.
+    fn push_out_of_blocks_at_corners(&mut self, world: &dyn World) {
+        let reach = f64::from(WIDTH) * 0.35;
+        let y = self.bb.min[1] + 0.5;
+        for (sx, sz) in [(-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (1.0, 1.0)] {
+            self.push_out_of_blocks(world, self.pos[0] + sx * reach, y, self.pos[2] + sz * reach);
+        }
+    }
+
+    /// `LocalClientPlayerEntity.pushOutOfBlocks`: a corner inside a normal cube (or one under it) nudges the
+    /// velocity 0.1 toward the nearest open side among west, east, north and south.
+    fn push_out_of_blocks(&mut self, world: &dyn World, x: f64, y: f64, z: f64) {
+        if self.no_clip {
+            return;
+        }
+        let cell = [floor(x), floor(y), floor(z)];
+        let open = |c: [i32; 3]| {
+            let cube = |y| place::normal_cube(world.block(c[0], y, c[2]));
+            !cube(c[1]) && !cube(c[1] + 1)
+        };
+        if open(cell) {
+            return;
+        }
+        let (dx, dz) = (x - f64::from(cell[0]), z - f64::from(cell[2]));
+        let sides = [
+            ([cell[0] - 1, cell[1], cell[2]], dx, 0, -1.0),
+            ([cell[0] + 1, cell[1], cell[2]], 1.0 - dx, 0, 1.0),
+            ([cell[0], cell[1], cell[2] - 1], dz, 2, -1.0),
+            ([cell[0], cell[1], cell[2] + 1], 1.0 - dz, 2, 1.0),
+        ];
+        let mut nearest = 9999.0;
+        let mut push = None;
+        for (c, dist, axis, sign) in sides {
+            if open(c) && dist < nearest {
+                nearest = dist;
+                push = Some((axis, sign));
+            }
+        }
+        if let Some((axis, sign)) = push {
+            self.vel[axis] = sign * f64::from(0.1_f32);
         }
     }
 

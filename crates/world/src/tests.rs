@@ -41,6 +41,8 @@ struct Scenario {
     steps: Vec<(u32, Input)>,
     /// Depth Strider level of the worn boots.
     boots: i32,
+    /// Spectator body: `Entity.noClip`, never on the ground.
+    no_clip: bool,
 }
 
 impl Scenario {
@@ -52,6 +54,7 @@ impl Scenario {
             yaw: 0.0,
             steps,
             boots: 0,
+            no_clip: false,
         }
     }
 
@@ -63,6 +66,11 @@ impl Scenario {
         let [x, y, z] = self.start;
         writeln!(s, "start {x:?} {y:?} {z:?} {:?}", self.yaw).unwrap();
         writeln!(s, "boots {}", self.boots).unwrap();
+        // The real `pushAwayFrom` runs at every tick, as `LocalClientPlayerEntity` does.
+        s.push_str("pushout\n");
+        if self.no_clip {
+            s.push_str("noclip\n");
+        }
         for (n, i) in &self.steps {
             writeln!(
                 s,
@@ -87,6 +95,7 @@ impl Scenario {
         };
         let mut p = Player::new(self.start, self.yaw);
         p.depth_strider = self.boots;
+        p.no_clip = self.no_clip;
         let mut out = Vec::new();
         for (n, input) in &self.steps {
             for _ in 0..*n {
@@ -527,4 +536,40 @@ fn sneak_walk_on_slime_is_not_slowed() {
 #[test]
 fn sprint_jumping_on_slime() {
     slime_floor(vec![(80, input(1.0, 0.0, true, true))]).check("slime jump");
+}
+
+/// A player at (0.5, 64.5, 0.5) in a two-high stone column; only the cell at x = -1 is open.
+fn walled_in() -> Scenario {
+    let mut s = Scenario::new(vec![(8, IDLE)]);
+    s.start = [0.5, 64.5, 0.5];
+    for (x, z) in [(0, 0), (1, 0), (0, -1), (0, 1)] {
+        for y in [64, 65] {
+            s.blocks.push(((x, y, z), STONE));
+        }
+    }
+    s
+}
+
+#[test]
+fn player_in_stone_is_pushed_to_the_open_side() {
+    let s = walled_in();
+    let world = TestWorld {
+        floor: s.floor,
+        blocks: s.blocks.iter().copied().collect(),
+    };
+    let mut p = Player::new(s.start, 0.0);
+    p.push_out_of_blocks_at_corners(&world);
+    assert_eq!(p.vel, [f64::from(-0.1_f32), 0.0, 0.0]);
+    s.check("pushed out of stone");
+}
+
+#[test]
+fn player_in_stone_is_pushed_north_when_west_is_closed() {
+    // West and east are stone; north and south are open, and north is the nearer (0.29) from most corners.
+    let mut s = walled_in();
+    s.blocks
+        .retain(|((x, _, z), _)| (*x, *z) != (0, -1) && (*x, *z) != (0, 1));
+    s.blocks
+        .extend([((-1, 64, 0), STONE), ((-1, 65, 0), STONE)]);
+    s.check("pushed out of stone to the north");
 }

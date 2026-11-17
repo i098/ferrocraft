@@ -317,12 +317,11 @@ fn packet_after_a_teleport_reports_the_new_position() {
     assert_eq!(tick(&mut app, &rx).0, [POS]);
 }
 
-/// `onUpdate` does nothing while the chunk at the player is not loaded.
+/// `ClientChunkCache.hasChunk` always returns true, so `onUpdate` sends over an unloaded chunk.
 #[test]
-fn nothing_is_sent_over_an_unloaded_chunk() {
+fn packets_are_sent_over_an_unloaded_chunk() {
     let (port, rx, out) = server();
     let mut app = idle_app(port, &out, &rx);
     app.game.player.as_mut().unwrap().pos = [100.5, 64.0, 100.5];
-    app.input.on_key(KeyCode::ShiftLeft, true, None);
-    assert!(tick(&mut app, &rx).0.is_empty());
+    assert!(!tick(&mut app, &rx).0.is_empty());
 }

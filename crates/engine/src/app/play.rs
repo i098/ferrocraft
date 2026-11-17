@@ -344,15 +344,13 @@ impl App {
         self.tick_particles();
         self.equip_tick();
         self.send_horse_jump();
-        if self.chunk_under_player() {
-            if self.game.vehicle.is_some() {
-                self.send_riding(input);
-            } else {
-                self.send_state();
-                // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
-                if self.game.camera.is_none() {
-                    self.send_movement();
-                }
+        if self.game.vehicle.is_some() {
+            self.send_riding(input);
+        } else {
+            self.send_state();
+            // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
+            if self.game.camera.is_none() {
+                self.send_movement();
             }
         }
         self.sound_tick();
@@ -759,14 +757,6 @@ impl App {
         let shown = if next <= 0.0 && !same { held } else { shown };
         let shown = if same { held } else { shown };
         self.equip = (next, cur, shown);
-    }
-
-    /// `EntityPlayerSP.onUpdate` runs nothing while the chunk at the player is not loaded.
-    fn chunk_under_player(&self) -> bool {
-        self.game.player.as_ref().is_some_and(|p| {
-            let at = |c: f64| (c.floor() as i32) >> 4;
-            self.game.store.get(at(p.pos[0]), at(p.pos[2])).is_some()
-        })
     }
 
     /// `EntityPlayerSP.onUpdateWalkingPlayer`: `C03`, `C04`, `C05` or `C06` by what changed since the last send.

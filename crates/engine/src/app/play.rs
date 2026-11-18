@@ -168,6 +168,37 @@ impl App {
         }
     }
 
+    fn mood_fx(&mut self, mood: world::entities::Mood, pos: [f64; 3], size: (f32, f32)) {
+        use render::ParticleKind as K;
+        use world::entities::Mood;
+        let kind = match mood {
+            Mood::Hearts | Mood::VillagerHearts => K::Heart,
+            Mood::Smoke => K::Smoke,
+            Mood::Angry => K::AngryVillager,
+            Mood::Happy => K::HappyVillager,
+        };
+        let (count, rise) = mood.count_and_rise();
+        self.particles.mood(kind, count, rise, pos, size)
+    }
+
+    fn bow_hit(&mut self, pos: [f64; 3], pitch: f32) {
+        if let Some(snd) = &mut self.sound {
+            snd.play("random.bowhit", Some(pos), 1.2, pitch);
+        }
+    }
+
+    /// Tells the entity scan of arrows and bobbers which remote players are spectators.
+    fn sync_spectators(&mut self) {
+        let tab = &self.hud.tablist;
+        let spectators: Vec<u128> = self
+            .game
+            .entities
+            .iter()
+            .filter_map(|e| e.uuid.filter(|&u| tab.is_spectator(u)))
+            .collect();
+        self.game.entities.set_spectators(spectators);
+    }
+
     /// `World.getClosestPlayer` skips spectators (`EntitySelectors.NOT_SPECTATING`).
     fn tick_block_entities(&mut self) {
         let tab = &self.hud.tablist;
@@ -346,6 +377,7 @@ impl App {
         };
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();
+        self.sync_spectators();
         self.game.tick(input);
         self.portal_touch();
         self.tick_dials();
@@ -410,19 +442,10 @@ impl App {
                     self.particles.hit_burst(magic, pos, size)
                 }
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
-                world::entities::Fx::Mood { mood, pos, size } => {
-                    use render::ParticleKind as K;
-                    use world::entities::Mood;
-                    let kind = match mood {
-                        Mood::Hearts | Mood::VillagerHearts => K::Heart,
-                        Mood::Smoke => K::Smoke,
-                        Mood::Angry => K::AngryVillager,
-                        Mood::Happy => K::HappyVillager,
-                    };
-                    let (count, rise) = mood.count_and_rise();
-                    self.particles.mood(kind, count, rise, pos, size)
-                }
+                world::entities::Fx::Mood { mood, pos, size } => self.mood_fx(mood, pos, size),
                 world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
+                // `ArrowEntity.tick`: `World.playSound` at the arrow, volume 1.2.
+                world::entities::Fx::BowHit { pos, pitch } => self.bow_hit(pos, pitch),
                 world::entities::Fx::Firework {
                     pos,
                     vel,

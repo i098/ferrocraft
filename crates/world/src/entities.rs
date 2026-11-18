@@ -4,7 +4,7 @@
 //!
 //! The network layer converts packets to [`EntityEvent`]; this module has no protocol dependency.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// What an entity is. Ids are the 1.8.9 mob and object type ids of the spawn packets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1106,6 +1106,8 @@ pub struct Entities {
     fx: Vec<Fx>,
     /// The local player as an arrow or bobber target: it is not in `map`.
     local: Option<crate::projectile::Target>,
+    /// Spectators on the tab list: `World.getEntities` leaves them out of an arrow or bobber scan.
+    spectators: HashSet<u128>,
     /// `EntityPickupParticle`s: items that fly to their collector for `PICKUP_TICKS`.
     pickups: Vec<Pickup>,
 }
@@ -1542,27 +1544,37 @@ impl Entities {
         });
     }
 
+    /// Replaces the set of remote players that are spectators (`EntityFilter.NOT_SPECTATOR`).
+    pub fn set_spectators(&mut self, uuids: impl IntoIterator<Item = u128>) {
+        self.spectators.clear();
+        self.spectators.extend(uuids);
+    }
+
     /// Drops the local target (see `set_local`).
     pub fn clear_local(&mut self) {
         self.local = None;
     }
 
-    /// `tick`, with `at` giving the block state (`id << 4 | meta`) at a position, for the squid's `isInWater`.
-    pub fn tick_in(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
-        // Only an arrow or a bobber scans for entities; its targets are the boxes as they stood at the tick start.
-        let scans = self
+    /// The boxes an arrow or bobber can meet, as they stand at the tick start; empty when none flies.
+    fn scan_targets(&self) -> Vec<crate::projectile::Target> {
+        if !self
             .map
             .values()
-            .any(|e| matches!(e.kind, Kind::Object(60 | 90)));
-        let targets: Vec<_> = if scans {
-            self.map
-                .values()
-                .filter_map(Entity::target)
-                .chain(self.local)
-                .collect()
-        } else {
-            Vec::new()
-        };
+            .any(|e| matches!(e.kind, Kind::Object(60 | 90)))
+        {
+            return Vec::new();
+        }
+        self.map
+            .values()
+            .filter(|e| !e.uuid.is_some_and(|u| self.spectators.contains(&u)))
+            .filter_map(Entity::target)
+            .chain(self.local)
+            .collect()
+    }
+
+    /// `tick`, with `at` giving the block state (`id << 4 | meta`) at a position, for the squid's `isInWater`.
+    pub fn tick_in(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+        let targets = self.scan_targets();
         for e in self.map.values_mut() {
             self.fx.extend(e.tick(at, &targets));
         }
@@ -1774,6 +1786,33 @@ mod tests {
             let a = es.get(5).unwrap();
             assert!((a.pos[0] - x).abs() < 1e-9 && (a.pos[1] - y).abs() < 1e-9);
         }
+    }
+
+    /// `World.getEntities` skips spectators: an arrow stops at a player but flies through a spectator.
+    #[test]
+    fn an_arrow_passes_through_a_spectator_but_stops_at_a_player() {
+        let fly = |spectator: bool| {
+            let mut es = Entities::default();
+            spawn_object(&mut es, 60, [0, 100 * 32, 0], [8000, 0, 0]);
+            es.apply(EntityEvent::SpawnPlayer {
+                id: 4,
+                uuid: 9,
+                pos: [3 * 32, 99 * 32 + 16, 0],
+                yaw: 0,
+                pitch: 0,
+                held: 0,
+                flags: None,
+            });
+            if spectator {
+                es.set_spectators([9]);
+            }
+            for _ in 0..6 {
+                es.tick_in(&open_air);
+            }
+            es.get(5).map(|a| a.pos[0])
+        };
+        assert!(fly(false).is_none());
+        assert!(fly(true).is_some_and(|x| x > 5.0));
     }
 
     /// `ItemEntity.tick`: gravity 0.04, then drag 0.98; a stone floor stops the fall and the item rests on it.

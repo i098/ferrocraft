@@ -168,6 +168,18 @@ impl App {
         }
     }
 
+    /// Tells the entity scan of arrows and bobbers which remote players are spectators.
+    fn sync_spectators(&mut self) {
+        let tab = &self.hud.tablist;
+        let spectators: Vec<u128> = self
+            .game
+            .entities
+            .iter()
+            .filter_map(|e| e.uuid.filter(|&u| tab.is_spectator(u)))
+            .collect();
+        self.game.entities.set_spectators(spectators);
+    }
+
     /// `World.getClosestPlayer` skips spectators (`EntitySelectors.NOT_SPECTATING`).
     fn tick_block_entities(&mut self) {
         let tab = &self.hud.tablist;
@@ -346,6 +358,7 @@ impl App {
         };
         let mut abilities = self.game.fly_toggle(input.jump);
         self.water_sounds();
+        self.sync_spectators();
         self.game.tick(input);
         self.portal_touch();
         self.tick_dials();

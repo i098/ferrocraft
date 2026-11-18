@@ -22,6 +22,11 @@ const PLAYER: u128 = 0x2222;
 fn fake_server(gamemode: i32, object: i8) -> u16 {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
+    let (player_at, object_at, velocity) = if object == 60 {
+        ([3 * 32, 99 * 32 + 16, 0], [0, 100 * 32, 0], [8000, 0, 0])
+    } else {
+        ([16, 69 * 32, 16], [16, 2291, 16], [0, -12800, 0])
+    };
     std::thread::spawn(move || {
         let (mut s, _) = l.accept().unwrap();
         let mut buf = [0u8; 256];
@@ -70,9 +75,9 @@ fn fake_server(gamemode: i32, object: i8) -> u16 {
             cb::Packet::from(cb::SpawnPlayer {
                 entity_id: VarInt(4),
                 uuid: Uuid(PLAYER),
-                x: if object == 60 { 3 * 32 } else { 16 },
-                y: if object == 60 { 99 * 32 + 16 } else { 69 * 32 },
-                z: if object == 60 { 0 } else { 16 },
+                x: player_at[0],
+                y: player_at[1],
+                z: player_at[2],
                 yaw: 0,
                 pitch: 0,
                 current_item: 0,
@@ -84,13 +89,13 @@ fn fake_server(gamemode: i32, object: i8) -> u16 {
             cb::Packet::from(cb::SpawnObject {
                 entity_id: VarInt(5),
                 kind: object,
-                x: if object == 60 { 0 } else { 16 },
-                y: if object == 60 { 100 * 32 } else { 2291 },
-                z: if object == 60 { 0 } else { 16 },
+                x: object_at[0],
+                y: object_at[1],
+                z: object_at[2],
                 pitch: 0,
                 yaw: 0,
                 data: 2,
-                velocity: Some(if object == 60 { [8000, 0, 0] } else { [0, -12800, 0] }),
+                velocity: Some(velocity),
             })
             .encode(),
         );

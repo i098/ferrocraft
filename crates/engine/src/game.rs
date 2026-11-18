@@ -822,6 +822,17 @@ impl Game {
         let rained_on = raining_at(store, self.weather.strengths(1.0).0);
         self.entities
             .update_wet(|x, y, z| store.get_block(x, y, z), rained_on);
+        if self.player.is_some() && self.gamemode != SPECTATOR {
+            let b = self.body();
+            self.entities.set_local(
+                self.entity_id,
+                [b[0], b[1], b[2]],
+                [b[3], b[4], b[5]],
+                self.abilities & 1 != 0,
+            );
+        } else {
+            self.entities.clear_local();
+        }
         self.entities
             .tick_in(&|p| store.get_block(p[0], p[1], p[2]));
         if self.ticks.is_multiple_of(20) {

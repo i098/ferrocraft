@@ -423,6 +423,12 @@ impl App {
                     self.particles.mood(kind, count, rise, pos, size)
                 }
                 world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
+                // `ArrowEntity.tick`: `World.playSound` at the arrow, volume 1.2.
+                world::entities::Fx::BowHit { pos, pitch } => {
+                    if let Some(snd) = &mut self.sound {
+                        snd.play("random.bowhit", Some(pos), 1.2, pitch);
+                    }
+                }
                 world::entities::Fx::Firework {
                     pos,
                     vel,

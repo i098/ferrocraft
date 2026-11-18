@@ -262,6 +262,8 @@ pub struct Entity {
     pub hurt_time: i32,
     /// Ticks since death status; the model tips over for 20 ticks, then the entity is removed.
     pub death_time: i32,
+    /// `Entity.removed` of an arrow that a hit ended on the client; the entity leaves at the end of the tick.
+    removed: bool,
     /// Sheep: ticks left of the grass-eating animation (`sheepTimer`, 40 at status 10).
     pub sheep_timer: i32,
     /// Iron golem arm and wolf shake timers.
@@ -278,7 +280,8 @@ pub struct Entity {
     pub age: u32,
     /// Metadata index 7: the mixed colour of the active potion effects, 0 for none.
     pub potion_color: i32,
-    /// Fishing bobbers: id of the player who cast it (the `SpawnObject` data), 0 for any other entity.
+    /// Arrows: id of the shooter; fishing bobbers: id of the player who cast it (the `SpawnObject` data). 0 for any
+    /// other entity.
     pub owner: i32,
     /// Metadata index 8: every active effect is ambient (beacon).
     pub potion_ambient: bool,
@@ -438,6 +441,7 @@ impl Entity {
             effects: Default::default(),
             hurt_time: 0,
             death_time: 0,
+            removed: false,
             sheep_timer: 0,
             anim: crate::mob_anim::MobAnim {
                 guardian: crate::mob_anim::Guardian::new(i64::from(id)),
@@ -624,16 +628,25 @@ impl Entity {
         self.on_ground = on_ground;
     }
 
-    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers.
-    fn fly(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers; an arrow that ends on a hit
+    /// plays its sound.
+    fn fly(
+        &mut self,
+        at: &dyn Fn([i32; 3]) -> u16,
+        targets: &[crate::projectile::Target],
+    ) -> Option<Fx> {
         let Kind::Object(object) = self.kind else {
-            return;
+            return None;
         };
         if !crate::projectile::simulated(object) {
-            return;
+            return None;
         }
         let mut b = crate::projectile::Body {
             id: self.id,
+            owner: self.owner,
+            targets,
+            removed: false,
+            hit_sound: None,
             age: self.age,
             size: self.size(),
             pos: self.pos,
@@ -649,10 +662,17 @@ impl Entity {
         (self.pos, self.vel, self.yaw, self.pitch) = (b.pos, b.vel, b.yaw, b.pitch);
         (self.prev_yaw, self.prev_pitch, self.on_ground, self.proj) =
             (b.prev_yaw, b.prev_pitch, b.on_ground, b.proj);
+        self.removed |= b.removed;
+        b.hit_sound.map(|(pos, pitch)| Fx::BowHit { pos, pitch })
     }
 
     /// One client tick: interpolation toward the server pose, limb swing, swing and hurt timers.
-    fn tick(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+    fn tick(
+        &mut self,
+        at: &dyn Fn([i32; 3]) -> u16,
+        targets: &[crate::projectile::Target],
+    ) -> Option<Fx> {
+        let mut fx = None;
         self.age += 1;
         // `EnderDragonEntity.mobTick` stores yaw and height before the position eases toward the server's.
         if let Some(dragon) = &mut self.dragon {
@@ -680,7 +700,7 @@ impl Entity {
             self.pitch += (self.target.pitch - self.pitch) / k;
             self.target.steps -= 1;
         } else {
-            self.fly(at);
+            fx = self.fly(at, targets);
         }
 
         // `EntityLivingBase.onUpdate` -> `updateLimbSwing`.
@@ -755,6 +775,7 @@ impl Entity {
         self.anim.begging = self.meta.begging == Some(1);
         self.anim.tick();
         self.anim.horse.tick(self.meta.horse_flags.unwrap_or(0));
+        fx
     }
 
     /// `LivingEntity.tick` after the entity moved by `moved`: a player's body follows `bodyMovement`,
@@ -1083,6 +1104,8 @@ pub struct Entities {
     emitters: Vec<Emitter>,
     /// Particle requests of the last ticks; the engine drains them with `take_fx`.
     fx: Vec<Fx>,
+    /// The local player as an arrow or bobber target: it is not in `map`.
+    local: Option<crate::projectile::Target>,
     /// `EntityPickupParticle`s: items that fly to their collector for `PICKUP_TICKS`.
     pickups: Vec<Pickup>,
 }
@@ -1135,12 +1158,40 @@ pub enum Fx {
     },
     /// `EntityWitch.handleStatusUpdate(15)`: witch magic specks around the head; `size` is `(width, height)`.
     Witch { pos: [f64; 3], size: (f32, f32) },
+    /// `ArrowEntity.tick`: `random.bowhit` at an arrow that `takeDamage` accepted, with this pitch.
+    BowHit { pos: [f64; 3], pitch: f32 },
     /// `EntityFireworkRocket.handleStatusUpdate(17)`: the `Starter` at the rocket, moving as it did.
     Firework {
         pos: [f64; 3],
         vel: [f64; 3],
         explosions: Vec<FireworkExplosion>,
     },
+}
+
+impl Entity {
+    /// What an arrow or bobber can meet in this entity: `hasCollision` (see `collidable`; the dragon's own box has
+    /// none), the class that `takeDamage` answers `true` for on a client, and the enderman exemption.
+    fn target(&self) -> Option<crate::projectile::Target> {
+        use crate::projectile::Hurt;
+        if !collidable(self) || self.kind == Kind::Mob(63) {
+            return None;
+        }
+        let (min, max) = self.bounds();
+        let hurt = match self.kind {
+            Kind::Player | Kind::Painting | Kind::Object(1 | 10..=12 | 51 | 71 | 77) => Hurt::Yes,
+            Kind::Object(63) => Hurt::IfAttacker,
+            _ => Hurt::No,
+        };
+        Some(crate::projectile::Target {
+            id: self.id,
+            min,
+            max,
+            hurt,
+            player: self.kind == Kind::Player,
+            invulnerable: false,
+            enderman: self.kind == Kind::Mob(58),
+        })
+    }
 }
 
 /// The particle of a mob mood status: `EntityAnimal` 18, `EntityTameable` 6 and 7, `EntityVillager` 12 to 14.
@@ -1339,7 +1390,7 @@ impl Entities {
                 }
                 e.vel = velocity(vel);
                 e.meta.vehicle.cart = crate::vehicle::cart_type(kind, data);
-                if kind == 90 {
+                if matches!(kind, 60 | 90) {
                     e.owner = data;
                 }
                 if kind == 70 {
@@ -1477,10 +1528,43 @@ impl Entities {
         self.tick_in(&|_| 0);
     }
 
+    /// Sets the local player's box and `abilities.invulnerable` for the entity scan of arrows and bobbers; `None`
+    /// for a spectator (`EntityFilter.NOT_SPECTATOR`) or before the join.
+    pub fn set_local(&mut self, id: i32, min: [f64; 3], max: [f64; 3], invulnerable: bool) {
+        self.local = Some(crate::projectile::Target {
+            id,
+            min,
+            max,
+            hurt: crate::projectile::Hurt::No,
+            player: true,
+            invulnerable,
+            enderman: false,
+        });
+    }
+
+    /// Drops the local target (see `set_local`).
+    pub fn clear_local(&mut self) {
+        self.local = None;
+    }
+
     /// `tick`, with `at` giving the block state (`id << 4 | meta`) at a position, for the squid's `isInWater`.
     pub fn tick_in(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+        // Only an arrow or a bobber scans for entities; its targets are the boxes as they stood at the tick start.
+        let scans = self
+            .map
+            .values()
+            .any(|e| matches!(e.kind, Kind::Object(60 | 90)));
+        let targets: Vec<_> = if scans {
+            self.map
+                .values()
+                .filter_map(Entity::target)
+                .chain(self.local)
+                .collect()
+        } else {
+            Vec::new()
+        };
         for e in self.map.values_mut() {
-            e.tick(at);
+            self.fx.extend(e.tick(at, &targets));
         }
         for i in 0..self.emitters.len() {
             self.burst(i);
@@ -1500,7 +1584,7 @@ impl Entities {
                     size: e.size(),
                 });
             }
-            keep
+            keep && !e.removed
         });
     }
 
@@ -1683,7 +1767,10 @@ mod tests {
             es.tick_in(&open_air);
             x += vx;
             y += vy;
-            (vx, vy) = (vx * 0.99, vy * 0.99 - 0.05);
+            (vx, vy) = (
+                vx * f64::from(0.99_f32),
+                vy * f64::from(0.99_f32) - f64::from(0.05_f32),
+            );
             let a = es.get(5).unwrap();
             assert!((a.pos[0] - x).abs() < 1e-9 && (a.pos[1] - y).abs() < 1e-9);
         }
@@ -1997,7 +2084,7 @@ mod tests {
         e.yaw = 170.0;
         e.target.yaw = angle(-127);
         e.target.steps = STEPS;
-        e.tick(&|_| 0);
+        e.tick(&|_| 0, &[]);
         assert!(e.yaw > 170.0, "went the long way: {}", e.yaw);
     }
 
@@ -2010,7 +2097,7 @@ mod tests {
         let (yaw, pitch) = e.lerp_look(0.5);
         assert!((yaw - 180.0).abs() < 1e-4, "went the long way: {yaw}");
         assert!((pitch - 20.0).abs() < 1e-4);
-        e.tick(&|_| 0);
+        e.tick(&|_| 0, &[]);
         assert_eq!((e.prev_yaw, e.prev_pitch), (-170.0, 30.0));
     }
 

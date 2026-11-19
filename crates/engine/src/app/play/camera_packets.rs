@@ -157,6 +157,7 @@ pub(super) fn join_app(port: u16, out: &Sender<Vec<u8>>) -> App {
         assets_dir: None,
         server: None,
         game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+        ..Default::default()
     });
     let session = Session::connect(&format!("127.0.0.1:{port}"), "Ferro", None).unwrap();
     app.link = Link::Live(session);

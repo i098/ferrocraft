@@ -13,51 +13,27 @@ pub struct Args {
     pub server: Option<String>,
     /// `--gameDir`, else `~/.minecraft`: holds `options.txt`, `servers.dat` and the sound assets.
     pub game_dir: PathBuf,
-}
-
-/// `--width`, `--height` and `--fullscreen`, as `net.minecraft.client.main.Main` reads them.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct WindowArgs {
+    /// `--width` and `--height`: the initial window size.
     pub width: u32,
     pub height: u32,
+    /// `--fullscreen`.
     pub fullscreen: bool,
 }
 
-impl Default for WindowArgs {
+impl Default for Args {
     /// Vanilla defaults: `Main` declares `--width` 854 and `--height` 480.
     fn default() -> Self {
-        WindowArgs {
+        Args {
+            username: "Player".to_string(),
+            auth: None,
+            assets_dir: None,
+            server: None,
+            game_dir: default_game_dir(),
             width: 854,
             height: 480,
             fullscreen: false,
         }
     }
-}
-
-/// Parse the window flags. A value that is not an integer is an error, as in vanilla
-/// (`OptionParser` rejects it); `Minecraft.<init>` turns a size below 1 into 1.
-pub fn parse_window(args: &[String]) -> Result<WindowArgs, String> {
-    let mut w = WindowArgs::default();
-    let mut it = args.iter().peekable();
-    while let Some(flag) = it.next() {
-        if !flag.starts_with("--") {
-            continue;
-        }
-        let val = it.next_if(|v| !v.starts_with("--"));
-        let size = |v: Option<&String>| {
-            let v = v.ok_or(format!("{flag} needs a value"))?;
-            v.parse::<i32>()
-                .map(|n| n.max(1) as u32)
-                .map_err(|e| format!("{flag}: {e}"))
-        };
-        match flag.as_str() {
-            "--width" => w.width = size(val)?,
-            "--height" => w.height = size(val)?,
-            "--fullscreen" => w.fullscreen = true,
-            _ => {}
-        }
-    }
-    Ok(w)
 }
 
 /// Parse `--username`, `--uuid`, `--accessToken`, `--assetsDir`, `--gameDir`, `--version`,
@@ -66,7 +42,8 @@ pub fn parse_window(args: &[String]) -> Result<WindowArgs, String> {
 /// unless that token is another `--flag`, so `--demo` and `--fullscreen` need no value.
 /// `env_server` is the `FERROCRAFT_SERVER` fallback. `--server` accepts `host` or `host:port`.
 pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String> {
-    let mut username = "Player".to_string();
+    let d = Args::default();
+    let mut username = d.username;
     let mut assets_dir = None;
     let mut game_dir = None;
     let mut version = None;
@@ -74,6 +51,7 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
     let mut token = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
     let mut host = None;
     let mut port = None;
+    let (mut width, mut height, mut fullscreen) = (d.width, d.height, d.fullscreen);
     let mut it = args.iter().peekable();
     while let Some(flag) = it.next() {
         if !flag.starts_with("--") {
@@ -81,6 +59,12 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
         }
         let val = it.next_if(|v| !v.starts_with("--"));
         let need = || val.ok_or(format!("{flag} needs a value"));
+        // `OptionParser` rejects a non-integer; `Minecraft.<init>` turns a size below 1 into 1.
+        let size = |v: &String| {
+            v.parse::<i32>()
+                .map(|n| n.max(1) as u32)
+                .map_err(|e| format!("{flag}: {e}"))
+        };
         match flag.as_str() {
             "--username" => username = need()?.clone(),
             "--uuid" => uuid = Some(need()?.clone()),
@@ -90,6 +74,9 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
             "--version" => version = Some(need()?.clone()),
             "--server" => host = Some(need()?.clone()),
             "--port" => port = Some(need()?.parse::<u16>().map_err(|e| format!("--port: {e}"))?),
+            "--width" => width = size(need()?)?,
+            "--height" => height = size(need()?)?,
+            "--fullscreen" => fullscreen = true,
             _ => {}
         }
     }
@@ -104,6 +91,9 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
         assets_dir: resolve_assets(assets_dir, Some(&game_dir), version.as_deref()),
         server,
         game_dir,
+        width,
+        height,
+        fullscreen,
     })
 }
 
@@ -207,33 +197,23 @@ mod tests {
             Some("h:9".into())
         );
         assert!(parse(&v("--port x"), None).is_err());
-        assert_eq!(parse_window(&v("--width 0 --height -5")).unwrap().width, 1);
-        assert_eq!(parse_window(&v("--width 0 --height -5")).unwrap().height, 1);
+        assert_eq!(parse(&v("--width 0 --height -5"), None).unwrap().width, 1);
+        assert_eq!(parse(&v("--width 0 --height -5"), None).unwrap().height, 1);
     }
 
     #[test]
     fn window_args_values_defaults_and_bad_values() {
-        let d = parse_window(&v("--username A --server 127.0.0.1")).unwrap();
-        assert_eq!(
-            d,
-            WindowArgs {
-                width: 854,
-                height: 480,
-                fullscreen: false
-            }
-        );
-        let w = parse_window(&v("--username A --width 1280 --height 720 --fullscreen")).unwrap();
-        assert_eq!(
-            w,
-            WindowArgs {
-                width: 1280,
-                height: 720,
-                fullscreen: true
-            }
-        );
-        assert_eq!(parse_window(&v("--width 640")).unwrap().height, 480);
+        let d = parse(&v("--username A --server 127.0.0.1"), None).unwrap();
+        assert_eq!((d.width, d.height, d.fullscreen), (854, 480, false));
+        let w = parse(
+            &v("--username A --width 1280 --height 720 --fullscreen"),
+            None,
+        )
+        .unwrap();
+        assert_eq!((w.width, w.height, w.fullscreen), (1280, 720, true));
+        assert_eq!(parse(&v("--width 640"), None).unwrap().height, 480);
         for bad in ["--width x", "--width", "--height 1.5"] {
-            assert!(parse_window(&v(bad)).is_err(), "{bad}");
+            assert!(parse(&v(bad), None).is_err(), "{bad}");
         }
     }
 

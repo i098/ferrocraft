@@ -27,16 +27,10 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let window = match args::parse_window(&argv) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("ferrocraft-engine: {e}");
-            std::process::exit(2);
-        }
-    };
+
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = app::App::new(args).with_window(window);
+    let mut app = app::App::new(args);
     event_loop.run_app(&mut app).expect("run");
     log::line(&format!(
         "event loop ended after {}s (window closed, quit or deadline)",

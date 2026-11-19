@@ -269,6 +269,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("container.enderchest", "Ender Chest"),
     ("container.beacon", "Beacon"),
     ("entity.Villager.name", "Villager"),
+    ("entity.Villager.farmer", "Farmer"),
+    ("entity.Villager.librarian", "Librarian"),
+    ("entity.Villager.priest", "Priest"),
+    ("entity.Villager.smith", "Blacksmith"),
+    ("entity.Villager.butcher", "Butcher"),
 ];
 
 static LANG: std::sync::RwLock<Option<std::collections::HashMap<String, String>>> =
@@ -479,6 +484,16 @@ mod tests {
             "Teleported PtF to -799.5, 4.0"
         );
         assert_eq!(plain_text(r#"{"translate":"container.chest"}"#), "Chest");
+        for (key, name) in [
+            ("farmer", "Farmer"),
+            ("librarian", "Librarian"),
+            ("priest", "Priest"),
+            ("smith", "Blacksmith"),
+            ("butcher", "Butcher"),
+        ] {
+            let json = format!(r#"{{"translate":"entity.Villager.{key}"}}"#);
+            assert_eq!(plain_text(&json), name);
+        }
     }
 
     #[test]

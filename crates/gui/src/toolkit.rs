@@ -1000,6 +1000,15 @@ mod tests {
     }
 
     #[test]
+    fn obfuscated_glyph_follows_the_seed() {
+        let pick = |seed| Gui::new(GuiScale::new(640, 480, 0, false), None, seed).obfuscated('a');
+        let picks: Vec<char> = (0..8)
+            .map(|i| pick(0x9E37_79B9u32.wrapping_mul(i + 1)))
+            .collect();
+        assert!(picks.iter().any(|&c| c != picks[0]));
+    }
+
+    #[test]
     fn transforms_compose_like_gl() {
         let mut g = Gui::new(GuiScale::new(640, 480, 0, false), None, 1);
         g.translate(10.0, 0.0);

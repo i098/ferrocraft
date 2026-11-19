@@ -445,7 +445,15 @@ mod tests {
     }
 
     #[test]
-    fn crop_planes_start_one_pixel_below_the_floor() {
-        assert!(CROP.iter().all(|e| e.from[1] == -1.0 && e.to[1] == 15.0));
+    fn wheat_vertices_match_vanilla_crop_json() {
+        // Vanilla crop.json: four planes at 4 and 12 px, spanning y -1..15 px.
+        let quads = cross_quads(59, [0, 64, 0]);
+        assert!(!quads.is_empty());
+        for v in quads.iter().flatten().map(|(p, _)| p) {
+            assert!(v[1] == -1.0 / 16.0 || v[1] == 15.0 / 16.0, "y {}", v[1]);
+            assert!(
+                [4.0 / 16.0, 12.0 / 16.0].contains(&v[0]) || [4.0 / 16.0, 12.0 / 16.0].contains(&v[2])
+            );
+        }
     }
 }

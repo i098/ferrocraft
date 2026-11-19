@@ -496,23 +496,14 @@ fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
     Some(mat)
 }
 
-/// `ItemRenderer.renderItem` doubles a block model (`shouldRenderItemIn3D`) before the display
-/// transform; `RenderItem.renderItem` then halves it. A flat model keeps its size.
-fn held_prepare(gui3d: bool) -> Mat {
-    if gui3d {
-        scale(2.0)
-    } else {
-        ident()
-    }
-}
-
 /// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
 /// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
 fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let xf = Xf::new(d, false);
     let Some(mat) = hand_matrix(d, m) else { return };
-    let prepare = held_prepare(m.gui3d);
-    let mat = chain(&[mat, prepare, m.third, scale(0.5)]);
+    // `ItemRenderer.renderItem` (bfn offsets 26-35) scales 3D models by 2 and `RenderItem.preTransform`
+    // (bjh 409-416) scales flat ones by 2, before the display transform.
+    let mat = chain(&[mat, scale(2.0), m.third, scale(0.5)]);
     // Model space is the biped's pixel frame; `Xf` maps it to the world.
     let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
     // Model y points down: the world y of a direction is its negation.
@@ -585,15 +576,6 @@ fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `ItemRenderer.renderItem` doubles a block and `RenderItem.renderItem` halves everything,
-    /// so a unit block stays one unit wide; a flat sprite ends up half as wide.
-    #[test]
-    fn held_block_keeps_its_size_and_flat_item_halves() {
-        let edge = |gui3d| point(&chain(&[held_prepare(gui3d), scale(0.5)]), [0.5, 0.0, 0.0]);
-        assert_eq!(edge(true), [0.5, 0.0, 0.0]);
-        assert_eq!(edge(false), [0.25, 0.0, 0.0]);
-    }
 
     fn top_color(mesh: &MeshData) -> [f32; 4] {
         mesh.vertices.iter().find(|v| v.pos[1] > 0.4).unwrap().color

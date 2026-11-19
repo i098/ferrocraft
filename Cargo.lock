@@ -904,6 +904,7 @@ dependencies = [
  "render",
  "winit",
  "world",
+ "x11-dl",
 ]
 
 [[package]]

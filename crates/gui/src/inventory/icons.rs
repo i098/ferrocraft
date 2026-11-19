@@ -455,6 +455,15 @@ fn entity_faces(name: &str) -> Option<Vec<Face>> {
     })
 }
 
+/// `RenderItem.renderItem`: a built-in model is turned 180 degrees about y before
+/// `translate(-0.5)`, which swaps the chest's latch and the skull's face to the viewer's side.
+fn turn_builtin(mut faces: Vec<Face>) -> Vec<Face> {
+    for f in &mut faces {
+        f.pts = f.pts.map(|p| [1.0 - p[0], p[1], 1.0 - p[2]]);
+    }
+    faces
+}
+
 /// The faces of the `elements` of the nearest model in the chain, as `FaceBakery` bakes them.
 fn element_faces(
     chain: &[(String, Value)],
@@ -554,7 +563,7 @@ impl Icons {
                     .collect(),
             ),
             Some("builtin/entity") => Model::Solid {
-                faces: entity_faces(name)?,
+                faces: turn_builtin(entity_faces(name)?),
                 gui: gui_display(&chain),
             },
             _ => Model::Solid {
@@ -736,5 +745,24 @@ mod tests {
         // The cube spans the 16 px slot: its top corner is at the slot's top edge.
         let top = gui_base(sub([0.0, 1.0, 1.0], [0.5; 3]));
         assert!((8.0 + top[1]).abs() < 1.5, "{top:?}");
+    }
+
+    /// The chest latch is on the south side of its model; the icon turns it to the viewer.
+    #[test]
+    fn chest_latch_faces_the_viewer_in_the_icon() {
+        let shows = |f: &Face| {
+            let n = normalize(cross(sub(f.pts[1], f.pts[0]), sub(f.pts[2], f.pts[0])));
+            let n = rot_x(210.0, rot_y(-135.0, n));
+            -n[2] > 0.0
+        };
+        let latch = chest("t").split_off(12);
+        let front = |faces: &[Face], z: f32| {
+            faces
+                .iter()
+                .find(|f| f.pts.iter().all(|p| p[2] == z))
+                .map(shows)
+        };
+        assert_eq!(front(&latch, 1.0), Some(false));
+        assert_eq!(front(&turn_builtin(latch), 0.0), Some(true));
     }
 }

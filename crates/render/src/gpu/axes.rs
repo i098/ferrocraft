@@ -1,5 +1,5 @@
 //! `EntityRenderer.drawDebugAxes`: while F3 shows the full debug screen the client draws three world axes
-//! 0.1 in front of the camera, after the hand on a cleared depth buffer, in place of the crosshair. The view is
+//! 0.1 in front of the camera, after the hand and ignoring its depth (vanilla clears it), in place of the crosshair. The view is
 //! `translate(0, 0, -0.1)`, the pitch, the yaw and the hand projection: no bobbing, no hurt tilt. Each axis is a box
 //! outline of 1 px lines: x red 0.005 long, z blue 0.005 long, y green 0.0033 long, each 0.0001 wide.
 
@@ -18,6 +18,7 @@ pub(super) struct Axes {
     globals: wgpu::Buffer,
     group: wgpu::BindGroup,
     lines: wgpu::Buffer,
+    pipe: wgpu::RenderPipeline,
 }
 
 impl Axes {
@@ -26,6 +27,7 @@ impl Axes {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         view: &wgpu::TextureView,
+        pipe: wgpu::RenderPipeline,
     ) -> Self {
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("axes globals"),
@@ -44,6 +46,7 @@ impl Axes {
             globals,
             group,
             lines,
+            pipe,
         }
     }
 
@@ -57,17 +60,12 @@ impl Axes {
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
     }
 
-    pub fn draw<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        line_pipe: &'a wgpu::RenderPipeline,
-    ) {
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if !self.on {
             return;
         }
         pass.set_bind_group(0, &self.group, &[]);
-        pass.set_pipeline(line_pipe);
+        pass.set_pipeline(&self.pipe);
         pass.set_vertex_buffer(0, self.lines.slice(..));
         pass.draw(0..VERTICES, 0..1);
     }
@@ -86,28 +84,33 @@ fn matrix_camera(cam: &Camera) -> Camera {
     }
 }
 
-/// The 12 edges of each box as line vertices.
+/// The 12 edges of a unit cube as corner index pairs: corner `i` has bit `a` set when it sits at the far end of axis `a`.
+fn cube_edges() -> impl Iterator<Item = (usize, usize)> {
+    (0..8usize)
+        .flat_map(|c| (0..3).map(move |axis| (c, axis)))
+        .filter(|&(c, axis)| c & (1 << axis) == 0)
+        .map(|(c, axis)| (c, c | 1 << axis))
+}
+
+/// The 12 edges of one box of `size` as line vertices.
+fn box_lines(size: [f32; 3], color: [f32; 4]) -> impl Iterator<Item = Vertex> {
+    let corner = move |i: usize| [0, 1, 2].map(|a| size[a] * ((i >> a) & 1) as f32);
+    cube_edges().flat_map(|(a, b)| [a, b]).map(move |i| Vertex {
+        pos: corner(i),
+        uv: [0.0; 2],
+        color,
+        light: [1.0; 2],
+    })
+}
+
+/// The three boxes as line vertices.
 fn lines() -> Vec<Vertex> {
-    let boxes = [
+    [
         ([0.005, WIDTH, WIDTH], RED),
         ([WIDTH, WIDTH, 0.005], BLUE),
         ([WIDTH, 0.0033, WIDTH], GREEN),
-    ];
-    let mut v = Vec::with_capacity(VERTICES as usize);
-    for (size, color) in boxes {
-        let corner = |i: usize| [0, 1, 2].map(|a| size[a] * ((i >> a) & 1) as f32);
-        for a in 0..8usize {
-            for axis in 0..3 {
-                if a & (1 << axis) == 0 {
-                    v.extend([a, a | 1 << axis].map(|i| Vertex {
-                        pos: corner(i),
-                        uv: [0.0; 2],
-                        color,
-                        light: [1.0; 2],
-                    }));
-                }
-            }
-        }
-    }
-    v
+    ]
+    .into_iter()
+    .flat_map(|(size, color)| box_lines(size, color))
+    .collect()
 }

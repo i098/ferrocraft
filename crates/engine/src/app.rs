@@ -508,6 +508,11 @@ impl App {
         self.game.reduced_debug || self.ui.settings.reduced_debug_info
     }
 
+    /// `EntityRenderer.drawDebugAxes` runs for F3 without reduced debug and without `hideGUI`.
+    fn debug_axes(&self) -> bool {
+        self.show_debug && self.in_world() && !self.hide_hud && !self.reduced_debug()
+    }
+
     fn camera(&self, frac: f64) -> Camera {
         let mut cam = self.view_camera(frac);
         cam.hurt_roll = self.hurt_roll(frac as f32);
@@ -960,7 +965,7 @@ impl App {
         let swing = self.game.swing.progress(frac as f32);
         let using = self.using(frac as f32);
         let fluid = self.fluid_at(cam.pos);
-        let axes = self.show_debug && self.in_world() && !self.hide_hud && !self.reduced_debug();
+        let axes = self.debug_axes();
         let Some(r) = &mut self.renderer else { return };
         for (name, png) in textures {
             r.register_texture(&name, &png);

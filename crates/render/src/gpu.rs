@@ -429,7 +429,6 @@ impl Renderer {
         let flat_view = level_zero_view(&atlas_tex);
         let item_group = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
         let hand_atlas_group = bind_group(&device, &layout_bg, &hand_globals, &sampler, &flat_view);
-        let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view);
         let hand_skin = skin_img.map(|img| {
             let view = view_of(&img);
             (
@@ -444,8 +443,9 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe] =
             build_pipelines(&device, &layout_bg, format);
+        let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view, axes_pipe);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
         let (w, h) = target_size(&target);
@@ -2068,11 +2068,7 @@ impl Renderer {
             self.draw_hand(&mut pass, hand);
         }
         self.draw_fire_overlay(&mut pass, fire);
-        if self.axes.on {
-            drop(pass);
-            pass = overlay_pass(enc, world, &self.depth);
-            self.axes.draw(&mut pass, &self.line_pipe);
-        }
+        self.axes.draw(&mut pass);
         // `renderEntityOutlines` blends the outlines in before the effect.
         self.composite_outlines(&mut pass);
         // `updateCameraAndRender`: the effect runs after the hand and before the GUI.
@@ -2287,7 +2283,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 22] {
+) -> [wgpu::RenderPipeline; 23] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2516,6 +2512,17 @@ fn build_pipelines(
         true,
         false,
     );
+    // `drawDebugAxes` clears the depth buffer first, so the axes ignore the hand's depth.
+    let axes_pipe = pipe(
+        "vs_world",
+        "fs_flat",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        false,
+        false,
+    );
     let crack_pipe = pipe(
         "vs_world",
         "fs_crack",
@@ -2657,6 +2664,7 @@ fn build_pipelines(
         cloud_depth_pipe,
         hand_pipe,
         line_pipe,
+        axes_pipe,
         crack_pipe,
         bolt_pipe,
         fire_pipe,

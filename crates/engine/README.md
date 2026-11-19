@@ -10,7 +10,7 @@ Each tick it also runs block breaking (`world::dig`): the left button digs the t
 The right button places blocks (`world::place`): the engine sends `PlayerBlockPlacement` (C08) with the face and the cursor, applies the same placement rules and orientation locally, and swings the arm only on success. Changing the held slot or stack ends an item use in progress (bow, food).
 Input and chat come from `input-audio`.
 
-Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`.
+Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`, `--width` (default 854), `--height` (default 480), `--fullscreen`. A bad `--width` or `--height` value exits with code 2.
 The renderer reads textures and the font from a client jar. The boot jar passes the classpath jar that holds `ascii.png` as a file value of `--assetsDir`, and the engine uses it as is. Otherwise the engine looks for `versions/1.8.9/1.8.9.jar` (or `versions/<--version>/<--version>.jar`) under the assets dir's parent, `--gameDir` or its parent. It logs a warning when no font is found. Resource packs listed in `resourcePacks` in `options.txt` layer over the jar.
 A server resource pack is offered through a Yes/No prompt screen unless the `servers.dat` entry decides it; see `src/app/pack.rs`.
 The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`, `--port` and `FERROCRAFT_SERVER` are all unset, the title screen opens and nothing connects.

@@ -1046,6 +1046,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         let mut session = Session::connect(&format!("127.0.0.1:{port}"), "Ferro", None).unwrap();
         let (mut got_slot, mut got_msg) = (false, false);
@@ -1087,6 +1088,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.game.player = Some(world::Player::new([0.0; 3], 0.0));
         use world::entities::EntityEvent as E;
@@ -1138,6 +1140,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.on_event(
             NetEvent::Statistics(vec![("achievement.mineWood".into(), 1)]),
@@ -1173,6 +1176,7 @@ mod tests {
                 assets_dir: None,
                 server: None,
                 game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+                ..Default::default()
             });
             assert_eq!(app.ui.player_id, expected);
         }
@@ -1186,6 +1190,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.ui.in_world = true;
         let m = metrics!(app);
@@ -1213,6 +1218,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.sneak_sent = true;
         app.sprint_sent = true;
@@ -1230,6 +1236,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.ui.in_world = true;
         app.game.player = Some(world::Player::new([0.0; 3], 0.0));
@@ -1296,6 +1303,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         let m = metrics!(app);
         app.ui.close(&m);

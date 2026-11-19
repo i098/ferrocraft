@@ -1053,7 +1053,8 @@ impl Renderer {
     fn upload_items(&mut self, draws: &[EntityDraw]) -> MeshData {
         self.resolve_items(draws);
         self.load_frames(draws);
-        let frames = self.frames.take().unwrap_or_default();
+        // Kept as `None` until a frame is drawn, so `load_frames` still reads the models then.
+        let frames = self.frames.take();
         if !self.map_icons.is_empty() {
             self.load_texture(hand::ICONS_TEXTURE);
         }
@@ -1061,14 +1062,14 @@ impl Renderer {
         entity::hanging::build(
             &mut items,
             draws,
-            &frames,
+            frames.as_ref().unwrap_or(&Default::default()),
             &self.item_models,
             &self.frame_compasses,
             &self.dials,
             &self.map_icons,
             |p| self.light_at(p),
         );
-        self.frames = Some(frames);
+        self.frames = frames;
         self.item_meshes.clear();
         let layers = std::iter::once((None, items.atlas)).chain(
             items

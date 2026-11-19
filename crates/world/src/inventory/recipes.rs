@@ -151,9 +151,36 @@ mod tests {
     }
 
     #[test]
-    fn shaped_recipes_mirror_and_shapeless_ignore_position() {
-        // sticks need two planks stacked, in either column of the 2x2 grid
-        let p = s(5, 0);
+    fn shaped_recipes_match_both_orientations_and_shapeless_ignore_position() {
+        let (p, k) = (s(5, 0), s(280, 0));
+        // vanilla 1.8.9 wooden axe (271) "XX","X#"," #" and its mirror, in the 3x3 grid
+        let axe = [
+            p.clone(),
+            p.clone(),
+            None,
+            p.clone(),
+            k.clone(),
+            None,
+            None,
+            k.clone(),
+            None,
+        ];
+        let flipped = [
+            p.clone(),
+            p.clone(),
+            None,
+            k.clone(),
+            p.clone(),
+            None,
+            k.clone(),
+            None,
+            None,
+        ];
+        assert_eq!(find(&axe, 3).map(|r| r.id), Some(271));
+        assert_eq!(find(&flipped, 3).map(|r| r.id), Some(271));
+        // the axe is three rows tall: no recipe fits the 2x2 grid
+        assert_eq!(find(&[p.clone(), p.clone(), None, k], 2), None);
+        // sticks need two planks stacked, in either column
         assert_eq!(
             find(&[None, p.clone(), None, p.clone()], 2).map(|r| (r.id, r.count)),
             Some((280, 4))
@@ -163,7 +190,6 @@ mod tests {
             find(&[None, s(318, 0), s(265, 0), None], 2).map(|r| r.id),
             Some(259)
         );
-        // one plank is a wooden button (143); two planks side by side a pressure plate (72)
         assert_eq!(
             find(&[p.clone(), None, None, None], 2).map(|r| r.id),
             Some(143)

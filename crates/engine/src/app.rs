@@ -770,7 +770,9 @@ impl App {
         let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
         let slot = |i: usize| self.game.inv.player[i].as_ref().map_or(0, |s| s.id);
         Some(EntityDraw {
-            class: Class::Player { slim: self.local_slim() },
+            class: Class::Player {
+                slim: self.local_slim(),
+            },
             pos: [
                 lerp(self.game.prev_pos[0], p.pos[0]),
                 lerp(self.game.prev_pos[1], p.pos[1]),

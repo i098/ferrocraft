@@ -446,9 +446,8 @@ impl Renderer {
                 img.height as u32,
             )
         });
-        let hand_skin_slim = slim_img.map(|img| {
-            bind_group(&device, &layout_bg, &hand_globals, &sampler, &view_of(&img))
-        });
+        let hand_skin_slim = slim_img
+            .map(|img| bind_group(&device, &layout_bg, &hand_globals, &sampler, &view_of(&img)));
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
         let snow_group =
@@ -1653,7 +1652,7 @@ impl Renderer {
             (HandTex::Skin | HandTex::Map(hand::MapTex::Skin), Some((group, _)), _) => self
                 .hand
                 .filter(|h| h.arm.slim)
-                .and_then(|_| self.hand_skin_slim.as_ref())
+                .and(self.hand_skin_slim.as_ref())
                 .unwrap_or(group),
             (HandTex::Map(t), _, _) => self.map_group(t),
             (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,

@@ -396,8 +396,6 @@ impl App {
         }
         self.boss_tick();
         self.step_sound();
-        let thunder = std::mem::take(&mut self.game.thunder);
-        self.play_weather(thunder);
         self.rain_particles();
         self.ambient_effects();
         self.potion_particles();
@@ -654,7 +652,7 @@ impl App {
         self.play_weather(sound);
     }
 
-    /// Plays weather sounds (`WorldClient.playSound` of the rain, `EntityLightningBolt.onUpdate` thunder).
+    /// Plays weather sounds (`WorldClient.playSound` of the rain).
     fn play_weather(&mut self, sounds: impl IntoIterator<Item = render::WeatherSound>) {
         let Some(s) = &mut self.sound else { return };
         for (name, at, volume, pitch) in sounds {

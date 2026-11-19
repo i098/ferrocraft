@@ -1834,12 +1834,12 @@ fn xp_orb_draws_as_a_point_three_block_textured_sprite() {
     };
     r.render_to_rgba(&cam, &[]);
     let empty = r.render_to_rgba(&cam, &[]).2;
-    r.set_entities(&[orb.clone()]);
+    r.set_entities(std::slice::from_ref(&orb));
     let frame = r.render_to_rgba(&cam, &[]).2;
     let (x0, y0, x1, y1) = changed_box(&empty, &frame, w).expect("the orb draws");
     let (left, _) = project(&cam, [-0.15, 65.0, 2.0], w as f64, h as f64);
     let (right, _) = project(&cam, [0.15, 65.0, 2.0], w as f64, h as f64);
-    let expected = right - left;
+    let expected = (right - left).abs();
     let (width, height) = ((x1 - x0 + 1) as f64, (y1 - y0 + 1) as f64);
     for (name, got) in [("width", width), ("height", height)] {
         assert!(
@@ -1853,5 +1853,9 @@ fn xp_orb_draws_as_a_point_three_block_textured_sprite() {
             colours.insert([c[0], c[1], c[2]]);
         }
     }
-    assert!(colours.len() >= 4, "textured, not a flat tint: {}", colours.len());
+    assert!(
+        colours.len() >= 4,
+        "textured, not a flat tint: {}",
+        colours.len()
+    );
 }

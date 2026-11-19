@@ -727,7 +727,8 @@ fn look_12(id: u16, meta: u16) -> Look {
     match id {
         102 => shape(0xc0e8ee, ["glass"; 6]),
         103 => cube3(0x8aa030, "melon_top", "melon_top", "melon_side"),
-        104 | 105 => cross(0x80a030, "melon_stem_disconnected", Tint::Foliage),
+        104 => cross(0x80a030, "pumpkin_stem_disconnected", Tint::None),
+        105 => cross(0x80a030, "melon_stem_disconnected", Tint::None),
         106 => Look {
             tint: Tint::Foliage,
             ..shape(0x3b7a24, ["vine"; 6])
@@ -1257,6 +1258,9 @@ pub fn texture_names() -> Vec<&'static str> {
             "double_plant_paeonia_top",
             "double_plant_sunflower_front",
             "double_plant_sunflower_back",
+            "fire_layer_1",
+            "melon_stem_connected",
+            "pumpkin_stem_connected",
         ])
         .collect();
     names.extend(PANE_TOP);

@@ -176,7 +176,7 @@ fn redstone_torch(cx: &mut Cx, pos: [i32; 3], meta: u16, rng: &mut JavaRandom) {
 }
 
 /// `FireBlock.isFlammable`: the blocks `FireBlock.init` registers with a burn chance.
-fn flammable(id: u16) -> bool {
+pub(crate) fn flammable(id: u16) -> bool {
     matches!(
         id,
         5 | 125 | 126 | 107 | 183..=187 | 85 | 188..=192 | 53 | 134..=136 | 17 | 162 | 18 | 161 | 47

@@ -129,7 +129,7 @@ impl App {
         }
     }
 
-    fn mouse_button(&mut self, down: bool, button: u8) {
+    pub(super) fn mouse_button(&mut self, down: bool, button: u8) {
         if button <= 2 {
             self.mouse_down = down;
         } else if !down {

@@ -1520,6 +1520,18 @@ impl Renderer {
         {
             return self.map_draws(&hand, damage).unwrap_or_default();
         }
+        self.refresh_held(kind);
+        match self.held.as_ref().map(|h| &h.1) {
+            Some(Held::Block(mesh, display)) => {
+                vec![(hand::block(&hand, mesh, *display), HandTex::Atlas)]
+            }
+            Some(Held::Flat(flat, _, _)) => vec![(hand::flat(&hand, flat), HandTex::Item)],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Resolves the held model when `kind` changed and advances an animated sprite.
+    fn refresh_held(&mut self, kind: HeldKind) {
         if self.held.as_ref().map(|h| h.0) != Some(kind) {
             let held = self.resolve_held(kind);
             self.held = Some((kind, held));
@@ -1529,13 +1541,6 @@ impl Renderer {
             if frame != flat.frame {
                 **flat = hand::Flat::new(&strip.image, strip.display, frame);
             }
-        }
-        match self.held.as_ref().map(|h| &h.1) {
-            Some(Held::Block(mesh, display)) => {
-                vec![(hand::block(&hand, mesh, *display), HandTex::Atlas)]
-            }
-            Some(Held::Flat(flat, _, _)) => vec![(hand::flat(&hand, flat), HandTex::Item)],
-            _ => Vec::new(),
         }
     }
 

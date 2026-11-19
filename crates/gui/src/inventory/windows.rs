@@ -314,7 +314,7 @@ fn anvil_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32) {
         16,
     );
     if (has(0) || has(1)) && !has(2) {
-        modal(c, ANVIL, l + 99, t + 56, 176, 0, 28, 21);
+        modal(c, ANVIL, l + 99, t + 45, 176, 0, 28, 21);
     }
 }
 

@@ -297,6 +297,7 @@ impl InputState {
             return;
         }
         self.focus_lost_at.get_or_insert(now);
+        self.mouse_down = [false; 2];
         self.release_all();
     }
 
@@ -1186,6 +1187,14 @@ mod tests {
         s.set_screen_open(true);
         assert_eq!(s.held_mouse_buttons().collect::<Vec<_>>(), [1]);
         s.mouse_button(MouseButton::Right, false);
+        assert_eq!(s.held_mouse_buttons().count(), 0);
+    }
+
+    #[test]
+    fn focus_loss_forgets_held_mouse_buttons() {
+        let mut s = InputState::default();
+        s.mouse_button(MouseButton::Right, true);
+        s.set_focused(false);
         assert_eq!(s.held_mouse_buttons().count(), 0);
     }
 

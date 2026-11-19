@@ -691,6 +691,14 @@ impl App {
         Ok(())
     }
 
+    /// A right click on a villager still held when its window opens clicks the slot under the
+    /// pointer (half a stack); the release is then ignored.
+    fn replay_held_mouse(&mut self) {
+        for button in self.input.held_mouse_buttons().collect::<Vec<_>>() {
+            self.mouse_button(true, button);
+        }
+    }
+
     fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {
@@ -717,11 +725,7 @@ impl App {
                     self.ui.width,
                     self.ui.height,
                 ));
-                // A right click on a villager still held when its window opens clicks the slot
-                // under the pointer (half a stack); the release is then ignored.
-                for button in self.input.held_mouse_buttons().collect::<Vec<_>>() {
-                    self.mouse_button(true, button);
-                }
+                self.replay_held_mouse();
             }
             Effect::CloseWindow => {
                 self.close_screens();

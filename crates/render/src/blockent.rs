@@ -640,7 +640,9 @@ pub fn book_quads(flip_l: f32, flip_r: f32, spread: f32) -> Vec<BookQuad> {
         cube.emit(&mut mesh, &Mat::at([0.0; 3]), BOOK_TEXELS, 0.0);
     }
     mesh.indices
-        .chunks_exact(6)
+        .as_chunks::<6>()
+        .0
+        .iter()
         .map(|q| {
             let v = &mesh.vertices[q[0] as usize..q[0] as usize + 4];
             (

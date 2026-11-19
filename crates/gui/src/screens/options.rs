@@ -1966,9 +1966,73 @@ mod tests {
         assert_eq!(Opt::RenderDistance.norm(17.0), 0.5);
     }
 
+    /// Records every `text` call; draws nothing else.
+    struct Rec(Vec<(String, f32, f32)>);
+    impl Metrics for Rec {
+        fn width(&self, s: &str) -> i32 {
+            s.len() as i32 * 6
+        }
+    }
+    impl Canvas for Rec {
+        fn fill(&mut self, _: i32, _: i32, _: i32, _: i32, _: u32) {}
+        fn gradient(&mut self, _: i32, _: i32, _: i32, _: i32, _: u32, _: u32) {}
+        fn blit(&mut self, _: &str, _: f32, _: f32, _: f32, _: f32, _: [f32; 4], _: u32) {}
+        fn quad(&mut self, _: &str, _: [[f32; 2]; 4], _: [[f32; 2]; 4], _: [u32; 4]) {}
+        fn quad_add(&mut self, _: &str, _: [[f32; 2]; 4], _: [[f32; 2]; 4], _: u32) {}
+        fn text(&mut self, s: &str, x: f32, y: f32, _: u32, _: bool) {
+            self.0.push((s.to_string(), x, y));
+        }
+        fn set_bidi(&mut self, _: bool) {}
+        fn texture(&mut self, _: &str, _: &[u8]) {}
+        fn push(&mut self, _: [f32; 2], _: f32, _: f32) {}
+        fn pop(&mut self) {}
+    }
+
+    /// Oracle: vanilla 1.8.9 `GuiSlot.drawSelectionBox` row top is `top + 4 - scroll + i * 20`;
+    /// entries get slotHeight 16, so a category title is at row + 6 and a key label at row + 4.
+    /// The list top is 63, so rows 0 (category) and 1 (key) have tops 67 and 87.
     #[test]
-    fn controls_entry_offsets_use_slot_height_minus_4() {
-        assert_eq!((category_dy(), key_label_dy()), (6, 4));
+    fn controls_text_rows_match_vanilla_offsets() {
+        let texts = Texts::parse("", "");
+        let stats = PlayerStats::default();
+        let dir = std::env::temp_dir().join("ferrocraft-controls-offsets");
+        let mut settings = Settings::new(dir.clone());
+        let mut clip = String::new();
+        let mut ctx = Ctx {
+            width: 320,
+            height: 240,
+            texts: &texts,
+            settings: &mut settings,
+            in_world: true,
+            difficulty: None,
+            hardcore: false,
+            now_ms: 0,
+            game_dir: dir,
+            effects: Vec::new(),
+            clipboard: &mut clip,
+            metrics: &M,
+            shift: false,
+            stats: &stats,
+            icons: None,
+            player_id: "",
+        };
+        struct Stub;
+        impl Screen for Stub {
+            fn init(&mut self, _: &mut Ctx) {}
+            fn draw(&mut self, _: &mut dyn Canvas, _: i32, _: i32, _: &mut Ctx) {}
+            fn click(&mut self, _: i32, _: i32, _: i32, _: &mut Ctx) -> Option<Nav> {
+                None
+            }
+        }
+        let mut s = Controls::new(Box::new(Stub));
+        s.init(&mut ctx);
+        let mut rec = Rec(Vec::new());
+        s.draw(&mut rec, 0, 0, &mut ctx);
+        assert!(matches!(s.rows[0], KeyRow::Category(_)));
+        let ys: Vec<f32> = rec.0.iter().map(|t| t.2).collect();
+        assert!(ys.contains(&73.0), "category title at 67 + 6: {ys:?}");
+        assert!(ys.contains(&91.0), "first key label at 87 + 4: {ys:?}");
+        assert!(!ys.contains(&77.0), "old category offset: {ys:?}");
     }
 
     struct M;

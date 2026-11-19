@@ -417,8 +417,14 @@ fn add(a: [f32; 3], b: [f64; 3]) -> [f32; 3] {
     [a[0] + b[0] as f32, a[1] + b[1] as f32, a[2] + b[2] as f32]
 }
 
-/// `ClientWorld.getHorizonHeight` of a default world.
-const HORIZON: f64 = 63.0;
+/// `World.getHorizon`: 63 in a default world, 0 in a superflat one.
+fn horizon(env: &Environment) -> f64 {
+    if env.flat_world {
+        0.0
+    } else {
+        63.0
+    }
+}
 
 /// Sky plane, sunrise glow, stars, sun, moon and the dark discs, with the camera at `eye`.
 /// `solid` (the sky plane) and `dark` are drawn in the world fog, `dark` last; `blend` is alpha
@@ -450,7 +456,7 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
 
     // `renderSky` after the stars: below the horizon a black plane 4 blocks under the eye and a
     // black shaft around the eye, then always the lower disc at the horizon height.
-    let d0 = eye[1] - HORIZON;
+    let d0 = eye[1] - horizon(env);
     if d0 < 0.0 {
         let black = [0.0, 0.0, 0.0, 1.0];
         sky_plane(&mut dark, -4.0, eye, black);
@@ -914,5 +920,34 @@ mod tests {
             ending.fog_end, 128.0,
             "the fog reopens over the last second"
         );
+    }
+
+    /// Worked by hand from 1.8.9 `World.getSkyColor` at noon in plains (temperature 0.8, 8 chunks):
+    /// clear (121, 167, 255), rain 1 (103, 115, 137), then thunder 1 on top (43, 46, 51).
+    #[test]
+    fn sky_colour_matches_vanilla_in_clear_rain_and_thunder() {
+        let sky = |rain, thunder| {
+            Environment {
+                rain,
+                thunder,
+                ..Environment::default()
+            }
+            .sky_state(0.8, [0.0; 3])
+            .sky
+            .map(|c| (c * 255.0).round() as i32)
+        };
+        assert_eq!(sky(0.0, 0.0), [121, 167, 255]);
+        assert_eq!(sky(1.0, 0.0), [103, 115, 137]);
+        assert_eq!(sky(1.0, 1.0), [43, 46, 51]);
+    }
+
+    #[test]
+    fn superflat_horizon_is_sea_level_zero() {
+        let flat = Environment {
+            flat_world: true,
+            ..Environment::default()
+        };
+        assert_eq!(horizon(&flat), 0.0);
+        assert_eq!(horizon(&Environment::default()), 63.0);
     }
 }

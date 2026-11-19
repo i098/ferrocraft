@@ -201,6 +201,30 @@ public class Dumper {
         }
     }
 
+    static String ing(ItemStack s) {
+        return s == null ? "-" : Item.getId(s.getItem()) + ":" + s.getMetadata();
+    }
+
+    /** CraftingManager's recipes in match order; the special recipes (dye, banner, fireworks, repair, maps, books) are skipped. */
+    static void writeRecipes(String out) throws Exception {
+        try (java.io.PrintWriter w = tsv(out, "recipes", "# kind\twidth\theight\tresult id:meta:count\tingredients id:meta (- empty, meta 32767 any), shaped row by row")) {
+            for (Recipe r : CraftingManager.getInstance().getRecipes()) {
+                StringBuilder b = new StringBuilder();
+                ItemStack res;
+                if (r instanceof ShapedRecipe) {
+                    ItemStack[] in = (ItemStack[]) get(r, ShapedRecipe.class, "ingredients");
+                    for (ItemStack s : in) b.append(b.length() > 0 ? " " : "").append(ing(s));
+                    res = (ItemStack) get(r, ShapedRecipe.class, "result");
+                    w.println("shaped\t" + get(r, ShapedRecipe.class, "width") + "\t" + get(r, ShapedRecipe.class, "height") + "\t" + ing(res) + ":" + res.size + "\t" + b);
+                } else if (r instanceof ShapelessRecipe) {
+                    for (ItemStack s : (List<ItemStack>) get(r, ShapelessRecipe.class, "ingredients")) b.append(b.length() > 0 ? " " : "").append(ing(s));
+                    res = (ItemStack) get(r, ShapelessRecipe.class, "result");
+                    w.println("shapeless\t0\t0\t" + ing(res) + ":" + res.size + "\t" + b);
+                }
+            }
+        }
+    }
+
     public static void main(String[] a) throws Exception {
         Bootstrap.init();
         loadGrassColormap();
@@ -208,6 +232,7 @@ public class Dumper {
         List<ItemStack> all = writeItems(out);
         writeModels(out, all);
         writeTabs(out, lang());
+        writeRecipes(out);
         try (java.io.PrintWriter ench = tsv(out, "enchantments", "# id\tname\tmax_level")) {
             for (Enchantment e : Enchantment.ALL) {
                 if (e != null) ench.println(e.id + "\t" + esc(e.getName(1)).replaceFirst(" I$", "") + "\t" + e.getMaxLevel());

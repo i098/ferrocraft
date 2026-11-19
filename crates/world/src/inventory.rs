@@ -6,11 +6,13 @@
 //! Window 0 is `ContainerPlayer`: 0 craft result, 1-4 craft grid, 5-8 armor (helmet first),
 //! 9-35 main, 36-44 hotbar. Every other window is its own slots, then the 27 main slots, then
 //! the 9 hotbar slots, which are the same stacks as window 0 slots 9-44.
-//! Not ported: crafting and smelting recipes (the server sends the result slot), the anvil
+//! The craft result slot is computed on the client for shaped and shapeless recipes (`recipes`).
+//! Not ported: the special crafting recipes, smelting, the anvil
 //! cost and rename logic, the enchantment offers, brewing and the horse window.
 
 pub mod items;
 pub mod merchant;
+pub mod recipes;
 
 pub use ferrocraft_protocol::codec::{ItemStack, Slot};
 pub use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
@@ -158,6 +160,8 @@ pub struct Inventory {
     /// `EntityPlayer.experienceLevel`, which the anvil and the enchanting table check.
     pub xp_level: i32,
     player_transaction: i16,
+    /// Slot 0 holds a result this client computed, not one the server sent.
+    local_craft: bool,
     drag: Drag,
 }
 
@@ -171,6 +175,7 @@ impl Default for Inventory {
             creative: false,
             xp_level: 0,
             player_transaction: 0,
+            local_craft: false,
             drag: Drag::default(),
         }
     }
@@ -287,6 +292,7 @@ impl Inventory {
     /// `S2D OpenWindow`. Unknown types return false; the caller closes them with `CloseWindow`.
     pub fn open_window(&mut self, id: u8, window_type: &str, title: String, slots: u8) -> bool {
         self.drag = Drag::default();
+        self.local_craft = false;
         let Some(kind) = Kind::from_open(window_type, slots) else {
             return false;
         };
@@ -316,6 +322,7 @@ impl Inventory {
     /// empties its craft grid (`ContainerPlayer.onContainerClosed`).
     pub fn close_window(&mut self) {
         self.cursor = None;
+        self.local_craft = false;
         self.drag = Drag::default();
         if self.open.take().is_none() {
             for s in &mut self.player[0..5] {
@@ -334,6 +341,12 @@ impl Inventory {
         if window_id == 0 {
             if let Some(s) = self.player.get_mut(i) {
                 *s = item;
+                if i == 0 {
+                    self.local_craft = false;
+                }
+            }
+            if (1..5).contains(&i) && self.open.is_none() {
+                self.refresh_craft();
             }
         } else if self
             .open
@@ -341,24 +354,58 @@ impl Inventory {
             .is_some_and(|w| i8::try_from(w.id) == Ok(window_id))
             && i < self.slot_count()
         {
+            if i == 0 {
+                self.local_craft = false;
+            }
             *self.slot_mut(i) = item;
             if i < 2 {
                 self.refresh_merchant();
             }
+            if (1..10).contains(&i) {
+                self.refresh_craft();
+            }
+        }
+    }
+
+    /// `ContainerPlayer`/`ContainerWorkbench.onCraftMatrixChanged`: the result slot shows the recipe
+    /// the grid matches, or nothing.
+    fn refresh_craft(&mut self) {
+        let (side, n) = match self.kind() {
+            Kind::Player => (2, 4),
+            Kind::Crafting => (3, 9),
+            _ => return,
+        };
+        let grid: Vec<Slot> = (1..=n).map(|i| self.slot(i).clone()).collect();
+        match recipes::find(&grid, side) {
+            Some(r) => {
+                *self.slot_mut(0) = Some(r);
+                self.local_craft = true;
+            }
+            None if self.local_craft => {
+                *self.slot_mut(0) = None;
+                self.local_craft = false;
+            }
+            None => {}
         }
     }
 
     /// `S30 WindowItems`.
     pub fn set_items(&mut self, window_id: u8, items: Vec<Slot>) {
         if window_id == 0 {
+            self.local_craft = false;
             for (s, item) in self.player.iter_mut().zip(items) {
                 *s = item;
             }
+            if self.open.is_none() {
+                self.refresh_craft();
+            }
         } else if self.window_id() == window_id {
             let n = self.slot_count();
+            self.local_craft = false;
             for (i, item) in items.into_iter().take(n).enumerate() {
                 *self.slot_mut(i) = item;
             }
+            self.refresh_craft();
         }
     }
 
@@ -499,6 +546,7 @@ impl Inventory {
     pub fn slot_click(&mut self, slot_id: i32, button: i32, mode: i8) -> Slot {
         let sent = self.click_inner(slot_id, button, mode);
         self.refresh_merchant();
+        self.refresh_craft();
         sent
     }
 
@@ -1256,5 +1304,81 @@ mod tests {
             ),
             (stack(1, 13), None, None)
         );
+    }
+}
+
+#[cfg(test)]
+mod craft_tests {
+    use super::*;
+
+    fn st(id: i16) -> Slot {
+        Some(ItemStack {
+            id,
+            count: 1,
+            damage: 0,
+            nbt: None,
+        })
+    }
+
+    #[test]
+    fn player_grid_computes_and_clears_the_result() {
+        let mut inv = Inventory::default();
+        for i in 1..5 {
+            inv.set_slot(0, i, st(5));
+        }
+        assert_eq!(inv.slot(0).as_ref().map(|r| r.id), Some(58));
+        inv.set_slot(0, 4, None);
+        assert_eq!(inv.slot(0), &None);
+        inv.set_slot(0, 3, None);
+        inv.set_slot(0, 2, None);
+        inv.set_slot(0, 1, None);
+        assert_eq!(inv.slot(0), &None);
+    }
+
+    #[test]
+    fn crafting_table_window_computes_and_clears_the_result() {
+        let mut inv = Inventory::default();
+        assert!(inv.open_window(1, "minecraft:crafting_table", String::new(), 0));
+        for i in [5, 6, 8, 9] {
+            inv.set_slot(1, i, st(5));
+        }
+        assert_eq!(inv.slot(0).as_ref().map(|r| r.id), Some(58));
+        for i in [5, 6, 8, 9] {
+            inv.set_slot(1, i, None);
+        }
+        assert_eq!(inv.slot(0), &None);
+    }
+
+    #[test]
+    fn server_result_survives_without_local_recipe_but_local_result_is_cleared() {
+        let mut inv = Inventory::default();
+        inv.set_slot(0, 0, st(397));
+        inv.set_slot(0, 1, st(3));
+        inv.set_slot(0, 2, st(5));
+        assert_eq!(inv.slot(0), &st(397));
+        inv.set_items(0, vec![st(397), st(3), st(5)]);
+        assert_eq!(inv.slot(0), &st(397));
+        inv.set_slot(0, 1, st(5));
+        inv.set_slot(0, 2, st(5));
+        inv.set_slot(0, 3, st(5));
+        inv.set_slot(0, 4, st(5));
+        assert_eq!(inv.slot(0).as_ref().map(|r| r.id), Some(58));
+        inv.set_slot(0, 4, None);
+        assert_eq!(inv.slot(0), &None);
+        inv.set_slot(0, 3, None);
+        inv.set_slot(0, 2, None);
+        inv.set_slot(0, 1, None);
+        assert_eq!(inv.slot(0), &None);
+    }
+
+    #[test]
+    fn clicking_a_plank_out_of_the_grid_empties_the_result() {
+        let mut inv = Inventory::default();
+        for i in 1..5 {
+            inv.set_slot(0, i, st(5));
+        }
+        inv.click(4, 0, 0);
+        assert_eq!(inv.cursor, st(5));
+        assert_eq!(inv.slot(0), &None);
     }
 }

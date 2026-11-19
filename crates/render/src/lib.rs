@@ -15,6 +15,7 @@ mod crack;
 mod crumbs;
 mod entity;
 mod gpu;
+mod gpu_info;
 mod hand;
 mod jrandom;
 pub use crumbs::remote_due as remote_crumbs_due;
@@ -44,6 +45,7 @@ pub use entity::{
     nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook, TeamTag, Thrower,
 };
 pub use gpu::{view_proj, Renderer};
+pub use gpu_info::GpuInfo;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};
 pub use post::SHADERS;
 pub use weather::{rain_particles, stops_rain};

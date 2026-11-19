@@ -10,6 +10,7 @@ macro_rules! metrics {
 
 mod crumbs;
 mod crystal;
+mod debug_overlay;
 mod equip;
 mod events;
 mod input;

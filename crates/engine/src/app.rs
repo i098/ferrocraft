@@ -809,6 +809,7 @@ impl App {
             line: None,
             look: Look {
                 riding: self.game.vehicle.is_some(),
+                local: true,
                 ghost: self.sees_own_ghost(),
                 stand: StandLook {
                     head_damage: self.game.inv.player[5].as_ref().map_or(0, |s| s.damage),
@@ -1672,12 +1673,15 @@ fn entity_draw(
         view: [0.0; 2],
         line: None,
         look: Look {
+            xp: e.xp.max(0) as u16,
             // Metadata 10 of a player is the skin parts byte; a sheep keeps its fleece, a slime or magma cube its size, a ghast its attack flag and a bat its roost flag in byte 16 and a
             // villager its profession in int 16. A server that never sent the byte shows every part.
             skin_parts: e.meta.stand.unwrap_or(0x7F),
             variant: match e.kind {
                 Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
                 Kind::Mob(120 | 68) => e.meta.guardian.map_or(0, |p| p as u8),
+                // A skeleton's type (1 is the wither skeleton) and a zombie's `isVillager`, both metadata byte 13.
+                Kind::Mob(51 | 54) => e.meta.skeleton.unwrap_or(0),
                 _ => 0,
             },
             cape: Some(CapeSway::default()),

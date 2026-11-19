@@ -27,7 +27,7 @@ fn entity_events(ev: &EntityEvent) -> Vec<ModEvent> {
         EntityEvent::SpawnPlayer { id, uuid, pos, .. } => (*id, Spawn::Player(*uuid), blocks(*pos)),
         EntityEvent::SpawnMob { id, kind, pos, .. } => (*id, Spawn::Mob(*kind), blocks(*pos)),
         EntityEvent::SpawnObject { id, kind, pos, .. } => (*id, Spawn::Object(*kind), blocks(*pos)),
-        EntityEvent::SpawnExperienceOrb { id, pos } => (*id, Spawn::Orb, blocks(*pos)),
+        EntityEvent::SpawnExperienceOrb { id, pos, .. } => (*id, Spawn::Orb, blocks(*pos)),
         EntityEvent::SpawnPainting { id, pos, .. } => (*id, Spawn::Painting, pos.map(f64::from)),
         _ => return Vec::new(),
     };

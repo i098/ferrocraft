@@ -112,6 +112,50 @@ fn billboard(out: &mut MeshData, d: &EntityDraw, skins: &Skins, skin: Skin, size
     );
 }
 
+/// `RenderXPOrb.doRender`: the icon cell of `EntityXPOrb.getTextureByXP` in the 64x64 texture, as a
+/// 0.3-scaled quad from y -0.25 to 0.75 that faces the viewer, tinted by the pulse of `xpColor`.
+pub(super) fn orb(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
+    let icon = [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3, 0]
+        .iter()
+        .position(|&t| i32::from(d.look.xp) >= t)
+        .map_or(0, |i| 10 - i);
+    let (cell_u, cell_v) = ((icon % 4 * 16) as f32, (icon / 4 * 16) as f32);
+    let at = Skins::uv_offset(skins.v_offset(Skin::XpOrb));
+    let tex = [Skins::width() as f32, Skins::height() as f32];
+    let pulse = d.age / 2.0;
+    let red = (((pulse.sin() + 1.0) * 0.5 * 255.0) as i32) as f32 / 255.0;
+    let blue = (((pulse + 4.188_790_3).sin() + 1.0) * 0.1 * 255.0) as i32 as f32 / 255.0;
+    let (yaw, pitch): (f32, f32) = (d.view[0], d.view[1]);
+    let corner = |x: f32, y: f32, u: f32, v: f32| {
+        let p = rot_y(
+            rot_x([x * 0.3, y * 0.3, 0.0], (-pitch).to_radians()),
+            (180.0 - yaw).to_radians(),
+        );
+        let mut vx = vertex(
+            [
+                (d.pos[0] + f64::from(p[0])) as f32,
+                (d.pos[1] + f64::from(p[1])) as f32,
+                (d.pos[2] + f64::from(p[2])) as f32,
+            ],
+            [
+                (cell_u + u * 16.0) / tex[0] + at[0],
+                (cell_v + v * 16.0) / tex[1] + at[1],
+            ],
+        );
+        vx.color = [red, 1.0, blue, 1.0];
+        vx
+    };
+    push_quad(
+        out,
+        [
+            corner(-0.5, -0.25, 0.0, 1.0),
+            corner(0.5, -0.25, 1.0, 1.0),
+            corner(0.5, 0.75, 1.0, 0.0),
+            corner(-0.5, 0.75, 0.0, 0.0),
+        ],
+    );
+}
+
 fn rot_x(p: V3, a: f32) -> V3 {
     let (s, c) = a.sin_cos();
     [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]

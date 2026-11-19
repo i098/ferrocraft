@@ -25,6 +25,12 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
         64 | 71 | 193..=197 => door(id, state, nb),
+        _ => plant_or_block(id, meta, nb),
+    }
+}
+
+fn plant_or_block(id: u16, meta: usize, nb: Nb) -> Found {
+    match id {
         81 => Some(("cactus", "normal".into())),
         138 => Some(("beacon", "normal".into())),
         106 => Some(("vine", vine_key(meta, nb))),

@@ -240,22 +240,36 @@ pub fn rain_particles(
             }
         }
     }
-    let mut sound = None;
-    if seen > 0 {
-        let play = rng.next_int(3) < *clock.sound_counter;
-        *clock.sound_counter += 1;
-        if play {
-            *clock.sound_counter = 0;
-            let covered = top(fx, fz).is_some_and(|(h, _)| h > fy);
-            let (volume, pitch) = if picked[1] > f64::from(fy + 1) && covered {
-                (0.1, 0.5)
-            } else {
-                (0.2, 1.0)
-            };
-            sound = Some(("ambient.weather.rain", picked, volume, pitch));
-        }
-    }
+    let sound = if seen > 0 {
+        rain_sound(clock.sound_counter, &mut rng, picked, top(fx, fz), fy)
+    } else {
+        None
+    };
     (out, sound)
+}
+
+/// The tail of `addRainParticles`: `nextInt(3) < rainSoundCounter++` picks a tick to play the rain loop;
+/// `column` is the precipitation height above the player.
+fn rain_sound(
+    counter: &mut i32,
+    rng: &mut JavaRandom,
+    picked: [f64; 3],
+    column: Option<(i32, u8)>,
+    fy: i32,
+) -> Option<WeatherSound> {
+    let play = rng.next_int(3) < *counter;
+    *counter += 1;
+    if !play {
+        return None;
+    }
+    *counter = 0;
+    let covered = column.is_some_and(|(h, _)| h > fy);
+    let (volume, pitch) = if picked[1] > f64::from(fy + 1) && covered {
+        (0.1, 0.5)
+    } else {
+        (0.2, 1.0)
+    };
+    Some(("ambient.weather.rain", picked, volume, pitch))
 }
 
 /// The particle one rain drop makes on the block `state` below column height `y`, if any.

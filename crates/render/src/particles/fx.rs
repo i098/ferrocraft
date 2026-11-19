@@ -167,8 +167,9 @@ impl Particles {
         p.vel = p.vel.map(|v| v * f64::from(0.85_f32));
         let c = p.pos.map(|v| v.floor() as i32);
         let wet = is_water(block(c[0], c[1], c[2]));
+        let alive = p.age < p.max_age;
         p.age += 1;
-        wet && p.age < p.max_age
+        wet && alive
     }
 
     /// `EntityFishWakeFX.onUpdate`: drag 0.98; the box grows by `0.001` per tick of life and the tile turns
@@ -183,8 +184,9 @@ impl Particles {
         let lived = 60 - (p.max_age as i32 - p.age as i32);
         p.half = f64::from(lived as f32 * 0.001) / 2.0;
         p.sprite = sheet(19 + lived.rem_euclid(4) as u32);
+        let alive = p.age < p.max_age;
         p.age += 1;
-        p.age < p.max_age
+        alive
     }
 }
 

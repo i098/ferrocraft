@@ -1297,7 +1297,7 @@ impl Particles {
             pos[2] + (self.rand() - 0.5) * w,
         ];
         let m = [-vel[0] * 4.0, 1.5, -vel[2] * 4.0];
-        self.spawn(Kind::BlockDust, at, m, i32::from(state));
+        self.spawn(Kind::BlockCrack, at, m, i32::from(state));
     }
     /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block. `biome_at(x, z)` is the
     /// biome id of a column, for the colour `colorMultiplier` gives the shards.

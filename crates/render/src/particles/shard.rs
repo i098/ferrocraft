@@ -78,8 +78,8 @@ impl Particles {
         data: i32,
     ) -> Option<Particle> {
         let state = (data & 0xFFFF) as u16;
-        // `EntityBlockDustFX.Factory` makes nothing for a block of render type -1: air, moving piston, barrier.
-        if kind == Kind::BlockDust && matches!(state >> 4, 0 | 36 | 166) {
+        // `EntityBlockDustFX.Factory` makes nothing for a block of render type -1: air, signs, moving piston, end portal, skull, barrier, banners.
+        if kind == Kind::BlockDust && matches!(state >> 4, 0 | 36 | 63 | 68 | 119 | 144 | 166 | 176 | 177) {
             return None;
         }
         let jitter = [(self.rand() * 3.0) as f32, (self.rand() * 3.0) as f32];

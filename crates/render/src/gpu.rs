@@ -1785,9 +1785,7 @@ impl Renderer {
         globals.hurt = self.mod_look.hurt_tint();
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
-        if self.axes.on {
-            self.axes.write(&self.queue, cam, w as f32 / h as f32);
-        }
+        self.axes.write(&self.queue, cam, w as f32 / h as f32);
 
         let layers = build_sky(&env, &sky, cam.pos);
         let sky_solid = self.upload_geometry(&layers.solid);

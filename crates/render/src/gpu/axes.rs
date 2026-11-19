@@ -49,6 +49,9 @@ impl Axes {
 
     /// The view-projection of the frame's camera orientation.
     pub fn write(&self, queue: &wgpu::Queue, cam: &Camera, aspect: f32) {
+        if !self.on {
+            return;
+        }
         let mut globals = <Globals as bytemuck::Zeroable>::zeroed();
         globals.view_proj = view_proj(&matrix_camera(cam), aspect);
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));

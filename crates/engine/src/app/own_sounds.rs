@@ -43,6 +43,27 @@ impl Consume {
     }
 }
 
+/// A sound the client plays: event, volume, pitch.
+type Cue = (&'static str, f32, f32);
+
+/// The sounds of `EntityPlayer.onConsumeItem` (drink at half volume; eat at 0.5 or 1.0 with a jittered pitch)
+/// and, when `finish` is set for a food, `ItemFood.onItemUseFinish` (`random.burp` at 0.5, pitch `0.9..1.0`).
+/// `roll` is `Random.nextFloat`; the draws run in vanilla order.
+fn consume_cues(c: Consume, finish: bool, roll: &mut impl FnMut() -> f32) -> Vec<Cue> {
+    match c {
+        Consume::Drink => vec![("random.drink", 0.5, roll() * 0.1 + 0.9)],
+        Consume::Eat(_) => {
+            let volume = if roll() < 0.5 { 0.5 } else { 1.0 };
+            let pitch = (roll() - roll()) * 0.2 + 1.0;
+            let mut cues = vec![("random.eat", volume, pitch)];
+            if finish {
+                cues.push(("random.burp", 0.5, roll() * 0.1 + 0.9));
+            }
+            cues
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct State {
     /// `Entity.inWater`; `None` before the first tick, which never splashes (`firstTick`).
@@ -170,36 +191,31 @@ impl App {
             if let Some(c) = held.and_then(|(id, damage)| Consume::of(id, damage)) {
                 self.own_sounds.consuming = Some(c);
                 if self.use_ticks <= CONSUME_FROM && self.use_ticks % 4 == 0 {
-                    self.play_consume(c, at, 5);
+                    self.play_consume(c, at, 5, false);
                 }
             }
         }
         if std::mem::take(&mut self.game.finished_use) {
             self.end_use();
             if let Some(c) = self.own_sounds.consuming.take() {
-                self.play_consume(c, at, 16);
+                self.play_consume(c, at, 16, true);
             }
         }
     }
 
-    /// `EntityPlayer.onConsumeItem(stack, count)`: drink at half volume; eat `count` crumbs and a sound at 0.5 or 1.0.
-    /// `finishUsingItem` passes 16, the use tick 5.
-    fn play_consume(&mut self, c: Consume, at: [f64; 3], count: u32) {
-        match c {
-            Consume::Drink => {
-                let pitch = self.roll() * 0.1 + 0.9;
-                self.play_own("random.drink", at, 0.5, pitch);
+    /// `EntityPlayer.onConsumeItem(stack, count)`: eat `count` crumbs and play the cues. `finishUsingItem`
+    /// passes 16 and `finish`, the use tick 5 and none.
+    fn play_consume(&mut self, c: Consume, at: [f64; 3], count: u32, finish: bool) {
+        if let Consume::Eat(item) = c {
+            if let Some(p) = &self.game.player {
+                let eye = eye_height(self.input.sneaking()) as f32;
+                self.particles
+                    .eat_crumbs(count, p.pos, eye, (p.yaw, self.game.pitch), item);
             }
-            Consume::Eat(item) => {
-                if let Some(p) = &self.game.player {
-                    let eye = eye_height(self.input.sneaking()) as f32;
-                    self.particles
-                        .eat_crumbs(count, p.pos, eye, (p.yaw, self.game.pitch), item);
-                }
-                let volume = if self.roll() < 0.5 { 0.5 } else { 1.0 };
-                let pitch = self.pitch_jitter(0.2);
-                self.play_own("random.eat", at, volume, pitch);
-            }
+        }
+        let cues = consume_cues(c, finish, &mut || self.roll());
+        for (event, volume, pitch) in cues {
+            self.play_own(event, at, volume, pitch);
         }
     }
 
@@ -224,5 +240,49 @@ impl App {
         if let Some(s) = &mut self.sound {
             s.play(event, Some(at), volume, pitch);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rolls(v: &[f32]) -> impl FnMut() -> f32 + '_ {
+        let mut i = 0;
+        move || {
+            i += 1;
+            v[i - 1]
+        }
+    }
+
+    /// `EntityPlayer.updateItemUse(stack, 5)` on the use tick: one `random.eat`, no burp.
+    #[test]
+    fn a_use_tick_plays_only_the_eat_sound() {
+        let c = consume_cues(Consume::Eat(322), false, &mut rolls(&[0.7, 0.9, 0.4]));
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].0, "random.eat");
+        assert_eq!(c[0].1, 1.0, "0.5 + 0.5 * nextInt(2)");
+        assert!((c[0].2 - 1.1).abs() < 1e-6, "(0.9 - 0.4) * 0.2 + 1");
+        let low = consume_cues(Consume::Eat(322), false, &mut rolls(&[0.2, 0.5, 0.5]));
+        assert_eq!(low[0].1, 0.5);
+    }
+
+    /// `finishUsingItem`: `updateItemUse(stack, 16)` plays the eat sound, then `ItemFood` plays `random.burp`.
+    #[test]
+    fn finishing_a_food_burps_after_the_last_bite() {
+        let c = consume_cues(Consume::Eat(322), true, &mut rolls(&[0.7, 0.5, 0.5, 0.5]));
+        let names: Vec<_> = c.iter().map(|x| x.0).collect();
+        assert_eq!(names, ["random.eat", "random.burp"]);
+        assert_eq!(c[1].1, 0.5);
+        assert!((c[1].2 - 0.95).abs() < 1e-6, "nextFloat * 0.1 + 0.9");
+    }
+
+    /// Milk and potions drink at half volume and do not burp (`ItemBucketMilk`, `ItemPotion`).
+    #[test]
+    fn a_drink_never_burps() {
+        let c = consume_cues(Consume::Drink, true, &mut rolls(&[0.5]));
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].0, "random.drink");
+        assert_eq!(c[0].1, 0.5);
     }
 }

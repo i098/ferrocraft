@@ -461,10 +461,10 @@ fn boxes_7(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
         )),
         81 => {
             let mut a = px([0.0, 0.0, 1.0], [16.0, 16.0, 15.0], t);
-            a.mask = bit(WEST) | bit(EAST);
+            a.mask = bit(NORTH) | bit(SOUTH);
             let mut b = px([1.0, 0.0, 0.0], [15.0, 16.0, 16.0], t);
-            b.mask = bit(NORTH) | bit(SOUTH);
-            let mut c = px([1.0, 0.0, 1.0], [15.0, 16.0, 15.0], t);
+            b.mask = bit(WEST) | bit(EAST);
+            let mut c = px([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], t);
             c.mask = bit(UP) | bit(DOWN);
             for bx in [&mut a, &mut b, &mut c] {
                 bx.cull = false;
@@ -538,7 +538,8 @@ fn boxes_9(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
         }
         116 => out.push(px([0.0, 0.0, 0.0], [16.0, 12.0, 16.0], t)),
         120 => out.push(px([0.0, 0.0, 0.0], [16.0, 13.0, 16.0], t)),
-        140 => out.push(px([5.0, 0.0, 5.0], [11.0, 6.0, 11.0], t)),
+        138 => out.push(px([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], t)),
+        140 | 255 => out.push(px([5.0, 0.0, 5.0], [11.0, 6.0, 11.0], t)),
         151 => out.push(px([0.0, 0.0, 0.0], [16.0, 6.0, 16.0], t)),
         _ => boxes_10(state, nb, l, out),
     }

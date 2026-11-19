@@ -497,3 +497,57 @@ fn jar_flat_blocks_keep_vanilla_boxes_and_uv() {
     ];
     assert_drawn(&models, 120 << 4 | 4, NB, &faces);
 }
+
+/// cactus, vine (plane at 15.2, top layer), beacon (glass, obsidian, core) and potted plants from the jar models.
+#[test]
+fn jar_cactus_vine_beacon_and_pot_keep_vanilla_boxes() {
+    let Some(models) = jar_models() else { return };
+    let near = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+    let cactus = models.quads(81 << 4, NB).unwrap();
+    assert_eq!(cactus.len(), 6);
+    let side = |q: &&Quad| q.face >= 2;
+    let z: Vec<_> = cactus
+        .iter()
+        .filter(side)
+        .map(|q| q.pos[0][2] * 16.0)
+        .collect();
+    assert!(z.iter().any(|v| (v - 1.0).abs() < 1e-3) && z.iter().any(|v| (v - 15.0).abs() < 1e-3));
+    assert!(near(extent(&[cactus[0].clone()], 0), (0.0, 16.0)));
+
+    // Meta 1 is the south side; a full block above adds the top layer (`vine_1u`).
+    let open = models.quads(106 << 4 | 1, NB).unwrap();
+    assert!(near(extent(open, 2), (15.2, 15.2)) && open.iter().all(|q| q.tint && !q.shade));
+    let roofed = models
+        .quads(106 << 4 | 1, &|_, dy, _| if dy == 1 { 1 << 4 } else { 0 })
+        .unwrap();
+    let flat_top = |q: &Quad| q.pos.iter().all(|p| (p[1] * 16.0 - 15.2).abs() < 1e-3);
+    assert!(!open.iter().any(flat_top) && roofed.iter().any(flat_top));
+
+    let beacon = models.quads(138 << 4, NB).unwrap();
+    assert_eq!(beacon.len(), 18);
+    let core: Vec<_> = beacon
+        .iter()
+        .filter(|q| &*q.tex == "beacon")
+        .cloned()
+        .collect();
+    assert!(near(extent(&core, 1), (3.0, 14.0)) && near(extent(&core, 0), (3.0, 13.0)));
+    let base: Vec<_> = beacon
+        .iter()
+        .filter(|q| &*q.tex == "obsidian")
+        .cloned()
+        .collect();
+    assert!(near(extent(&base, 1), (0.1, 3.0)) && near(extent(&base, 0), (2.0, 14.0)));
+
+    let rose = models
+        .quads(crate::blocks::flower_pot_state(38, 0), NB)
+        .unwrap();
+    assert!(
+        rose.iter().any(|q| &*q.tex == "flower_rose") && rose.iter().any(|q| &*q.tex == "dirt")
+    );
+    let daisy = models
+        .quads(crate::blocks::flower_pot_state(38, 8), NB)
+        .unwrap();
+    assert!(daisy.iter().any(|q| &*q.tex == "flower_oxeye_daisy"));
+    let empty = models.quads(140 << 4, NB).unwrap();
+    assert!(empty.iter().all(|q| &*q.tex != "flower_rose"));
+}

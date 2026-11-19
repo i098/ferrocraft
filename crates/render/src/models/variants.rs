@@ -25,8 +25,38 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
         64 | 71 | 193..=197 => door(id, state, nb),
+        _ => plant_or_block(id, meta, nb),
+    }
+}
+
+fn plant_or_block(id: u16, meta: usize, nb: Nb) -> Found {
+    match id {
+        81 => Some(("cactus", "normal".into())),
+        138 => Some(("beacon", "normal".into())),
+        106 => Some(("vine", vine_key(meta, nb))),
+        140 | 255 => flower_pot(id, meta),
         _ => None,
     }
+}
+
+/// `BlockVine.getActualState`: `up` is set when the block above is a normal cube; the side bits are south 1, west 2, north 4, east 8.
+fn vine_key(meta: usize, nb: Nb) -> String {
+    let side = |bit| meta & bit != 0;
+    format!(
+        "east={},north={},south={},up={},west={}",
+        side(8),
+        side(4),
+        side(1),
+        crate::blocks::is_opaque_cube(nb(0, 1, 0)),
+        side(2)
+    )
+}
+
+/// The contents of a pot are in its renderer state (`blocks::flower_pot_state`).
+fn flower_pot(id: u16, meta: usize) -> Found {
+    let n = if id == 140 { meta } else { 16 + meta };
+    let contents = crate::blocks::POT_CONTENTS.get(n)?;
+    Some(("flower_pot", format!("contents={contents}")))
 }
 
 fn torch(id: u16, meta: usize) -> Found {

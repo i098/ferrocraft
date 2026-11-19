@@ -782,7 +782,7 @@ fn look_13(id: u16, meta: u16) -> Look {
         123 => cube(0x6a4a2a, "redstone_lamp_off"),
         124 => cube(0xf0d08a, "redstone_lamp_on"),
         129 => cube(0x7f9a86, "emerald_ore"),
-        138 => cutout(0x76ddd4, "beacon"),
+        138 => shape(0x76ddd4, ["beacon"; 6]),
         130 => shape(0x1a1a2a, ["obsidian"; 6]),
         133 => cube(0x2fc15a, "emerald_block"),
         137 => cube(0xc08040, "command_block"),
@@ -800,7 +800,7 @@ fn look_13(id: u16, meta: u16) -> Look {
 
 fn look_14(id: u16, meta: u16) -> Look {
     match id {
-        140 => shape(0x7a3a2a, ["flower_pot"; 6]),
+        140 | 255 => shape(0x7a3a2a, ["flower_pot"; 6]),
         141 => cross(
             0x80a030,
             [
@@ -1114,6 +1114,7 @@ pub fn light_opacity(state: u16) -> u8 {
         | 127
         | 130..=132
         | 138..=151
+        | 255
         | 154
         | 157
         | 160
@@ -1133,7 +1134,7 @@ pub fn uses_neighbor_light(state: u16) -> bool {
         state >> 4,
         6 | 10..=11 | 20 | 26..=29 | 31..=34 | 36..=40 | 43..=44 | 50..=55 | 59..=60 | 63..=72
             | 75..=78 | 81 | 83 | 85 | 90 | 92..=96 | 101..=102 | 104..=109 | 111 | 113..=120
-            | 122 | 125..=128 | 130..=132 | 134..=136 | 138..=151 | 154 | 156..=157 | 160
+            | 122 | 125..=128 | 130..=132 | 134..=136 | 138..=151 | 154 | 156..=157 | 160 | 255
             | 163..=167 | 171 | 175..=178 | 180..=197
     )
 }
@@ -1227,6 +1228,65 @@ pub fn double_plant_top(variant: u16) -> (&'static str, Tint) {
     }
 }
 
+/// Flower pot contents in the order of their renderer state: index 0 is empty, 1..=15 are meta 1..=15 of
+/// block 140, 16..=21 are meta 0..=5 of the renderer-only block 255 (a meta has four bits, vanilla has 22 contents).
+pub(crate) const POT_CONTENTS: [&str; 22] = [
+    "empty",
+    "rose",
+    "dandelion",
+    "oak_sapling",
+    "spruce_sapling",
+    "birch_sapling",
+    "jungle_sapling",
+    "acacia_sapling",
+    "dark_oak_sapling",
+    "mushroom_red",
+    "mushroom_brown",
+    "cactus",
+    "dead_bush",
+    "fern",
+    "blue_orchid",
+    "allium",
+    "houstonia",
+    "red_tulip",
+    "orange_tulip",
+    "white_tulip",
+    "pink_tulip",
+    "oxeye_daisy",
+];
+
+/// Renderer state of a flower pot that holds block `plant` with `data`
+/// (`TileEntityFlowerPot` `Item`/`Data`, mapped as `BlockFlowerPot.getActualState` does). The server sends
+/// the contents only in the block entity, so the renderer keeps them in the pot's state.
+pub fn flower_pot_state(plant: u16, data: i32) -> u16 {
+    let name = match (plant, data) {
+        (38, 0..=8) => [
+            "rose",
+            "blue_orchid",
+            "allium",
+            "houstonia",
+            "red_tulip",
+            "orange_tulip",
+            "white_tulip",
+            "pink_tulip",
+            "oxeye_daisy",
+        ][data as usize],
+        (37, _) => "dandelion",
+        (6, 0..=5) => POT_CONTENTS[3 + data as usize],
+        (40, _) => "mushroom_red",
+        (39, _) => "mushroom_brown",
+        (81, _) => "cactus",
+        (32, _) | (31, 0) => "dead_bush",
+        (31, 2) => "fern",
+        _ => "empty",
+    };
+    let n = POT_CONTENTS.iter().position(|c| *c == name).unwrap_or(0);
+    match n {
+        0..=15 => 140 << 4 | n as u16,
+        _ => 255 << 4 | (n - 16) as u16,
+    }
+}
+
 /// Blocks that count as full cubes for ambient occlusion and face culling.
 pub fn is_opaque_cube(state: u16) -> bool {
     cached(state).kind == Kind::Opaque
@@ -1312,5 +1372,24 @@ mod tests {
     fn furnace_front_follows_meta() {
         assert_eq!(look(61 << 4 | 5).tex[EAST], "furnace_front_off");
         assert_eq!(look(61 << 4 | 5).tex[SOUTH], "furnace_side");
+    }
+}
+
+#[cfg(test)]
+mod pot_tests {
+    use super::*;
+
+    /// Every vanilla content maps to its own renderer state, and the model key reads the name back.
+    #[test]
+    fn flower_pot_contents_round_trip_through_the_state() {
+        let mut seen = std::collections::HashSet::new();
+        let plants = (0..9).map(|d| (38, d)).chain((0..6).map(|d| (6, d)));
+        let rest = [(37, 0), (40, 0), (39, 0), (81, 0), (32, 0), (31, 2), (0, 0)];
+        for (plant, data) in plants.chain(rest) {
+            assert!(seen.insert(flower_pot_state(plant, data)), "{plant}:{data}");
+        }
+        assert_eq!(flower_pot_state(38, 0), 140 << 4 | 1);
+        assert_eq!(flower_pot_state(38, 8) >> 4, 255);
+        assert_eq!(flower_pot_state(0, 0), 140 << 4);
     }
 }

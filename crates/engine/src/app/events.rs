@@ -951,6 +951,14 @@ fn mirror_tile(r: &mut Renderer, tile: TileEvent, difficulty: u8, world_time: i6
                 },
             );
         }
+        TileEvent::FlowerPot { pos, plant, data } => {
+            r.set_block(
+                pos[0],
+                pos[1],
+                pos[2],
+                render::flower_pot_state(plant, data),
+            );
+        }
         TileEvent::Banner { pos, base, layers } => r.set_banner(pos, Banner { base, layers }),
         TileEvent::Spawner {
             pos,

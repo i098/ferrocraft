@@ -182,10 +182,10 @@ pub(crate) const UNMIPPED: f32 = 3.0;
 /// Blocks of vanilla's `CUTOUT` layer, drawn after `setBlurMipmap(false, false)` (`EntityRenderer.renderWorldPass`):
 /// plants, torches, rails, doors, glass, webs, fire and the like. Leaves, bars and panes are `CUTOUT_MIPPED`, so they and
 /// every `SOLID` block keep the mip levels.
-const CUTOUT_BLOCKS: [u16; 50] = [
+const CUTOUT_BLOCKS: [u16; 51] = [
     6, 20, 26, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 51, 52, 55, 59, 64, 65, 66, 71, 75, 76, 81,
     83, 92, 93, 94, 96, 104, 105, 106, 111, 115, 117, 127, 138, 140, 141, 142, 149, 150, 157, 167,
-    175, 193, 194, 195, 196, 197,
+    175, 193, 194, 195, 196, 197, 255,
 ];
 
 fn is_unmipped(state: u16) -> bool {
@@ -644,8 +644,12 @@ impl Mesher<'_> {
 
     /// Quads baked from the block's vanilla model: explicit uv, face and element rotation are kept.
     fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look) {
-        let rgb = self.base_color(l, Tint::None, at);
+        let (plain, tinted) = (
+            self.base_color(l, Tint::None, at),
+            self.base_color(l, l.tint, at),
+        );
         for q in quads {
+            let rgb = if q.tint { tinted } else { plain };
             if q.cull.is_some_and(|c| self.opaque(self.st(at, DIRS[c]))) {
                 continue;
             }

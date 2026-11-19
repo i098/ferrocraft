@@ -197,15 +197,7 @@ fn other_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>>
         cb::Packet::SpawnGlobalEntity(s) if s.kind == 1 => vec![NetEvent::Lightning {
             pos: [s.x, s.y, s.z].map(|v| f64::from(v) / 32.0),
         }],
-        cb::Packet::Maps(m) => m
-            .update
-            .iter()
-            .map(|u| NetEvent::Map {
-                id: m.item_damage.0,
-                area: [u.x, u.z, m.columns, u.rows].map(usize::from),
-                data: u.data.0.clone(),
-            })
-            .collect(),
+        cb::Packet::Maps(m) => maps_events(&m),
         cb::Packet::ChatMessage(c) => vec![NetEvent::Chat(chat::styled(&c.json))],
         cb::Packet::BlockChange(b) => vec![block_change(
             b.location.x,
@@ -223,6 +215,25 @@ fn other_events(packet: cb::Packet, dimension: i32) -> io::Result<Vec<NetEvent>>
             .chain(events::events(&other))
             .collect(),
     })
+}
+
+/// `S34PacketMaps` (gu offsets 38-76): each icon byte holds the type in its high and the
+/// rotation in its low nibble; then the colour area.
+fn maps_events(m: &cb::Maps) -> Vec<NetEvent> {
+    let id = m.item_damage.0;
+    let icons = m
+        .icons
+        .iter()
+        .map(|i| ((i.dir_type as u8) >> 4, i.x, i.z, i.dir_type as u8 & 15))
+        .collect();
+    let updates = m.update.iter().map(|u| NetEvent::Map {
+        id,
+        area: [u.x, u.z, m.columns, u.rows].map(usize::from),
+        data: u.data.0.clone(),
+    });
+    std::iter::once(NetEvent::MapIcons { id, icons })
+        .chain(updates)
+        .collect()
 }
 
 fn block_change(x: i32, y: i32, z: i32, state: i32) -> NetEvent {
@@ -299,6 +310,29 @@ mod tests {
     fn level_type_is_flat_ignoring_case() {
         assert!(is_flat("flat") && is_flat("FLAT"));
         assert!(!is_flat("default") && !is_flat("flatten"));
+    }
+
+    /// An icons-only map packet still replaces the decorations: type 1 rotation 8 at (-4, 5).
+    #[test]
+    fn map_packet_icon_byte_splits_into_type_and_rotation() {
+        let p = cb::Maps {
+            item_damage: ferrocraft_protocol::codec::VarInt(3),
+            scale: 0,
+            icons: vec![ferrocraft_protocol::play::MapIcon {
+                dir_type: 0x18,
+                x: -4,
+                z: 5,
+            }],
+            columns: 0,
+            update: None,
+        };
+        assert_eq!(
+            maps_events(&p),
+            vec![NetEvent::MapIcons {
+                id: 3,
+                icons: vec![(1, -4, 5, 8)]
+            }]
+        );
     }
 
     /// A Map Chunk Bulk frame captured from a vanilla 1.8.9 server with a flat world.

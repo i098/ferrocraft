@@ -1,14 +1,19 @@
 //! Paintings (`RenderPainting`) and item frames (`RenderItemFrame`) with their display item, and
-//! the 128x128 colour map of a filled map (`MapRenderer`).
+//! the 128x128 colour map of a filled map (`MapRenderer`) with its decorations.
 //!
 //! shortcut: the edges and back of a painting sample one texel of the sheet instead of vanilla's
-//! strips, and the map decorations (player and frame markers) are not drawn.
+//! strips.
 
 use super::item::{dir, point, ItemModel, Items, Models, Stack};
 use super::{Class, EntityDraw, V3};
-use crate::hand::{chain, ident, rotate, scale, translate, DialTurns, Mat};
+use crate::hand::{chain, ident, rotate, scale, translate, DialTurns, Mat, ICONS_TEXTURE};
 use serde_json::Value;
 use std::collections::HashMap;
+
+pub use crate::hand::MapIcon;
+
+/// The decorations of each map by id, as the last Maps packet left them.
+pub type MapIcons = HashMap<i32, Vec<MapIcon>>;
 
 pub const PAINTING_SHEET: &str = "textures/painting/paintings_kristoffer_zetterstrand.png";
 pub const FILLED_MAP: i16 = 358;
@@ -173,6 +178,7 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
 }
 
 /// Adds every painting and item frame of `draws` to `out`; `light` gives the `[sky, block]` level.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     out: &mut Items,
     draws: &[EntityDraw],
@@ -180,14 +186,16 @@ pub fn build(
     models: &Models,
     compasses: &Compasses,
     dials: &DialTurns,
+    icons: &MapIcons,
     light: impl Fn([f64; 3]) -> [f32; 2],
 ) {
     for d in draws {
-        draw(out, d, frames, models, compasses, dials, &light);
+        draw(out, d, frames, models, compasses, dials, icons, &light);
     }
 }
 
 /// Draws the painting or item frame `d`.
+#[allow(clippy::too_many_arguments)]
 fn draw(
     out: &mut Items,
     d: &EntityDraw,
@@ -195,6 +203,7 @@ fn draw(
     models: &Models,
     compasses: &Compasses,
     dials: &DialTurns,
+    icons: &MapIcons,
     light: &impl Fn([f64; 3]) -> [f32; 2],
 ) {
     let facing = d.hang.facing;
@@ -203,7 +212,9 @@ fn draw(
     if d.class == Class::Painting {
         painting(out, d, &turn, light);
     } else if is_frame(d) {
-        frame(out, d, &turn, frames, models, compasses, dials, light);
+        frame(
+            out, d, &turn, frames, models, compasses, dials, icons, light,
+        );
     }
 }
 
@@ -292,6 +303,7 @@ fn frame(
     models: &Models,
     compasses: &Compasses,
     dials: &DialTurns,
+    icons: &MapIcons,
     light: &impl Fn([f64; 3]) -> [f32; 2],
 ) {
     // The frame is drawn at the centre of the block its entity stands in.
@@ -349,6 +361,19 @@ fn frame(
             1.0,
             [1.0, 1.0],
         );
+        // `MapItemRenderer.Instance.render` with `inItemFrame`: only type 1 decorations, numbered
+        // by the ones drawn (avq$a 262-275, 539).
+        let shown = icons.get(&i32::from(stack.damage)).into_iter().flatten();
+        for (k, icon) in shown.filter(|i| i.kind == 1).enumerate() {
+            let (corners, uv) = icon.quad(k);
+            out.quad(
+                ICONS_TEXTURE,
+                corners.map(|c| world(&mat, c)),
+                uv,
+                1.0,
+                [1.0, 1.0],
+            );
+        }
         return;
     }
     let model = match compass(d, dials) {
@@ -358,7 +383,13 @@ fn frame(
     let Some(Some(m)) = model else {
         return;
     };
-    let prepare = if m.gui3d() { ident() } else { rotate(180.0, 1) };
+    // `RenderItem.preTransform` (bjh 409-416) scales flat models by 2; `RenderItemFrame` calls
+    // `renderItem` directly, so 3D models keep their size.
+    let prepare = if m.gui3d() {
+        ident()
+    } else {
+        chain(&[rotate(180.0, 1), scale(2.0)])
+    };
     let mat = chain(&[
         base,
         rotate(rot * 360.0 / 8.0, 2),

@@ -7,6 +7,9 @@ use crate::mesh::{mesh_chunk, mesh_chunk_flat, MeshData, Neighborhood, Vertex, H
 use serde_json::Value;
 use std::f32::consts::PI;
 
+mod map;
+pub use map::{parts as map_parts, MapIcon, MapTex, BACKGROUND_TEXTURE, ICONS_TEXTURE};
+
 pub type Mat = [[f32; 4]; 4];
 
 /// What the hand holds.
@@ -257,11 +260,13 @@ pub fn held_mesh(state: u16, atlas: &Atlas, flat: bool) -> MeshData {
     out
 }
 
-pub fn block(hand: &Hand, mesh: &MeshData) -> Draw {
+/// `ItemRenderer.renderItem` (bfn 26-35) scales a 3D model by 2, then `applyTransform(FIRST_PERSON)`
+/// with the model's `firstperson` display `display`, then `RenderItem.renderItem` scales by 0.5.
+pub fn block(hand: &Hand, mesh: &MeshData, display: Mat) -> Draw {
     Draw {
         vertices: mesh.vertices.clone(),
         indices: mesh.indices.clone(),
-        model: mul(held_transform(hand), scale(0.5)),
+        model: chain(&[held_transform(hand), scale(2.0), display, scale(0.5)]),
     }
 }
 
@@ -425,6 +430,30 @@ pub fn flat_model(
     Some((layers, display))
 }
 
+/// The `firstperson` display transform of a block item: `models/item/<name>.json` and its parents
+/// (`block/...`, ending in `block/block`); the identity when none sets one.
+pub fn block_display(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, name: &str) -> Mat {
+    let mut next = format!("item/{name}");
+    for _ in 0..16 {
+        if next.starts_with("builtin/") {
+            break;
+        }
+        let Some(v) = read(&format!("models/{next}.json"))
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        else {
+            break;
+        };
+        if let Some(d) = v["display"].get("firstperson") {
+            return transform(d).0;
+        }
+        let Some(parent) = v["parent"].as_str() else {
+            break;
+        };
+        next = parent.to_string();
+    }
+    ident()
+}
+
 /// The layers of a flat item drawn over each other, layer `i` multiplied by the `0xRRGGBB` color
 /// `i`: what the sprite's front face shows when the layers' quads share one plane. Layers of
 /// another size than the first are skipped.
@@ -526,11 +555,13 @@ impl Flat {
     }
 }
 
-/// `transformFirstPersonItem`, the model's `firstperson` transform, then `RenderItem.renderItem`
-/// (`scale(0.5)`, `translate(-0.5)`), lit per face like the arm.
+/// `transformFirstPersonItem`, `RenderItem.preTransform` (`scale(2)` for a flat model, bjh 409-416),
+/// the model's `firstperson` transform, then `RenderItem.renderItem` (`scale(0.5)`, `translate(-0.5)`),
+/// lit per face like the arm.
 pub fn flat(hand: &Hand, f: &Flat) -> Draw {
     let model = chain(&[
         held_transform(hand),
+        scale(2.0),
         f.display,
         scale(0.5),
         translate(-0.5, -0.5, -0.5),
@@ -548,9 +579,6 @@ pub fn flat(hand: &Hand, f: &Flat) -> Draw {
         model,
     }
 }
-
-/// Right arm box `addBox(-3, -2, -2, 4, 12, 4)` at skin pixel (40, 16); model y points down.
-const BOX: [[f32; 2]; 3] = [[-3.0, 1.0], [-2.0, 10.0], [-2.0, 2.0]];
 
 /// Eye-space placement of the right arm: `ItemRenderer` swing, `ModelRenderer` rotation point and z rotation.
 fn arm_model(hand: &Hand) -> Mat {
@@ -582,8 +610,29 @@ fn arm_model(hand: &Hand) -> Mat {
 
 /// `RenderPlayer.renderRightArm` seen through `ItemRenderer`: the arm of the default skin.
 pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
-    let model = arm_model(hand);
-    let [[x0, x1], [y0, y1], [z0, z1]] = BOX;
+    arm_draw(arm_model(hand), &hand.look, skin_height, Side::Right)
+}
+
+/// One arm of `ModelPlayer` (default skin, 64x64): which box and which skin pixel it unfolds from.
+#[derive(Clone, Copy)]
+enum Side {
+    Right,
+    Left,
+}
+
+impl Side {
+    /// The box as `[[x0, x1], [y0, y1], [z0, z1]]` and its skin pixel `(u, v)`; model y points down.
+    fn arm_box(self) -> ([[f32; 2]; 3], f32, f32) {
+        match self {
+            Side::Right => ([[-3.0, 1.0], [-2.0, 10.0], [-2.0, 2.0]], 40.0, 16.0),
+            Side::Left => ([[-1.0, 3.0], [-2.0, 10.0], [-2.0, 2.0]], 32.0, 48.0),
+        }
+    }
+}
+
+/// The six faces of an arm box placed by `model`, lit per face.
+fn arm_draw(model: Mat, look: &HandLook, skin_height: u32, side: Side) -> Draw {
+    let ([[x0, x1], [y0, y1], [z0, z1]], tx, ty) = side.arm_box();
     let (tw, th) = (64.0, skin_height.max(32) as f32);
     // Each face: normal, then four corners as (position, u, v) in skin pixels.
     type Corner = ([f32; 3], f32, f32);
@@ -597,30 +646,30 @@ pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
     let faces = [
         // front (z min), back (z max)
         face([0.0, 0.0, -1.0], [[x0, x1], [y0, y1]], &|x, y| {
-            ([x, y, z0], 44.0 + (x - x0), 20.0 + (y - y0))
+            ([x, y, z0], tx + 4.0 + (x - x0), ty + 4.0 + (y - y0))
         }),
         face([0.0, 0.0, 1.0], [[x0, x1], [y0, y1]], &|x, y| {
-            ([x, y, z1], 56.0 - (x - x0), 20.0 + (y - y0))
+            ([x, y, z1], tx + 16.0 - (x - x0), ty + 4.0 + (y - y0))
         }),
         // outer (x min), inner (x max)
         face([-1.0, 0.0, 0.0], [[z0, z1], [y0, y1]], &|z, y| {
-            ([x0, y, z], 44.0 - (z - z0), 20.0 + (y - y0))
+            ([x0, y, z], tx + 4.0 - (z - z0), ty + 4.0 + (y - y0))
         }),
         face([1.0, 0.0, 0.0], [[z0, z1], [y0, y1]], &|z, y| {
-            ([x1, y, z], 48.0 + (z - z0), 20.0 + (y - y0))
+            ([x1, y, z], tx + 8.0 + (z - z0), ty + 4.0 + (y - y0))
         }),
         // top (y min), bottom (y max)
         face([0.0, -1.0, 0.0], [[x0, x1], [z0, z1]], &|x, z| {
-            ([x, y0, z], 44.0 + (x - x0), 20.0 - (z - z0))
+            ([x, y0, z], tx + 4.0 + (x - x0), ty + 4.0 - (z - z0))
         }),
         face([0.0, 1.0, 0.0], [[x0, x1], [z0, z1]], &|x, z| {
-            ([x, y1, z], 48.0 + (x - x0), 16.0 + (z - z0))
+            ([x, y1, z], tx + 8.0 + (x - x0), ty + (z - z0))
         }),
     ];
     let mut vertices = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
     for (normal, corners) in faces {
-        let shade = item_light(&model, normal, &hand.look);
+        let shade = item_light(&model, normal, look);
         let base = vertices.len() as u32;
         for (p, u, v) in corners {
             vertices.push(Vertex {

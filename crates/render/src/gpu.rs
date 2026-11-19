@@ -74,7 +74,8 @@ struct Strip {
 
 /// The resolved model of the held item.
 enum Held {
-    Block(MeshData),
+    /// The block mesh and the `firstperson` display transform of its item model.
+    Block(MeshData, hand::Mat),
     /// Extruded sprite and its item texture, bound with the hand globals.
     Flat(Box<hand::Flat>, wgpu::BindGroup, Strip),
     /// No model (unknown item, entity models such as skulls): nothing is drawn.
@@ -87,6 +88,8 @@ enum HandTex {
     Skin,
     Atlas,
     Item,
+    /// A part of the held map.
+    Map(hand::MapTex),
 }
 
 enum Target {
@@ -139,6 +142,8 @@ pub struct Renderer {
     frames: Option<entity::hanging::Frames>,
     /// Colour index bytes of each received map, 128x128.
     maps: HashMap<i32, Vec<u8>>,
+    /// Decorations of each received map (`MapData.mapDecorations`).
+    map_icons: entity::hanging::MapIcons,
     /// Held and dropped item meshes: the block atlas (`None`) or the sprite texture they sample.
     item_meshes: Vec<(Option<String>, GpuMesh)>,
     fires: Vec<entity::fire::Fire>,
@@ -197,6 +202,8 @@ pub struct Renderer {
     snow_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
     hand_glint_group: Option<wgpu::BindGroup>,
+    /// Hand-bound bind groups of the map textures: `map/{id}`, the icons and the background.
+    hand_groups: HashMap<String, wgpu::BindGroup>,
     held: Option<(HeldKind, Held)>,
     /// Camera-relative particle quads for the next frame.
     particles: Quads,
@@ -479,6 +486,7 @@ impl Renderer {
             frame_compasses: HashMap::new(),
             frames: None,
             maps: HashMap::new(),
+            map_icons: HashMap::new(),
             item_meshes: Vec::new(),
             fires: Vec::new(),
             on_fire: false,
@@ -522,6 +530,7 @@ impl Renderer {
             snow_group,
             hand: None,
             hand_glint_group: None,
+            hand_groups: HashMap::new(),
             held: None,
             particles: Quads::default(),
             gui_pipes,
@@ -753,6 +762,17 @@ impl Renderer {
                 &self.sampler,
                 &view,
             ));
+        }
+        if tex.starts_with("map/") || tex == hand::ICONS_TEXTURE || tex == hand::BACKGROUND_TEXTURE
+        {
+            let group = bind_group(
+                &self.device,
+                &self.layout_bg,
+                &self.hand_globals,
+                &self.sampler,
+                &view,
+            );
+            self.hand_groups.insert(tex.to_owned(), group);
         }
         self.textures.insert(tex.to_owned(), group);
     }
@@ -1034,6 +1054,9 @@ impl Renderer {
         self.resolve_items(draws);
         self.load_frames(draws);
         let frames = self.frames.take().unwrap_or_default();
+        if !self.map_icons.is_empty() {
+            self.load_texture(hand::ICONS_TEXTURE);
+        }
         let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
         entity::hanging::build(
             &mut items,
@@ -1042,6 +1065,7 @@ impl Renderer {
             &self.item_models,
             &self.frame_compasses,
             &self.dials,
+            &self.map_icons,
             |p| self.light_at(p),
         );
         self.frames = Some(frames);
@@ -1116,6 +1140,8 @@ impl Renderer {
     /// Forgets every received map, as a new server's map ids start again.
     pub fn clear_maps(&mut self) {
         self.maps.clear();
+        self.map_icons.clear();
+        self.hand_groups.retain(|k, _| !k.starts_with("map/"));
         self.textures.retain(|k, _| !k.starts_with("map/"));
     }
 
@@ -1443,13 +1469,57 @@ impl Renderer {
             .map_or(PLAINS_TEMPERATURE, |b| temperature(b, x, y, z))
     }
 
-    /// Hand geometry for this frame and the texture it samples; `None` when no hand or texture exists.
-    fn hand_draw(&mut self) -> Option<(hand::Draw, HandTex)> {
-        let hand = self.hand?;
-        let Some(kind) = hand.held else {
-            let (_, height) = self.hand_skin.as_ref()?;
-            return Some((hand::arm(&hand, *height), HandTex::Skin));
+    /// Replaces the decorations of map `id` (`S34PacketMaps.setMapdataTo`).
+    pub fn map_icons(&mut self, id: i32, icons: &[(u8, i8, i8, u8)]) {
+        let icons = icons
+            .iter()
+            .map(|&(kind, x, z, rotation)| hand::MapIcon {
+                kind,
+                x,
+                z,
+                rotation,
+            })
+            .collect();
+        self.map_icons.insert(id, icons);
+    }
+
+    /// The parts of a held filled map: both arms, background, colours and decorations.
+    fn map_draws(&mut self, hand: &Hand, damage: i16) -> Option<Vec<(hand::Draw, HandTex)>> {
+        let (_, height) = self.hand_skin.as_ref()?;
+        let height = *height;
+        self.load_texture(hand::ICONS_TEXTURE);
+        self.load_texture(hand::BACKGROUND_TEXTURE);
+        let colors = self.hand_groups.contains_key(&format!("map/{damage}"));
+        let icons = self
+            .map_icons
+            .get(&i32::from(damage))
+            .map_or(&[][..], |v| v);
+        let parts = hand::map_parts(hand, height, colors, icons);
+        Some(
+            parts
+                .into_iter()
+                .map(|(d, t)| (d, HandTex::Map(t)))
+                .collect(),
+        )
+    }
+
+    /// Hand geometry for this frame and the texture each part samples; empty when no hand or texture exists.
+    fn hand_draw(&mut self) -> Vec<(hand::Draw, HandTex)> {
+        let Some(hand) = self.hand else {
+            return Vec::new();
         };
+        let Some(kind) = hand.held else {
+            let Some((_, height)) = self.hand_skin.as_ref() else {
+                return Vec::new();
+            };
+            return vec![(hand::arm(&hand, *height), HandTex::Skin)];
+        };
+        if let HeldKind::Item {
+            id: 358, damage, ..
+        } = kind
+        {
+            return self.map_draws(&hand, damage).unwrap_or_default();
+        }
         if self.held.as_ref().map(|h| h.0) != Some(kind) {
             let held = self.resolve_held(kind);
             self.held = Some((kind, held));
@@ -1460,16 +1530,18 @@ impl Renderer {
                 **flat = hand::Flat::new(&strip.image, strip.display, frame);
             }
         }
-        match &self.held.as_ref()?.1 {
-            Held::Block(mesh) => Some((hand::block(&hand, mesh), HandTex::Atlas)),
-            Held::Flat(flat, _, _) => Some((hand::flat(&hand, flat), HandTex::Item)),
-            Held::Nothing => None,
+        match self.held.as_ref().map(|h| &h.1) {
+            Some(Held::Block(mesh, display)) => {
+                vec![(hand::block(&hand, mesh, *display), HandTex::Atlas)]
+            }
+            Some(Held::Flat(flat, _, _)) => vec![(hand::flat(&hand, flat), HandTex::Item)],
+            _ => Vec::new(),
         }
     }
 
     fn resolve_held(&mut self, kind: HeldKind) -> Held {
-        let state = match kind {
-            HeldKind::Block(state) => state,
+        let (state, id, damage) = match kind {
+            HeldKind::Block(state) => (state, (state >> 4) as i16, (state & 15) as i16),
             HeldKind::Item { id, damage, dye } => {
                 if let Some(flat) = self.flat_item(id, damage, dye) {
                     return flat;
@@ -1477,10 +1549,15 @@ impl Renderer {
                 if !(1..256).contains(&id) {
                     return Held::Nothing;
                 }
-                ((id as u16) << 4) | (damage as u16 & 15)
+                (((id as u16) << 4) | (damage as u16 & 15), id, damage)
             }
         };
-        Held::Block(hand::held_mesh(state, &self.atlas, false))
+        let display = world::inventory::items::model(id, damage)
+            .zip(self.source.as_mut())
+            .map_or(hand::ident(), |(name, source)| {
+                hand::block_display(&mut |p| source.read(&format!("assets/minecraft/{p}")), name)
+            });
+        Held::Block(hand::held_mesh(state, &self.atlas, false), display)
     }
 
     /// Meshes of the footprint quads and of each item's icon quads, with their textures uploaded.
@@ -1560,7 +1637,8 @@ impl Renderer {
 
     fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
         match (tex, &self.hand_skin, &self.held) {
-            (HandTex::Skin, Some((group, _)), _) => group,
+            (HandTex::Skin | HandTex::Map(hand::MapTex::Skin), Some((group, _)), _) => group,
+            (HandTex::Map(t), _, _) => self.map_group(t),
             (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,
             _ => &self.hand_atlas_group,
         }
@@ -1599,14 +1677,39 @@ impl Renderer {
         (self.upload_geometry(&rain), self.upload_geometry(&snow))
     }
 
-    /// Uploads the hand and its own projection, with the texture it samples.
+    /// The hand-bound group of a held map part, the atlas group while it is not loaded.
+    fn map_group(&self, part: hand::MapTex) -> &wgpu::BindGroup {
+        let key = match (part, self.hand.and_then(|h| h.held)) {
+            (hand::MapTex::Background, _) => hand::BACKGROUND_TEXTURE.to_owned(),
+            (hand::MapTex::Icons, _) => hand::ICONS_TEXTURE.to_owned(),
+            (_, Some(HeldKind::Item { damage, .. })) => format!("map/{damage}"),
+            _ => String::new(),
+        };
+        self.hand_groups.get(&key).unwrap_or(&self.hand_atlas_group)
+    }
+
+    /// Uploads every part of the hand with its texture.
     fn hand_mesh(
         &mut self,
         cam: &Camera,
         world: &Globals,
         sun_brightness: f32,
+    ) -> Vec<(GpuMesh, HandTex, Option<GpuMesh>)> {
+        self.hand_draw()
+            .into_iter()
+            .filter_map(|(draw, tex)| self.hand_part(cam, world, sun_brightness, draw, tex))
+            .collect()
+    }
+
+    /// Uploads one part of the hand and its own projection.
+    fn hand_part(
+        &mut self,
+        cam: &Camera,
+        world: &Globals,
+        sun_brightness: f32,
+        mut draw: hand::Draw,
+        tex: HandTex,
     ) -> Option<(GpuMesh, HandTex, Option<GpuMesh>)> {
-        let (mut draw, tex) = self.hand_draw()?;
         let glint = self.hand.is_some_and(|h| h.glint && h.held.is_some());
         if glint {
             self.load_texture(entity::GLINT_TEXTURE);
@@ -2023,7 +2126,7 @@ impl Renderer {
         self.draw_hand_and_gui(
             &mut enc,
             [world, view],
-            hand.as_ref(),
+            &hand,
             &fire,
             gui_buf.as_ref(),
             overlay,
@@ -2057,15 +2160,15 @@ impl Renderer {
         enc: &mut wgpu::CommandEncoder,
         // The world target (`minecraft:main` while an effect runs), then the window.
         [world, view]: [&wgpu::TextureView; 2],
-        hand: Option<&(GpuMesh, HandTex, Option<GpuMesh>)>,
+        hand: &[(GpuMesh, HandTex, Option<GpuMesh>)],
         fire: &FireFrame,
         gui_buf: Option<&wgpu::Buffer>,
         overlay: &[Quad],
     ) {
         // Vanilla draws the hand on a cleared depth buffer, then the GUI.
         let mut pass = overlay_pass(enc, world, &self.depth);
-        if let Some(hand) = hand {
-            self.draw_hand(&mut pass, hand);
+        for part in hand {
+            self.draw_hand(&mut pass, part);
         }
         self.draw_fire_overlay(&mut pass, fire);
         self.axes.draw(&mut pass);

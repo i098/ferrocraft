@@ -229,7 +229,7 @@ impl Loader<'_> {
         else {
             return Vec::new();
         };
-        let turn = |k| spec.get(k).and_then(Value::as_u64).unwrap_or(0) as u8 / 90;
+        let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
         let (x, y) = (turn("x"), turn("y"));
         let mut quads = Vec::new();
         for el in model.elements.iter() {

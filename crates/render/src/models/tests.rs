@@ -138,6 +138,15 @@ fn repeater_door_and_piston_faces_follow_vanilla_uv_rules() {
     );
 }
 
+/// Vanilla `ModelRotation`: y 270 turns north to west and x 270 turns north to up (three quarter turns).
+#[test]
+fn blockstate_turn_of_270_degrees_turns_the_face() {
+    let json = r##"{"textures": {"t": "blocks/stone"}, "elements": [{"from": [0,0,0], "to": [16,16,16],
+        "faces": {"north": {"texture": "#t"}}}]}"##;
+    assert_eq!(bake(json, r#"{"model": "m", "y": 270}"#)[0].face, 4);
+    assert_eq!(bake(json, r#"{"model": "m", "x": 270}"#)[0].face, 0);
+}
+
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
 #[test]
 fn element_rotation_leans_the_wall_torch() {
@@ -308,30 +317,46 @@ fn jar_doors_keep_vanilla_uv() {
     }
 }
 
-/// piston_head.json via piston_head_normal.json: platform and both shaft boxes, facing up (x 270) and east (y 90).
+/// piston_head.json via piston_head_normal.json: platform and both shaft boxes. `m` maps a model face to the face
+/// after the blockstate turn: facing east is y 90 (north to east), facing up is x 270 (north to up, south to down).
+fn piston_faces(m: [usize; 6]) -> Vec<Expect> {
+    let (s, p) = ("piston_side", "piston_top_normal");
+    let (up, down, north, south, west, east) = (m[0], m[1], m[2], m[3], m[4], m[5]);
+    let mut v = vec![
+        (s, Some(down), [0.0, 0.0, 16.0, 4.0], 180),
+        (s, Some(up), [0.0, 0.0, 16.0, 4.0], 0),
+        (s, Some(west), [0.0, 0.0, 16.0, 4.0], 270),
+        (s, Some(east), [0.0, 0.0, 16.0, 4.0], 90),
+        (p, Some(north), [0.0, 0.0, 16.0, 16.0], 0),
+        (p, Some(south), [0.0, 0.0, 16.0, 16.0], 0),
+    ];
+    for (a, b) in [
+        ([4.0, 0.0, 16.0, 4.0], [16.0, 4.0, 4.0, 0.0]),
+        ([0.0, 0.0, 4.0, 4.0], [4.0, 4.0, 0.0, 0.0]),
+    ] {
+        v.push((s, Some(down), a, 90));
+        v.push((s, Some(up), a, 270));
+        v.push((s, Some(west), b, 0));
+        v.push((s, Some(east), a, 0));
+    }
+    v
+}
+
 #[test]
 fn jar_piston_head_keeps_vanilla_uv() {
     let Some(models) = jar_models() else { return };
-    let (s, p) = ("piston_side", "piston_top_normal");
-    let faces: [Expect; 14] = [
-        (s, None, [0.0, 0.0, 16.0, 4.0], 180),
-        (s, None, [0.0, 0.0, 16.0, 4.0], 0),
-        (s, None, [0.0, 0.0, 16.0, 4.0], 270),
-        (s, None, [0.0, 0.0, 16.0, 4.0], 90),
-        (p, None, [0.0, 0.0, 16.0, 16.0], 0),
-        (s, None, [4.0, 0.0, 16.0, 4.0], 90),
-        (s, None, [4.0, 0.0, 16.0, 4.0], 270),
-        (s, None, [16.0, 4.0, 4.0, 0.0], 0),
-        (s, None, [4.0, 0.0, 16.0, 4.0], 0),
-        (s, None, [0.0, 0.0, 4.0, 4.0], 90),
-        (s, None, [0.0, 0.0, 4.0, 4.0], 270),
-        (s, None, [4.0, 4.0, 0.0, 0.0], 0),
-        (s, None, [0.0, 0.0, 4.0, 4.0], 0),
-        (p, None, [0.0, 0.0, 16.0, 16.0], 0),
-    ];
-    for meta in [1u16, 5] {
-        assert_drawn(&models, 34 << 4 | meta, NB, &faces);
-    }
+    assert_drawn(
+        &models,
+        34 << 4 | 5,
+        NB,
+        &piston_faces([UP, DOWN, EAST, WEST, NORTH, SOUTH]),
+    );
+    assert_drawn(
+        &models,
+        34 << 4 | 1,
+        NB,
+        &piston_faces([SOUTH, NORTH, UP, DOWN, WEST, EAST]),
+    );
 }
 
 /// lever.json / lever_off.json: cobblestone base and handle uv, unpowered and powered.
@@ -356,29 +381,64 @@ fn jar_lever_keeps_vanilla_uv() {
     }
 }
 
-/// tripwire_hook_attached.json (facing south is turned y 180, so faces are not pinned).
+/// The lever handle leans 45 degrees about x through [8,1,8]: lever_off (+45) toward +z, lever (-45) toward -z.
+#[test]
+fn jar_lever_handle_leans_with_its_state() {
+    let Some(models) = jar_models() else { return };
+    let reach = |meta: u16| {
+        let quads = models.quads(69 << 4 | meta, NB).unwrap();
+        let handle: Vec<_> = quads.iter().filter(|q| &*q.tex == "lever").collect();
+        let z = handle.iter().flat_map(|q| q.pos).map(|p| p[2] * 16.0);
+        let y = handle.iter().flat_map(|q| q.pos).map(|p| p[1] * 16.0);
+        (
+            z.clone().fold(99.0, f32::min),
+            z.fold(-9.0, f32::max),
+            y.fold(-9.0, f32::max),
+        )
+    };
+    // Tip (y 11, z 8 +- 1) turned 45 degrees about (y 1, z 8): y 1 + 7.07 + 0.71, z 8 +- (7.07 + 0.71).
+    let (zmin, zmax, ymax) = reach(5);
+    assert!(
+        zmax > 15.5 && zmin > 6.5 && (ymax - 8.78).abs() < 0.05,
+        "off: {zmin} {zmax} {ymax}"
+    );
+    let (zmin, zmax, ymax) = reach(13);
+    assert!(
+        zmin < 0.5 && zmax < 9.5 && (ymax - 8.78).abs() < 0.05,
+        "on: {zmin} {zmax} {ymax}"
+    );
+}
+
+/// tripwire_hook_attached.json for facing south (y 180: north and south swap, west and east swap).
 #[test]
 fn jar_tripwire_hook_keeps_vanilla_uv() {
     let Some(models) = jar_models() else { return };
     let (h, w, t) = ("trip_wire_source", "planks_oak", "trip_wire");
-    let faces = [
-        (h, None, [5.0, 3.0, 11.0, 9.0], 0),
-        (h, None, [5.0, 3.0, 11.0, 4.0], 0),
-        (h, None, [5.0, 8.0, 11.0, 9.0], 0),
-        (h, None, [7.0, 8.0, 9.0, 9.0], 0),
-        (h, None, [7.0, 3.0, 9.0, 4.0], 0),
-        (w, None, [7.0, 2.0, 9.0, 7.0], 0),
-        (w, None, [7.0, 9.0, 9.0, 14.0], 0),
-        (w, None, [7.0, 9.0, 9.0, 11.0], 0),
-        (w, None, [2.0, 9.0, 7.0, 11.0], 0),
-        (w, None, [9.0, 9.0, 14.0, 11.0], 0),
-        (w, None, [6.0, 14.0, 10.0, 16.0], 0),
-        (w, None, [6.0, 0.0, 10.0, 2.0], 0),
-        (w, None, [6.0, 7.0, 10.0, 15.0], 0),
-        (w, None, [0.0, 7.0, 2.0, 15.0], 0),
-        (w, None, [14.0, 7.0, 16.0, 15.0], 0),
-        (t, None, [0.0, 6.0, 16.0, 8.0], 90),
-        (t, None, [0.0, 8.0, 16.0, 6.0], 90),
+    let faces: [Expect; 24] = [
+        (h, Some(DOWN), [5.0, 3.0, 11.0, 9.0], 0),
+        (h, Some(UP), [5.0, 3.0, 11.0, 9.0], 0),
+        (h, Some(SOUTH), [5.0, 3.0, 11.0, 4.0], 0),
+        (h, Some(NORTH), [5.0, 8.0, 11.0, 9.0], 0),
+        (h, Some(EAST), [5.0, 8.0, 11.0, 9.0], 0),
+        (h, Some(WEST), [5.0, 3.0, 11.0, 4.0], 0),
+        (h, Some(SOUTH), [7.0, 8.0, 9.0, 9.0], 0),
+        (h, Some(NORTH), [7.0, 3.0, 9.0, 4.0], 0),
+        (h, Some(WEST), [7.0, 8.0, 9.0, 9.0], 0),
+        (h, Some(EAST), [7.0, 3.0, 9.0, 4.0], 0),
+        (w, Some(UP), [7.0, 2.0, 9.0, 7.0], 0),
+        (w, Some(DOWN), [7.0, 9.0, 9.0, 14.0], 0),
+        (w, Some(SOUTH), [7.0, 9.0, 9.0, 11.0], 0),
+        (w, Some(NORTH), [7.0, 9.0, 9.0, 11.0], 0),
+        (w, Some(EAST), [2.0, 9.0, 7.0, 11.0], 0),
+        (w, Some(WEST), [9.0, 9.0, 14.0, 11.0], 0),
+        (w, Some(DOWN), [6.0, 14.0, 10.0, 16.0], 0),
+        (w, Some(UP), [6.0, 0.0, 10.0, 2.0], 0),
+        (w, Some(SOUTH), [6.0, 7.0, 10.0, 15.0], 0),
+        (w, Some(NORTH), [6.0, 7.0, 10.0, 15.0], 0),
+        (w, Some(EAST), [0.0, 7.0, 2.0, 15.0], 0),
+        (w, Some(WEST), [14.0, 7.0, 16.0, 15.0], 0),
+        (t, Some(DOWN), [0.0, 8.0, 16.0, 6.0], 90),
+        (t, Some(UP), [0.0, 6.0, 16.0, 8.0], 90),
     ];
     assert_drawn(&models, 131 << 4 | 4, NB, &faces);
 }

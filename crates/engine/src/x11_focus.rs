@@ -89,8 +89,18 @@ unsafe fn has_window_manager(xlib: &x11_dl::xlib::Xlib, dpy: *mut x11_dl::xlib::
         let (mut ty, mut fmt, mut n, mut after) = (0, 0, 0, 0);
         let mut data: *mut u8 = std::ptr::null_mut();
         let status = (xlib.XGetWindowProperty)(
-            dpy, root, atom, 0, 1, 0, x11_dl::xlib::XA_WINDOW, &mut ty, &mut fmt, &mut n,
-            &mut after, &mut data,
+            dpy,
+            root,
+            atom,
+            0,
+            1,
+            0,
+            x11_dl::xlib::XA_WINDOW,
+            &mut ty,
+            &mut fmt,
+            &mut n,
+            &mut after,
+            &mut data,
         );
         let found = status == 0 && !data.is_null() && n > 0;
         if !data.is_null() {

@@ -9,6 +9,7 @@ use crate::blocks::{
     DOWN, NORTH, UP,
 };
 use crate::light::Light;
+use crate::models::Quad;
 use crate::shapes::{boxes, Bx, BREWING_SPOKES};
 use bytemuck::{Pod, Zeroable};
 
@@ -264,6 +265,10 @@ impl Mesher<'_> {
             Kind::Shape if matches!(state >> 4, 54 | 130 | 146) => {}
             Kind::Shape => {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
+                if let Some(quads) = self.atlas.models.quads(state, &nb) {
+                    self.modelled(at, quads, &l);
+                    return;
+                }
                 let list = boxes(state, &nb);
                 for b in &list {
                     self.boxed(at, b, Self::pass_of(state));
@@ -612,6 +617,25 @@ impl Mesher<'_> {
             back.reverse();
             self.push_quad(Pass::Opaque, quad, false);
             self.push_quad(Pass::Opaque, back, false);
+        }
+    }
+
+    /// Quads baked from the block's vanilla model: explicit uv, face and element rotation are kept.
+    fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look) {
+        let rgb = self.base_color(l, Tint::None, at);
+        for q in quads {
+            if q.cull.is_some_and(|c| self.opaque(self.st(at, DIRS[c]))) {
+                continue;
+            }
+            let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));
+            let k = if q.shade { SHADE[q.face] } else { 1.0 };
+            let verts = std::array::from_fn(|i| Vertex {
+                pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
+                uv: self.atlas.uv(&q.tex, q.uv[i]),
+                color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
+                light,
+            });
+            self.push_quad(Pass::Opaque, verts, false);
         }
     }
 

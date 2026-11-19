@@ -591,7 +591,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstate rotation `x` then `y` in quarter turns, as vanilla applies it to a model.
-fn quarter(mut v: [f32; 3], x: u8, y: u8) -> [f32; 3] {
+pub(crate) fn quarter(mut v: [f32; 3], x: u8, y: u8) -> [f32; 3] {
     for _ in 0..x {
         v = [v[0], v[2], -v[1]];
     }

@@ -222,7 +222,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     );
 
     let mut ps = Particles::new();
-    ps.break_block([7, 66, 12], 1 << 4);
+    ps.break_block([7, 66, 12], 1 << 4, |_, _| 1);
     ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
     ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
     r.set_particles(
@@ -1636,4 +1636,70 @@ fn a_wither_darkens_the_lightmap() {
         assert!((k - 0.02..k + 0.1).contains(&ratio), "{c}: {ratio}");
     }
     assert!(dark[1] < plain[1], "{plain:?} {dark:?}");
+}
+
+/// Each particle of the vanilla-parity batch draws at its packet position, and a bubble in water
+/// lives `max_age + 1` updates; with `RENDER_DIR` set the frames are written.
+#[test]
+fn parity_particles_draw_and_expire() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
+    let mut r = Renderer::new_offscreen(854, 480, jar.as_deref());
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let (w, h) = (854usize, 480usize);
+    let mut frame = |ps: &Particles| {
+        r.set_particles(
+            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
+                r.light_at(p)
+            }),
+        );
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let clear = frame(&Particles::new());
+    let dir = std::env::var_os("RENDER_DIR").map(std::path::PathBuf::from);
+    for (name, id, y, args) in [
+        ("flame", 26, 66.0, vec![]),
+        ("lava", 27, 66.0, vec![]),
+        ("note", 23, 66.0, vec![]),
+        ("heart", 34, 66.0, vec![]),
+        ("angry_villager", 32, 66.0, vec![]),
+        ("bubble", 4, 66.0, vec![]),
+        ("wake", 6, 66.0, vec![]),
+        ("block_dust", 38, 66.0, vec![(1 << 12) | 1]),
+        ("barrier", 35, 66.0, vec![]),
+    ] {
+        let pos = [8.0, y, 11.0];
+        let mut ps = Particles::new();
+        ps.spawn_packet(id, pos, [0.0; 3], 0.0, 0, &args);
+        // Bubbles and wakes need water around them to survive the first update.
+        ps.tick(|_, _, _| 9 << 4);
+        let px = frame(&ps);
+        let b = changed_box(&clear, &px, w);
+        eprintln!("{name}: box {b:?}");
+        // The barrier is a block-item icon, which only the vanilla assets supply.
+        assert!(
+            b.is_some() || (name == "barrier" && jar.is_none()),
+            "{name} must draw"
+        );
+        if let Some(d) = &dir {
+            encode_png(
+                &d.join(format!("parity_{name}.png")),
+                w as u32,
+                h as u32,
+                &px,
+            )
+            .expect("png");
+        }
+    }
+    let _ = h;
 }

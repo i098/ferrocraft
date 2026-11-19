@@ -821,7 +821,11 @@ impl App {
         match id {
             2001 => {
                 let state = (((data & 0xfff) << 4) | ((data >> 12) & 0xf)) as u16;
-                self.particles.break_block(pos, state);
+                self.particles.break_block(pos, state, |x, z| {
+                    self.game.store.get(x >> 4, z >> 4).map_or(1, |c| {
+                        c.biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize)
+                    })
+                });
             }
             2002 => {
                 let (rgb, instant) = world::potion_brew::color_and_instant(data);

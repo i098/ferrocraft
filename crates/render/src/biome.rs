@@ -83,7 +83,7 @@ pub enum Tint {
 
 /// `textures/colormap/grass.png` and `foliage.png` (`GrassColors`, `FoliageColors`), RGB, row-major.
 pub struct Colormaps {
-    grass: Vec<u32>,
+    pub(crate) grass: Vec<u32>,
     foliage: Vec<u32>,
 }
 
@@ -113,7 +113,7 @@ impl Colormaps {
 }
 
 /// `GrassColors.getColor`: the map is a triangle, rainfall scaled by temperature.
-fn sample(map: &[u32], temperature: f32, downfall: f32) -> u32 {
+pub(crate) fn sample(map: &[u32], temperature: f32, downfall: f32) -> u32 {
     let t = f64::from(temperature.clamp(0.0, 1.0));
     let rain = f64::from(downfall.clamp(0.0, 1.0)) * t;
     let (x, y) = (

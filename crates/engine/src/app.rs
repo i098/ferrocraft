@@ -1817,6 +1817,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn language_list_reads_pack_mcmeta_from_assets_dir_not_game_dir() {
+        let root = std::env::temp_dir().join(format!("fc-lang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mc = root.join("mc");
+        let hash = "ab12cd34";
+        let obj = mc.join("assets/objects/ab");
+        std::fs::create_dir_all(&obj).unwrap();
+        std::fs::create_dir_all(mc.join("assets/indexes")).unwrap();
+        std::fs::create_dir_all(root.join("game")).unwrap();
+        std::fs::write(
+            mc.join("assets/indexes/1.8.json"),
+            format!(r#"{{"objects":{{"pack.mcmeta":{{"hash":"{hash}","size":1}}}}}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            obj.join(hash),
+            r#"{"language":{"fr_FR":{"name":"Fran\u00e7ais","region":"France"},"en_US":{"name":"English","region":"US"}}}"#,
+        )
+        .unwrap();
+        let args = crate::args::parse(
+            &[
+                "--gameDir".to_string(),
+                root.join("game").display().to_string(),
+                "--assetsDir".to_string(),
+                mc.join("assets").display().to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        let mut app = App::new(args);
+        app.load_texts();
+        let codes: Vec<&str> = app.ui.texts.languages.iter().map(|l| l.code.as_str()).collect();
+        assert_eq!(codes, ["en_US", "fr_FR"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn regeneration_bounce_wraps_on_max_health_even_at_zero_health() {
         let mut game = Game::new();
         game.effects.add(world::effects::Effect {

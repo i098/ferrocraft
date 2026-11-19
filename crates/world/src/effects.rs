@@ -33,9 +33,26 @@ pub struct Effect {
 /// `S1DPacketEntityEffect` duration that means "no end".
 pub const PERMANENT_TICKS: i32 = 32767;
 
-/// `EntityLivingBase.activePotionsMap` in id order, as `HashMap<Integer, ...>.values()` iterates it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Effects(Vec<Effect>);
+/// `HashMap` default table size.
+const INITIAL_CAPACITY: usize = 16;
+
+/// `EntityLivingBase.activePotionsMap`, kept in the order `HashMap<Integer, ...>.values()` iterates:
+/// bucket `id & (capacity - 1)` ascending, insertion order inside a bucket. The table doubles when
+/// the size passes 3/4 of the capacity and never shrinks (a resize keeps the order inside a bucket).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Effects(Vec<Effect>, usize);
+
+impl Default for Effects {
+    fn default() -> Self {
+        Self(Vec::new(), INITIAL_CAPACITY)
+    }
+}
+
+/// `HashMap.hash` of an `Integer` key is `h ^ (h >>> 16)`; the bucket is that masked by `cap - 1`.
+fn bucket(id: i8, cap: usize) -> usize {
+    let h = i32::from(id) as u32;
+    ((h ^ (h >> 16)) as usize) & (cap - 1)
+}
 
 impl Effects {
     pub fn iter(&self) -> impl Iterator<Item = &Effect> {
@@ -47,7 +64,7 @@ impl Effects {
     }
 
     pub fn clear(&mut self) {
-        self.0.clear();
+        *self = Self::default();
     }
 
     /// `isPotionActive`.
@@ -63,8 +80,14 @@ impl Effects {
     /// `handleEntityEffect` then `addPotionEffect`: a new effect is stored, a known id is combined.
     pub fn add(&mut self, new: Effect) {
         let Some(e) = self.0.iter_mut().find(|e| e.id == new.id) else {
-            let at = self.0.partition_point(|e| e.id < new.id);
+            let b = bucket(new.id, self.1);
+            let at = self.0.partition_point(|e| bucket(e.id, self.1) <= b);
             self.0.insert(at, new);
+            if self.0.len() > self.1 * 3 / 4 {
+                self.1 *= 2;
+                let cap = self.1;
+                self.0.sort_by_key(|e| bucket(e.id, cap));
+            }
             return;
         };
         // `PotionEffect.combine`
@@ -275,6 +298,51 @@ mod tests {
         e.add(fx(1, 2, 50));
         let only = e.iter().next().unwrap();
         assert_eq!((only.amplifier, only.duration), (2, 50));
+    }
+
+    fn order(e: &Effects) -> Vec<i8> {
+        e.iter().map(|x| x.id).collect()
+    }
+
+    /// Vanilla `/effect` 1, 9, 16, 5 lists Night Vision, Speed, Strength, Nausea: 16, 1, 5, 9.
+    #[test]
+    fn iteration_follows_hash_map_bucket_order() {
+        let mut e = Effects::default();
+        for id in [1, 9, 16, 5] {
+            e.add(fx(id, 0, 100));
+        }
+        assert_eq!(order(&e), [16, 1, 5, 9]);
+    }
+
+    /// 3, 19, 35, 51, 67, 83 share bucket 3: they keep insertion order, also after a removal.
+    #[test]
+    fn one_bucket_keeps_insertion_order() {
+        let mut e = Effects::default();
+        for id in [51, 3, 83, 19, 67, 35] {
+            e.add(fx(id, 0, 100));
+        }
+        assert_eq!(order(&e), [51, 3, 83, 19, 67, 35]);
+        e.remove(83);
+        e.add(fx(83, 0, 100));
+        assert_eq!(order(&e), [51, 3, 19, 67, 35, 83]);
+    }
+
+    /// The 13th entry grows the table to 32 buckets: 16 moves from bucket 0 behind 12.
+    #[test]
+    fn table_doubles_past_three_quarters() {
+        let mut e = Effects::default();
+        e.add(fx(16, 0, 100));
+        for id in 1..=11 {
+            e.add(fx(id, 0, 100));
+        }
+        assert_eq!(order(&e)[0], 16);
+        e.add(fx(12, 0, 100));
+        assert_eq!(order(&e), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16]);
+        e.clear();
+        for id in [17, 1] {
+            e.add(fx(id, 0, 100));
+        }
+        assert_eq!(order(&e), [17, 1]);
     }
 
     #[test]

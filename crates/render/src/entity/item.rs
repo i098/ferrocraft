@@ -305,6 +305,10 @@ impl Items {
             for v in &mut vertices {
                 v.pos = to_world(v.pos);
                 v.light = level;
+                // The block mesh carries world face shade and AO; the GUI lights the faces itself.
+                if layer.normals.is_none() && super::UNSHADED.get() {
+                    v.color = unshaded(v.color);
+                }
             }
             if let Some(normals) = &layer.normals {
                 let rgb = world::inventory::items::tint(model.id, model.damage, self.dye, i);
@@ -485,13 +489,32 @@ fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
     Some(mat)
 }
 
+/// `ItemRenderer.renderItem` doubles a block model (`shouldRenderItemIn3D`) before the display
+/// transform; `RenderItem.renderItem` then halves it. A flat model keeps its size.
+fn held_prepare(gui3d: bool) -> Mat {
+    if gui3d {
+        scale(2.0)
+    } else {
+        ident()
+    }
+}
+
+/// A baked block color without its face shade and AO: the brightest channel back to 1, so a
+/// biome tint keeps its hue (`RenderItem` draws block quads white, or tinted, under GL lighting).
+fn unshaded(color: [f32; 4]) -> [f32; 4] {
+    let top = color[0].max(color[1]).max(color[2]);
+    if top <= 0.0 {
+        return color;
+    }
+    [color[0] / top, color[1] / top, color[2] / top, color[3]]
+}
+
 /// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
 /// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
 fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let xf = Xf::new(d, false);
     let Some(mat) = hand_matrix(d, m) else { return };
-    // `renderItemInHand` scales flat models by 2 before the display transform.
-    let prepare = if m.gui3d { ident() } else { scale(2.0) };
+    let prepare = held_prepare(m.gui3d);
     let mat = chain(&[mat, prepare, m.third, scale(0.5)]);
     // Model space is the biped's pixel frame; `Xf` maps it to the world.
     let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
@@ -560,4 +583,21 @@ fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize)
     let placed = chain(&[*base, m.ground, scale(0.5)]);
     *base = mul(*base, translate(0.0, 0.0, 0.046_875 * m.ground_scale[2]));
     placed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn held_block_is_doubled_and_flat_item_is_not() {
+        assert_eq!(held_prepare(true), scale(2.0));
+        assert_eq!(held_prepare(false), ident());
+    }
+
+    #[test]
+    fn unshaded_keeps_the_tint_hue_at_full_brightness() {
+        assert_eq!(unshaded([0.5, 0.5, 0.5, 1.0]), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(unshaded([0.2, 0.4, 0.1, 1.0]), [0.5, 1.0, 0.25, 1.0]);
+    }
 }

@@ -3,6 +3,7 @@
 //! A resource pack that replaces a blockstate or model changes the result, as in vanilla.
 
 use crate::assets::AssetSource;
+use crate::mesh::face_uv;
 use crate::shapes::quarter;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -33,7 +34,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 31] = [
+const BLOCKSTATES: [&str; 34] = [
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",
@@ -65,6 +66,9 @@ const BLOCKSTATES: [&str; 31] = [
     "vine",
     "flower_pot",
     "beacon",
+    "cobblestone_wall",
+    "mossy_cobblestone_wall",
+    "bed",
 ];
 /// The other door blockstates, one per wood.
 const WOOD_DOORS: [&str; 5] = [
@@ -246,6 +250,7 @@ impl Loader<'_> {
         };
         let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
         let (x, y) = (turn("x"), turn("y"));
+        let uvlock = spec.get("uvlock").and_then(Value::as_bool) == Some(true);
         let mut quads = Vec::new();
         for el in model.elements.iter() {
             for (f, face) in el.faces.iter().enumerate() {
@@ -253,7 +258,7 @@ impl Loader<'_> {
                 let Some(tex) = self.texture(&model, &face.tex) else {
                     continue;
                 };
-                quads.push(bake_quad(el, f, face, tex, (x, y)));
+                quads.push(bake_quad(el, f, face, tex, (x, y), uvlock));
             }
         }
         quads
@@ -293,7 +298,14 @@ fn rotate_part(
 }
 
 /// `FaceBakery.makeBakedQuad` for one face of `el`, then the blockstate rotation `(x, y)` in quarter turns.
-fn bake_quad(el: &Element, f: usize, face: &Face, tex: Arc<str>, (x, y): (u8, u8)) -> Quad {
+fn bake_quad(
+    el: &Element,
+    f: usize,
+    face: &Face,
+    tex: Arc<str>,
+    (x, y): (u8, u8),
+    uvlock: bool,
+) -> Quad {
     let turned = |n: [f32; 3]| NORMALS.iter().position(|m| *m == quarter(n, x, y));
     let mut pos = [[0.0; 3]; 4];
     let mut uv = [[0.0; 2]; 4];
@@ -318,11 +330,20 @@ fn bake_quad(el: &Element, f: usize, face: &Face, tex: Arc<str>, (x, y): (u8, u8
             } / 16.0,
         ];
     }
+    let face_after_turn =
+        turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal");
+    if uvlock {
+        // `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its
+        // turned position on the turned face (the face's own `uv` is not read), stored in the slot `rotation` shifts it to.
+        for (i, p) in pos.iter().enumerate() {
+            uv[(i + 4 - face.turns % 4) % 4] = face_uv(face_after_turn, *p);
+        }
+    }
     Quad {
         pos,
         uv,
         tex,
-        face: turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal"),
+        face: face_after_turn,
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
         shade: el.shade,
         tint: face.tint,
@@ -337,7 +358,12 @@ impl Models {
             names: Vec::new(),
         };
         let mut states = HashMap::new();
-        for name in BLOCKSTATES.iter().chain(&WOOD_DOORS) {
+        for name in BLOCKSTATES
+            .iter()
+            .chain(&WOOD_DOORS)
+            .chain(&variants::STAIRS)
+            .chain(&variants::GATES)
+        {
             let Some(json) = loader.json(&format!("blockstates/{name}")) else {
                 continue;
             };

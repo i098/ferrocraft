@@ -90,6 +90,19 @@ fn explicit_uv_rotation_and_blockstate_turn_are_kept() {
     assert_eq!(up.uv[0], [0.0, 0.5]);
 }
 
+/// Issue #547 oracles: wall torch side samples v 6..16 and a cocoa pod side samples [11,4,15,9].
+#[test]
+fn explicit_uv_of_wall_torch_and_cocoa_sides_is_kept() {
+    let torch = r##"{"textures": {"t": "blocks/torch_on"}, "elements": [{"from": [-1,3.5,7], "to": [1,19.5,9],
+        "faces": {"west": {"uv": [7,6,9,16], "texture": "#t"}}}]}"##;
+    let quads = bake(torch, r#"{"model": "m"}"#);
+    assert!(has_uv(&quads, "torch_on", [7.0, 6.0, 9.0, 16.0]));
+    let cocoa = r##"{"textures": {"t": "blocks/cocoa_stage_2"}, "elements": [{"from": [6,2,1], "to": [10,9,5],
+        "faces": {"north": {"uv": [11,4,15,9], "texture": "#t"}}}]}"##;
+    let quads = bake(cocoa, r#"{"model": "m"}"#);
+    assert!(has_uv(&quads, "cocoa_stage_2", [11.0, 4.0, 15.0, 9.0]));
+}
+
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
 #[test]
 fn element_rotation_leans_the_wall_torch() {

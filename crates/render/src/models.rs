@@ -315,10 +315,8 @@ fn bake_quad(el: &Element, f: usize, face: &Face, tex: Arc<str>, (x, y): (u8, u8
 const HORIZONTAL: [&str; 4] = ["south", "west", "north", "east"];
 const FRONT: [&str; 6] = ["down", "up", "north", "south", "west", "east"];
 
-/// `(blockstate, variant key)` of a block state: the key lists the properties in the order of the JSON files.
-fn variant(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<(&'static str, String)> {
-    let (id, meta) = (state >> 4, state as usize & 15);
-    let facing = HORIZONTAL[meta & 3];
+/// The torch, repeater, comparator, lever, pressure plate and tripwire hook states.
+fn redstone_variant(id: u16, meta: usize, facing: &str) -> Option<(&'static str, String)> {
     Some(match id {
         50 | 75 | 76 => {
             let name = match id {
@@ -341,22 +339,6 @@ fn variant(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<(&'static st
                 id == 150 || meta & 8 != 0
             ),
         ),
-        127 => (
-            "cocoa",
-            format!("age={},facing={facing}", (meta >> 2).min(2)),
-        ),
-        145 => (
-            "anvil",
-            format!("damage={},facing={facing}", (meta >> 2).min(2)),
-        ),
-        34 => (
-            "piston_head",
-            format!(
-                "facing={},short=false,type={}",
-                FRONT[(meta & 7) % 6],
-                ["normal", "sticky"][meta >> 3]
-            ),
-        ),
         69 => {
             let dir = [
                 "down_x", "east", "west", "south", "north", "up_z", "up_x", "down_z",
@@ -374,6 +356,42 @@ fn variant(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<(&'static st
             ][usize::from(id == 148)],
             format!("power={meta}"),
         ),
+        131 => (
+            "tripwire_hook",
+            format!(
+                "attached={},facing={facing},powered={},suspended=false",
+                meta & 4 != 0,
+                meta & 8 != 0
+            ),
+        ),
+        _ => return None,
+    })
+}
+
+/// `(blockstate, variant key)` of a block state: the key lists the properties in the order of the JSON files.
+fn variant(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<(&'static str, String)> {
+    let (id, meta) = (state >> 4, state as usize & 15);
+    let facing = HORIZONTAL[meta & 3];
+    if let Some(found) = redstone_variant(id, meta, facing) {
+        return Some(found);
+    }
+    Some(match id {
+        127 => (
+            "cocoa",
+            format!("age={},facing={facing}", (meta >> 2).min(2)),
+        ),
+        145 => (
+            "anvil",
+            format!("damage={},facing={facing}", (meta >> 2).min(2)),
+        ),
+        34 => (
+            "piston_head",
+            format!(
+                "facing={},short=false,type={}",
+                FRONT[(meta & 7) % 6],
+                ["normal", "sticky"][meta >> 3]
+            ),
+        ),
         65 => (
             "ladder",
             format!(
@@ -384,14 +402,6 @@ fn variant(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<(&'static st
         120 => (
             "end_portal_frame",
             format!("eye={},facing={facing}", meta & 4 != 0),
-        ),
-        131 => (
-            "tripwire_hook",
-            format!(
-                "attached={},facing={facing},powered={},suspended=false",
-                meta & 4 != 0,
-                meta & 8 != 0
-            ),
         ),
         64 | 71 | 193..=197 => {
             let name = match id {

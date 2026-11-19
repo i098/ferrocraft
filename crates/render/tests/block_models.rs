@@ -1,4 +1,5 @@
-//! Offscreen render of the comparator, repeater, cocoa, wall torch, door and piston head from their vanilla models.
+//! Offscreen smoke test: the comparator, repeater, cocoa, wall torch, door and piston head draw from their vanilla models.
+//! It does not check texels; the per-face uv and rotation are asserted in `models/tests.rs`.
 //! `MODELS_OUT=<dir>` keeps the PNG.
 
 use render::{encode_png, Camera, ChunkBlocks, Renderer};
@@ -39,7 +40,7 @@ fn frame(r: &mut Renderer) -> Vec<u8> {
 
 #[test]
 #[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
-fn model_blocks_draw_from_their_vanilla_models() {
+fn model_blocks_draw_something() {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
     let mut r = Renderer::new_offscreen(960, 360, Some(Path::new(&jar)));
     for cx in -1..=1 {

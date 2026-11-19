@@ -24,14 +24,19 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         65 => ladder(meta),
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
+        _ => connected_variant(state, facing, nb),
+    }
+}
+
+/// Doors, gates, walls, beds and stairs.
+fn connected_variant(state: u16, facing: &str, nb: Nb) -> Found {
+    let (id, meta) = (state >> 4, state as usize & 15);
+    match id {
         64 | 71 | 193..=197 => door(id, state, nb),
-        53 | 67 | 108 | 109 | 114 | 128 | 134..=136 | 156 | 163 | 164 | 180 => stairs(id, meta, nb),
         107 | 183..=187 => fence_gate(id, meta, facing, nb),
         139 => wall(meta, nb),
-        26 => Some((
-            "bed",
-            format!("facing={facing},part={}", ["foot", "head"][meta >> 3 & 1]),
-        )),
+        26 => bed(meta, facing),
+        _ if is_stairs(id) => stairs(id, meta, nb),
         _ => mechanism(id, meta, nb),
     }
 }
@@ -73,6 +78,13 @@ fn flower_pot(id: u16, meta: usize) -> Found {
     let n = if id == 140 { meta } else { 16 + meta };
     let contents = crate::blocks::POT_CONTENTS.get(n)?;
     Some(("flower_pot", format!("contents={contents}")))
+}
+
+fn bed(meta: usize, facing: &str) -> Found {
+    Some((
+        "bed",
+        format!("facing={facing},part={}", ["foot", "head"][meta >> 3 & 1]),
+    ))
 }
 
 fn torch(id: u16, meta: usize) -> Found {
@@ -368,34 +380,44 @@ const INNER: [Corner; 4] = [
     [(WEST, WEST, 1), (EAST, EAST, 2)],
 ];
 
+/// Facing of the stair on `side` with the same half, if any.
+fn stair_on(nb: Nb, side: usize, top: bool) -> Option<usize> {
+    let (dx, dz) = STEP[side];
+    let s = nb(dx, 0, dz);
+    (is_stairs(s >> 4) && (s as usize >> 2 & 1 == top as usize)).then_some(s as usize & 3)
+}
+
+/// Corner value (1 right, 2 left) from the stair at `neighbour`, unless an equal stair stands at the table's offset.
+fn corner(nb: Nb, top: bool, facing: usize, neighbour: usize, table: &Corner) -> Option<u8> {
+    let f2 = stair_on(nb, neighbour, top)?;
+    table
+        .iter()
+        .find(|(n, off, _)| *n == f2 && stair_on(nb, *off, top) != Some(facing))
+        .map(|(_, _, v)| if top { 3 - v } else { *v })
+}
+
 /// `BlockStairs.getActualState`: the outer corner wins over the inner one; 1 is the right and 2 the left variant.
-fn stairs(id: u16, meta: usize, nb: Nb) -> Found {
-    let (facing, top) = (meta & 3, meta & 4 != 0);
-    let stair = |side: usize| {
-        let (dx, dz) = STEP[side];
-        let s = nb(dx, 0, dz);
-        (is_stairs(s >> 4) && (s as usize >> 2 & 1 == top as usize)).then_some(s as usize & 3)
-    };
-    let same = |side: usize| stair(side) == Some(facing);
-    let find = |neighbour: usize, table: &Corner| {
-        let f2 = stair(neighbour)?;
-        table
-            .iter()
-            .find(|(n, off, _)| *n == f2 && !same(*off))
-            .map(|(_, _, v)| if top { 3 - v } else { *v })
-    };
+fn stair_shape(nb: Nb, facing: usize, top: bool) -> &'static str {
     let opposite = [WEST, EAST, NORTH, SOUTH][facing];
-    let shape = match (find(facing, &OUTER[facing]), find(opposite, &INNER[facing])) {
+    match (
+        corner(nb, top, facing, facing, &OUTER[facing]),
+        corner(nb, top, facing, opposite, &INNER[facing]),
+    ) {
         (Some(v), _) => ["", "outer_right", "outer_left"][v as usize],
         (None, Some(v)) => ["", "inner_right", "inner_left"][v as usize],
         (None, None) => "straight",
-    };
+    }
+}
+
+fn stairs(id: u16, meta: usize, nb: Nb) -> Found {
+    let (facing, top) = (meta & 3, meta & 4 != 0);
     Some((
         STAIRS[STAIR_IDS.iter().position(|i| *i == id).unwrap_or(0)],
         format!(
-            "facing={},half={},shape={shape}",
+            "facing={},half={},shape={}",
             STAIR_FACING[facing],
-            ["bottom", "top"][usize::from(top)]
+            ["bottom", "top"][usize::from(top)],
+            stair_shape(nb, facing, top)
         ),
     ))
 }

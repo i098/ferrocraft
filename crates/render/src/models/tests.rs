@@ -673,7 +673,16 @@ fn wall_gate_and_bed_keys() {
     let gate = 107 << 4;
     assert!(key(gate, &world(&[((1, 0), wall)])).contains("in_wall=true"));
     assert!(key(gate, &world(&[((0, 1), wall)])).contains("in_wall=false"));
-    assert_eq!(key(26 << 4 | 8 | 2, &world(&[])), "facing=north,part=head");
+}
+
+/// Vanilla blockstates/bed.json lists only facing and part: every bed meta must find a drawn variant.
+#[test]
+fn every_bed_state_has_quads() {
+    let Some(models) = jar_models() else { return };
+    for meta in 0..16u16 {
+        let quads = models.quads(26 << 4 | meta, NB);
+        assert!(quads.is_some_and(|q| !q.is_empty()), "bed meta {meta}");
+    }
 }
 
 /// Vanilla `BlockWall.canConnectTo` rejects `Material.gourd` (melon) but joins other full cubes.

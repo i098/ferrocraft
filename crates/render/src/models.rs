@@ -333,11 +333,7 @@ fn bake_quad(
     let face_after_turn =
         turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal");
     if uvlock {
-        // `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its
-        // turned position on the turned face (the face's own `uv` is not read), stored in the slot `rotation` shifts it to.
-        for (i, p) in pos.iter().enumerate() {
-            uv[(i + 4 - face.turns % 4) % 4] = face_uv(face_after_turn, *p);
-        }
+        lock_uv(&mut uv, &pos, face_after_turn, face.turns);
     }
     Quad {
         pos,
@@ -347,6 +343,14 @@ fn bake_quad(
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
         shade: el.shade,
         tint: face.tint,
+    }
+}
+
+/// `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its
+/// turned position on the turned face (the face's own `uv` is not read), stored in the slot `rotation` shifts it to.
+fn lock_uv(uv: &mut [[f32; 2]; 4], pos: &[[f32; 3]; 4], face: usize, turns: usize) {
+    for (i, p) in pos.iter().enumerate() {
+        uv[(i + 4 - turns % 4) % 4] = face_uv(face, *p);
     }
 }
 

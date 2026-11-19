@@ -1,4 +1,4 @@
-//! Cube model orientation from the blockstate: the random variant `WeightedBakedModel` picks by
+//! Block model orientation from the blockstate: the random variant `WeightedBakedModel` picks by
 //! `MathHelper.getPositionRandom`, and the axis models of logs, hay bales and quartz pillars.
 
 use super::{face_uv, position_random, rot_uv, DIRS};
@@ -164,7 +164,10 @@ mod tests {
             [distinct(46), distinct(1), distinct(7), distinct(87)],
             [4, 4, 4, 16]
         );
-        assert_eq!([distinct(2), distinct(3), distinct(12), distinct(111)], [4, 4, 4, 4]);
+        assert_eq!(
+            [distinct(2), distinct(3), distinct(12), distinct(111)],
+            [4, 4, 4, 4]
+        );
     }
 
     #[test]

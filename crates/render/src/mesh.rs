@@ -180,15 +180,16 @@ fn is_leaves(state: u16) -> bool {
 pub(crate) const UNMIPPED: f32 = 3.0;
 
 /// Blocks of vanilla's `CUTOUT` layer, drawn after `setBlurMipmap(false, false)` (`EntityRenderer.renderWorldPass`):
-/// plants, torches, rails, doors, glass, bars, webs, fire and the like. Leaves are `MIPPED_CUTOUT`, so they and
+/// plants, torches, rails, doors, glass, webs, fire and the like. Leaves, bars and panes are `CUTOUT_MIPPED`, so they and
 /// every `SOLID` block keep the mip levels.
+const CUTOUT_BLOCKS: [u16; 50] = [
+    6, 20, 26, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 51, 52, 55, 59, 64, 65, 66, 71, 75, 76, 81,
+    83, 92, 93, 94, 96, 104, 105, 106, 111, 115, 117, 127, 138, 140, 141, 142, 149, 150, 157, 167,
+    175, 193, 194, 195, 196, 197,
+];
+
 fn is_unmipped(state: u16) -> bool {
-    matches!(
-        state >> 4,
-        6 | 20 | 27 | 28 | 30..=32 | 37..=40 | 50..=52 | 55 | 59 | 64 | 65 | 66 | 71 | 75 | 76 | 83 | 96 | 101
-            | 102 | 104..=106 | 111 | 115 | 117 | 118 | 131 | 132 | 138 | 140..=142 | 154 | 157 | 167 | 175
-            | 193..=197
-    )
+    CUTOUT_BLOCKS.contains(&(state >> 4))
 }
 
 struct Mesher<'a> {
@@ -952,5 +953,19 @@ mod tests {
         );
         assert!(m.opaque.is_empty());
         assert_eq!(m.water.vertices.len(), 8, "two broad faces only");
+    }
+
+    #[test]
+    #[ignore = "needs a JDK and downloads the 1.8.9 client jar"]
+    fn unmipped_blocks_are_the_cutout_layer_of_the_1_8_9_jar() {
+        let layers = oracle::Oracle::get().run("layer\n").unwrap();
+        assert_eq!(layers.len(), 256, "{layers:?}");
+        for (id, layer) in layers.iter().enumerate() {
+            assert_eq!(
+                is_unmipped((id as u16) << 4),
+                layer == "Cutout",
+                "block {id} is {layer}"
+            );
+        }
     }
 }

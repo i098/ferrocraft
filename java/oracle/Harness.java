@@ -252,6 +252,12 @@ public class Harness {
     }
 
     /** One line of {@code minewith}: the mining speed on the ground and in the air. */
+    static void layerLines() {
+        for (int id = 0; id < 256; id++) {
+            System.out.println(Block.byId(id).getRenderLayer());
+        }
+    }
+
     static void minewithCommand(PlayerEntity player, String[] t) {
         // minewith <block> <held item id, 0 = none> <efficiency> <haste amp, -1 = none>
         //          <fatigue amp, -1 = none> <aqua affinity 0/1>
@@ -885,6 +891,9 @@ public class Harness {
                     }
                     break;
                 }
+                case "layer":
+                    layerLines();
+                    break;
                 case "eat":
                     eatCommand(player, t);
                     break;

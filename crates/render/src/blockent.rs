@@ -434,7 +434,8 @@ fn emit_chest(out: &mut Batches, id: u16, double: bool, m: &Mat, angle: f32) {
     } else {
         (14.0, [64.0, 64.0])
     };
-    let knob_x = if double { 15.0 } else { 8.0 };
+    // `ModelLargeChest` puts the knob at x 16 (`ldc 16.0f`), on the seam; `ModelChest` at 8.
+    let knob_x = if double { 16.0 } else { 8.0 };
     let target = out.mesh(Tex::Named(format!(
         "textures/entity/chest/{}.png",
         chest_texture(id, double)

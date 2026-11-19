@@ -348,6 +348,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
         app.screen_key(KeyCode::F2, None, true);
@@ -364,6 +365,7 @@ mod tests {
             assets_dir: None,
             server: None,
             game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+            ..Default::default()
         });
         app.container = Some(ContainerScreen::new(&app.game.inv, 854, 480));
         app.mouse_button(true, 0);

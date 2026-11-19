@@ -271,11 +271,68 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("entity.Villager.name", "Villager"),
 ];
 
-fn translation(key: &str) -> Option<&'static str> {
+static LANG: std::sync::RwLock<Option<std::collections::HashMap<String, String>>> =
+    std::sync::RwLock::new(None);
+
+/// `LanguageMap.inject` (`StringTranslate`): `key=value` lines, `#` comments skipped, split at the
+/// first `=`, and `%d`/`%2$f` placeholders turned into `%s`/`%2$s`. Replaces the loaded table;
+/// the built-in table stays the fallback for keys the lang text lacks.
+pub fn set_lang(text: &str) {
+    let map = text
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.to_owned(), numeric_to_s(v)))
+        .collect();
+    *LANG.write().unwrap_or_else(|e| e.into_inner()) = Some(map);
+}
+
+/// `Pattern "%(\d+\$)?[\d\.]*[df]"` replaced by `%$1s`.
+fn numeric_to_s(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(i) = rest.find('%') {
+        out.push_str(&rest[..i]);
+        let spec = &rest[i + 1..];
+        let b = spec.as_bytes();
+        let digits = b.iter().take_while(|c| c.is_ascii_digit()).count();
+        let pos = if digits > 0 && b.get(digits) == Some(&b'$') {
+            digits + 1
+        } else {
+            0
+        };
+        let n = pos
+            + b[pos..]
+                .iter()
+                .take_while(|c| c.is_ascii_digit() || **c == b'.')
+                .count();
+        out.push('%');
+        if matches!(b.get(n), Some(b'd' | b'f')) {
+            out.push_str(&spec[..pos]);
+            out.push('s');
+            rest = &spec[n + 1..];
+        } else {
+            rest = spec;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `StatCollector.translateToLocal`: the loaded lang text, else the built-in table.
+fn translation(key: &str) -> Option<String> {
+    if let Some(v) = LANG
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(key))
+    {
+        return Some(v.clone());
+    }
     TRANSLATIONS
         .iter()
         .find(|(k, _)| *k == key)
-        .map(|&(_, v)| v)
+        .map(|&(_, v)| v.to_owned())
 }
 
 fn flatten(v: &Value, parent: Style, out: &mut Vec<Styled>) {
@@ -311,14 +368,12 @@ fn flatten(v: &Value, parent: Style, out: &mut Vec<Styled>) {
 }
 
 fn translate(key: &str, args: &[Value], style: &Style, out: &mut Vec<Styled>) {
+    // Vanilla: a key with no entry stays the key and the arguments are not shown.
     let Some(pattern) = translation(key) else {
         push(out, style, key);
-        for a in args {
-            push(out, style, " ");
-            flatten(a, style.clone(), out);
-        }
         return;
     };
+    let pattern = pattern.as_str();
     let mut next = 0;
     let mut rest = pattern;
     while let Some(i) = rest.find('%') {
@@ -331,6 +386,11 @@ fn translate(key: &str, args: &[Value], style: &Style, out: &mut Vec<Styled>) {
             _ if spec.starts_with('s') => {
                 next += 1;
                 (next - 1, 1)
+            }
+            _ if spec.starts_with('%') => {
+                push(out, style, "%");
+                rest = &spec[1..];
+                continue;
             }
             _ => {
                 push(out, style, "%");
@@ -397,11 +457,28 @@ mod tests {
             plain_text(r#"{"text":"a","extra":[{"text":"b"},"c"]}"#),
             "abc"
         );
-        assert_eq!(
-            plain_text(r#"{"translate":"x.y","with":["1","2"]}"#),
-            "x.y 1 2"
-        );
+        assert_eq!(plain_text(r#"{"translate":"x.y","with":["1","2"]}"#), "x.y");
         assert_eq!(plain_text("not json"), "not json");
+    }
+
+    #[test]
+    fn lang_text_formats_command_feedback() {
+        super::set_lang(
+            "# c\ncommands.give.success=Given %s \u{d7} %d to %s\ncommands.tp.success.coordinates=Teleported %s to %.1f, %.1f\n",
+        );
+        assert_eq!(
+            plain_text(
+                r#"{"translate":"commands.give.success","with":["[Splash Potion of Healing]","1","PtF"]}"#
+            ),
+            "Given [Splash Potion of Healing] \u{d7} 1 to PtF"
+        );
+        assert_eq!(
+            plain_text(
+                r#"{"translate":"commands.tp.success.coordinates","with":["PtF","-799.5","4.0"]}"#
+            ),
+            "Teleported PtF to -799.5, 4.0"
+        );
+        assert_eq!(plain_text(r#"{"translate":"container.chest"}"#), "Chest");
     }
 
     #[test]

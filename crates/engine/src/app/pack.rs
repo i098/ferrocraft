@@ -6,6 +6,11 @@ use ferrocraft_net_client::{load_servers, save_servers, split_address, PackStatu
 use gui::screens::PackPrompt;
 
 impl App {
+    /// `LanguageMap.inject` for chat `translate` components: the same lang text the menus use.
+    pub(super) fn inject_chat_lang(&self, lang: &str) {
+        ferrocraft_net_client::set_lang(lang);
+    }
+
     /// The `servers.dat` entry for the connected server, with its `acceptTextures` choice.
     fn server_entry(&self) -> Option<(usize, Vec<ferrocraft_net_client::ServerEntry>)> {
         let path = self.args.game_dir.join("servers.dat");

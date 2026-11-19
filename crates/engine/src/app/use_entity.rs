@@ -53,6 +53,7 @@ mod tests {
                 assets_dir: None,
                 server: None,
                 game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+                ..Default::default()
             });
             app.game.player = Some(world::Player::new([0.5, 64.0, 0.5], 0.0));
             app.game.inv.player[36] = Some(world::inventory::ItemStack {

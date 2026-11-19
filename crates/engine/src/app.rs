@@ -275,6 +275,7 @@ impl App {
             lang.push('\n');
             lang += &merged_lang(&file, src.as_mut(), &self.ui.settings.lang);
         }
+        self.inject_chat_lang(&lang);
         let splashes = src
             .as_mut()
             .and_then(|s| s.read("assets/minecraft/texts/splashes.txt"))
@@ -1489,7 +1490,17 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Minecraft 1.8.9");
+        let attrs = Window::default_attributes()
+            .with_title("Minecraft 1.8.9")
+            .with_inner_size(winit::dpi::PhysicalSize::new(
+                self.args.width,
+                self.args.height,
+            ))
+            .with_fullscreen(
+                self.args
+                    .fullscreen
+                    .then_some(winit::window::Fullscreen::Borderless(None)),
+            );
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
@@ -1498,6 +1509,10 @@ impl ApplicationHandler for App {
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
+        // `Minecraft.startGame`: `--fullscreen` toggles full screen on, which sets `gameSettings.fullScreen`.
+        if self.args.fullscreen {
+            self.ui.settings.fullscreen = true;
+        }
         self.apply_settings();
         self.start_screen();
     }

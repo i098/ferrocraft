@@ -26,7 +26,7 @@ use std::time::Duration;
 
 pub use auth::Auth;
 pub use chat::{
-    formatted_text, plain_text, styled, Click, ClickAction, Hover, HoverAction, Styled,
+    formatted_text, plain_text, set_lang, styled, Click, ClickAction, Hover, HoverAction, Styled,
 };
 pub use events::{PlayerInfo, PlayerListEvent};
 pub use ferrocraft_protocol::play::CombatEventKind;

@@ -108,6 +108,12 @@ pub enum NetEvent {
         area: [usize; 4],
         data: Vec<u8>,
     },
+    /// Maps (0x34): the decorations of map `id` as `(kind, x, z, rotation)`. Every packet replaces
+    /// the whole list (`S34PacketMaps.setMapdataTo` clears `mapDecorations` first).
+    MapIcons {
+        id: i32,
+        icons: Vec<(u8, i8, i8, u8)>,
+    },
     /// A chat message (positions 0 and 1) as styled runs.
     Chat(Vec<Styled>),
     /// An action bar message (position 2): the component's unformatted text.

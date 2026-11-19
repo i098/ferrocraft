@@ -321,6 +321,12 @@ impl App {
             }
             return;
         }
+        if let NetEvent::MapIcons { id, icons } = &ev {
+            if let Some(r) = &mut self.renderer {
+                r.map_icons(*id, icons);
+            }
+            return;
+        }
         if let NetEvent::Statistics(values) = &ev {
             self.ui.stats_arrived(values);
             return;

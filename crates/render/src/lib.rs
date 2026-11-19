@@ -41,6 +41,7 @@ pub use ambient::{random_display_ticks, Effect as AmbientEffect};
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use biome::splashes;
 pub use blockent::{book_quads, Banner, BookQuad, Skull, WornHead};
+pub use blocks::flower_pot_state;
 pub use entity::{hanging, item, leash, vehicle};
 pub use entity::{
     nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook, TeamTag, Thrower,
@@ -54,10 +55,12 @@ pub use weather::{rain_particles, stops_rain, RainClock, WeatherSound};
 /// Whether a block state is drawn as a full cube (lava included); everything the mesher skips
 /// or blends (plants, doors, panes, water) is not.
 pub fn is_solid(state: u16) -> bool {
-    matches!(
-        blocks::look(state).kind,
-        blocks::Kind::Opaque | blocks::Kind::Cutout
-    )
+    // The beacon is a model but keeps its full-cube collision box.
+    state >> 4 == 138
+        || matches!(
+            blocks::look(state).kind,
+            blocks::Kind::Opaque | blocks::Kind::Cutout
+        )
 }
 
 /// `Block.isViewBlocking`: an opaque full cube hides the camera inside it.

@@ -29,6 +29,12 @@ pub enum TileEvent {
         base: u8,
         layers: Vec<(String, u8)>,
     },
+    /// `TileEntityFlowerPot`: the plant's block id (0 when empty) and its `Data`.
+    FlowerPot {
+        pos: [i32; 3],
+        plant: u16,
+        data: i32,
+    },
     /// `MobSpawnerBaseLogic.readFromNBT`: the entity it shows (`SpawnData.id`, else `EntityId`),
     /// `Delay` and `MinSpawnDelay`.
     Spawner {
@@ -61,7 +67,7 @@ pub(crate) fn event(packet: &cb::Packet) -> Option<NetEvent> {
     Some(NetEvent::Tile(tile))
 }
 
-/// `TileEntity.onDataPacket` of the spawner (1), sign (9), skull (4) and banner (6) block entities.
+/// `TileEntity.onDataPacket` of the spawner (1), flower pot (5), sign (9), skull (4) and banner (6) block entities.
 fn update(pos: [i32; 3], action: u8, nbt: &Nbt) -> Option<TileEvent> {
     let root = &nbt.root;
     match action {
@@ -82,7 +88,31 @@ fn update(pos: [i32; 3], action: u8, nbt: &Nbt) -> Option<TileEvent> {
             base: int(root, "Base").map_or(0, |v| v as u8),
             layers: patterns(root),
         }),
+        5 => Some(TileEvent::FlowerPot {
+            pos,
+            plant: pot_plant(root),
+            data: int(root, "Data").unwrap_or(0),
+        }),
         _ => None,
+    }
+}
+
+/// `TileEntityFlowerPot.readFromNBT`: `Item` is a registry name, or an item id in old data.
+fn pot_plant(root: &Compound) -> u16 {
+    match tag(root, "Item") {
+        Some(Tag::String(name)) => match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "sapling" => 6,
+            "tallgrass" => 31,
+            "deadbush" => 32,
+            "yellow_flower" => 37,
+            "red_flower" => 38,
+            "brown_mushroom" => 39,
+            "red_mushroom" => 40,
+            "cactus" => 81,
+            _ => 0,
+        },
+        Some(Tag::Int(id)) => u16::try_from(*id).unwrap_or(0),
+        _ => 0,
     }
 }
 
@@ -305,6 +335,22 @@ mod tests {
                 pos: [-3, 64, 12],
                 base: 1,
                 layers: vec![("bs".into(), 11)]
+            })
+        );
+
+        let pot = send(
+            5,
+            tags(&[
+                ("Item", Tag::String("minecraft:red_flower".into())),
+                ("Data", Tag::Int(3)),
+            ]),
+        );
+        assert_eq!(
+            pot,
+            Some(TileEvent::FlowerPot {
+                pos: [-3, 64, 12],
+                plant: 38,
+                data: 3
             })
         );
     }

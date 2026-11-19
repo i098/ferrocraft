@@ -33,7 +33,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 20] = [
+const BLOCKSTATES: [&str; 24] = [
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",
@@ -54,6 +54,10 @@ const BLOCKSTATES: [&str; 20] = [
     "tripwire_hook",
     "wooden_door",
     "iron_door",
+    "cactus",
+    "vine",
+    "flower_pot",
+    "beacon",
 ];
 /// The other door blockstates, one per wood.
 const WOOD_DOORS: [&str; 5] = [
@@ -76,6 +80,8 @@ pub struct Quad {
     pub cull: Option<usize>,
     /// The element's `shade`: false draws at full brightness.
     pub shade: bool,
+    /// The face has a `tintindex`: the block's biome or fixed tint multiplies the texel.
+    pub tint: bool,
 }
 
 #[derive(Default)]
@@ -89,6 +95,7 @@ struct Face {
     turns: usize,
     tex: String,
     cull: Option<usize>,
+    tint: bool,
 }
 
 struct Element {
@@ -149,6 +156,7 @@ fn parse_element(e: &Value) -> Option<Element> {
                 .get("cullface")
                 .and_then(Value::as_str)
                 .and_then(face_index),
+            tint: f.get("tintindex").is_some(),
         });
     }
     Some(Element {
@@ -310,6 +318,7 @@ fn bake_quad(el: &Element, f: usize, face: &Face, tex: Arc<str>, (x, y): (u8, u8
         face: turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal"),
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
         shade: el.shade,
+        tint: face.tint,
     }
 }
 

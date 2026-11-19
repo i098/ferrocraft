@@ -69,6 +69,7 @@ fn handle(
                 NetEvent::Respawn {
                     dimension_changed: changed,
                 },
+                NetEvent::Dimension(r.dimension),
                 NetEvent::LevelType {
                     flat: is_flat(&r.level_type),
                 },
@@ -93,6 +94,7 @@ fn handle(
                     max_players: j.max_players,
                     reduced_debug_info: j.reduced_debug_info,
                 },
+                NetEvent::Dimension(i32::from(j.dimension)),
                 NetEvent::LevelType {
                     flat: is_flat(&j.level_type),
                 },

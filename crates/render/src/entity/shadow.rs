@@ -4,6 +4,7 @@
 use super::{Class, EntityDraw};
 use crate::blocks::{look, Kind};
 use crate::mesh::{MeshData, Vertex};
+use crate::sky::Dimension;
 
 pub const TEXTURE: &str = "textures/misc/shadow.png";
 
@@ -63,8 +64,8 @@ pub fn caster(d: &EntityDraw) -> Option<Caster> {
 }
 
 /// `World.calculateSkylightSubtracted(1.0)`: how many sky levels the time of day and the weather remove.
-pub fn skylight_subtracted(world_time: i64, rain: f32, thunder: f32) -> i32 {
-    let angle = crate::sky::celestial_angle(world_time, 1.0);
+pub fn skylight_subtracted(dimension: Dimension, world_time: i64, rain: f32, thunder: f32) -> i32 {
+    let angle = dimension.celestial_angle(world_time, 1.0);
     let mut f = (1.0 - ((angle * std::f32::consts::TAU).cos() * 2.0 + 0.5)).clamp(0.0, 1.0);
     f = 1.0 - f;
     f *= 1.0 - rain * 5.0 / 16.0;
@@ -183,7 +184,7 @@ mod tests {
 
     #[test]
     fn eye_brightness_follows_vanilla_table_at_night() {
-        let night = skylight_subtracted(18000, 0.0, 0.0);
+        let night = skylight_subtracted(Dimension::Overworld, 18000, 0.0, 0.0);
         assert_eq!(night, 11);
         // Sky 15 minus 11 = level 4 in the open at night: 4/15 / (11/15 * 3 + 1).
         let want = (4.0 / 15.0) / ((11.0 / 15.0) * 3.0 + 1.0);
@@ -192,7 +193,10 @@ mod tests {
         assert_eq!(eye_light_brightness([0, 0], night), 0.0);
         assert_eq!(eye_light_brightness([0, 15], night), 1.0);
         assert_eq!(
-            eye_light_brightness([15, 0], skylight_subtracted(6000, 0.0, 0.0)),
+            eye_light_brightness(
+                [15, 0],
+                skylight_subtracted(Dimension::Overworld, 6000, 0.0, 0.0)
+            ),
             1.0
         );
     }
@@ -261,9 +265,15 @@ mod tests {
 
     #[test]
     fn midnight_subtracts_eleven_sky_levels() {
-        assert_eq!(skylight_subtracted(6000, 0.0, 0.0), 0);
-        assert_eq!(skylight_subtracted(18000, 0.0, 0.0), 11);
-        assert!(skylight_subtracted(6000, 1.0, 0.0) > 0);
-        assert!(skylight_subtracted(6000, 1.0, 1.0) > skylight_subtracted(6000, 0.0, 1.0));
+        assert_eq!(skylight_subtracted(Dimension::Overworld, 6000, 0.0, 0.0), 0);
+        assert_eq!(
+            skylight_subtracted(Dimension::Overworld, 18000, 0.0, 0.0),
+            11
+        );
+        assert!(skylight_subtracted(Dimension::Overworld, 6000, 1.0, 0.0) > 0);
+        assert!(
+            skylight_subtracted(Dimension::Overworld, 6000, 1.0, 1.0)
+                > skylight_subtracted(Dimension::Overworld, 6000, 0.0, 1.0)
+        );
     }
 }

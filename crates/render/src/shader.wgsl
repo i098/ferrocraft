@@ -8,6 +8,8 @@ struct Globals {
     screen: vec4<f32>,
     // rgb: tint of a hit entity (`setBrightness`), a: its strength
     hurt: vec4<f32>,
+    // x: lowest light table value (0.1 in the Nether), y: 1 in the End (its own light map colour)
+    dim: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var tex: texture_2d<f32>;
@@ -71,13 +73,13 @@ fn vs_thick(v: WorldIn) -> WorldOut {
     return o;
 }
 
-// OverworldProvider.lightBrightnessTable with level normalised to 0..1.
+// Dimension.getBrightnessTable with level normalised to 0..1.
 fn brightness(level: f32) -> f32 {
     let f = 1.0 - level;
-    return (1.0 - f) / (f * 3.0 + 1.0);
+    return (1.0 - f) / (f * 3.0 + 1.0) * (1.0 - g.dim.x) + g.dim.x;
 }
 
-// EntityRenderer.updateLightmap for the overworld.
+// EntityRenderer.updateLightmap.
 fn lightmap(sky: f32, block: f32) -> vec3<f32> {
     let sun = g.fog.z * 0.95 + 0.05;
     let f1 = brightness(sky) * sun;
@@ -89,6 +91,10 @@ fn lightmap(sky: f32, block: f32) -> vec3<f32> {
     // A Wither (screen.w is `skyDarkness`): red x0.7, green and blue x0.6 at full darkness.
     if (g.screen.w > 0.0) {
         c = c * (1.0 - g.screen.w) + c * vec3<f32>(0.7, 0.6, 0.6) * g.screen.w;
+    }
+    // The End light map ignores the sky light and the time of day.
+    if (g.dim.y > 0.5) {
+        c = vec3<f32>(0.22 + f2 * 0.75, 0.28 + f6 * 0.75, 0.25 + f7 * 0.75);
     }
     c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
     // Night Vision (screen.z is its brightness, 0 without the effect): scale toward the brightest channel at 1.

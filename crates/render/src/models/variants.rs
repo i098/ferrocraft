@@ -24,7 +24,19 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         65 => ladder(meta),
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
+        _ => connected_variant(state, facing, nb),
+    }
+}
+
+/// Doors, gates, walls, beds and stairs.
+fn connected_variant(state: u16, facing: &str, nb: Nb) -> Found {
+    let (id, meta) = (state >> 4, state as usize & 15);
+    match id {
         64 | 71 | 193..=197 => door(id, state, nb),
+        107 | 183..=187 => fence_gate(id, meta, facing, nb),
+        139 => wall(meta, nb),
+        26 => bed(meta, facing),
+        _ if is_stairs(id) => stairs(id, meta, nb),
         _ => mechanism(id, meta, nb),
     }
 }
@@ -66,6 +78,13 @@ fn flower_pot(id: u16, meta: usize) -> Found {
     let n = if id == 140 { meta } else { 16 + meta };
     let contents = crate::blocks::POT_CONTENTS.get(n)?;
     Some(("flower_pot", format!("contents={contents}")))
+}
+
+fn bed(meta: usize, facing: &str) -> Found {
+    Some((
+        "bed",
+        format!("facing={facing},part={}", ["foot", "head"][meta >> 3 & 1]),
+    ))
 }
 
 fn torch(id: u16, meta: usize) -> Found {
@@ -301,4 +320,147 @@ fn door_key(state: u16, nb: Nb) -> String {
     let hinge = ["left", "right"][usize::from(same(high) && high & 1 != 0)];
     let half = ["lower", "upper"][usize::from(upper)];
     format!("facing={facing},half={half},hinge={hinge},open={open}")
+}
+
+pub(super) const STAIRS: [&str; 13] = [
+    "oak_stairs",
+    "stone_stairs",
+    "brick_stairs",
+    "stone_brick_stairs",
+    "nether_brick_stairs",
+    "sandstone_stairs",
+    "spruce_stairs",
+    "birch_stairs",
+    "jungle_stairs",
+    "quartz_stairs",
+    "acacia_stairs",
+    "dark_oak_stairs",
+    "red_sandstone_stairs",
+];
+
+pub(super) const GATES: [&str; 6] = [
+    "fence_gate",
+    "spruce_fence_gate",
+    "birch_fence_gate",
+    "jungle_fence_gate",
+    "dark_oak_fence_gate",
+    "acacia_fence_gate",
+];
+
+const STAIR_IDS: [u16; 13] = [
+    53, 67, 108, 109, 114, 128, 134, 135, 136, 156, 163, 164, 180,
+];
+
+fn is_stairs(id: u16) -> bool {
+    STAIR_IDS.contains(&id)
+}
+
+/// Stair facing of meta bits 0..2 (`BlockStairs.getStateFromMeta`) as `0 east, 1 west, 2 south, 3 north`.
+const STAIR_FACING: [&str; 4] = ["east", "west", "south", "north"];
+/// Block offset `(dx, dz)` of each stair facing.
+const STEP: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+const EAST: usize = 0;
+const WEST: usize = 1;
+const SOUTH: usize = 2;
+const NORTH: usize = 3;
+
+/// `(neighbour facing, offset that must not hold an equal stair, value for a bottom stair)` per own facing, from the
+/// bytecode of `BlockStairs.func_176307_f` (outer corner, neighbour in front) and `func_176305_g` (inner, behind).
+type Corner = [(usize, usize, u8); 2];
+const OUTER: [Corner; 4] = [
+    [(NORTH, SOUTH, 1), (SOUTH, NORTH, 2)],
+    [(NORTH, SOUTH, 2), (SOUTH, NORTH, 1)],
+    [(WEST, EAST, 2), (EAST, WEST, 1)],
+    [(WEST, EAST, 1), (EAST, WEST, 2)],
+];
+const INNER: [Corner; 4] = [
+    [(NORTH, NORTH, 1), (SOUTH, SOUTH, 2)],
+    [(NORTH, NORTH, 2), (SOUTH, SOUTH, 1)],
+    [(WEST, WEST, 2), (EAST, EAST, 1)],
+    [(WEST, WEST, 1), (EAST, EAST, 2)],
+];
+
+/// Facing of the stair on `side` with the same half, if any.
+fn stair_on(nb: Nb, side: usize, top: bool) -> Option<usize> {
+    let (dx, dz) = STEP[side];
+    let s = nb(dx, 0, dz);
+    (is_stairs(s >> 4) && (s as usize >> 2 & 1 == top as usize)).then_some(s as usize & 3)
+}
+
+/// Corner value (1 left, 2 right) from the stair at `neighbour`, unless an equal stair stands at the table's offset.
+fn corner(nb: Nb, top: bool, facing: usize, neighbour: usize, table: &Corner) -> Option<u8> {
+    let f2 = stair_on(nb, neighbour, top)?;
+    table
+        .iter()
+        .find(|(n, off, _)| *n == f2 && stair_on(nb, *off, top) != Some(facing))
+        .map(|(_, _, v)| if top { 3 - v } else { *v })
+}
+
+/// `BlockStairs.getActualState`: the outer corner wins over the inner one; 1 is the left and 2 the right variant.
+fn stair_shape(nb: Nb, facing: usize, top: bool) -> &'static str {
+    let opposite = [WEST, EAST, NORTH, SOUTH][facing];
+    match (
+        corner(nb, top, facing, facing, &OUTER[facing]),
+        corner(nb, top, facing, opposite, &INNER[facing]),
+    ) {
+        (Some(v), _) => ["", "outer_left", "outer_right"][v as usize],
+        (None, Some(v)) => ["", "inner_left", "inner_right"][v as usize],
+        (None, None) => "straight",
+    }
+}
+
+fn stairs(id: u16, meta: usize, nb: Nb) -> Found {
+    let (facing, top) = (meta & 3, meta & 4 != 0);
+    Some((
+        STAIRS[STAIR_IDS.iter().position(|i| *i == id).unwrap_or(0)],
+        format!(
+            "facing={},half={},shape={}",
+            STAIR_FACING[facing],
+            ["bottom", "top"][usize::from(top)],
+            stair_shape(nb, facing, top)
+        ),
+    ))
+}
+
+/// `BlockFenceGate.getActualState`: `in_wall` when a cobblestone wall stands beside the gate's hinge axis.
+fn fence_gate(id: u16, meta: usize, facing: &str, nb: Nb) -> Found {
+    let name = match id {
+        107 => GATES[0],
+        _ => GATES[id as usize - 182],
+    };
+    let wall = |dx, dz| nb(dx, 0, dz) >> 4 == 139;
+    let in_wall = if meta & 1 == 0 {
+        wall(-1, 0) || wall(1, 0)
+    } else {
+        wall(0, -1) || wall(0, 1)
+    };
+    Some((
+        name,
+        format!("facing={facing},in_wall={in_wall},open={}", meta & 4 != 0),
+    ))
+}
+
+/// `BlockWall.canConnectTo`: walls and gates, and full opaque cubes other than barriers and pumpkins.
+fn wall_joins(s: u16) -> bool {
+    let id = s >> 4;
+    id == 139
+        || matches!(id, 107 | 183..=187)
+        || (crate::blocks::look(s).kind == crate::blocks::Kind::Opaque
+            && !matches!(id, 86 | 91 | 103 | 166))
+}
+
+/// `BlockWall.getActualState`: `up` is true unless the block above is air.
+fn wall(meta: usize, nb: Nb) -> Found {
+    let join = |dx, dz| wall_joins(nb(dx, 0, dz));
+    Some((
+        ["cobblestone_wall", "mossy_cobblestone_wall"][meta & 1],
+        format!(
+            "east={},north={},south={},up={},west={}",
+            join(1, 0),
+            join(0, -1),
+            join(0, 1),
+            nb(0, 1, 0) >> 4 != 0,
+            join(-1, 0)
+        ),
+    ))
 }

@@ -602,3 +602,143 @@ fn jar_cactus_vine_beacon_and_pot_keep_vanilla_boxes() {
     let empty = models.quads(140 << 4, NB).unwrap();
     assert!(empty.iter().all(|q| &*q.tex != "flower_rose"));
 }
+
+/// A world with `(dx, dz) -> state` entries on the row `y = 0`; air elsewhere.
+fn world(blocks: &[((i32, i32), u16)]) -> impl Fn(i32, i32, i32) -> u16 + '_ {
+    move |dx, dy, dz| {
+        blocks
+            .iter()
+            .find(|((x, z), _)| dy == 0 && (*x, *z) == (dx, dz))
+            .map_or(0, |(_, s)| *s)
+    }
+}
+
+fn key(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> String {
+    super::variants::variant(state, nb).unwrap().1
+}
+
+/// `BlockStairs.getActualState` (`func_176307_f` outer, `func_176305_g` inner), read from the 1.8.9 bytecode.
+#[test]
+fn stairs_corners_follow_the_neighbours() {
+    // Oak stairs: meta 0 east, 1 west, 2 south, 3 north; +4 is upside down.
+    let (east, west, south, north) = (53 << 4, 53 << 4 | 1, 53 << 4 | 2, 53 << 4 | 3);
+    let at = |own: u16, nbs: &[((i32, i32), u16)]| key(own, &world(nbs));
+    assert_eq!(at(east, &[]), "facing=east,half=bottom,shape=straight");
+    // A north-facing stair in front turns an east stair into an outer corner; the left variant when bottom.
+    assert_eq!(
+        at(east, &[((1, 0), north)]),
+        "facing=east,half=bottom,shape=outer_left"
+    );
+    assert_eq!(
+        at(east, &[((1, 0), south)]),
+        "facing=east,half=bottom,shape=outer_right"
+    );
+    assert_eq!(
+        at(east | 4, &[((1, 0), north | 4)]),
+        "facing=east,half=top,shape=outer_right"
+    );
+    // Behind: an inner corner.
+    assert_eq!(
+        at(east, &[((-1, 0), north)]),
+        "facing=east,half=bottom,shape=inner_left"
+    );
+    assert_eq!(
+        at(west, &[((1, 0), south)]),
+        "facing=west,half=bottom,shape=inner_left"
+    );
+    // The other half does not join; an equal stair beside the corner cancels it.
+    assert_eq!(
+        at(east, &[((1, 0), north | 4)]),
+        "facing=east,half=bottom,shape=straight"
+    );
+    assert_eq!(
+        at(east, &[((1, 0), north), ((0, 1), east)]),
+        "facing=east,half=bottom,shape=straight"
+    );
+}
+
+/// `BlockWall.getActualState` and `BlockFenceGate.getActualState`, and the bed part.
+#[test]
+fn wall_gate_and_bed_keys() {
+    let wall = 139 << 4;
+    let blocks = [((0, -1), wall), ((0, 1), wall)];
+    let nb = world(&blocks);
+    assert_eq!(
+        key(wall, &nb),
+        "east=false,north=true,south=true,up=false,west=false"
+    );
+    let covered = |dx, dy, dz| if dy == 1 { 1 << 4 } else { nb(dx, dy, dz) };
+    assert!(key(wall, &covered).contains("up=true"));
+    // A gate facing south has its hinges on the x axis: only a wall at west or east lowers it.
+    let gate = 107 << 4;
+    assert!(key(gate, &world(&[((1, 0), wall)])).contains("in_wall=true"));
+    assert!(key(gate, &world(&[((0, 1), wall)])).contains("in_wall=false"));
+}
+
+/// The raised quarters of a bottom stair, read from the jar's real stair models: the x/z span of every up face at y = 1.
+fn raised_tops(models: &Models, state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Vec<[f32; 4]> {
+    let quads = models.quads(state, nb).expect("stair model");
+    quads
+        .iter()
+        .filter(|q| q.face == UP && q.pos.iter().all(|p| p[1] == 1.0))
+        .map(|q| {
+            let f =
+                |i: usize, m: fn(f32, f32) -> f32| q.pos.iter().map(|p| p[i]).fold(q.pos[0][i], m);
+            [
+                f(0, f32::min),
+                f(0, f32::max),
+                f(2, f32::min),
+                f(2, f32::max),
+            ]
+        })
+        .collect()
+}
+
+/// Facing east, a north stair at +x raises the north-east quarter (z grows south); one behind raises north-west too.
+#[test]
+fn stair_corner_models_raise_the_vanilla_quarter() {
+    let Some(models) = jar_models() else { return };
+    let (east, north) = (53 << 4, 53 << 4 | 3);
+    let outer = raised_tops(&models, east, &world(&[((1, 0), north)]));
+    assert!(outer.contains(&[0.5, 1.0, 0.0, 0.5]), "{outer:?}");
+    assert!(!outer.contains(&[0.5, 1.0, 0.5, 1.0]), "{outer:?}");
+    let inner = raised_tops(&models, east, &world(&[((-1, 0), north)]));
+    // The inner model raises the whole north half (one element) plus the south-east quarter; the south-west stays low.
+    assert!(inner.contains(&[0.0, 1.0, 0.0, 0.5]), "{inner:?}");
+    assert!(inner.contains(&[0.5, 1.0, 0.5, 1.0]), "{inner:?}");
+    assert!(!inner.contains(&[0.0, 0.5, 0.5, 1.0]), "{inner:?}");
+}
+
+/// Vanilla blockstates/bed.json lists only facing and part: every bed meta must find a drawn variant.
+#[test]
+fn every_bed_state_has_quads() {
+    let Some(models) = jar_models() else { return };
+    for meta in 0..16u16 {
+        let quads = models.quads(26 << 4 | meta, NB);
+        assert!(quads.is_some_and(|q| !q.is_empty()), "bed meta {meta}");
+    }
+}
+
+/// Vanilla `BlockWall.canConnectTo` rejects `Material.gourd` (melon) but joins other full cubes.
+#[test]
+fn wall_ignores_melon_but_joins_stone() {
+    let wall = 139 << 4;
+    let melon = key(wall, &world(&[((0, 1), 103 << 4)]));
+    assert!(melon.contains("south=false"), "{melon}");
+    let stone = key(wall, &world(&[((0, 1), 1 << 4)]));
+    assert!(stone.contains("south=true"), "{stone}");
+}
+
+/// `uvlock`: the quad takes the uv of its turned position, not the uv of the model face.
+#[test]
+fn uvlock_uses_the_turned_position() {
+    let Some(models) = jar_models() else { return };
+    // Stairs facing west are the east model turned 180 degrees with uvlock: the top step keeps the unturned wood grain.
+    let quads = models.quads(53 << 4 | 1, NB).unwrap();
+    let up = quads.iter().filter(|q| q.face == UP);
+    for q in up {
+        for (p, uv) in q.pos.iter().zip(q.uv) {
+            assert!((uv[0] - p[0]).abs() < 1e-4 && (uv[1] - p[2]).abs() < 1e-4);
+        }
+    }
+}

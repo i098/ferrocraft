@@ -303,6 +303,20 @@ fn riding_sends_no_entity_action() {
     assert_eq!(ids, [LOOK, STEER]);
 }
 
+/// `C0C` carries `moveForward` after `onLivingUpdate`: 1.0 from the key times 0.98.
+#[test]
+fn steer_forward_is_scaled_by_0_98() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.input.on_key(KeyCode::KeyW, true, None);
+    app.game.vehicle = Some(OTHER_ID);
+    app.tick_once();
+    let frames = sent_frames(&mut app, &rx);
+    let steer = frames.iter().find(|f| f[0] == STEER).expect("C0C sent");
+    let forward = f32::from_be_bytes(steer[5..9].try_into().unwrap());
+    assert_eq!(forward, 0.98_f32);
+}
+
 /// `handlePlayerMove` echoes `C06` without touching the sent position, so the next tick reports it.
 #[test]
 fn packet_after_a_teleport_reports_the_new_position() {

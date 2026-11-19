@@ -20,19 +20,10 @@ impl App {
             return None;
         }
         let p = self.game.player.as_ref()?;
-        let s = &self.ui.settings;
         let [x, y, z] = p.pos.map(|v| v.floor() as i32);
-        let ray = self.view_ray(frac);
         let total = self.game.entities.len() + 1;
         let left = left_lines(&DebugInfo {
-            fps_line: fps_line(&FpsInfo {
-                fps: self.fps.1,
-                chunk_updates: self.chunk_updates.1,
-                max_fps: s.max_fps,
-                vsync: s.vsync,
-                fancy: s.fancy_graphics,
-                clouds: s.clouds,
-            }),
+            fps_line: self.debug_fps(),
             renders: self.debug_renders((x >> 4, z >> 4)),
             entities: entities_line(rendered.min(total), total, 0),
             particles: format!("P: {}. T: All: {total}", self.particles.len()),
@@ -45,14 +36,28 @@ impl App {
             yaw: p.yaw,
             pitch: self.game.pitch,
             loaded_extra: self.debug_location(x, y, z),
-            looking_at: ray
-                .and_then(|(eye, yaw, pitch, id, vehicle)| {
-                    self.game.block_aim(eye, yaw, pitch, id, vehicle)
-                })
-                .map(|(h, _)| h.pos),
+            looking_at: self.debug_looking_at(frac),
             reduced: self.reduced_debug(),
         });
         Some((left, self.debug_right()))
+    }
+
+    fn debug_fps(&self) -> String {
+        let s = &self.ui.settings;
+        fps_line(&FpsInfo {
+            fps: self.fps.1,
+            chunk_updates: self.chunk_updates.1,
+            max_fps: s.max_fps,
+            vsync: s.vsync,
+            fancy: s.fancy_graphics,
+            clouds: s.clouds,
+        })
+    }
+
+    fn debug_looking_at(&self, frac: f64) -> Option<[i32; 3]> {
+        let (eye, yaw, pitch, id, vehicle) = self.view_ray(frac)?;
+        let (hit, _) = self.game.block_aim(eye, yaw, pitch, id, vehicle)?;
+        Some(hit.pos)
     }
 
     /// `getDebugInfoRenders`: the sections with blocks inside the render distance over all sections of the view.
@@ -68,9 +73,10 @@ impl App {
         renders_line(rendered, side * side * 16, d, MESH_WORKERS)
     }
 
-    /// `Biome`, `Light` and `Local Difficulty` when the chunk of the feet block is loaded.
+    /// `Biome`, `Light` and `Local Difficulty` when the feet block is in Y 0..256 and its chunk is loaded.
     fn debug_location(&self, x: i32, y: i32, z: i32) -> Vec<String> {
-        let Some(chunk) = self.game.store.get(x >> 4, z >> 4) else {
+        let chunk = self.game.store.get(x >> 4, z >> 4);
+        let (true, Some(chunk)) = ((0..256).contains(&y), chunk) else {
             return Vec::new();
         };
         let [sky, block] = self.renderer.as_ref().map_or([0.0; 2], |r| {

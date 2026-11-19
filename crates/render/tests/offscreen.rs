@@ -1686,7 +1686,11 @@ fn parity_particles_draw_and_expire() {
         let px = frame(&ps);
         let b = changed_box(&clear, &px, w);
         eprintln!("{name}: box {b:?}");
-        assert!(b.is_some(), "{name} must draw");
+        // The barrier is a block-item icon, which only the vanilla assets supply.
+        assert!(
+            b.is_some() || (name == "barrier" && jar.is_none()),
+            "{name} must draw"
+        );
         if let Some(d) = &dir {
             encode_png(
                 &d.join(format!("parity_{name}.png")),

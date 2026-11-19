@@ -1848,7 +1848,13 @@ mod tests {
         .unwrap();
         let mut app = App::new(args);
         app.load_texts();
-        let codes: Vec<&str> = app.ui.texts.languages.iter().map(|l| l.code.as_str()).collect();
+        let codes: Vec<&str> = app
+            .ui
+            .texts
+            .languages
+            .iter()
+            .map(|l| l.code.as_str())
+            .collect();
         assert_eq!(codes, ["en_US", "fr_FR"]);
         let _ = std::fs::remove_dir_all(&root);
     }

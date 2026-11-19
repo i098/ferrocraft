@@ -13,7 +13,7 @@ pub struct Args {
     pub assets_root: Option<PathBuf>,
     /// `--server`/`--port`/`FERROCRAFT_SERVER`: join this server at once; without it the title screen opens.
     pub server: Option<String>,
-    /// `--gameDir`, else `~/.minecraft`: holds `options.txt`, `servers.dat` and the sound assets.
+    /// `--gameDir`, else `~/.minecraft`: holds `options.txt` and `servers.dat`; a fallback place for `assets/` after `assets_root`.
     pub game_dir: PathBuf,
     /// `--width` and `--height`: the initial window size.
     pub width: u32,

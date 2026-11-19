@@ -159,7 +159,6 @@ fn parse_element(e: &Value) -> Option<Element> {
             uv,
             turns: f.get("rotation").and_then(Value::as_u64).unwrap_or(0) as usize / 90,
             tex: f.get("texture")?.as_str()?.to_owned(),
-            tint: f.get("tintindex").is_some(),
             cull: f
                 .get("cullface")
                 .and_then(Value::as_str)

@@ -18,9 +18,6 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         127 => cocoa(meta, facing),
         145 => anvil(meta, facing),
         34 => piston_head(meta),
-        29 | 33 => piston(id, meta),
-        27 | 28 | 66 | 157 => rail(id, meta),
-        55 => redstone_wire(nb),
         69 => lever(meta),
         70 | 72 => pressure_plate(id, meta),
         147 | 148 => weighted_plate(id, meta),
@@ -28,6 +25,15 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
         64 | 71 | 193..=197 => door(id, state, nb),
+        _ => mechanism(id, meta, nb),
+    }
+}
+
+fn mechanism(id: u16, meta: usize, nb: Nb) -> Found {
+    match id {
+        29 | 33 => piston(id, meta),
+        27 | 28 | 66 | 157 => rail(id, meta),
+        55 => redstone_wire(nb),
         _ => plant_or_block(id, meta, nb),
     }
 }
@@ -166,6 +172,10 @@ const WIRE_SIDES: [(&str, [i32; 2], usize); 4] = [
     ("west", [-1, 0], 1),
 ];
 
+const WIRE_POWER_SOURCES: [u16; 17] = [
+    28, 69, 70, 72, 75, 76, 77, 143, 131, 146, 147, 148, 149, 150, 151, 152, 178,
+];
+
 /// `BlockRedstoneWire.canConnectTo`: wire, a repeater lying along the line, or any block that
 /// provides power. `side` is the `HORIZONTAL` index of the direction from the wire, `None` for the
 /// check from above or below.
@@ -179,49 +189,30 @@ fn wire_connects(state: u16, side: Option<usize>) -> bool {
         }),
         // Torches, lever, buttons, plates, tripwire hook, detector rail, trapped chest,
         // redstone block, repeaters/comparators, daylight sensors.
-        _ => {
-            side.is_some()
-                && matches!(
-                    id,
-                    28 | 69
-                        | 70
-                        | 72
-                        | 75
-                        | 76
-                        | 77
-                        | 143
-                        | 131
-                        | 146
-                        | 147
-                        | 148
-                        | 149
-                        | 150
-                        | 151
-                        | 152
-                        | 178
-                )
-        }
+        _ => side.is_some() && WIRE_POWER_SOURCES.contains(&id),
     }
 }
 
-/// `BlockRedstoneWire.getActualState` / `getAttachPosition`: per side `none`, `side` or `up`.
+fn is_opaque(state: u16) -> bool {
+    crate::blocks::look(state).kind == crate::blocks::Kind::Opaque
+}
+
+/// `BlockRedstoneWire.getAttachPosition` for the neighbour at `[dx, dz]`.
+fn wire_attach(nb: Nb, [dx, dz]: [i32; 2], side: usize) -> &'static str {
+    let next = nb(dx, 0, dz);
+    if wire_connects(next, Some(side)) {
+        return "side";
+    }
+    if !is_opaque(next) && wire_connects(nb(dx, -1, dz), None) {
+        return "side";
+    }
+    let climbs = is_opaque(next) && !is_opaque(nb(0, 1, 0)) && wire_connects(nb(dx, 1, dz), None);
+    ["none", "up"][usize::from(climbs)]
+}
+
+/// `BlockRedstoneWire.getActualState`: per side `none`, `side` or `up`.
 fn redstone_wire(nb: Nb) -> Found {
-    let solid = |s: u16| crate::blocks::look(s).kind == crate::blocks::Kind::Opaque;
-    let above_solid = solid(nb(0, 1, 0));
-    let attach = |[dx, dz]: [i32; 2], side: usize| {
-        let next = nb(dx, 0, dz);
-        if !wire_connects(next, Some(side)) && (solid(next) || !wire_connects(nb(dx, -1, dz), None))
-        {
-            if !above_solid && solid(next) && wire_connects(nb(dx, 1, dz), None) {
-                "up"
-            } else {
-                "none"
-            }
-        } else {
-            "side"
-        }
-    };
-    let [e, n, s, w] = WIRE_SIDES.map(|(_, d, side)| attach(d, side));
+    let [e, n, s, w] = WIRE_SIDES.map(|(_, d, side)| wire_attach(nb, d, side));
     Some((
         "redstone_wire",
         format!("east={e},north={n},south={s},west={w}"),

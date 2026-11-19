@@ -103,6 +103,29 @@ fn explicit_uv_of_wall_torch_and_cocoa_sides_is_kept() {
     assert!(has_uv(&quads, "cocoa_stage_2", [11.0, 4.0, 15.0, 9.0]));
 }
 
+/// Vanilla `BlockFaceUV`: vertex `i` takes uv corner `(i + rotation / 90) % 4` of (u1,v1) (u1,v2) (u2,v2) (u2,v1);
+/// a blockstate `y` turns the face but never the uv. Covers the repeater torch, a mirrored door face and a rotated piston shaft.
+#[test]
+fn repeater_door_and_piston_faces_follow_vanilla_uv_rules() {
+    let face = |tex: &str, uv: &str, rot: u16| {
+        format!(
+            r##"{{"textures": {{"t": "blocks/{tex}"}}, "elements": [{{"from": [0,0,0], "to": [4,12,4],
+            "faces": {{"north": {{"uv": {uv}, "rotation": {rot}, "texture": "#t"}}}}}}]}}"##
+        )
+    };
+    let corners = |quads: &[Quad]| quads[0].uv.map(|c| [c[0] * 16.0, c[1] * 16.0]);
+
+    let repeater = bake(&face("redstone_torch_on", "[7,6,9,11]", 0), r#"{"model": "m"}"#);
+    assert_eq!(corners(&repeater), [[7.0, 6.0], [7.0, 11.0], [9.0, 11.0], [9.0, 6.0]]);
+
+    let door = bake(&face("door_wood_lower", "[3,0,0,16]", 0), r#"{"model": "m", "y": 90}"#);
+    assert_eq!(door[0].face, 5);
+    assert_eq!(corners(&door), [[3.0, 0.0], [3.0, 16.0], [0.0, 16.0], [0.0, 0.0]]);
+
+    let piston = bake(&face("piston_side", "[0,0,4,12]", 270), r#"{"model": "m"}"#);
+    assert_eq!(corners(&piston), [[4.0, 0.0], [0.0, 0.0], [0.0, 12.0], [4.0, 12.0]]);
+}
+
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
 #[test]
 fn element_rotation_leans_the_wall_torch() {
@@ -174,19 +197,24 @@ fn jar_models_keep_vanilla_uv() {
     // Cocoa age 1 pod side: vanilla [9,4,15,11] (south facing, no turn).
     let cocoa = models.quads(127 << 4 | 4, &nb).unwrap();
     assert!(has_uv(cocoa, "cocoa_stage_1", [9.0, 4.0, 15.0, 11.0]));
-    // Wall torch (facing east): the side planes cover the whole 16 px column.
+    // Wall torch (facing east): the side planes sample v 6..16 (the cube default would be v 3..13).
     let torch = models.quads(50 << 4 | 1, &nb).unwrap();
-    assert!(has_uv(torch, "torch_on", [0.0, 0.0, 16.0, 16.0]));
+    assert!(torch.iter().any(|q| {
+        let v = q.uv.iter().map(|p| p[1] * 16.0);
+        &*q.tex == "torch_on"
+            && v.clone().fold(99.0, f32::min) == 6.0
+            && v.fold(-9.0, f32::max) == 16.0
+    }));
     // Upper door half draws the upper texture; the hinge comes from the upper half.
     let upper = |meta: u16| move |_, dy, _| if dy < 0 { 64 << 4 } else { 64 << 4 | meta };
     let left = models.quads(64 << 4 | 8, &upper(8)).unwrap();
-    let right = models.quads(64 << 4 | 8 | 1, &upper(9)).unwrap();
     // The cap (up face) uses the lower texture in the vanilla model; every side uses the upper one.
     assert!(left
         .iter()
         .filter(|q| q.face != 0)
         .all(|q| &*q.tex == "door_wood_upper"));
-    assert_ne!(left, right, "hinge side mirrors the door");
-    // Piston head platform and shaft come from the model.
-    assert!(models.quads(34 << 4 | 2, &nb).unwrap().len() >= 6);
+    // Piston head platform and shaft come from the model, with the textures of piston_head_normal.json.
+    let piston = models.quads(34 << 4 | 2, &nb).unwrap();
+    assert!(piston.iter().any(|q| &*q.tex == "piston_top_normal"));
+    assert!(piston.iter().any(|q| &*q.tex == "piston_side"));
 }

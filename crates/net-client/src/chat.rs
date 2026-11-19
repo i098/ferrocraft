@@ -269,11 +269,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("container.enderchest", "Ender Chest"),
     ("container.beacon", "Beacon"),
     ("entity.Villager.name", "Villager"),
-    ("entity.Villager.farmer", "Farmer"),
-    ("entity.Villager.librarian", "Librarian"),
-    ("entity.Villager.priest", "Priest"),
-    ("entity.Villager.smith", "Blacksmith"),
-    ("entity.Villager.butcher", "Butcher"),
 ];
 
 static LANG: std::sync::RwLock<Option<std::collections::HashMap<String, String>>> =
@@ -413,6 +408,9 @@ fn translate(key: &str, args: &[Value], style: &Style, out: &mut Vec<Styled>) {
 
 #[cfg(test)]
 mod tests {
+    /// Tests that replace the global lang table run one at a time.
+    static LANG_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::{formatted_text, plain_text, styled};
 
     #[test]
@@ -468,6 +466,7 @@ mod tests {
 
     #[test]
     fn lang_text_formats_command_feedback() {
+        let _g = LANG_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         super::set_lang(
             "# c\ncommands.give.success=Given %s \u{d7} %d to %s\ncommands.tp.success.coordinates=Teleported %s to %.1f, %.1f\n",
         );
@@ -484,14 +483,34 @@ mod tests {
             "Teleported PtF to -799.5, 4.0"
         );
         assert_eq!(plain_text(r#"{"translate":"container.chest"}"#), "Chest");
-        for (key, name) in [
-            ("farmer", "Farmer"),
-            ("librarian", "Librarian"),
-            ("priest", "Priest"),
-            ("smith", "Blacksmith"),
-            ("butcher", "Butcher"),
-        ] {
-            let json = format!(r#"{{"translate":"entity.Villager.{key}"}}"#);
+    }
+
+    /// `FERROCRAFT_CLIENT_JAR` (any 1.8.9 jar holding `en_US.lang`) is the oracle: every key must
+    /// translate to something other than the raw key; skipped when the jar is absent.
+    #[test]
+    fn every_en_us_key_resolves_and_villager_careers_read_by_name() {
+        use std::io::Read;
+        let _g = LANG_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR") else {
+            return;
+        };
+        let mut z = zip::ZipArchive::new(std::fs::File::open(jar).unwrap()).unwrap();
+        let mut lang = String::new();
+        z.by_name("assets/minecraft/lang/en_US.lang")
+            .unwrap()
+            .read_to_string(&mut lang)
+            .unwrap();
+        super::set_lang(&lang);
+        for key in lang
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|l| l.split_once('=').map(|(k, _)| k))
+        {
+            let json = format!(r#"{{"translate":"{key}"}}"#);
+            assert_ne!(plain_text(&json), key, "raw key {key}");
+        }
+        for (career, name) in [("librarian", "Librarian"), ("cleric", "Cleric")] {
+            let json = format!(r#"{{"translate":"entity.Villager.{career}"}}"#);
             assert_eq!(plain_text(&json), name);
         }
     }

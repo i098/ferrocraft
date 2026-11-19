@@ -204,6 +204,8 @@ pub struct Game {
     pub weather: Weather,
     /// Lightning bolts of Spawn Global Entity and the flash they cause.
     pub bolts: render::Bolts,
+    /// Thunder and explosion sounds the bolts made this tick; the app plays and drains them.
+    pub thunder: Vec<render::WeatherSound>,
     pub swing: Swing,
     /// `renderArmPitch` and `renderArmYaw`.
     pub arm_look: ArmLook,
@@ -319,6 +321,7 @@ impl Game {
             disconnected: None,
             weather: Weather::default(),
             bolts: render::Bolts::default(),
+            thunder: Vec::new(),
             swing: Swing::default(),
             arm_look: ArmLook::default(),
             world_time: 6000,
@@ -804,7 +807,7 @@ impl Game {
             self.world_time += 1;
         }
         self.weather.tick();
-        self.bolts.tick();
+        self.thunder.extend(self.bolts.tick());
         self.swing.tick(self.effects.arm_swing_duration());
         if let Some(p) = &self.player {
             self.arm_look.tick([self.pitch, p.yaw]);

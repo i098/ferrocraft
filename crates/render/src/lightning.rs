@@ -42,9 +42,17 @@ impl Bolts {
     }
 
     /// One 20 Hz tick: `Minecraft.runTick` counts the cooldown down, then each bolt's `onUpdate`.
-    pub fn tick(&mut self) {
+    /// A bolt in stage 2 (its first tick) plays `ambient.weather.thunder` and `random.explode`.
+    pub fn tick(&mut self) -> Vec<crate::weather::WeatherSound> {
+        let mut sounds = Vec::new();
         self.cooldown = (self.cooldown - 1).max(0);
         for b in &mut self.list {
+            if b.stage == 2 {
+                let thunder = 0.8 + b.rng.next_float() * 0.2;
+                sounds.push(("ambient.weather.thunder", b.pos, 10_000.0, thunder));
+                let explode = 0.5 + b.rng.next_float() * 0.2;
+                sounds.push(("random.explode", b.pos, 2.0, explode));
+            }
             b.stage -= 1;
             if b.stage < 0 && b.fire_attempts > 0 && b.stage < -b.rng.next_int(10) {
                 b.fire_attempts -= 1;
@@ -56,6 +64,7 @@ impl Bolts {
             }
         }
         self.list.retain(|b| b.stage >= 0 || b.fire_attempts > 0);
+        sounds
     }
 
     /// Sky flash strength `0..=1` (`World.getSkyColor` with `lightningCooldown - partialTick`).
@@ -188,5 +197,24 @@ mod tests {
         let m = build(&[([0.0, 64.0, 0.0], 7)], [0.0; 3]);
         // 4 passes; per pass 8 + 3 + 3 strips of 8 triangles.
         assert_eq!(m.indices.len(), 4 * (8 + 3 + 3) * 8 * 3);
+    }
+
+    #[test]
+    fn a_bolt_thunders_and_explodes_once_on_its_first_tick() {
+        let mut b = Bolts::default();
+        b.spawn([1.0, 64.0, 2.0], 5);
+        let first = b.tick();
+        // Vanilla `EntityLightningBolt.onUpdate` with `lightningState == 2`.
+        assert_eq!(first.len(), 2);
+        let (n, at, v, p) = first[0];
+        assert_eq!(
+            (n, at, v),
+            ("ambient.weather.thunder", [1.0, 64.0, 2.0], 10_000.0)
+        );
+        assert!((0.8..1.0).contains(&p));
+        let (n, _, v, p) = first[1];
+        assert_eq!((n, v), ("random.explode", 2.0));
+        assert!((0.5..0.7).contains(&p));
+        assert!(b.tick().is_empty());
     }
 }

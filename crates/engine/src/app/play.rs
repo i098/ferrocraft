@@ -396,6 +396,8 @@ impl App {
         }
         self.boss_tick();
         self.step_sound();
+        let thunder = std::mem::take(&mut self.game.thunder);
+        self.play_weather(thunder);
         self.rain_particles();
         self.ambient_effects();
         self.potion_particles();
@@ -633,17 +635,30 @@ impl App {
         let top = precipitation_top(store);
         let (rain, _) = self.game.weather.strengths(1.0);
         let settings = &self.ui.settings;
-        let drops = render::rain_particles(
+        let clock = render::RainClock {
+            ticks: self.game.ticks,
+            sound_counter: &mut self.rain_sound_counter,
+        };
+        let (drops, sound) = render::rain_particles(
             rain,
             settings.fancy_graphics,
             settings.particles,
-            self.game.ticks,
+            clock,
             p.pos,
             top,
             |x, y, z| store.get_block(x, y, z),
         );
         for (kind, at) in drops {
             self.particles.spawn(kind, at, [0.0; 3], 0);
+        }
+        self.play_weather(sound);
+    }
+
+    /// Plays weather sounds (`WorldClient.playSound` of the rain, `EntityLightningBolt.onUpdate` thunder).
+    fn play_weather(&mut self, sounds: impl IntoIterator<Item = render::WeatherSound>) {
+        let Some(s) = &mut self.sound else { return };
+        for (name, at, volume, pitch) in sounds {
+            s.play(name, Some(at), volume, pitch);
         }
     }
 

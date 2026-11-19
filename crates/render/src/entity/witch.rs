@@ -90,7 +90,7 @@ fn hat(head: ([f32; 3], [f32; 3])) -> Vec<Part> {
 
 /// `LayerHeldItemWitch`, up to `ItemInHandRenderer.render`: from the nose pivot and rotation
 /// (`ModelRenderer.postRender` skips the translate offset and the head), then the pose of the
-/// item kind. `block3d` is `BlockItem` with `isItem3d`.
+/// item kind. `block3d` is a chest (`isRenderTypeChest`).
 pub(super) fn hand(d: &EntityDraw, block3d: bool) -> Mat {
     let n = nose(d);
     let seat = chain(&[

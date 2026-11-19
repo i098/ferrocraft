@@ -58,7 +58,7 @@ use crate::hand::UseAction;
 use crate::mesh::{MeshData, Vertex};
 pub use armorstand::StandLook;
 use glint_mask::Mask;
-pub use projectile::Thrower;
+pub use projectile::{bobber_line, Thrower};
 pub use skin::{Skin, Skins, SLOT};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 

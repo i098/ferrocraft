@@ -760,13 +760,19 @@ impl App {
         })
     }
 
+    fn local_slim(&self) -> bool {
+        u128::from_str_radix(&self.ui.player_id.replace('-', ""), 16).is_ok_and(default_slim)
+    }
+
     fn self_draw(&self, frac: f64) -> Option<EntityDraw> {
         let p = self.game.player.as_ref()?;
         let f = frac as f32;
         let lerp = |prev: f64, now: f64| prev + (now - prev) * frac;
         let slot = |i: usize| self.game.inv.player[i].as_ref().map_or(0, |s| s.id);
         Some(EntityDraw {
-            class: Class::Player { slim: false },
+            class: Class::Player {
+                slim: self.local_slim(),
+            },
             pos: [
                 lerp(self.game.prev_pos[0], p.pos[0]),
                 lerp(self.game.prev_pos[1], p.pos[1]),
@@ -869,6 +875,7 @@ impl App {
     }
 
     fn draw(&mut self) {
+        let local_slim = self.local_slim();
         let frac = self.tick_frac();
         let cam = self.camera(frac);
         let spectated = self.game.camera.and_then(|id| self.game.entities.get(id));
@@ -1046,6 +1053,10 @@ impl App {
                     lowered,
                     using,
                     glint: hand_item.is_some_and(|h| h.2),
+                    arm: render::ArmSkin {
+                        slim: local_slim,
+                        parts: self.ui.settings.model_parts,
+                    },
                     look,
                 }),
         );
@@ -1062,10 +1073,12 @@ impl App {
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(self.game.outline(self.hide_hud, ray));
         r.set_debug_axes(axes);
-        r.set_lines(
-            self.mod_drawn
-                .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes),
-        );
+        // `FishingBobberRenderer` draws its line as GL lines, 1 px wide at any distance.
+        let mut lines = self
+            .mod_drawn
+            .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes);
+        lines.extend(draws.iter().flat_map(render::bobber_line));
+        r.set_lines(lines);
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles
@@ -1639,6 +1652,11 @@ fn stand_look(e: &Entity) -> StandLook {
     .with_pose(e.meta.pose)
 }
 
+/// `DefaultPlayerSkin.getSkinType`: the default skin of an odd uuid hash is the slim one.
+fn default_slim(u: u128) -> bool {
+    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
+}
+
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
@@ -1651,11 +1669,7 @@ fn entity_draw(
 ) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
-            slim: slim.unwrap_or_else(|| {
-                e.uuid.is_some_and(|u| {
-                    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
-                })
-            }),
+            slim: slim.unwrap_or_else(|| e.uuid.is_some_and(default_slim)),
         },
         Kind::Mob(id) => Class::Mob(id),
         Kind::Object(id) => Class::Object(id),

@@ -40,6 +40,8 @@ pub struct Hand {
     pub using: Option<Using>,
     /// `ItemStack.hasEffect` of the held item: draws the enchantment glint over it.
     pub glint: bool,
+    /// The local skin's arm model and sleeve parts.
+    pub arm: ArmSkin,
     /// The view and the eased arm look, for the sway and the item lights.
     pub look: HandLook,
 }
@@ -161,10 +163,9 @@ pub(crate) fn chain(ms: &[Mat]) -> Mat {
 }
 
 /// `ItemRenderer.transformFirstPersonItem`, after `applyHandSway`.
-fn item_transform(swing: f32, lowered: f32, look: &HandLook) -> Mat {
+fn item_transform(swing: f32, lowered: f32) -> Mat {
     let root = swing.sqrt();
     chain(&[
-        look.sway(),
         translate(
             -0.4 * (root * PI).sin(),
             0.2 * (root * 2.0 * PI).sin(),
@@ -180,14 +181,16 @@ fn item_transform(swing: f32, lowered: f32, look: &HandLook) -> Mat {
     ])
 }
 
-/// `ItemRenderer.renderItemInFirstPerson`: the pose of the held item. While it is in use the
-/// swing is skipped and the action's transform joins the plain first-person one.
+/// `ItemRenderer.renderItemInFirstPerson`: the pose of the held item. The hand sway comes first
+/// (`rotateWithPlayerRotations`), the action's transform next. While the item is in use the swing
+/// is skipped.
 fn held_transform(hand: &Hand) -> Mat {
+    let sway = hand.look.sway();
     let Some(Using { action, timer }) = hand.using else {
-        return item_transform(hand.swing, hand.lowered, &hand.look);
+        return mul(sway, item_transform(hand.swing, hand.lowered));
     };
-    let base = item_transform(0.0, hand.lowered, &hand.look);
-    match action {
+    let base = item_transform(0.0, hand.lowered);
+    let pose = match action {
         UseAction::Consume => {
             let progress = timer / action.duration();
             let bob = if progress >= 0.8 {
@@ -232,7 +235,8 @@ fn held_transform(hand: &Hand) -> Mat {
                 scale3([1.0, 1.0, 1.0 + draw * 0.2]),
             ])
         }
-    }
+    };
+    mul(sway, pose)
 }
 
 /// A single block centred on the origin, as `RenderItem.renderItem` draws it (`scale(0.5)` follows in the model matrix).
@@ -580,6 +584,43 @@ pub fn flat(hand: &Hand, f: &Flat) -> Draw {
     }
 }
 
+/// What `ModelPlayer` of the local player shows on the arms: `smallArms` (Alex) and the skin
+/// part byte of `EnumPlayerModelParts` (left sleeve 4, right sleeve 8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArmSkin {
+    pub slim: bool,
+    pub parts: u8,
+}
+
+impl ArmSkin {
+    /// The wide arm with every skin part on, as the default Steve.
+    pub const STEVE: ArmSkin = ArmSkin {
+        slim: false,
+        parts: 0x7F,
+    };
+
+    /// `ModelPlayer` puts the arm pivot at y 2.5 for `smallArms` and 2 otherwise.
+    pub(crate) fn pivot_y(self) -> f32 {
+        if self.slim {
+            2.5 / 16.0
+        } else {
+            2.0 / 16.0
+        }
+    }
+}
+
+impl Default for ArmSkin {
+    fn default() -> Self {
+        Self::STEVE
+    }
+}
+
+/// `ModelBiped.setRotationAngles` rolls the arms about z by `cos(age * 0.09) * 0.05 + 0.05`;
+/// `RenderPlayer.renderRightArm` passes age 0.
+pub(crate) fn idle_arm_roll(age: f32) -> f32 {
+    (age * 0.09).cos() * 0.05 + 0.05
+}
+
 /// Eye-space placement of the right arm: `ItemRenderer` swing, `ModelRenderer` rotation point and z rotation.
 fn arm_model(hand: &Hand) -> Mat {
     let (swing, root) = (hand.swing, hand.swing.sqrt());
@@ -600,39 +641,93 @@ fn arm_model(hand: &Hand) -> Mat {
         rotate(-135.0, 1),
         translate(5.6, 0.0, 0.0),
     ]);
-    // Rotation point (-5, 2, 0) px, then z rotation 0.05 rad from `ModelBiped.setRotationAngles`.
     chain(&[
         place,
-        translate(-5.0 / 16.0, 2.0 / 16.0, 0.0),
-        rotate(0.05f32.to_degrees(), 2),
+        translate(-5.0 / 16.0, hand.arm.pivot_y(), 0.0),
+        rotate(idle_arm_roll(0.0).to_degrees(), 2),
     ])
 }
 
-/// `RenderPlayer.renderRightArm` seen through `ItemRenderer`: the arm of the default skin.
+/// `RenderPlayer.renderRightArm` seen through `ItemRenderer`: the arm and its sleeve of the local skin.
 pub fn arm(hand: &Hand, skin_height: u32) -> Draw {
-    arm_draw(arm_model(hand), &hand.look, skin_height, Side::Right)
+    arm_draw(
+        arm_model(hand),
+        &hand.look,
+        skin_height,
+        Side::Right,
+        hand.arm,
+    )
 }
 
-/// One arm of `ModelPlayer` (default skin, 64x64): which box and which skin pixel it unfolds from.
+/// One arm of `ModelPlayer` (64x64 skin): which box and which skin pixel it unfolds from.
 #[derive(Clone, Copy)]
-enum Side {
+pub(crate) enum Side {
     Right,
     Left,
 }
 
 impl Side {
-    /// The box as `[[x0, x1], [y0, y1], [z0, z1]]` and its skin pixel `(u, v)`; model y points down.
-    fn arm_box(self) -> ([[f32; 2]; 3], f32, f32) {
+    /// The box as `[[x0, x1], [y0, y1], [z0, z1]]` (model y points down), the skin pixel `(u, v)`
+    /// of the arm and the one of its sleeve.
+    fn arm_box(self, slim: bool) -> ([[f32; 2]; 3], [f32; 2], [f32; 2]) {
+        let w = if slim { 3.0 } else { 4.0 };
         match self {
-            Side::Right => ([[-3.0, 1.0], [-2.0, 10.0], [-2.0, 2.0]], 40.0, 16.0),
-            Side::Left => ([[-1.0, 3.0], [-2.0, 10.0], [-2.0, 2.0]], 32.0, 48.0),
+            Side::Right => (
+                [[1.0 - w, 1.0], [-2.0, 10.0], [-2.0, 2.0]],
+                [40.0, 16.0],
+                [40.0, 32.0],
+            ),
+            Side::Left => (
+                [[-1.0, w - 1.0], [-2.0, 10.0], [-2.0, 2.0]],
+                [32.0, 48.0],
+                [48.0, 48.0],
+            ),
+        }
+    }
+
+    /// The `EnumPlayerModelParts` bit of this arm's sleeve.
+    fn sleeve_bit(self) -> u8 {
+        match self {
+            Side::Right => 8,
+            Side::Left => 4,
         }
     }
 }
 
-/// The six faces of an arm box placed by `model`, lit per face.
-fn arm_draw(model: Mat, look: &HandLook, skin_height: u32, side: Side) -> Draw {
-    let ([[x0, x1], [y0, y1], [z0, z1]], tx, ty) = side.arm_box();
+/// The six faces of an arm box and, when the skin part is on and the skin has the second layer
+/// (64x64), its sleeve box grown by 0.25 (`bipedRightArmwear`), placed by `model` and lit per face.
+pub(crate) fn arm_draw(
+    model: Mat,
+    look: &HandLook,
+    skin_height: u32,
+    side: Side,
+    arm: ArmSkin,
+) -> Draw {
+    let mut out = Draw {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        model,
+    };
+    let (bounds, arm_uv, sleeve_uv) = side.arm_box(arm.slim);
+    arm_box_faces(&mut out, bounds, arm_uv, 0.0, skin_height, look);
+    if skin_height >= 64 && arm.parts & side.sleeve_bit() != 0 {
+        arm_box_faces(&mut out, bounds, sleeve_uv, 0.25, skin_height, look);
+    }
+    out
+}
+
+/// The faces of `ModelBox` `bounds` with skin origin `uv`, vertices pushed out by `grow`; the
+/// skin coordinates follow the box before growing.
+fn arm_box_faces(
+    out: &mut Draw,
+    bounds: [[f32; 2]; 3],
+    [tx, ty]: [f32; 2],
+    grow: f32,
+    skin_height: u32,
+    look: &HandLook,
+) {
+    let [[x0, x1], [y0, y1], [z0, z1]] = bounds;
+    let w = x1 - x0;
     let (tw, th) = (64.0, skin_height.max(32) as f32);
     // Each face: normal, then four corners as (position, u, v) in skin pixels.
     type Corner = ([f32; 3], f32, f32);
@@ -649,42 +744,45 @@ fn arm_draw(model: Mat, look: &HandLook, skin_height: u32, side: Side) -> Draw {
             ([x, y, z0], tx + 4.0 + (x - x0), ty + 4.0 + (y - y0))
         }),
         face([0.0, 0.0, 1.0], [[x0, x1], [y0, y1]], &|x, y| {
-            ([x, y, z1], tx + 16.0 - (x - x0), ty + 4.0 + (y - y0))
+            (
+                [x, y, z1],
+                tx + 8.0 + 2.0 * w - (x - x0),
+                ty + 4.0 + (y - y0),
+            )
         }),
         // outer (x min), inner (x max)
         face([-1.0, 0.0, 0.0], [[z0, z1], [y0, y1]], &|z, y| {
             ([x0, y, z], tx + 4.0 - (z - z0), ty + 4.0 + (y - y0))
         }),
         face([1.0, 0.0, 0.0], [[z0, z1], [y0, y1]], &|z, y| {
-            ([x1, y, z], tx + 8.0 + (z - z0), ty + 4.0 + (y - y0))
+            ([x1, y, z], tx + 4.0 + w + (z - z0), ty + 4.0 + (y - y0))
         }),
         // top (y min), bottom (y max)
         face([0.0, -1.0, 0.0], [[x0, x1], [z0, z1]], &|x, z| {
             ([x, y0, z], tx + 4.0 + (x - x0), ty + 4.0 - (z - z0))
         }),
         face([0.0, 1.0, 0.0], [[x0, x1], [z0, z1]], &|x, z| {
-            ([x, y1, z], tx + 8.0 + (x - x0), ty + (z - z0))
+            ([x, y1, z], tx + 4.0 + w + (x - x0), ty + (z - z0))
         }),
     ];
-    let mut vertices = Vec::with_capacity(24);
-    let mut indices = Vec::with_capacity(36);
+    // A grown box moves each corner away from the box centre.
+    let outward = |c: f32, lo: f32, hi: f32| c + grow * (c - (lo + hi) / 2.0).signum();
     for (normal, corners) in faces {
-        let shade = item_light(&model, normal, look);
-        let base = vertices.len() as u32;
-        for (p, u, v) in corners {
-            vertices.push(Vertex {
-                pos: p.map(|c| c / 16.0),
+        let shade = item_light(&out.model, normal, look);
+        let base = out.vertices.len() as u32;
+        for ([x, y, z], u, v) in corners {
+            out.vertices.push(Vertex {
+                pos: [
+                    outward(x, x0, x1) / 16.0,
+                    outward(y, y0, y1) / 16.0,
+                    outward(z, z0, z1) / 16.0,
+                ],
                 uv: [u / tw, v / th],
                 color: [shade, shade, shade, 1.0],
                 light: [1.0, 0.0],
             });
         }
-        indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
-    }
-    Draw {
-        vertices,
-        indices,
-        model,
+        out.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
     }
 }
 
@@ -716,6 +814,7 @@ mod tests {
                 lowered: 0.0,
                 using: None,
                 glint: false,
+                arm: Default::default(),
                 look: HandLook::default(),
             },
             64,
@@ -830,10 +929,11 @@ mod tests {
                     timer,
                 }),
                 glint: false,
+                arm: Default::default(),
                 look: HandLook::default(),
             })
         };
-        let rest = item_transform(0.0, 0.0, &HandLook::default());
+        let rest = item_transform(0.0, 0.0);
         assert!((at(32.0)[3][1] - rest[3][1]).abs() < 0.1);
         assert!(at(8.0)[3][0] < rest[3][0] + 0.6 * 0.4 + 1e-3 && at(8.0)[3] != rest[3]);
     }
@@ -868,6 +968,7 @@ mod tests {
                 lowered: 0.0,
                 using: None,
                 glint: false,
+                arm: Default::default(),
                 look: HandLook {
                     pitch,
                     arm_pitch: pitch,

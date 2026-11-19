@@ -275,7 +275,7 @@ impl App {
             lang.push('\n');
             lang += &merged_lang(&file, src.as_mut(), &self.ui.settings.lang);
         }
-        ferrocraft_net_client::set_lang(&lang);
+        self.inject_chat_lang(&lang);
         let splashes = src
             .as_mut()
             .and_then(|s| s.read("assets/minecraft/texts/splashes.txt"))

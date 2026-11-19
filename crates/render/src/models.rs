@@ -5,9 +5,9 @@
 use crate::assets::AssetSource;
 use crate::shapes::quarter;
 use serde_json::Value;
-use variants::variant;
 use std::collections::HashMap;
 use std::sync::Arc;
+use variants::variant;
 
 /// Face indices in `UP, DOWN, NORTH, SOUTH, WEST, EAST` order, as in `mesh.rs`.
 const FACE_NAMES: [&str; 6] = ["up", "down", "north", "south", "west", "east"];
@@ -354,6 +354,6 @@ impl Models {
     }
 }
 
-mod variants;
 #[cfg(test)]
 mod tests;
+mod variants;

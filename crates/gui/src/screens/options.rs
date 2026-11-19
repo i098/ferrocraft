@@ -1623,6 +1623,19 @@ enum KeyRow {
     Key(usize, Button, Button),
 }
 
+/// `GuiSlot.drawSelectionBox` hands entries `slotHeight - 4` (20 - 4) as their `slotHeight`.
+const ENTRY_H: i32 = 20 - 4;
+
+/// `CategoryEntry.drawEntry`: `y + slotHeight - fontHeight - 1`.
+fn category_dy() -> i32 {
+    ENTRY_H - 9 - 1
+}
+
+/// `KeyEntry.drawEntry`: `y + slotHeight / 2 - fontHeight / 2`.
+fn key_label_dy() -> i32 {
+    ENTRY_H / 2 - 9 / 2
+}
+
 /// `GuiControls` with its `GuiKeyBindingList`.
 pub struct Controls {
     parent: Option<Box<dyn Screen>>,
@@ -1724,7 +1737,7 @@ impl Screen for Controls {
                 KeyRow::Category(cat) => {
                     let s = ctx.texts.tr(cat);
                     let sw = c.width(&s);
-                    text(c, &s, ctx.width / 2 - sw / 2, y + 20 - 9 - 1, WHITE);
+                    text(c, &s, ctx.width / 2 - sw / 2, y + category_dy(), WHITE);
                 }
                 KeyRow::Key(k, change, reset) => {
                     let kb = &keys[*k];
@@ -1732,7 +1745,7 @@ impl Screen for Controls {
                         c,
                         &ctx.texts.tr(kb.desc),
                         x + 90 - self.label_w,
-                        y + 20 / 2 - 9 / 2,
+                        y + key_label_dy(),
                         WHITE,
                     );
                     (reset.x, reset.y, reset.enabled) = (x + 190, y, kb.code != kb.default);
@@ -1951,6 +1964,11 @@ mod tests {
         assert_eq!(Opt::FramerateLimit.denorm(0.5), 140.0);
         assert_eq!(Opt::Fov.denorm(1.0), 110.0);
         assert_eq!(Opt::RenderDistance.norm(17.0), 0.5);
+    }
+
+    #[test]
+    fn controls_entry_offsets_use_slot_height_minus_4() {
+        assert_eq!((category_dy(), key_label_dy()), (6, 4));
     }
 
     struct M;

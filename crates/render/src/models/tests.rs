@@ -231,7 +231,7 @@ fn jar_flat_blocks_keep_vanilla_extents() {
     let models = Models::load(&mut source);
     let nb = |_, _, _| 0u16;
     let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
-    for id in [70u16, 72] {
+    for id in [70u16, 72, 147, 148] {
         assert!(near(y_max(models.quads(id << 4, &nb).unwrap()), 1.0), "plate {id} up");
         assert!(near(y_max(models.quads(id << 4 | 1, &nb).unwrap()), 0.5), "plate {id} down");
     }

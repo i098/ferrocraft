@@ -703,7 +703,9 @@ fn stair_corner_models_raise_the_vanilla_quarter() {
     assert!(outer.contains(&[0.5, 1.0, 0.0, 0.5]), "{outer:?}");
     assert!(!outer.contains(&[0.5, 1.0, 0.5, 1.0]), "{outer:?}");
     let inner = raised_tops(&models, east, &world(&[((-1, 0), north)]));
-    assert!(inner.contains(&[0.0, 0.5, 0.0, 0.5]), "{inner:?}");
+    // The inner model raises the whole north half (one element) plus the south-east quarter; the south-west stays low.
+    assert!(inner.contains(&[0.0, 1.0, 0.0, 0.5]), "{inner:?}");
+    assert!(inner.contains(&[0.5, 1.0, 0.5, 1.0]), "{inner:?}");
     assert!(!inner.contains(&[0.0, 0.5, 0.5, 1.0]), "{inner:?}");
 }
 

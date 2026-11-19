@@ -424,7 +424,7 @@ fn wall_joins(s: u16) -> bool {
     id == 139
         || matches!(id, 107 | 183..=187)
         || (crate::blocks::look(s).kind == crate::blocks::Kind::Opaque
-            && !matches!(id, 86 | 91 | 166))
+            && !matches!(id, 86 | 91 | 103 | 166))
 }
 
 /// `BlockWall.getActualState`: `up` is true unless the block above is air.

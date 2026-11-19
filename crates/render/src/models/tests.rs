@@ -676,6 +676,16 @@ fn wall_gate_and_bed_keys() {
     assert_eq!(key(26 << 4 | 8 | 2, &world(&[])), "facing=north,part=head");
 }
 
+/// Vanilla `BlockWall.canConnectTo` rejects `Material.gourd` (melon) but joins other full cubes.
+#[test]
+fn wall_ignores_melon_but_joins_stone() {
+    let wall = 139 << 4;
+    let melon = key(wall, &world(&[((0, 1), 103 << 4)]));
+    assert!(melon.contains("south=false"), "{melon}");
+    let stone = key(wall, &world(&[((0, 1), 1 << 4)]));
+    assert!(stone.contains("south=true"), "{stone}");
+}
+
 /// `uvlock`: the quad takes the uv of its turned position, not the uv of the model face.
 #[test]
 fn uvlock_uses_the_turned_position() {

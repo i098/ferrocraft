@@ -98,6 +98,8 @@ pub struct App {
     icons: Option<Icons>,
     container: Option<ContainerScreen>,
     particles: Particles,
+    /// `EntityRenderer.rainSoundCounter`.
+    rain_sound_counter: i32,
     sound: Option<Sound>,
     /// Rendered frames in the last second, for the F3 `fps` line.
     fps: (u32, u32, Instant),
@@ -199,6 +201,7 @@ impl App {
             icons: None,
             container: None,
             particles: Particles::new(),
+            rain_sound_counter: 0,
             sound: None,
             fps: (0, 0, Instant::now()),
             chunk_updates: (0, 0),

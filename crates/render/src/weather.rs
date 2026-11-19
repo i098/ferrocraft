@@ -178,23 +178,33 @@ pub fn precipitation_height(blocks: &[u16], x: usize, z: usize) -> i32 {
         .map_or(0, |y| y as i32 + 1)
 }
 
+/// A world sound a weather step asks for: `(event, position, volume, pitch)`.
+pub type WeatherSound = (&'static str, [f64; 3], f32, f32);
+
+/// `EntityRenderer.m` (client ticks) and `rainSoundCounter`.
+pub struct RainClock<'a> {
+    pub ticks: u64,
+    pub sound_counter: &'a mut i32,
+}
+
 /// `EntityRenderer.addRainParticles`: the splashes (and smoke over lava) one client tick adds around
-/// the player. `option` is `gameSettings.particles` (0 all, 1 decreased, 2 minimal); `top(x, z)` is
-/// the precipitation height and biome id; `block(x, y, z)` a block state id.
+/// the player, and the `ambient.weather.rain` sound it may play. `option` is `gameSettings.particles`
+/// (0 all, 1 decreased, 2 minimal); `top(x, z)` is the precipitation height and biome id;
+/// `block(x, y, z)` a block state id.
 pub fn rain_particles(
     rain: f32,
     fancy: bool,
     option: i32,
-    ticks: u64,
+    clock: RainClock,
     feet: [f64; 3],
     top: impl Fn(i32, i32) -> Option<(i32, u8)>,
     block: impl Fn(i32, i32, i32) -> u16,
-) -> Vec<(ParticleKind, [f64; 3])> {
+) -> (Vec<(ParticleKind, [f64; 3])>, Option<WeatherSound>) {
     let strength = if fancy { rain } else { rain / 2.0 };
     if strength == 0.0 {
-        return Vec::new();
+        return (Vec::new(), None);
     }
-    let mut rng = JavaRandom::new((ticks as i64).wrapping_mul(312_987_231));
+    let mut rng = JavaRandom::new((clock.ticks as i64).wrapping_mul(312_987_231));
     let (fx, fy, fz) = (
         feet[0].floor() as i32,
         feet[1].floor() as i32,
@@ -206,6 +216,8 @@ pub fn rain_particles(
         _ => (100.0 * strength * strength) as i32,
     };
     let mut out = Vec::new();
+    // Vanilla keeps one random splash (`d0, d1, d2`) out of `j` by `nextInt(++j) == 0`.
+    let (mut picked, mut seen) = ([0.0f64; 3], 0);
     for _ in 0..count {
         let x = fx + rng.next_int(10) - rng.next_int(10);
         let z = fz + rng.next_int(10) - rng.next_int(10);
@@ -217,9 +229,47 @@ pub fn rain_particles(
         }
         let state = block(x, y - 1, z);
         let (dx, dz) = (rng.next_double(), rng.next_double());
-        out.extend(splash(state, x, y, z, dx, dz));
+        let Some((kind, at)) = splash(state, x, y, z, dx, dz) else {
+            continue;
+        };
+        out.push((kind, at));
+        if kind == ParticleKind::Droplet {
+            seen += 1;
+            if rng.next_int(seen) == 0 {
+                picked = [at[0], at[1] - 1.0, at[2]];
+            }
+        }
     }
-    out
+    let sound = if seen > 0 {
+        rain_sound(clock.sound_counter, &mut rng, picked, top(fx, fz), fy)
+    } else {
+        None
+    };
+    (out, sound)
+}
+
+/// The tail of `addRainParticles`: `nextInt(3) < rainSoundCounter++` picks a tick to play the rain loop;
+/// `column` is the precipitation height above the player.
+fn rain_sound(
+    counter: &mut i32,
+    rng: &mut JavaRandom,
+    picked: [f64; 3],
+    column: Option<(i32, u8)>,
+    fy: i32,
+) -> Option<WeatherSound> {
+    let play = rng.next_int(3) < *counter;
+    *counter += 1;
+    if !play {
+        return None;
+    }
+    *counter = 0;
+    let covered = column.is_some_and(|(h, _)| h > fy);
+    let (volume, pitch) = if picked[1] > f64::from(fy + 1) && covered {
+        (0.1, 0.5)
+    } else {
+        (0.2, 1.0)
+    };
+    Some(("ambient.weather.rain", picked, volume, pitch))
 }
 
 /// The particle one rain drop makes on the block `state` below column height `y`, if any.
@@ -337,24 +387,78 @@ mod rain_tests {
         assert_eq!(q[1].1[1], q[0].1[1]);
     }
 
-    #[test]
-    fn splashes_land_on_the_ground_and_stop_without_rain() {
+    fn tick(ticks: u64, counter: &mut i32, feet: [f64; 3], option: i32, rain: f32) -> Tick {
         let flat = |_, _| Some((64, 1));
         let ground = |_: i32, y: i32, _: i32| if y == 63 { GRASS } else { 0 };
-        let drops = rain_particles(1.0, true, 0, 7, [0.5, 64.0, 0.5], flat, ground);
+        let clock = RainClock {
+            ticks,
+            sound_counter: counter,
+        };
+        rain_particles(rain, true, option, clock, feet, flat, ground)
+    }
+
+    type Tick = (Vec<(ParticleKind, [f64; 3])>, Option<WeatherSound>);
+
+    #[test]
+    fn splashes_land_on_the_ground_and_stop_without_rain() {
+        let mut c = 0;
+        let (drops, _) = tick(7, &mut c, [0.5, 64.0, 0.5], 0, 1.0);
         assert!(drops.len() > 50);
         assert!(drops
             .iter()
             .all(|(k, p)| *k == ParticleKind::Droplet && (p[1] - 64.1).abs() < 1e-4));
-        assert!(rain_particles(0.0, true, 0, 7, [0.5, 64.0, 0.5], flat, ground).is_empty());
-        assert!(rain_particles(1.0, true, 2, 7, [0.5, 64.0, 0.5], flat, ground).is_empty());
+        assert!(tick(7, &mut c, [0.5, 64.0, 0.5], 0, 0.0).0.is_empty());
+        assert!(tick(7, &mut c, [0.5, 64.0, 0.5], 2, 1.0).0.is_empty());
+    }
+
+    #[test]
+    fn rain_sound_follows_the_counter_with_vanilla_volume_and_pitch() {
+        // Vanilla `nextInt(3) < rainSoundCounter++`: never on the first splash tick, then reset to 0.
+        let mut c = 0;
+        let (_, first) = tick(7, &mut c, [0.5, 64.0, 0.5], 0, 1.0);
+        assert!(first.is_none());
+        assert_eq!(c, 1);
+        let mut sounds = Vec::new();
+        for t in 8..200 {
+            sounds.extend(tick(t, &mut c, [0.5, 64.0, 0.5], 0, 1.0).1);
+        }
+        assert!(sounds.len() > 20, "{}", sounds.len());
+        for (name, at, v, p) in &sounds {
+            // Player in the open: the loud, normal-pitch variant at the ground the splash lands on.
+            assert_eq!((*name, *v, *p), ("ambient.weather.rain", 0.2, 1.0));
+            assert!((at[1] - 63.1).abs() < 1e-4);
+        }
+        // Under a roof above the head and the splash well below: the quiet, low-pitch variant.
+        let mut c = 5;
+        let (_, s) = tick(9, &mut c, [0.5, 60.0, 0.5], 0, 1.0);
+        let (name, _, v, p) = s.expect("counter 5 always passes nextInt(3)");
+        assert_eq!((name, v, p), ("ambient.weather.rain", 0.1, 0.5));
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn no_rain_sound_without_a_splash() {
+        let mut c = 5;
+        let none = |_, _| None;
+        let clock = RainClock {
+            ticks: 1,
+            sound_counter: &mut c,
+        };
+        let (_, s) = rain_particles(1.0, true, 0, clock, [0.5, 64.0, 0.5], none, |_, _, _| 0);
+        assert!(s.is_none());
+        assert_eq!(c, 5);
     }
 
     #[test]
     fn columns_far_above_or_below_are_skipped() {
         let high = |_, _| Some((80, 1));
-        assert!(
-            rain_particles(1.0, true, 0, 7, [0.5, 64.0, 0.5], high, |_, _, _| GRASS).is_empty()
-        );
+        let mut c = 0;
+        let clock = RainClock {
+            ticks: 7,
+            sound_counter: &mut c,
+        };
+        let (drops, s) =
+            rain_particles(1.0, true, 0, clock, [0.5, 64.0, 0.5], high, |_, _, _| GRASS);
+        assert!(drops.is_empty() && s.is_none());
     }
 }

@@ -45,6 +45,10 @@ impl Bolts {
     pub fn tick(&mut self) {
         self.cooldown = (self.cooldown - 1).max(0);
         for b in &mut self.list {
+            if b.stage == 2 {
+                b.rng.next_float();
+                b.rng.next_float();
+            }
             b.stage -= 1;
             if b.stage < 0 && b.fire_attempts > 0 && b.stage < -b.rng.next_int(10) {
                 b.fire_attempts -= 1;

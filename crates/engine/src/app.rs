@@ -100,6 +100,8 @@ pub struct App {
     sound: Option<Sound>,
     /// Rendered frames in the last second, for the F3 `fps` line.
     fps: (u32, u32, Instant),
+    /// Chunk meshes uploaded this second and in the last one, for the F3 `chunk updates` count.
+    chunk_updates: (u32, u32),
     next_tick: Instant,
     grabbed: bool,
     /// Left-click presses since the last tick that did not hit an entity.
@@ -198,6 +200,7 @@ impl App {
             particles: Particles::new(),
             sound: None,
             fps: (0, 0, Instant::now()),
+            chunk_updates: (0, 0),
             next_tick: Instant::now(),
             grabbed: false,
             attack_presses: 0,
@@ -960,8 +963,10 @@ impl App {
             r.register_texture(&name, &png);
         }
         self.fps.0 += 1;
+        self.chunk_updates.0 += r.take_chunk_updates();
         if self.fps.2.elapsed() >= Duration::from_secs(1) {
             self.fps = (0, self.fps.0, Instant::now());
+            self.chunk_updates = (0, self.chunk_updates.0);
         }
         let (rain, thunder) = self.mod_view.weather.unwrap_or_else(|| {
             let (rain, thunder) = self.game.weather.strengths(frac as f32);
@@ -1197,31 +1202,6 @@ impl App {
         })
     }
 
-    /// The F3 left column, `None` without a player.
-    fn debug_lines(&self, frac: f64) -> Option<Vec<String>> {
-        let ray = self.view_ray(frac);
-        self.game.player.as_ref().map(|p| {
-            gui::debug::left_lines(&gui::debug::DebugInfo {
-                fps_line: format!("{} fps (0 chunk updates) T: 120 fast", self.fps.1),
-                provider: format!(
-                    "MultiplayerChunkCache: {}, {}",
-                    self.game.store.len(),
-                    self.game.store.len()
-                ),
-                pos: p.pos,
-                yaw: p.yaw,
-                pitch: self.game.pitch,
-                looking_at: ray
-                    .and_then(|(eye, yaw, pitch, id, vehicle)| {
-                        self.game.block_aim(eye, yaw, pitch, id, vehicle)
-                    })
-                    .map(|(h, _)| h.pos),
-                reduced: self.reduced_debug(),
-                ..Default::default()
-            })
-        })
-    }
-
     /// `renderPlayerlist` head inputs: uploads the skins that finished downloading and tells each
     /// entry which skin, hat and flip to draw. Only an online connection draws heads.
     fn tab_heads(&mut self) {
@@ -1294,7 +1274,7 @@ impl App {
         );
         if show_hud {
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
-            let debug = self.debug_lines(frac);
+            let debug = self.debug_lines(frac, draws.len());
             let in_water = self.game.player.as_ref().is_some_and(|p| {
                 let get = |x, y, z| self.game.store.get_block(x, y, z);
                 screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))
@@ -1316,10 +1296,7 @@ impl App {
             let mut frame = gui::Frame {
                 partial_ticks: frac as f32,
                 chat_input: self.input.chat_field(),
-                debug: debug
-                    .as_deref()
-                    .filter(|_| self.show_debug)
-                    .map(|l| (l, &[][..])),
+                debug: debug.as_ref().map(|(l, r)| (&l[..], &r[..])),
                 reduced_debug: self.reduced_debug(),
                 fancy: self.ui.settings.fancy_graphics,
                 brightness: self.game.player.as_ref().map_or(1.0, |p| {

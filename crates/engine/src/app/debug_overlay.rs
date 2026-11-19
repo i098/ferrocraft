@@ -1,0 +1,150 @@
+//! The F3 screen: `GuiOverlayDebug.call()` and `getDebugInfoRight()` filled from the world and the renderer.
+
+use super::App;
+use gui::debug::{left_lines, DebugInfo};
+use gui::debug_data::{
+    biome_name, entities_line, fps_line, light_line, local_difficulty_line, renders_line,
+    right_lines, FpsInfo, RightInfo,
+};
+
+/// Mesh workers of the renderer, vanilla's free chunk builders (`aB`).
+const MESH_WORKERS: usize = 2;
+
+/// Both F3 columns.
+pub(super) type Columns = (Vec<String>, Vec<String>);
+
+impl App {
+    /// The F3 columns, `None` while F3 is off or there is no player. `rendered` is the entity draw count.
+    pub(super) fn debug_lines(&self, frac: f64, rendered: usize) -> Option<Columns> {
+        if !self.show_debug {
+            return None;
+        }
+        let p = self.game.player.as_ref()?;
+        let s = &self.ui.settings;
+        let [x, y, z] = p.pos.map(|v| v.floor() as i32);
+        let ray = self.view_ray(frac);
+        let total = self.game.entities.len() + 1;
+        let left = left_lines(&DebugInfo {
+            fps_line: fps_line(&FpsInfo {
+                fps: self.fps.1,
+                chunk_updates: self.chunk_updates.1,
+                max_fps: s.max_fps,
+                vsync: s.vsync,
+                fancy: s.fancy_graphics,
+                clouds: s.clouds,
+            }),
+            renders: self.debug_renders((x >> 4, z >> 4)),
+            entities: entities_line(rendered.min(total), total, 0),
+            particles: format!("P: {}. T: All: {total}", self.particles.len()),
+            provider: format!(
+                "MultiplayerChunkCache: {}, {}",
+                self.game.store.len(),
+                self.game.store.len()
+            ),
+            pos: p.pos,
+            yaw: p.yaw,
+            pitch: self.game.pitch,
+            loaded_extra: self.debug_location(x, y, z),
+            looking_at: ray
+                .and_then(|(eye, yaw, pitch, id, vehicle)| {
+                    self.game.block_aim(eye, yaw, pitch, id, vehicle)
+                })
+                .map(|(h, _)| h.pos),
+            reduced: self.reduced_debug(),
+        });
+        Some((left, self.debug_right()))
+    }
+
+    /// `getDebugInfoRenders`: the sections with blocks inside the render distance over all sections of the view.
+    /// Frustum and cave culling are not applied.
+    fn debug_renders(&self, at: (i32, i32)) -> String {
+        let d = self.ui.settings.render_distance;
+        let rendered = (at.0 - d..=at.0 + d)
+            .flat_map(|cx| (at.1 - d..=at.1 + d).map(move |cz| (cx, cz)))
+            .filter_map(|(cx, cz)| self.game.store.get(cx, cz))
+            .map(|c| (0..16).filter(|&i| c.section(i).is_some()).count())
+            .sum();
+        let side = (2 * d + 1) as usize;
+        renders_line(rendered, side * side * 16, d, MESH_WORKERS)
+    }
+
+    /// `Biome`, `Light` and `Local Difficulty` when the chunk of the feet block is loaded.
+    fn debug_location(&self, x: i32, y: i32, z: i32) -> Vec<String> {
+        let Some(chunk) = self.game.store.get(x >> 4, z >> 4) else {
+            return Vec::new();
+        };
+        let [sky, block] = self.renderer.as_ref().map_or([0.0; 2], |r| {
+            r.light_at([f64::from(x), f64::from(y), f64::from(z)])
+        });
+        let level = |v: f32| (v * 15.0).round() as u8;
+        vec![
+            format!(
+                "Biome: {}",
+                biome_name(chunk.biome((x & 15) as usize, (z & 15) as usize))
+            ),
+            light_line(level(sky), level(block)),
+            local_difficulty_line(self.ui.difficulty.unwrap_or(0), self.game.world_time),
+        ]
+    }
+
+    /// `getDebugInfoRight` without the block state lines of the block under the crosshair.
+    fn debug_right(&self) -> Vec<String> {
+        let (max, total, used) = process_memory();
+        let gpu = self.renderer.as_ref().map(|r| r.gpu_info().clone());
+        let gpu = gpu.unwrap_or_default();
+        right_lines(&RightInfo {
+            java: "Ferrocraft (Rust)".to_owned(),
+            bits: usize::BITS,
+            max,
+            total,
+            used,
+            cpu: CPU.clone(),
+            display: self.renderer.as_ref().map_or((0, 0), |r| r.size()),
+            vendor: gpu.vendor,
+            renderer: gpu.renderer,
+            version: gpu.version,
+        })
+    }
+}
+
+/// `OpenGlHelper.getCpu`: `"<cores>x <model>"` with runs of spaces collapsed.
+static CPU: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let model = info
+        .lines()
+        .find_map(|l| l.strip_prefix("model name"))
+        .and_then(|l| l.split_once(':'))
+        .map(|(_, m)| m.split_whitespace().collect::<Vec<_>>().join(" "));
+    match model {
+        Some(m) => format!(
+            "{}x {m}",
+            std::thread::available_parallelism().map_or(1, usize::from)
+        ),
+        None => "<unknown>".to_owned(),
+    }
+});
+
+/// `(maxMemory, totalMemory, used)` in bytes: the machine memory, the process data size and its resident size.
+/// Zero where `/proc` is missing. shortcut: 4 KiB pages assumed, read the page size when a platform needs it.
+fn process_memory() -> (u64, u64, u64) {
+    const PAGE: u64 = 4096;
+    let kb = |text: &str, key: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            .unwrap_or(0)
+            * 1024
+    };
+    let max = kb(
+        &std::fs::read_to_string("/proc/meminfo").unwrap_or_default(),
+        "MemTotal:",
+    );
+    let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+    let pages: Vec<u64> = statm
+        .split_whitespace()
+        .filter_map(|v| v.parse().ok())
+        .collect();
+    let at = |i: usize| pages.get(i).copied().unwrap_or(0) * PAGE;
+    let used = at(1);
+    (max, at(5).max(used).min(max.max(used)), used)
+}

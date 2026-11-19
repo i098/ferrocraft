@@ -1181,6 +1181,15 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
                 }
             }
         }
+        // The flash is opaque white (vanilla resets the color alpha to 1).
+        if d.class == Class::Object(50) && (80 - d.age as i32) / 5 % 2 == 0 {
+            assert!(
+                colours.contains(&[255, 255, 255]),
+                "a flashing TNT is not white"
+            );
+            tints.push(sum);
+            continue;
+        }
         assert!(
             colours.len() >= 4,
             "{:?} drew {} colours; a flat tint cannot be a model",

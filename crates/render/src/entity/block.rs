@@ -2,8 +2,9 @@
 //! object 70): the block model of the state, not the generic box.
 //!
 //! The constants were read from the real 1.8.9 `PrimedTntRenderer.render` bytecode: lift 0.5,
-//! pulse below `fuseTimer - partial + 1 < 10` as `1 + 0.3 * clamp(1 - x/10)^4`, flash alpha
-//! `(1 - x/100) * 0.8` while `fuseTimer / 5 % 2 == 0`, and a 90 degree turn about y.
+//! pulse below `fuseTimer - partial + 1 < 10` as `1 + 0.3 * clamp(1 - x/10)^4`, a flash while
+//! `fuseTimer / 5 % 2 == 0`, and a 90 degree turn about y. The flash is fully opaque white: the
+//! block renderer resets the color alpha to 1, so the `(1 - x/100) * 0.8` set before it is lost.
 //!
 //! shortcut: the flash is the additive `SRC_ALPHA, ONE` pipeline over a copy grown by 0.1 percent
 //! instead of vanilla's polygon offset; the falling block takes the light at the entity.
@@ -35,11 +36,6 @@ pub fn pulse(x: f32) -> f32 {
     let f = (1.0 - x / 10.0).clamp(0.0, 1.0);
     let f = f * f;
     1.0 + f * f * 0.3
-}
-
-/// Alpha of the white flash for `x = fuseTimer - partial + 1`.
-pub fn flash_alpha(x: f32) -> f32 {
-    (1.0 - x / 100.0) * 0.8
 }
 
 /// Whether the white flash shows at the integer `fuse_timer`.
@@ -90,7 +86,7 @@ pub fn build(
         out.piece(m, &to(mat), &|n| n, level, false, None);
         if flashing(timer) {
             let grown = chain(&[mat, scale(1.001)]);
-            out.flash(m, &to(grown), flash_alpha(x));
+            out.flash(m, &to(grown), 1.0);
         }
     }
 }
@@ -112,6 +108,5 @@ mod tests {
     fn flash_follows_the_integer_timer() {
         assert!(flashing(80) && flashing(4) && flashing(0));
         assert!(!flashing(79) && !flashing(5) && !flashing(9));
-        assert!((flash_alpha(81.0) - 0.152).abs() < 1e-6);
     }
 }

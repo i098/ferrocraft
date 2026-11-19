@@ -356,10 +356,12 @@ impl Session {
         brand: &str,
     ) -> io::Result<Session> {
         let (host, port) = resolve_target(addr, srv_lookup);
+        // Vanilla `GuiConnecting` shows "Unknown host" for any `UnknownHostException`.
         let sock = (host.as_str(), port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| invalid(format!("cannot resolve {host}:{port}")))?;
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Unknown host"))?;
         let stream = TcpStream::connect_timeout(&sock, LOGIN_TIMEOUT)?;
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(LOGIN_TIMEOUT))?;
@@ -632,5 +634,13 @@ mod resolve_tests {
     fn explicit_port_skips_srv() {
         let r = resolve_target("example.net:25566", |_| panic!("SRV must not be queried"));
         assert_eq!(r, ("example.net".into(), 25566));
+    }
+
+    #[test]
+    fn unresolvable_host_reads_unknown_host() {
+        let e = super::Session::connect("host.invalid", "Steve", None)
+            .err()
+            .unwrap();
+        assert_eq!(e.to_string(), "Unknown host");
     }
 }

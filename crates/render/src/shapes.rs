@@ -551,6 +551,7 @@ fn boxes_10(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut V
     match id {
         171 => out.push(px([0.0, 0.0, 0.0], [16.0, 1.0, 16.0], t)),
         34 => piston_head(meta, out),
+        29 | 33 => piston_base(id == 29, meta, out),
         69 => lever(meta, out),
         77 | 143 => button(meta, t[0], out),
         127 => cocoa(meta, out),
@@ -833,8 +834,28 @@ fn piston_head(meta: u16, out: &mut Vec<Bx>) {
     let mut plate = px([0.0, 0.0, 0.0], [16.0, 16.0, 4.0], ["piston_side"; 6]);
     plate.tex[NORTH] = front;
     plate.tex[SOUTH] = "piston_top_normal";
-    let shaft = part([6.0, 6.0, 4.0], [10.0, 10.0, 16.0], "piston_side", ALL);
+    // `piston_head_normal.json`: the arm runs to z 20, 4 px into the base block behind the head.
+    let shaft = part([6.0, 6.0, 4.0], [10.0, 10.0, 20.0], "piston_side", ALL);
     push_turned(vec![plate, shaft], x, y, out);
+}
+
+/// `piston_normal`/`piston_extended_normal` turned to `meta & 7`: a full cube whose north face is the
+/// platform, or, when extended (bit 8), a 12 px base whose front shows `piston_inner`.
+fn piston_base(sticky: bool, meta: u16, out: &mut Vec<Bx>) {
+    let (x, y) = [(1, 0), (3, 0), (0, 0), (0, 2), (0, 3), (0, 1)][(meta as usize & 7).min(5)];
+    let extended = meta & 8 != 0;
+    let mut b = px(
+        [0.0, 0.0, if extended { 4.0 } else { 0.0 }],
+        [16.0, 16.0, 16.0],
+        ["piston_side"; 6],
+    );
+    b.tex[NORTH] = match (extended, sticky) {
+        (true, _) => "piston_inner",
+        (false, true) => "piston_top_sticky",
+        (false, false) => "piston_top_normal",
+    };
+    b.tex[SOUTH] = "piston_bottom";
+    push_turned(vec![b], x, y, out);
 }
 
 fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], out: &mut Vec<Bx>) {

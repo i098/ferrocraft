@@ -25,6 +25,15 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         120 => end_portal_frame(meta, facing),
         131 => tripwire_hook(meta, facing),
         64 | 71 | 193..=197 => door(id, state, nb),
+        _ => mechanism(id, meta, nb),
+    }
+}
+
+fn mechanism(id: u16, meta: usize, nb: Nb) -> Found {
+    match id {
+        29 | 33 => piston(id, meta),
+        27 | 28 | 66 | 157 => rail(id, meta),
+        55 => redstone_wire(nb),
         _ => plant_or_block(id, meta, nb),
     }
 }
@@ -109,6 +118,104 @@ fn piston_head(meta: usize) -> Found {
             FRONT[(meta & 7) % 6],
             ["normal", "sticky"][meta >> 3]
         ),
+    ))
+}
+
+/// `BlockPistonBase`: bit 8 is `extended`, the low bits the facing. Id 33 is the plain piston, 29 the sticky one.
+fn piston(id: u16, meta: usize) -> Found {
+    Some((
+        ["sticky_piston", "piston"][usize::from(id == 33)],
+        format!(
+            "extended={},facing={}",
+            meta & 8 != 0,
+            FRONT[(meta & 7) % 6]
+        ),
+    ))
+}
+
+/// `BlockRailBase.EnumRailDirection` by metadata; only the plain rail has the four curves (6..9).
+const RAIL_SHAPES: [&str; 10] = [
+    "north_south",
+    "east_west",
+    "ascending_east",
+    "ascending_west",
+    "ascending_north",
+    "ascending_south",
+    "south_east",
+    "south_west",
+    "north_west",
+    "north_east",
+];
+
+/// Rails 27 (powered), 28 (detector) and 157 (activator) carry `powered` in bit 8 and the shape in bits 0..2.
+fn rail(id: u16, meta: usize) -> Found {
+    if id == 66 {
+        return Some(("rail", format!("shape={}", RAIL_SHAPES[meta.min(9)])));
+    }
+    let name = match id {
+        27 => "golden_rail",
+        28 => "detector_rail",
+        _ => "activator_rail",
+    };
+    Some((
+        name,
+        format!("powered={},shape={}", meta & 8 != 0, RAIL_SHAPES[meta & 7]),
+    ))
+}
+
+/// Horizontal offsets in the order of the wire properties `east, north, south, west`, with the
+/// direction a neighbour in that offset is seen from the wire (`EnumFacing` index in `HORIZONTAL`).
+const WIRE_SIDES: [(&str, [i32; 2], usize); 4] = [
+    ("east", [1, 0], 3),
+    ("north", [0, -1], 2),
+    ("south", [0, 1], 0),
+    ("west", [-1, 0], 1),
+];
+
+const WIRE_POWER_SOURCES: [u16; 17] = [
+    28, 69, 70, 72, 75, 76, 77, 143, 131, 146, 147, 148, 149, 150, 151, 152, 178,
+];
+
+/// `BlockRedstoneWire.canConnectTo`: wire, a repeater lying along the line, or any block that
+/// provides power. `side` is the `HORIZONTAL` index of the direction from the wire, `None` for the
+/// check from above or below.
+fn wire_connects(state: u16, side: Option<usize>) -> bool {
+    let id = state >> 4;
+    match id {
+        55 => true,
+        93 | 94 => side.is_some_and(|s| {
+            let facing = state as usize & 3;
+            facing == s || facing == (s + 2) % 4
+        }),
+        // Torches, lever, buttons, plates, tripwire hook, detector rail, trapped chest,
+        // redstone block, repeaters/comparators, daylight sensors.
+        _ => side.is_some() && WIRE_POWER_SOURCES.contains(&id),
+    }
+}
+
+fn is_opaque(state: u16) -> bool {
+    crate::blocks::look(state).kind == crate::blocks::Kind::Opaque
+}
+
+/// `BlockRedstoneWire.getAttachPosition` for the neighbour at `[dx, dz]`.
+fn wire_attach(nb: Nb, [dx, dz]: [i32; 2], side: usize) -> &'static str {
+    let next = nb(dx, 0, dz);
+    if wire_connects(next, Some(side)) {
+        return "side";
+    }
+    if !is_opaque(next) && wire_connects(nb(dx, -1, dz), None) {
+        return "side";
+    }
+    let climbs = is_opaque(next) && !is_opaque(nb(0, 1, 0)) && wire_connects(nb(dx, 1, dz), None);
+    ["none", "up"][usize::from(climbs)]
+}
+
+/// `BlockRedstoneWire.getActualState`: per side `none`, `side` or `up`.
+fn redstone_wire(nb: Nb) -> Found {
+    let [e, n, s, w] = WIRE_SIDES.map(|(_, d, side)| wire_attach(nb, d, side));
+    Some((
+        "redstone_wire",
+        format!("east={e},north={n},south={s},west={w}"),
     ))
 }
 

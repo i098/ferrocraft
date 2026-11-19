@@ -161,6 +161,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         lowered: 0.0,
         using: None,
         glint: false,
+        arm: Default::default(),
         look: Default::default(),
     };
     let clear = frame(&mut r, 0.0, None);
@@ -1363,6 +1364,7 @@ fn tinted_items_keep_color_and_overlay() {
             lowered: 0.0,
             using: None,
             glint: false,
+            arm: Default::default(),
             look: Default::default(),
         }));
         let image = r.render_to_rgba(&cam, &[]).2;
@@ -1448,6 +1450,7 @@ fn held_bow_and_rod_change_picture_with_draw_and_cast() {
             lowered: 0.0,
             using: None,
             glint: false,
+            arm: Default::default(),
             look: Default::default(),
         }));
         r.render_to_rgba(&cam, &[]).2
@@ -1547,6 +1550,7 @@ fn held_item_shading_follows_the_look() {
             lowered: 0.0,
             using: None,
             glint: false,
+            arm: Default::default(),
             look: render::HandLook {
                 pitch,
                 yaw,
@@ -1597,6 +1601,7 @@ fn held_item_sways_when_the_arm_look_lags() {
             lowered: 0.0,
             using: None,
             glint: false,
+            arm: Default::default(),
             look: render::HandLook {
                 pitch: 10.0,
                 yaw: 20.0,

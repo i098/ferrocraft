@@ -67,28 +67,28 @@ fn angle_from_pitch(pitch: f32) -> f32 {
 
 /// Right arm: `ModelPlayer` with `heldItemRight` 1 turns it by `-PI / 10` about x (`setRotationAngles`)
 /// and idles it by `cos(0) * 0.05 + 0.05` about z.
-fn right_arm(to_arms: Mat) -> Mat {
+fn right_arm(to_arms: Mat, pivot: f32) -> Mat {
     chain(&[
         to_arms,
         rotate(54.0, 1),
         rotate(64.0, 0),
         rotate(-62.0, 2),
         translate(0.25, -0.85, 0.75),
-        translate(-5.0 / 16.0, 2.0 / 16.0, 0.0),
-        rotate(0.1f32.to_degrees(), 2),
+        translate(-5.0 / 16.0, pivot, 0.0),
+        rotate(super::idle_arm_roll(0.0).to_degrees(), 2),
         rotate((-PI / 10.0).to_degrees(), 0),
     ])
 }
 
-fn left_arm(to_arms: Mat) -> Mat {
+fn left_arm(to_arms: Mat, pivot: f32) -> Mat {
     chain(&[
         to_arms,
         rotate(92.0, 1),
         rotate(45.0, 0),
         rotate(41.0, 2),
         translate(-0.3, -1.1, 0.45),
-        translate(5.0 / 16.0, 2.0 / 16.0, 0.0),
-        rotate(-0.1f32.to_degrees(), 2),
+        translate(5.0 / 16.0, pivot, 0.0),
+        rotate(-super::idle_arm_roll(0.0).to_degrees(), 2),
     ])
 }
 
@@ -146,7 +146,7 @@ pub fn parts(
         )
     };
     let skin = |model: Mat, side| {
-        let mut d = arm_draw(model, &hand.look, skin_height, side);
+        let mut d = arm_draw(model, &hand.look, skin_height, side, hand.arm);
         for v in &mut d.vertices {
             v.pos = point(&model, v.pos);
         }
@@ -154,8 +154,8 @@ pub fn parts(
         (d, MapTex::Skin)
     };
     let mut out = vec![
-        skin(right_arm(to_arms), Side::Right),
-        skin(left_arm(to_arms), Side::Left),
+        skin(right_arm(to_arms, hand.arm.pivot_y()), Side::Right),
+        skin(left_arm(to_arms, hand.arm.pivot_y()), Side::Left),
         (square(-7.0, 135.0, 0.0), MapTex::Background),
     ];
     if colors {

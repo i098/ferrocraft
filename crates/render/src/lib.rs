@@ -34,7 +34,9 @@ mod shapes;
 mod sky;
 mod weather;
 
-pub use hand::{compass_target, dial_frame, DialTurns, Hand, HandLook, HeldKind, UseAction, Using};
+pub use hand::{
+    compass_target, dial_frame, ArmSkin, DialTurns, Hand, HandLook, HeldKind, UseAction, Using,
+};
 pub use sky::{celestial_angle, Environment, Fluid};
 
 pub use ambient::{random_display_ticks, Effect as AmbientEffect};
@@ -42,10 +44,11 @@ pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use biome::splashes;
 pub use blockent::{book_quads, Banner, BookQuad, Skull, WornHead};
 pub use blocks::flower_pot_state;
-pub use entity::{hanging, item, leash, vehicle};
 pub use entity::{
-    nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook, TeamTag, Thrower,
+    bobber_line, nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook,
+    TeamTag, Thrower,
 };
+pub use entity::{hanging, item, leash, vehicle};
 pub use gpu::{view_proj, Renderer};
 pub use gpu_info::GpuInfo;
 pub use particles::{Kind as ParticleKind, Particles, Quads as ParticleQuads};

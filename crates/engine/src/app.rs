@@ -1046,6 +1046,10 @@ impl App {
                     lowered,
                     using,
                     glint: hand_item.is_some_and(|h| h.2),
+                    arm: render::ArmSkin {
+                        slim: false,
+                        parts: self.ui.settings.model_parts,
+                    },
                     look,
                 }),
         );
@@ -1062,10 +1066,12 @@ impl App {
         r.set_block_entities(cam.pos, self.game.world_time, frac as f32);
         r.set_selection(self.game.outline(self.hide_hud, ray));
         r.set_debug_axes(axes);
-        r.set_lines(
-            self.mod_drawn
-                .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes),
-        );
+        // `FishingBobberRenderer` draws its line as GL lines, 1 px wide at any distance.
+        let mut lines = self
+            .mod_drawn
+            .hitbox_lines(&self.game, &ids, &draws, self.show_hitboxes);
+        lines.extend(draws.iter().flat_map(render::bobber_line));
+        r.set_lines(lines);
         r.set_cracks(self.game.cracks());
         let verts =
             self.particles

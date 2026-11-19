@@ -450,6 +450,11 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     out.piece(m, &to_world, &normal, level, false, None);
 }
 
+/// `LayerHeldItemWitch`: the block pose is for chests (`isRenderTypeChest`): chest, ender chest, trapped chest.
+fn is_chest(id: i16) -> bool {
+    matches!(id, 54 | 130 | 146)
+}
+
 /// Torches, `BlockTorch.getRenderType() == 2`: `ItemInHandLayer` tilts them as held blocks.
 fn is_torch(id: i16) -> bool {
     matches!(id, 50 | 75 | 76)
@@ -457,9 +462,9 @@ fn is_torch(id: i16) -> bool {
 
 /// Where the hand puts the item, before the display transform: the witch's nose layer, else the
 /// right arm's pivot and rotation (`translateRightArm`).
-fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
+fn hand_matrix(d: &EntityDraw) -> Option<Mat> {
     if d.class == Class::Mob(super::witch::WITCH) {
-        return Some(super::witch::hand(d, m.gui3d && d.held < 256));
+        return Some(super::witch::hand(d, is_chest(d.held)));
     }
     let parts = model(d).parts;
     let arm = parts.get(3)?;
@@ -469,10 +474,12 @@ fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
     } else {
         ident()
     };
+    // `ModelPlayer.postRenderArm` moves the pivot of a small arm 1 px in.
+    let slim = matches!(d.class, Class::Player { slim: true });
     let mut mat = chain(&[
         child,
         translate(
-            arm.pivot[0] / 16.0,
+            (arm.pivot[0] + f32::from(u8::from(slim))) / 16.0,
             arm.pivot[1] / 16.0,
             arm.pivot[2] / 16.0,
         ),
@@ -500,7 +507,7 @@ fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
 /// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
 fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let xf = Xf::new(d, false);
-    let Some(mat) = hand_matrix(d, m) else { return };
+    let Some(mat) = hand_matrix(d) else { return };
     // `ItemRenderer.renderItem` (bfn offsets 26-35) scales 3D models by 2 and `RenderItem.preTransform`
     // (bjh 409-416) scales flat ones by 2, before the display transform.
     let mat = chain(&[mat, scale(2.0), m.third, scale(0.5)]);
@@ -576,6 +583,24 @@ fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ModelPlayer.postRenderArm`: a small arm's pivot moves 1 px in, which carries the item with it.
+    #[test]
+    fn a_slim_arm_holds_the_item_a_pixel_closer() {
+        let mut d = super::super::tests::steve();
+        d.held = 276;
+        let wide = hand_matrix(&d).unwrap();
+        d.class = Class::Player { slim: true };
+        let slim = hand_matrix(&d).unwrap();
+        assert!(((slim[3][0] - wide[3][0]).abs() - 1.0 / 16.0).abs() < 1e-5);
+    }
+
+    /// `LayerHeldItemWitch`: only chests take the block pose.
+    #[test]
+    fn the_witch_block_pose_is_for_chests() {
+        assert!(is_chest(54) && is_chest(130) && is_chest(146));
+        assert!(!is_chest(1));
+    }
 
     fn top_color(mesh: &MeshData) -> [f32; 4] {
         mesh.vertices.iter().find(|v| v.pos[1] > 0.4).unwrap().color

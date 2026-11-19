@@ -1,7 +1,7 @@
 //! Shot and thrown objects: the arrow model, item sprites that face the camera, the fishing bobber
 //! and its line. Object ids are the 1.8.9 spawn-object types.
 
-use super::{skin::Skin, EntityDraw, Skins, V3};
+use super::{skin::Skin, Class, EntityDraw, Skins, V3};
 use crate::mesh::{MeshData, Vertex};
 use std::f32::consts::PI;
 
@@ -55,9 +55,6 @@ pub fn build(out: &mut MeshData, id: i8, d: &EntityDraw, skins: &Skins) {
         _ => (Skin::Bobber, 0.5, 0.0),
     };
     billboard(out, d, skins, skin, size, rise);
-    if let (FISHING_BOBBER, Some((hand, eye))) = (id, d.line) {
-        line(out, d, hand, eye, skins);
-    }
 }
 
 /// One light-independent vertex; the caller sets the light afterwards.
@@ -235,56 +232,25 @@ pub(super) fn arrow_model(
     }
 }
 
-/// `FishingBobberRenderer`: 16 segments of a sagging line from the rod tip to the bobber, drawn as
-/// thin black ribbons that face the viewer.
-fn line(out: &mut MeshData, d: &EntityDraw, hand: [f64; 3], eye: f32, skins: &Skins) {
-    let at = Skins::uv_offset(skins.v_offset(Skin::White));
-    let uv = [
-        at[0] + 0.5 / Skins::width() as f32,
-        at[1] + 0.5 / Skins::height() as f32,
-    ];
+/// `FishingBobberRenderer`: the 16 segments of the sagging line from the rod tip to the bobber, as
+/// world-space `(from, to, argb)` for the 1 px `GL_LINE_STRIP` it draws in black. Empty for any
+/// other entity.
+pub fn bobber_line(d: &EntityDraw) -> Vec<([f64; 3], [f64; 3], u32)> {
+    let (Class::Object(FISHING_BOBBER), Some((hand, eye))) = (d.class, d.line) else {
+        return Vec::new();
+    };
     let dx = (hand[0] - d.pos[0]) as f32;
     let dy = (hand[1] - d.pos[1]) as f32 - 0.25 + eye;
     let dz = (hand[2] - d.pos[2]) as f32;
-    let at = |i: u32| -> V3 {
+    let at = |i: u32| -> [f64; 3] {
         let f = i as f32 / 16.0;
         [
-            (d.pos[0] + f64::from(dx * f)) as f32,
-            (d.pos[1] + f64::from(dy * (f * f + f) * 0.5 + 0.25)) as f32,
-            (d.pos[2] + f64::from(dz * f)) as f32,
+            d.pos[0] + f64::from(dx * f),
+            d.pos[1] + f64::from(dy * (f * f + f) * 0.5 + 0.25),
+            d.pos[2] + f64::from(dz * f),
         ]
     };
-    // Ribbon half-width, perpendicular to both the segment and the view direction.
-    let (yaw, pitch) = (d.view[0].to_radians(), d.view[1].to_radians());
-    let look = [
-        -yaw.sin() * pitch.cos(),
-        -pitch.sin(),
-        yaw.cos() * pitch.cos(),
-    ];
-    for i in 0..16 {
-        let (a, b) = (at(i), at(i + 1));
-        let seg = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let side = super::cross(seg, look);
-        let len = super::dot(side, side).sqrt();
-        if len < 1e-6 {
-            continue;
-        }
-        let w = 0.006 / len;
-        let off = [side[0] * w, side[1] * w, side[2] * w];
-        let quad = [
-            [a[0] - off[0], a[1] - off[1], a[2] - off[2]],
-            [a[0] + off[0], a[1] + off[1], a[2] + off[2]],
-            [b[0] + off[0], b[1] + off[1], b[2] + off[2]],
-            [b[0] - off[0], b[1] - off[1], b[2] - off[2]],
-        ];
-        // Black, and visible from both sides.
-        let black = |p: V3| Vertex {
-            color: [0.0, 0.0, 0.0, 1.0],
-            ..vertex(p, uv)
-        };
-        push_quad(out, quad.map(black));
-        push_quad(out, [quad[3], quad[2], quad[1], quad[0]].map(black));
-    }
+    (0..16).map(|i| (at(i), at(i + 1), 0xFF00_0000)).collect()
 }
 
 /// `FishingBobberRenderer`: where the line leaves the rod, in world space. `first_person` is the
@@ -352,11 +318,26 @@ mod tests {
     }
 
     #[test]
-    fn the_bobber_line_adds_geometry_and_the_arrow_is_a_model() {
-        let bare = count(draw(FISHING_BOBBER, None));
-        assert!(bare > 0);
-        assert!(count(draw(FISHING_BOBBER, Some(([5.0, 66.0, 5.0], 0.0)))) > bare);
+    fn the_arrow_is_a_model() {
+        assert!(count(draw(FISHING_BOBBER, None)) > 0);
         assert!(count(draw(ARROW, None)) > count(draw(SNOWBALL, None)));
+    }
+
+    /// 16 segments from the bobber to the rod tip; the line sags below the straight path by
+    /// `(f * f + f) * 0.5` of the drop, so the middle sits lower than the chord.
+    #[test]
+    fn the_bobber_line_has_16_segments_ending_at_the_rod_tip() {
+        assert!(bobber_line(&draw(ARROW, Some(([1.0, 2.0, 3.0], 0.0)))).is_empty());
+        assert!(bobber_line(&draw(FISHING_BOBBER, None)).is_empty());
+        let mut d = draw(FISHING_BOBBER, Some(([4.0, 70.0, 0.0], 0.0)));
+        d.pos = [0.0, 64.0, 0.0];
+        let line = bobber_line(&d);
+        assert_eq!(line.len(), 16);
+        assert_eq!(line[0].0, [0.0, 64.25, 0.0]);
+        let end = line[15].1;
+        assert!((end[0] - 4.0).abs() < 1e-5 && (end[1] - 70.0).abs() < 1e-5);
+        let mid = line[7].1;
+        assert!(mid[1] < 64.25 + (70.0 - 64.25) * 0.5, "{mid:?}");
     }
 
     #[test]

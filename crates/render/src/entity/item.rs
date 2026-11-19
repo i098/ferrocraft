@@ -43,6 +43,8 @@ struct Layer {
     mesh: MeshData,
     /// One normal per quad of a sprite; block meshes carry their shade in the vertex color.
     normals: Option<Vec<V3>>,
+    /// Block meshes only: each vertex color without face shade and AO, for the GUI.
+    flat: Vec<[f32; 4]>,
     /// The opaque texels of a sprite, for the GUI glint.
     mask: Option<Mask>,
 }
@@ -147,6 +149,7 @@ fn geometry(
                         tex: ItemTex::Sprite(texture),
                         mesh,
                         normals: Some(flat.normals),
+                        flat: Vec::new(),
                         mask: Some(Mask::of(&image)),
                     })
                 })
@@ -162,8 +165,13 @@ fn geometry(
     let state = ((id as u16) << 4) | (damage.max(0) as u16 & 15);
     Some(vec![Layer {
         tex: ItemTex::Atlas,
-        mesh: hand::held_mesh(state, atlas),
+        mesh: hand::held_mesh(state, atlas, false),
         normals: None,
+        flat: hand::held_mesh(state, atlas, true)
+            .vertices
+            .iter()
+            .map(|v| v.color)
+            .collect(),
         mask: None,
     }])
 }
@@ -302,12 +310,11 @@ impl Items {
             if direct && layer.normals.is_some() {
                 vertices[..4].reverse();
             }
-            for v in &mut vertices {
+            for (j, v) in vertices.iter_mut().enumerate() {
                 v.pos = to_world(v.pos);
                 v.light = level;
-                // The block mesh carries world face shade and AO; the GUI lights the faces itself.
-                if layer.normals.is_none() && super::UNSHADED.get() {
-                    v.color = unshaded(v.color);
+                if super::UNSHADED.get() && layer.normals.is_none() {
+                    v.color = layer.flat[j];
                 }
             }
             if let Some(normals) = &layer.normals {
@@ -499,16 +506,6 @@ fn held_prepare(gui3d: bool) -> Mat {
     }
 }
 
-/// A baked block color without its face shade and AO: the brightest channel back to 1, so a
-/// biome tint keeps its hue (`RenderItem` draws block quads white, or tinted, under GL lighting).
-fn unshaded(color: [f32; 4]) -> [f32; 4] {
-    let top = color[0].max(color[1]).max(color[2]);
-    if top <= 0.0 {
-        return color;
-    }
-    [color[0] / top, color[1] / top, color[2] / top, color[3]]
-}
-
 /// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
 /// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
 fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
@@ -589,15 +586,42 @@ fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize)
 mod tests {
     use super::*;
 
+    /// `ItemRenderer.renderItem` doubles a block and `RenderItem.renderItem` halves everything,
+    /// so a unit block stays one unit wide; a flat sprite ends up half as wide.
     #[test]
-    fn held_block_is_doubled_and_flat_item_is_not() {
-        assert_eq!(held_prepare(true), scale(2.0));
-        assert_eq!(held_prepare(false), ident());
+    fn held_block_keeps_its_size_and_flat_item_halves() {
+        let edge = |gui3d| point(&chain(&[held_prepare(gui3d), scale(0.5)]), [0.5, 0.0, 0.0]);
+        assert_eq!(edge(true), [0.5, 0.0, 0.0]);
+        assert_eq!(edge(false), [0.25, 0.0, 0.0]);
     }
 
+    fn top_color(mesh: &MeshData) -> [f32; 4] {
+        mesh.vertices.iter().find(|v| v.pos[1] > 0.4).unwrap().color
+    }
+
+    fn textured() -> Atlas {
+        let mut atlas = Atlas::flat();
+        atlas.textured = true;
+        atlas
+    }
+
+    fn rgb([r, g, b, _]: [f32; 4]) -> u32 {
+        [r, g, b].iter().fold(0, |acc, c| acc << 8 | (c * 255.0).round() as u32)
+    }
+
+    /// `RenderItem` draws block quads white, or in their plains tint (`GrassColors`,
+    /// `FoliageColors` at 0.5/1.0: 0x91bd59, 0x77ab2f) with no face shade or AO.
     #[test]
-    fn unshaded_keeps_the_tint_hue_at_full_brightness() {
-        assert_eq!(unshaded([0.5, 0.5, 0.5, 1.0]), [1.0, 1.0, 1.0, 1.0]);
-        assert_eq!(unshaded([0.2, 0.4, 0.1, 1.0]), [0.5, 1.0, 0.25, 1.0]);
+    fn flat_held_block_colors_are_the_tint_or_white() {
+        let atlas = textured();
+        for (id, tint) in [(1u16, 0xff_ffff), (2, 0x91_bd59), (18, 0x77_ab2f)] {
+            let flat = hand::held_mesh(id << 4, &atlas, true);
+            let colors: Vec<u32> = flat.vertices.iter().map(|v| rgb(v.color)).collect();
+            assert_eq!(rgb(top_color(&flat)), tint, "block {id} top");
+            assert!(colors.iter().all(|&c| c == tint || c == 0xff_ffff), "block {id}");
+            if id != 2 {
+                assert!(colors.iter().all(|&c| c == tint), "block {id}");
+            }
+        }
     }
 }

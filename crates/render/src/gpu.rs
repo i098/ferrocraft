@@ -1480,7 +1480,7 @@ impl Renderer {
                 ((id as u16) << 4) | (damage as u16 & 15)
             }
         };
-        Held::Block(hand::held_mesh(state, &self.atlas))
+        Held::Block(hand::held_mesh(state, &self.atlas, false))
     }
 
     /// Meshes of the footprint quads and of each item's icon quads, with their textures uploaded.

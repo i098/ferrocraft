@@ -3,7 +3,7 @@
 //! `ItemModelGenerator` for the extruded sprite of flat items).
 
 use crate::assets::{Atlas, Image};
-use crate::mesh::{mesh_chunk, MeshData, Neighborhood, Vertex, HEIGHT};
+use crate::mesh::{mesh_chunk, mesh_chunk_flat, MeshData, Neighborhood, Vertex, HEIGHT};
 use serde_json::Value;
 use std::f32::consts::PI;
 
@@ -233,7 +233,7 @@ fn held_transform(hand: &Hand) -> Mat {
 }
 
 /// A single block centred on the origin, as `RenderItem.renderItem` draws it (`scale(0.5)` follows in the model matrix).
-pub fn held_mesh(state: u16, atlas: &Atlas) -> MeshData {
+pub fn held_mesh(state: u16, atlas: &Atlas, flat: bool) -> MeshData {
     let mut blocks = vec![0u16; 16 * HEIGHT * 16];
     blocks[crate::mesh::index(8, 128, 8)] = state;
     let hood = Neighborhood {
@@ -242,7 +242,11 @@ pub fn held_mesh(state: u16, atlas: &Atlas) -> MeshData {
         neighbors: [None; 8],
         biomes: [None; 9],
     };
-    let m = mesh_chunk(&hood, atlas, true, true);
+    let m = if flat {
+        mesh_chunk_flat(&hood, atlas, true, true)
+    } else {
+        mesh_chunk(&hood, atlas, true, true)
+    };
     let mut out = m.opaque;
     let base = out.vertices.len() as u32;
     out.vertices.extend(m.water.vertices);

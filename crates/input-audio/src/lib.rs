@@ -123,6 +123,8 @@ pub struct InputState {
     sensitivity: f32,
     bindings: KeyBindings,
     held: [bool; Bind::ALL.len()],
+    /// Left and right mouse buttons as the window reports them, whatever screen is open.
+    mouse_down: [bool; 2],
     actions: VecDeque<Action>,
     ctrl_down: bool,
     f3_down: bool,
@@ -175,6 +177,7 @@ impl InputState {
             sensitivity,
             bindings: KeyBindings::default(),
             held: [false; Bind::ALL.len()],
+            mouse_down: [false; 2],
             actions: VecDeque::new(),
             ctrl_down: false,
             f3_down: false,
@@ -418,6 +421,11 @@ impl InputState {
     }
 
     fn mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        match button {
+            MouseButton::Left => self.mouse_down[0] = pressed,
+            MouseButton::Right => self.mouse_down[1] = pressed,
+            _ => {}
+        }
         if self.chat.is_some() || self.screen_open {
             return;
         }
@@ -752,6 +760,12 @@ impl InputState {
     /// Use button held: vanilla repeats item use every 4 ticks while it stays down.
     pub fn use_held(&self) -> bool {
         self.is_held(Bind::Use)
+    }
+
+    /// Mouse buttons (0 left, 1 right) physically down. A window the server opens while one is
+    /// down gets that press: `Mouse.setGrabbed(false)` in `displayGuiScreen` replays it.
+    pub fn held_mouse_buttons(&self) -> impl Iterator<Item = u8> + '_ {
+        (0u8..2).filter(|&b| self.mouse_down[usize::from(b)])
     }
 
     /// Tab: show the player list while held.
@@ -1163,6 +1177,16 @@ mod tests {
                 "{key:?}"
             );
         }
+    }
+
+    #[test]
+    fn mouse_buttons_stay_tracked_under_a_screen() {
+        let mut s = InputState::default();
+        s.mouse_button(MouseButton::Right, true);
+        s.set_screen_open(true);
+        assert_eq!(s.held_mouse_buttons().collect::<Vec<_>>(), [1]);
+        s.mouse_button(MouseButton::Right, false);
+        assert_eq!(s.held_mouse_buttons().count(), 0);
     }
 
     #[test]

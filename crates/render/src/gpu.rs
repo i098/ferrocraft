@@ -28,11 +28,9 @@ const CLEAR_COLOR: [f64; 3] = [0.0; 3];
 /// Eye height of the standing player; rain is centred on the feet.
 const EYE_HEIGHT: f64 = 1.62;
 const OFFSCREEN: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// Vertices of the 12 edges of the block selection outline.
-const SELECTION_VERTICES: u32 = 24;
-/// Vanilla draws the outline black at 40% alpha with 2 px lines; wgpu lines are 1 px, so the
-/// alpha is raised to keep it as visible.
-const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.8];
+/// `RenderGlobal.drawSelectionBoundingBox`: 6 vertices per edge (a 2 px wide quad), black at 40% alpha.
+const SELECTION_VERTICES: u32 = 72;
+const SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.4];
 const PARTICLE_SHEET: &str = "textures/particle/particles.png";
 const EXPLOSION_SHEET: &str = "textures/entity/explosion.png";
 const FOOTPRINT_SHEET: &str = "textures/particle/footprint.png";
@@ -182,6 +180,7 @@ pub struct Renderer {
     portal_add_pipe: wgpu::RenderPipeline,
     /// `LayerWitherAura`: `blendFunc(ONE, ONE)`, depth tested, no depth write.
     aura_pipe: wgpu::RenderPipeline,
+    selection_pipe: wgpu::RenderPipeline,
     border_pipe: wgpu::RenderPipeline,
     /// The world border to draw, if any.
     border: Option<crate::Border>,
@@ -434,7 +433,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
 
@@ -496,6 +495,7 @@ impl Renderer {
             portal_sky_pipe,
             portal_add_pipe,
             aura_pipe,
+            selection_pipe,
             border_pipe,
             border: None,
             hand_glint_pipe,
@@ -1953,7 +1953,7 @@ impl Renderer {
             }
             if let Some(buf) = &sel_buf {
                 pass.set_bind_group(0, &self.world_group, &[]);
-                pass.set_pipeline(&self.line_pipe);
+                pass.set_pipeline(&self.selection_pipe);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..SELECTION_VERTICES, 0..1);
             }
@@ -2240,7 +2240,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 21] {
+) -> [wgpu::RenderPipeline; 22] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2308,7 +2308,7 @@ fn build_pipelines(
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: if fs == "fs_flat" {
+                topology: if fs == "fs_flat" && vs == "vs_world" {
                     wgpu::PrimitiveTopology::LineList
                 } else {
                     wgpu::PrimitiveTopology::TriangleList
@@ -2587,6 +2587,18 @@ fn build_pipelines(
         true,
         false,
     );
+    // `drawSelectionBoundingBox`: `glLineWidth(2.0)`; wgpu lines are 1 px, so each edge is a
+    // 2 px wide quad (`vs_thick`) with the same blend and depth test as the 1 px lines.
+    let selection_pipe = pipe(
+        "vs_thick",
+        "fs_flat",
+        stride,
+        &world_attrs,
+        alpha,
+        false,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -2609,33 +2621,36 @@ fn build_pipelines(
         portal_sky_pipe,
         portal_add_pipe,
         aura_pipe,
+        selection_pipe,
     ]
 }
 
-/// The 12 edges of a world-space box `[x0, y0, z0, x1, y1, z1]` as line-list vertices.
+/// The 12 edges of a world-space box `[x0, y0, z0, x1, y1, z1]` as `vs_thick` triangles: each
+/// vertex holds its own end in `pos`, the far end in `uv` and `light.x`, and its side in `light.y`.
 fn selection_lines(b: [f64; 6]) -> [Vertex; SELECTION_VERTICES as usize] {
-    let corner = |i: usize| {
-        let pick = |axis: usize| b[axis + 3 * ((i >> axis) & 1)] as f32;
-        Vertex {
-            pos: [pick(0), pick(1), pick(2)],
-            uv: [0.0; 2],
-            color: SELECTION_COLOR,
-            light: [1.0; 2],
-        }
+    let corner = |i: usize| [0, 1, 2].map(|axis| b[axis + 3 * ((i >> axis) & 1)] as f32);
+    let end = |at: [f32; 3], far: [f32; 3], side: f32| Vertex {
+        pos: at,
+        uv: [far[0], far[1]],
+        color: SELECTION_COLOR,
+        light: [far[2], side],
     };
-    let mut v = [corner(0); SELECTION_VERTICES as usize];
-    let mut n = 0;
+    let mut v = Vec::with_capacity(SELECTION_VERTICES as usize);
     // Corner indices differ in exactly one bit along an edge.
     for a in 0..8usize {
         for axis in 0..3 {
             if a & (1 << axis) == 0 {
-                v[n] = corner(a);
-                v[n + 1] = corner(a | 1 << axis);
-                n += 2;
+                let (p, q) = (corner(a), corner(a | 1 << axis));
+                // The far end flips the direction, so a flipped sign keeps the same side.
+                let quad = [(p, q, -1.0), (p, q, 1.0), (q, p, -1.0), (q, p, 1.0)];
+                for i in [0, 1, 2, 0, 2, 3] {
+                    let (at, far, side) = quad[i];
+                    v.push(end(at, far, side));
+                }
             }
         }
     }
-    v
+    v.try_into().expect("12 edges of 6 vertices")
 }
 
 /// Indexed triangles for vertices that come four per quad.

@@ -655,6 +655,11 @@ pub(crate) fn position_random(x: i32, y: i32, z: i32) -> i64 {
         .wrapping_add(i.wrapping_mul(11))
 }
 
+/// Quads of a plant model for the block-break overlay (see `plants::cross_quads`).
+pub(crate) fn cross_quads(id: u16, at: [i32; 3]) -> Vec<[([f32; 3], [f32; 2]); 4]> {
+    plants::cross_quads(id, at)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

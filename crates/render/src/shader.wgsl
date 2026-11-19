@@ -38,6 +38,39 @@ fn vs_world(v: WorldIn) -> WorldOut {
     return o;
 }
 
+// A line of `drawSelectionBoundingBox` (`glLineWidth(2.0)`) as a 2 px wide quad: `pos` is this
+// end, `uv` and `light.x` the far end, `light.y` the side (-1 or 1). `g.screen.xy` is the target size.
+@vertex
+fn vs_thick(v: WorldIn) -> WorldOut {
+    var a = g.view_proj * vec4<f32>(v.pos, 1.0);
+    var b = g.view_proj * vec4<f32>(v.uv, v.light.x, 1.0);
+    var o: WorldOut;
+    o.uv = vec2<f32>(0.0);
+    o.color = v.color;
+    o.light = vec2<f32>(1.0);
+    o.world = v.pos;
+    // Clip each end to the near plane so the direction stays finite.
+    if (a.w < 0.001 && b.w < 0.001) {
+        o.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return o;
+    }
+    if (a.w < 0.001) {
+        a = a + (b - a) * ((0.001 - a.w) / (b.w - a.w));
+    } else if (b.w < 0.001) {
+        b = a + (b - a) * ((0.001 - a.w) / (b.w - a.w));
+    }
+    let pa = a.xy / a.w;
+    let d = (b.xy / b.w - pa) * g.screen.xy;
+    var n = vec2<f32>(0.0);
+    if (dot(d, d) > 0.0) {
+        n = normalize(vec2<f32>(-d.y, d.x));
+    }
+    // One pixel to each side is two ndc units per `screen` pixels.
+    let ndc = pa + n * v.light.y * 2.0 / g.screen.xy;
+    o.clip = vec4<f32>(ndc * a.w, a.z, a.w);
+    return o;
+}
+
 // OverworldProvider.lightBrightnessTable with level normalised to 0..1.
 fn brightness(level: f32) -> f32 {
     let f = 1.0 - level;

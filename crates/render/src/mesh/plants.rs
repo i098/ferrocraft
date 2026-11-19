@@ -192,24 +192,47 @@ impl Mesher<'_> {
         }
     }
 
-    fn model_vertex(&self, at: [i32; 3], e: &Elem, (dir, uv, slot): Face, c: [f32; 3], d: &Draw) -> Vertex {
-        let mut p = [0, 1, 2].map(|a| if c[a] > 0.5 { e.to[a] } else { e.from[a] });
-        if let Some(t) = e.turn {
-            p = t.apply(p);
-        }
-        let p = turn_model(p.map(|v| v / 16.0), d.quarter_turns);
-        let [fu, fv] = face_uv(dir, c);
-        let (u1, u2) = if d.flip { (uv[2], uv[0]) } else { (uv[0], uv[2]) };
+    fn model_vertex(&self, at: [i32; 3], e: &Elem, face: Face, c: [f32; 3], d: &Draw) -> Vertex {
+        let (pos, uv) = model_point(e, face, c, d);
         Vertex {
-            pos: [0, 1, 2].map(|a| at[a] as f32 + p[a] + d.offset[a]),
-            uv: self.atlas.uv(
-                d.tex[slot],
-                [(u1 + (u2 - u1) * fu) / 16.0, (uv[1] + (uv[3] - uv[1]) * fv) / 16.0],
-            ),
+            pos: [0, 1, 2].map(|a| at[a] as f32 + pos[a]),
+            uv: self.atlas.uv(d.tex[face.2], uv),
             color: [d.rgb[0] * d.shade, d.rgb[1] * d.shade, d.rgb[2] * d.shade, 1.0],
             light: d.light,
         }
     }
+}
+
+/// Position (relative to the block, with the block offset) and sprite uv of corner `c` of a model face.
+fn model_point(e: &Elem, (dir, uv, _): Face, c: [f32; 3], d: &Draw) -> ([f32; 3], [f32; 2]) {
+    let mut p = [0, 1, 2].map(|a| if c[a] > 0.5 { e.to[a] } else { e.from[a] });
+    if let Some(t) = e.turn {
+        p = t.apply(p);
+    }
+    let p = turn_model(p.map(|v| v / 16.0), d.quarter_turns);
+    let [fu, fv] = face_uv(dir, c);
+    let (u1, u2) = if d.flip { (uv[2], uv[0]) } else { (uv[0], uv[2]) };
+    let pos = [0, 1, 2].map(|a| p[a] + d.offset[a]);
+    (pos, [(u1 + (u2 - u1) * fu) / 16.0, (uv[1] + (uv[3] - uv[1]) * fv) / 16.0])
+}
+
+/// The quads of the cross or crop model of block `id` at block `at` (with `Block.getOffset`):
+/// positions relative to the block and sprite uv. Both windings, so a plane shows from either side.
+pub(crate) fn cross_quads(id: u16, at: [i32; 3]) -> Vec<[([f32; 3], [f32; 2]); 4]> {
+    let d = Draw {
+        tex: &[],
+        rgb: [1.0; 3],
+        light: [0.0; 2],
+        shade: 1.0,
+        quarter_turns: 0,
+        offset: plant_offset(id, at),
+        flip: false,
+    };
+    let d = &d;
+    plant_model(id, false)
+        .iter()
+        .flat_map(|e| e.faces.iter().map(move |&f| CORNERS[f.0].map(|c| model_point(e, f, c, d))))
+        .collect()
 }
 
 /// The model of a plain plant block: crops, the sunflower head, or the cross.

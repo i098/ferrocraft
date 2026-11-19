@@ -1859,3 +1859,29 @@ fn xp_orb_draws_as_a_point_three_block_textured_sprite() {
         colours.len()
     );
 }
+
+/// A superflat world has its horizon at y 0: a camera at y 5 sees the open sky, not the dark
+/// lower disc (which sits at y 63 in a default world and would hang over a low camera).
+#[test]
+fn superflat_camera_sees_the_open_sky() {
+    let env = Environment {
+        flat_world: true,
+        view_y: 5.0,
+        ..Environment::default()
+    };
+    let s = env.sky_state(0.8, [0.0, 0.0, 1.0]);
+    let mut r = Renderer::new_offscreen(64, 64, None);
+    r.set_environment(env);
+    let cam = Camera {
+        pos: [0.0, 5.0, 0.0],
+        pitch: -45.0,
+        ..Camera::default()
+    };
+    let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
+    let p = &rgba[(((h / 2) * w + w / 2) * 4) as usize..][..3];
+    let want = [s.sky[0], s.sky[1], s.sky[2]].map(|c| c * 255.0);
+    assert!(
+        (0..3).all(|i| (f32::from(p[i]) - want[i]).abs() <= 12.0),
+        "{p:?} vs {want:?}"
+    );
+}

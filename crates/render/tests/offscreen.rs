@@ -1172,20 +1172,24 @@ fn primed_tnt_and_falling_blocks_draw_as_models() {
         let (cx, cy) = project(&cam, [d.pos[0], d.pos[1] + 0.5, d.pos[2]], 640.0, 360.0);
         let mut colours = std::collections::HashSet::new();
         let mut sum = [0u32; 3];
+        let mut white = 0;
+        let mut changed = 0;
         for y in (cy - 25.0).max(0.0) as usize..((cy + 25.0) as usize).min(360) {
             for x in (cx - 25.0).max(0.0) as usize..((cx + 25.0) as usize).min(640) {
                 let o = (y * 640 + x) * 4;
                 if image[o..o + 3] != baseline[o..o + 3] {
                     colours.insert([image[o], image[o + 1], image[o + 2]]);
                     (0..3).for_each(|c| sum[c] += u32::from(image[o + c]));
+                    white += usize::from(image[o..o + 3] == [255, 255, 255]);
+                    changed += 1;
                 }
             }
         }
         // The flash is opaque white (vanilla resets the color alpha to 1).
         if d.class == Class::Object(50) && (80 - d.age as i32) / 5 % 2 == 0 {
             assert!(
-                colours.contains(&[255, 255, 255]),
-                "a flashing TNT is not white"
+                white * 10 >= changed * 9 && white >= 200,
+                "a flashing TNT is not white: {white} of {changed} changed pixels"
             );
             tints.push(sum);
             continue;

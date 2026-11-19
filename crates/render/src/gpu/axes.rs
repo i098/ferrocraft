@@ -62,6 +62,10 @@ impl Axes {
         pass: &mut wgpu::RenderPass<'a>,
         line_pipe: &'a wgpu::RenderPipeline,
     ) {
+    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        if !self.on {
+            return;
+        }
         pass.set_bind_group(0, &self.group, &[]);
         pass.set_pipeline(line_pipe);
         pass.set_vertex_buffer(0, self.lines.slice(..));

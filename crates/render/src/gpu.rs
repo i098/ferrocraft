@@ -1557,6 +1557,16 @@ impl Renderer {
         }
     }
 
+    /// Draws the cloud layer; fancy clouds draw twice: depth only, then color.
+    fn draw_clouds<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh, fancy: bool) {
+        pass.set_bind_group(0, &self.env_group, &[]);
+        let pipes = [&self.cloud_depth_pipe, &self.cloud_pipe];
+        for pipe in &pipes[usize::from(!fancy)..] {
+            pass.set_pipeline(pipe);
+            draw_mesh(pass, m);
+        }
+    }
+
     /// Draws each precipitation mesh that has a texture.
     fn draw_precipitation<'a>(
         &'a self,
@@ -1835,6 +1845,7 @@ impl Renderer {
         });
 
         let world = self.running_post().map_or(view, Post::main);
+        let below_clouds = cam.pos[1] < 128.0;
         // Chunk positions are baked in world space as f32; chunks come from the camera's own area, so precision holds.
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -1874,6 +1885,11 @@ impl Renderer {
             sky_add.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_pipeline(&self.sky_fog_pipe);
             sky_dark.iter().for_each(|m| draw_mesh(&mut pass, m));
+            // `renderWorldPass`: below y 128 the clouds draw before the terrain, so near
+            // geometry and particles are never covered by a cloud behind them.
+            if let (Some(m), true) = (&clouds, below_clouds) {
+                self.draw_clouds(&mut pass, m, env.clouds == 2);
+            }
             pass.set_bind_group(0, &self.world_group, &[]);
             pass.set_pipeline(&self.opaque_pipe);
             self.meshes
@@ -1984,14 +2000,9 @@ impl Renderer {
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..self.lines.len() as u32, 0..1);
             }
-            if let Some(m) = &clouds {
-                pass.set_bind_group(0, &self.env_group, &[]);
-                // Fancy clouds draw twice: depth only, then color.
-                let pipes = [&self.cloud_depth_pipe, &self.cloud_pipe];
-                for pipe in &pipes[usize::from(env.clouds != 2)..] {
-                    pass.set_pipeline(pipe);
-                    draw_mesh(&mut pass, m);
-                }
+            // `renderWorldPass`: at or above y 128 the clouds follow the translucent layer.
+            if let (Some(m), false) = (&clouds, below_clouds) {
+                self.draw_clouds(&mut pass, m, env.clouds == 2);
             }
             self.draw_precipitation(
                 &mut pass,

@@ -1703,3 +1703,76 @@ fn parity_particles_draw_and_expire() {
     }
     let _ = h;
 }
+
+/// `renderWorldPass` draws the clouds before the terrain while the eye is below y 128, so a near
+/// particle is never covered by a cloud behind it. A barrier particle 3 blocks ahead of a camera
+/// that looks at the cloud layer keeps every sprite pixel it has without clouds.
+#[test]
+fn clouds_never_cover_near_particles_below_cloud_height() {
+    let Some(jar) = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from) else {
+        eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping the cloud and barrier particle test");
+        return;
+    };
+    let mut r = Renderer::new_offscreen(854, 480, Some(&jar));
+    for cx in -1..=1 {
+        for cz in 0..=2 {
+            r.upload_chunk(&Synthetic(cx, cz));
+        }
+    }
+    let cam = Camera {
+        pos: [8.0, 65.62, 8.0],
+        yaw: 20.0,
+        pitch: -15.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let (sy, cy) = f64::from(cam.yaw).to_radians().sin_cos();
+    let (sp, cp) = f64::from(cam.pitch).to_radians().sin_cos();
+    let pos = [
+        cam.pos[0] - 3.0 * sy * cp,
+        cam.pos[1] - 3.0 * sp,
+        cam.pos[2] + 3.0 * cy * cp,
+    ];
+    let mut ps = Particles::new();
+    ps.spawn_packet(35, pos.map(|c| c as f32), [0.0; 3], 0.0, 0, &[]);
+    ps.tick(|_, _, _| 9 << 4);
+    let mut frame = |clouds: u8, ps: &Particles| {
+        r.set_environment(Environment {
+            clouds,
+            ..Environment::default()
+        });
+        r.set_particles(
+            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
+                r.light_at(p)
+            }),
+        );
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let (clear_sky, clear_clouds) = (frame(0, &Particles::new()), frame(2, &Particles::new()));
+    let (with_sky, with_clouds) = (frame(0, &ps), frame(2, &ps));
+    if let Some(d) = std::env::var_os("RENDER_DIR") {
+        let path = std::path::Path::new(&d).join("clouds_barrier.png");
+        encode_png(&path, 854, 480, &with_clouds).expect("png");
+    }
+    let px = |f: &[u8]| f.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<Vec<_>>();
+    let (clear_sky, clear_clouds, with_sky, with_clouds) = (
+        px(&clear_sky),
+        px(&clear_clouds),
+        px(&with_sky),
+        px(&with_clouds),
+    );
+    let sprite: Vec<usize> = (0..with_sky.len())
+        .filter(|&i| with_sky[i] != clear_sky[i])
+        .collect();
+    assert!(!sprite.is_empty(), "the barrier must draw");
+    let behind = sprite
+        .iter()
+        .filter(|&&i| clear_clouds[i] != clear_sky[i])
+        .count();
+    assert!(behind > 0, "the scene needs clouds behind the sprite");
+    let covered = sprite
+        .iter()
+        .filter(|&&i| with_clouds[i] != with_sky[i])
+        .count();
+    assert_eq!(covered, 0, "{covered} sprite pixels show cloud");
+}

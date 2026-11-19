@@ -107,3 +107,46 @@ pub(super) fn orient(state: u16, world: [i32; 3], snowy: bool) -> Orient {
         random_orient(id, world)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinct orientations `random_orient` yields for `id` over a grid of positions.
+    fn distinct(id: u16) -> usize {
+        let mut seen: Vec<Orient> = Vec::new();
+        for x in -20..20 {
+            for z in -20..20 {
+                let o = random_orient(id, [x, 64, z]);
+                if !seen.contains(&o) {
+                    seen.push(o);
+                }
+            }
+        }
+        seen.len()
+    }
+
+    /// Variant counts of `blockstates/{name}.json` `variants.normal` (a list) in the 1.8.9 jar.
+    fn jar_variants(jar: &std::path::Path, name: &str) -> usize {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(jar).unwrap()).unwrap();
+        let file = zip.by_name(&format!("assets/minecraft/blockstates/{name}.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_reader(file).unwrap();
+        json["variants"]["normal"].as_array().map_or(1, Vec::len)
+    }
+
+    #[test]
+    fn random_variant_counts_follow_the_blockstates() {
+        // tnt, stone, bedrock: 4 variants; netherrack: 16 (`blockstates/*.json` of 1.8.9).
+        assert_eq!([distinct(46), distinct(1), distinct(7), distinct(87)], [4, 4, 4, 16]);
+        assert_eq!([distinct(2), distinct(3), distinct(12)], [4, 4, 4]);
+    }
+
+    #[test]
+    #[ignore = "requires the vanilla 1.8.9 client jar in FERROCRAFT_CLIENT_JAR"]
+    fn jar_blockstates_have_the_counts_the_pick_uses() {
+        let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client jar");
+        let jar = std::path::Path::new(&jar);
+        let counts: Vec<usize> = ["tnt", "stone", "bedrock", "netherrack"].map(|n| jar_variants(jar, n)).into();
+        assert_eq!(counts, [4, 4, 4, 16]);
+    }
+}

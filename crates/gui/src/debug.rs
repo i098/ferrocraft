@@ -19,7 +19,7 @@ pub struct DebugInfo {
     pub pos: [f64; 3],
     pub yaw: f32,
     pub pitch: f32,
-    /// `Biome`, `Light` and `Local Difficulty` lines when the block at the feet is loaded.
+    /// `Biome`, `Light` and `Local Difficulty` lines when the block at the feet is loaded (see `debug_data`).
     pub loaded_extra: Vec<String>,
     /// The block the crosshair hits.
     pub looking_at: Option<[i32; 3]>,
@@ -132,5 +132,46 @@ mod tests {
         assert_eq!(l[8], "Block: -1 64 17");
         assert_eq!(l[9], "Chunk: 15 0 1 in -1 4 1");
         assert_eq!(l[10], "Facing: west (Towards negative X) (90.0 / 12.3)");
+    }
+
+    #[test]
+    fn left_column_lists_vanilla_lines_in_order() {
+        let d = DebugInfo {
+            fps_line: "15 fps".into(),
+            renders: "C: 1/2".into(),
+            entities: "E: 1/1, B: 0, I: 0".into(),
+            particles: "P: 0. T: All: 1".into(),
+            provider: "MultiplayerChunkCache: 4, 4".into(),
+            pos: [250.5, 4.0, 650.5],
+            loaded_extra: vec![
+                "Biome: Plains".into(),
+                "Light: 15 (15 sky, 0 block)".into(),
+                "Local Difficulty: 0.00 (Day 0)".into(),
+            ],
+            looking_at: Some([1, 2, 3]),
+            ..Default::default()
+        };
+        let l = left_lines(&d);
+        let heads: Vec<&str> = l.iter().map(|s| s.split(':').next().unwrap()).collect();
+        assert_eq!(
+            heads,
+            [
+                "Minecraft 1.8.9 (1.8.9/vanilla)",
+                "15 fps",
+                "C",
+                "E",
+                "P",
+                "MultiplayerChunkCache",
+                "",
+                "XYZ",
+                "Block",
+                "Chunk",
+                "Facing",
+                "Biome",
+                "Light",
+                "Local Difficulty",
+                "Looking at"
+            ]
+        );
     }
 }

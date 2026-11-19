@@ -227,6 +227,9 @@ pub struct Renderer {
     /// Biome ids per chunk column, `z << 4 | x`.
     biomes: HashMap<(i32, i32), SharedBiomes>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
+    /// Meshes uploaded since the last [`Renderer::take_chunk_updates`], `RenderChunk.renderChunksUpdated`.
+    chunk_updates: u32,
+    gpu: crate::gpu_info::GpuInfo,
     mesher: Mesher,
     /// Chunks to remesh on the workers.
     dirty: HashSet<(i32, i32)>,
@@ -276,13 +279,16 @@ impl Renderer {
             present_mode(!std::env::var("FERROCRAFT_VSYNC").is_ok_and(|v| v == "0"));
         surface.configure(&device, &config);
         let format = config.format;
-        Self::build(
+        let gpu = crate::gpu_info::GpuInfo::from_adapter(&adapter.get_info());
+        let mut r = Self::build(
             device,
             queue,
             Target::Window { surface, config },
             format,
             assets,
-        )
+        );
+        r.gpu = gpu;
+        r
     }
 
     /// Headless renderer that draws into an RGBA texture (tests, screenshots).
@@ -297,12 +303,12 @@ impl Renderer {
         static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
         static CREATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let instance = INSTANCE.get_or_init(wgpu::Instance::default);
-        let (_, device, queue) = {
+        let (adapter, device, queue) = {
             let _guard = CREATE.lock().unwrap_or_else(|e| e.into_inner());
             pollster::block_on(request_device(instance, None))
         };
         let texture = offscreen_texture(&device, width, height);
-        Self::build(
+        let mut r = Self::build(
             device,
             queue,
             Target::Offscreen {
@@ -312,7 +318,9 @@ impl Renderer {
             },
             OFFSCREEN,
             source,
-        )
+        );
+        r.gpu = crate::gpu_info::GpuInfo::from_adapter(&adapter.get_info());
+        r
     }
 
     fn build(
@@ -537,6 +545,8 @@ impl Renderer {
             blocks: HashMap::new(),
             biomes: HashMap::new(),
             meshes: HashMap::new(),
+            chunk_updates: 0,
+            gpu: Default::default(),
             dirty: HashSet::new(),
             smooth_lighting: true,
             fancy_graphics: true,
@@ -659,6 +669,16 @@ impl Renderer {
     /// surface cannot be read back.
     pub fn take_screenshot(&mut self) -> Option<(u32, u32, Vec<u8>)> {
         self.screenshot.take()
+    }
+
+    /// `RenderChunk.renderChunksUpdated`: meshes uploaded since the last call.
+    pub fn take_chunk_updates(&mut self) -> u32 {
+        std::mem::take(&mut self.chunk_updates)
+    }
+
+    /// `GL_VENDOR`, `GL_RENDERER` and `GL_VERSION` of the adapter.
+    pub fn gpu_info(&self) -> &crate::gpu_info::GpuInfo {
+        &self.gpu
     }
 
     /// Target size in pixels.
@@ -916,6 +936,7 @@ impl Renderer {
             light: m.light,
         };
         self.meshes.insert(done.key, mesh);
+        self.chunk_updates += 1;
     }
 
     fn upload_mesh(&self, mut data: MeshData, origin: [f32; 3]) -> Option<GpuMesh> {

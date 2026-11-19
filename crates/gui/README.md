@@ -10,6 +10,6 @@ Vanilla 1.8.9 GUI for the client. It draws into a `toolkit::Gui`, and `render` d
 - `tablist`: `GuiPlayerTabOverlay`, including player heads. `scoreboard`: objectives, scores, teams and `renderScoreboard`. `title`: `displayTitle`. `bossbar`: `BossStatus`.
 - `canvas`: `GuiCanvas`, the `screens::Canvas` over a `Gui`; textures from `Canvas::texture` wait in `pending_textures`.
 - `chat`: `GuiNewChat` (wrap, fade, 10 lines closed and 20 open, scroll, sent history) and the `GuiChat` input line.
-- `debug`: the F3 left column (`GuiOverlayDebug`).
+- `debug`: the F3 screen, both columns (`GuiOverlayDebug`); `debug_data` builds the line lists.
 
 `tests/hud.rs` draws the HUD offscreen to a PNG. Set `FERROCRAFT_CLIENT_JAR` to the 1.8.9 client jar for real textures and the font.

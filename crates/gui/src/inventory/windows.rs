@@ -387,8 +387,8 @@ fn beacon_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my:
                     modal(c, INVENTORY, x, y, i % 8 * 18, 198 + i / 8 * 18, 18, 18);
                 }
             }
-            Act::Confirm => modal(c, BEACON, x, y, 90, 219, 18, 18),
-            Act::Cancel => modal(c, BEACON, x, y, 112, 219, 18, 18),
+            Act::Confirm => modal(c, BEACON, x, y, 90, 220, 18, 18),
+            Act::Cancel => modal(c, BEACON, x, y, 112, 220, 18, 18),
         }
     }
 }

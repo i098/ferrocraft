@@ -9,8 +9,6 @@ const RESPAWN: i32 = 0;
 const TITLE: i32 = 1;
 
 pub struct Death {
-    /// The death message from the combat packet, already formatted.
-    cause: Option<String>,
     score: i32,
     buttons: Vec<Button>,
     /// `enableButtonsTimer`.
@@ -18,9 +16,8 @@ pub struct Death {
 }
 
 impl Death {
-    pub fn new(cause: Option<String>, score: i32) -> Death {
+    pub fn new(score: i32) -> Death {
         Death {
-            cause,
             score,
             buttons: Vec::new(),
             timer: 0,
@@ -78,8 +75,8 @@ impl Screen for Death {
         };
         centered(c, &ctx.tr(title), w / 2 / 2, 30, WHITE);
         c.pop();
-        if let Some(cause) = &self.cause {
-            centered(c, cause, w / 2, 85, WHITE);
+        if ctx.hardcore {
+            centered(c, &ctx.tr("deathScreen.hardcoreInfo"), w / 2, 144, WHITE);
         }
         let score = format!("{}: §e{}", ctx.tr("deathScreen.score"), self.score);
         centered(c, &score, w / 2, 100, WHITE);

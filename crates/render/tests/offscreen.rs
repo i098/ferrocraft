@@ -1776,3 +1776,82 @@ fn clouds_never_cover_near_particles_below_cloud_height() {
         .count();
     assert_eq!(covered, 0, "{covered} sprite pixels show cloud");
 }
+
+/// `RenderXPOrb`: the orb is a textured quad 0.3 block wide and tall that faces the camera. The
+/// expected pixel size comes from the pinhole projection of a 0.3-block span, not from the mesh.
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn xp_orb_draws_as_a_point_three_block_textured_sprite() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let (w, h) = (800usize, 450usize);
+    let mut r = Renderer::new_offscreen(w as u32, h as u32, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let orb = EntityDraw {
+        class: Class::Orb,
+        pos: [0.0, 65.0, 2.0],
+        yaw: 0.0,
+        head_yaw: 0.0,
+        pitch: 0.0,
+        limb_swing: 0.0,
+        limb_swing_amount: 0.0,
+        swing: 0.0,
+        age: 0.0,
+        sneaking: false,
+        hurt: false,
+        death_time: 0.0,
+        invisible: false,
+        size: (0.5, 0.5),
+        held: 0,
+        armor: [0; 4],
+        armor_dye: [None; 4],
+        armor_glint: [false; 4],
+        held_glint: false,
+        held_damage: 0,
+        held_dye: None,
+        stack: None,
+        hover_start: 0.0,
+        hang: Default::default(),
+        name: None,
+        skin: None,
+        burning: false,
+        eye_height: 0.25,
+        always_name: false,
+        team_tag: Default::default(),
+        pointed: false,
+        ridden: false,
+        child: false,
+        using: None,
+        view: [0.0; 2],
+        line: None,
+        look: render::Look {
+            xp: 3,
+            ..render::Look::default()
+        },
+    };
+    r.render_to_rgba(&cam, &[]);
+    let empty = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&[orb.clone()]);
+    let frame = r.render_to_rgba(&cam, &[]).2;
+    let (x0, y0, x1, y1) = changed_box(&empty, &frame, w).expect("the orb draws");
+    let (left, _) = project(&cam, [-0.15, 65.0, 2.0], w as f64, h as f64);
+    let (right, _) = project(&cam, [0.15, 65.0, 2.0], w as f64, h as f64);
+    let expected = right - left;
+    let (width, height) = ((x1 - x0 + 1) as f64, (y1 - y0 + 1) as f64);
+    for (name, got) in [("width", width), ("height", height)] {
+        assert!(
+            (expected * 0.5..=expected + 2.0).contains(&got),
+            "{name} {got} px, a 0.3-block sprite spans {expected} px"
+        );
+    }
+    let mut colours = std::collections::HashSet::new();
+    for (a, c) in empty.chunks(4).zip(frame.chunks(4)) {
+        if a != c {
+            colours.insert([c[0], c[1], c[2]]);
+        }
+    }
+    assert!(colours.len() >= 4, "textured, not a flat tint: {}", colours.len());
+}

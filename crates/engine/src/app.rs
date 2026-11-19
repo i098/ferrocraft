@@ -1577,8 +1577,6 @@ fn remote_using(e: &Entity) -> Option<UseAction> {
     (e.flags & flag::USING_ITEM != 0).then(|| use_action(e.equipment[0].map_or(0, |i| i.id)))
 }
 
-/// Flags and pose of an armor stand. The worn item's damage (the skull type, or the block variant)
-/// is read for every entity, because `LayerCustomHead` serves players and mobs too.
 /// The per-kind variant byte the models read (see `render::entity::Look::variant`).
 fn look_variant(e: &Entity) -> u8 {
     match e.kind {
@@ -1590,6 +1588,8 @@ fn look_variant(e: &Entity) -> u8 {
     }
 }
 
+/// Flags and pose of an armor stand. The worn item's damage (the skull type, or the block variant)
+/// is read for every entity, because `LayerCustomHead` serves players and mobs too.
 fn stand_look(e: &Entity) -> StandLook {
     let head_damage = e.equipment[4].map_or(0, |i| i.damage);
     if e.kind != Kind::Object(78) {

@@ -578,12 +578,22 @@ fn book_block(out: &mut Batches, book: &Book, at: Mat, partial: f32) {
     let target = out.mesh(Tex::Named(
         "textures/entity/enchanting_table_book.png".into(),
     ));
-    let tex = [64.0, 32.0];
+    for cube in book_cubes(y, page_x) {
+        cube.emit(target, &m, BOOK_TEXELS, 0.0);
+    }
+}
+
+/// Size in texels of `enchanting_table_book.png`.
+const BOOK_TEXELS: [f32; 2] = [64.0, 32.0];
+
+/// The seven boxes of `ModelBook`: the covers, the spine, the two page stacks and the two flipping
+/// pages, from the angles of [`book_angles`].
+fn book_cubes(y: [f32; 6], page_x: f32) -> [Cube; 7] {
     let part = |min: V3, size: V3, uv, pivot: V3, rot_y: f32| {
         Cube::new(min, size, uv).at(pivot, [0.0, rot_y, 0.0])
     };
     let page = [page_x, 0.0, 0.0];
-    for cube in [
+    [
         part(
             [-6.0, -5.0, 0.0],
             [6.0, 10.0, 0.0],
@@ -615,9 +625,30 @@ fn book_block(out: &mut Batches, book: &Book, at: Mat, partial: f32) {
         ),
         part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[4]),
         part([0.0, -4.0, 0.0], [5.0, 8.0, 0.0], (24.0, 10.0), page, y[5]),
-    ] {
-        cube.emit(target, &m, tex, 0.0);
+    ]
+}
+
+/// One quad of the book model: corners in blocks (model pixels / 16) and texture coordinates.
+pub type BookQuad = ([[f32; 3]; 4], [[f32; 2]; 4]);
+
+/// `ModelBook.render(null, 0, flip_l, flip_r, spread, 0, 0.0625)` as `GuiEnchantment` calls it:
+/// the model in its own space, ready for the caller's matrix.
+pub fn book_quads(flip_l: f32, flip_r: f32, spread: f32) -> Vec<BookQuad> {
+    let (y, page_x) = book_angles(0.0, flip_l, flip_r, spread);
+    let mut mesh = MeshData::default();
+    for cube in book_cubes(y, page_x) {
+        cube.emit(&mut mesh, &Mat::at([0.0; 3]), BOOK_TEXELS, 0.0);
     }
+    mesh.indices
+        .chunks_exact(6)
+        .map(|q| {
+            let v = &mesh.vertices[q[0] as usize..q[0] as usize + 4];
+            (
+                [0, 1, 2, 3].map(|i| v[i].pos),
+                [0, 1, 2, 3].map(|i| v[i].uv),
+            )
+        })
+        .collect()
 }
 
 static NO_BANNER: Banner = Banner {

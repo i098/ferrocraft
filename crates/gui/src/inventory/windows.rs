@@ -2,7 +2,8 @@
 //! besides the slots: `GuiRepair`, `GuiEnchantment`, `GuiBrewingStand`, `GuiBeacon` and
 //! `GuiMerchant` of 1.8.9.
 
-use super::{modal, tooltip, Icons, Key, Mods, Request, LABEL};
+use super::book::Book;
+use super::{modal, tooltip, Icons, InventoryView, Key, Mods, Request, LABEL};
 use crate::screens::{key, Canvas, Metrics, TextField};
 use render::JavaRandom;
 use world::effects;
@@ -37,6 +38,8 @@ pub struct Extras {
     name: TextField,
     /// Slot 0 of the anvil at the last tick (`GuiRepair.sendSlotContents`).
     seen: Slot,
+    /// The open book of the enchanting table.
+    book: Book,
 }
 
 impl Extras {
@@ -46,12 +49,23 @@ impl Extras {
         name.background = false;
         name.color = 0xFF_FFFF;
         name.max_len = 40;
-        Extras { name, seen: None }
+        Extras {
+            name,
+            seen: None,
+            book: Book::new(),
+        }
     }
 
     /// `GuiRepair.updateScreen` and `sendSlotContents`: a new stack in slot 0 fills the field and
     /// names the item.
     pub fn tick(&mut self, inv: &Inventory, m: &dyn Metrics) -> Vec<Request> {
+        if inv.kind() == Kind::Enchanting {
+            let open = inv
+                .open
+                .as_ref()
+                .is_some_and(|w| w.props[..3].iter().any(|&p| p != 0));
+            self.book.tick(inv.slot(0), open);
+        }
         if inv.kind() != Kind::Anvil {
             return Vec::new();
         }
@@ -136,11 +150,19 @@ impl Extras {
     }
 
     /// `drawGuiContainerBackgroundLayer` beyond the plain texture; `(l, t)` is the window's corner.
-    pub fn draw_back(&self, c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) {
+    /// `animation` is the partial tick and the screen's size, for the book.
+    pub fn draw_back(
+        &self,
+        c: &mut dyn Canvas,
+        inv: &Inventory,
+        (l, t): (i32, i32),
+        (mx, my): (i32, i32),
+        animation: (f32, (i32, i32)),
+    ) {
         match inv.kind() {
             Kind::Anvil => anvil_back(c, inv, l, t),
             Kind::Brewing => brewing_back(c, inv, l, t),
-            Kind::Enchanting => self.enchant_back(c, inv, l, t, mx, my),
+            Kind::Enchanting => self.enchant_back(c, inv, (l, t), (mx, my), animation),
             Kind::Merchant => merchant_back(c, inv, l, t, mx, my),
             Kind::Beacon => beacon_back(c, inv, l, t, mx, my),
             _ => {}
@@ -148,22 +170,29 @@ impl Extras {
     }
 
     /// `GuiEnchantment.drawGuiContainerBackgroundLayer`: the three option buttons with their
-    /// standard galactic phrase.
-    // shortcut: the open book (`EnchantmentTableBookModel`) is a 3D model and waits for the entity renderer.
-    fn enchant_back(&self, c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) {
+    /// standard galactic phrase, after the book model.
+    fn enchant_back(
+        &self,
+        c: &mut dyn Canvas,
+        inv: &Inventory,
+        (l, t): (i32, i32),
+        (mx, my): (i32, i32),
+        (partial, size): (f32, (i32, i32)),
+    ) {
         let Some(w) = inv.open.as_ref() else { return };
+        self.book.draw(c, partial, size);
         let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
         let mut rng = JavaRandom::new(i64::from(w.props[3]));
         for i in 0..3 {
             let (x, y) = (l + 60, t + 14 + 19 * i);
             let level = i32::from(w.props[i as usize]);
+            // `generateNewRandomName` runs for every row, level 0 too, so the sequence advances.
+            let phrase = phrase(&mut rng);
             if level == 0 {
                 modal(c, ENCHANT, x, y, 0, 185, 108, 19);
                 continue;
             }
             let number = level.to_string();
-            let wrap = 86 - c.width(&number);
-            let phrase = phrase(&mut rng);
             let (text, number_color) = if (lapis < i + 1 || inv.xp_level < level) && !inv.creative {
                 modal(c, ENCHANT, x, y, 0, 185, 108, 19);
                 modal(c, ENCHANT, x + 1, y + 1, 16 * i, 239, 16, 16);
@@ -174,7 +203,7 @@ impl Extras {
                 modal(c, ENCHANT, x + 1, y + 1, 16 * i, 223, 16, 16);
                 (if hover { 0xFF_FF80 } else { 0x68_5E4A }, 0x80_FF20)
             };
-            galactic(c, &phrase, x + 20, y + 2, wrap, text);
+            galactic(c, &phrase, x + 20, y + 2, 86, text);
             let nx = x + 20 + 86 - c.width(&number);
             c.text(
                 &number,
@@ -190,7 +219,6 @@ impl Extras {
     pub fn draw_fore(&self, c: &mut dyn Canvas, inv: &Inventory, icons: &Icons) {
         let Some(w) = inv.open.as_ref() else { return };
         if inv.kind() == Kind::Anvil {
-            self.name.draw(c);
             anvil_cost(c, inv, i32::from(w.props[0]));
         }
         if inv.kind() == Kind::Beacon {
@@ -241,6 +269,78 @@ impl Extras {
         if let Some(lines) = lines {
             tooltip::draw(c, &lines, mx, my, sw, sh);
         }
+    }
+
+    /// What `drawScreen` adds after `super.drawScreen`: the anvil's name field, or the selected
+    /// merchant trade over the slots with the tooltip of the hovered item or the
+    /// `merchant.deprecated` hint.
+    /// `origin` is the window's corner, `size` the screen's.
+    pub fn draw_over(
+        &self,
+        c: &mut dyn Canvas,
+        view: &InventoryView,
+        origin: (i32, i32),
+        mouse: (i32, i32),
+        size: (i32, i32),
+    ) {
+        match view.inv.kind() {
+            Kind::Anvil => {
+                c.push([origin.0 as f32, origin.1 as f32], 1.0, 0.0);
+                self.name.draw(c);
+                c.pop();
+            }
+            Kind::Merchant => merchant_trade(c, view, origin, mouse, size),
+            _ => {}
+        }
+    }
+}
+
+fn merchant_trade(
+    c: &mut dyn Canvas,
+    view: &InventoryView,
+    (l, t): (i32, i32),
+    (mx, my): (i32, i32),
+    (sw, sh): (i32, i32),
+) {
+    let Some(r) = view
+        .inv
+        .open
+        .as_ref()
+        .and_then(|w| w.recipes.get(w.recipe_index))
+    else {
+        return;
+    };
+    let shown = [(&r.buy, 36), (&r.buy2, 62), (&r.sell, 120)];
+    c.push([l as f32, t as f32], 1.0, 0.0);
+    for (stack, x) in shown {
+        if let Some(s) = stack {
+            view.icons.draw(c, s, x, 24);
+            view.icons.overlay(c, s, x, 24, None);
+        }
+    }
+    c.pop();
+    let at = |x, y, w, h| inside(mx - l, my - t, x, y, w, h);
+    if let Some((Some(s), _)) = shown
+        .iter()
+        .find(|(s, x)| s.is_some() && at(*x, 24, 16, 16))
+    {
+        tooltip::draw(
+            c,
+            &tooltip::lines(s, view.advanced_tooltips),
+            mx,
+            my,
+            sw,
+            sh,
+        );
+    } else if r.disabled() && (at(83, 21, 28, 21) || at(83, 51, 28, 21)) {
+        tooltip::draw(
+            c,
+            &["Trade something else to unlock!".into()],
+            mx,
+            my,
+            sw,
+            sh,
+        );
     }
 }
 
@@ -566,7 +666,7 @@ fn galactic_width(c: char) -> i32 {
     }
 }
 
-/// `FontRenderer.drawSplitString` in the standard galactic font, the first two lines, no shadow.
+/// `FontRenderer.drawSplitString` in the standard galactic font, all lines, no shadow.
 fn galactic(c: &mut dyn Canvas, text: &str, x: i32, y: i32, wrap: i32, rgb: u32) {
     let mut lines: Vec<String> = vec![String::new()];
     let mut used = 0;
@@ -585,7 +685,7 @@ fn galactic(c: &mut dyn Canvas, text: &str, x: i32, y: i32, wrap: i32, rgb: u32)
             used += w;
         }
     }
-    for (row, line) in lines.iter().take(2).enumerate() {
+    for (row, line) in lines.iter().enumerate() {
         let mut px = x as f32;
         for ch in line.chars() {
             let width = galactic_width(ch);

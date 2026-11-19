@@ -1494,7 +1494,12 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::PhysicalSize::new(
                 self.args.width,
                 self.args.height,
-            ));
+            ))
+            .with_fullscreen(
+                self.args
+                    .fullscreen
+                    .then_some(winit::window::Fullscreen::Borderless(None)),
+            );
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();

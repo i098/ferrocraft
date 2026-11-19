@@ -198,6 +198,8 @@ pub struct Renderer {
     item_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
     hand_skin: Option<(wgpu::BindGroup, u32)>,
+    /// The slim (Alex) skin of the hand.
+    hand_skin_slim: Option<wgpu::BindGroup>,
     rain_group: Option<wgpu::BindGroup>,
     snow_group: Option<wgpu::BindGroup>,
     hand: Option<Hand>,
@@ -372,6 +374,7 @@ impl Renderer {
         let rain_img = load_png("environment/rain");
         let snow_img = load_png("environment/snow");
         let skin_img = load_png("entity/steve");
+        let slim_img = load_png("entity/alex");
         let mip_levels = atlas.max_levels();
         for animation in &mut animations {
             animation.set_levels(atlas.tile as usize, mip_levels);
@@ -442,6 +445,9 @@ impl Renderer {
                 bind_group(&device, &layout_bg, &hand_globals, &sampler, &view),
                 img.height as u32,
             )
+        });
+        let hand_skin_slim = slim_img.map(|img| {
+            bind_group(&device, &layout_bg, &hand_globals, &sampler, &view_of(&img))
         });
         let rain_group =
             rain_img.map(|img| bind_group(&device, &layout_bg, &globals, &sampler, &view_of(&img)));
@@ -526,6 +532,7 @@ impl Renderer {
             axes,
             item_group,
             hand_skin,
+            hand_skin_slim,
             rain_group,
             snow_group,
             hand: None,
@@ -1643,7 +1650,11 @@ impl Renderer {
 
     fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
         match (tex, &self.hand_skin, &self.held) {
-            (HandTex::Skin | HandTex::Map(hand::MapTex::Skin), Some((group, _)), _) => group,
+            (HandTex::Skin | HandTex::Map(hand::MapTex::Skin), Some((group, _)), _) => self
+                .hand
+                .filter(|h| h.arm.slim)
+                .and_then(|_| self.hand_skin_slim.as_ref())
+                .unwrap_or(group),
             (HandTex::Map(t), _, _) => self.map_group(t),
             (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,
             _ => &self.hand_atlas_group,

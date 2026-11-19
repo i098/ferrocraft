@@ -650,7 +650,11 @@ impl Mesher<'_> {
                 continue;
             }
             let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));
-            let k = if q.shade { self.lit(SHADE[q.face]) } else { 1.0 };
+            let k = if q.shade {
+                self.lit(SHADE[q.face])
+            } else {
+                1.0
+            };
             let verts = std::array::from_fn(|i| Vertex {
                 pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
                 uv: self.atlas.uv(&q.tex, q.uv[i]),

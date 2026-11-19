@@ -606,7 +606,9 @@ mod tests {
     }
 
     fn rgb([r, g, b, _]: [f32; 4]) -> u32 {
-        [r, g, b].iter().fold(0, |acc, c| acc << 8 | (c * 255.0).round() as u32)
+        [r, g, b]
+            .iter()
+            .fold(0, |acc, c| acc << 8 | (c * 255.0).round() as u32)
     }
 
     /// `RenderItem` draws block quads white, or in their plains tint (`GrassColors`,
@@ -618,7 +620,10 @@ mod tests {
             let flat = hand::held_mesh(id << 4, &atlas, true);
             let colors: Vec<u32> = flat.vertices.iter().map(|v| rgb(v.color)).collect();
             assert_eq!(rgb(top_color(&flat)), tint, "block {id} top");
-            assert!(colors.iter().all(|&c| c == tint || c == 0xff_ffff), "block {id}");
+            assert!(
+                colors.iter().all(|&c| c == tint || c == 0xff_ffff),
+                "block {id}"
+            );
             if id != 2 {
                 assert!(colors.iter().all(|&c| c == tint), "block {id}");
             }

@@ -187,6 +187,8 @@ pub struct Renderer {
     hand_glint_pipe: wgpu::RenderPipeline,
     hand_globals: wgpu::Buffer,
     hand_atlas_group: wgpu::BindGroup,
+    /// `drawDebugAxes`: the F3 axes in place of the crosshair.
+    axes: axes::Axes,
     /// Atlas at level 0 only for dropped and held items: vanilla draws them with `setBlurMipmap(false, false)`.
     item_group: wgpu::BindGroup,
     /// Player skin and its height in pixels; `None` without assets.
@@ -427,6 +429,7 @@ impl Renderer {
         let flat_view = level_zero_view(&atlas_tex);
         let item_group = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
         let hand_atlas_group = bind_group(&device, &layout_bg, &hand_globals, &sampler, &flat_view);
+        let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view);
         let hand_skin = skin_img.map(|img| {
             let view = view_of(&img);
             (
@@ -512,6 +515,7 @@ impl Renderer {
             lines: Vec::new(),
             hand_globals,
             hand_atlas_group,
+            axes,
             item_group,
             hand_skin,
             rain_group,
@@ -578,6 +582,11 @@ impl Renderer {
     /// The world border walls for the next frames; `None` draws none.
     pub fn set_border(&mut self, border: Option<crate::Border>) {
         self.border = border;
+    }
+
+    /// `drawDebugAxes` for the next frames: F3 without reduced debug and without `hideGUI`.
+    pub fn set_debug_axes(&mut self, on: bool) {
+        self.axes.on = on;
     }
 
     /// Block outline for the next frames: a world-space box `[x0, y0, z0, x1, y1, z1]`.
@@ -1776,6 +1785,9 @@ impl Renderer {
         globals.hurt = self.mod_look.hurt_tint();
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        if self.axes.on {
+            self.axes.write(&self.queue, cam, w as f32 / h as f32);
+        }
 
         let layers = build_sky(&env, &sky, cam.pos);
         let sky_solid = self.upload_geometry(&layers.solid);
@@ -2058,6 +2070,9 @@ impl Renderer {
             self.draw_hand(&mut pass, hand);
         }
         self.draw_fire_overlay(&mut pass, fire);
+        if self.axes.on {
+            self.axes.draw(&mut pass, &self.line_pipe);
+        }
         // `renderEntityOutlines` blends the outlines in before the effect.
         self.composite_outlines(&mut pass);
         // `updateCameraAndRender`: the effect runs after the hand and before the GUI.
@@ -2693,6 +2708,7 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
     MeshData { vertices, indices }
 }
 
+mod axes;
 mod block_entities;
 mod outline;
 mod shadow;

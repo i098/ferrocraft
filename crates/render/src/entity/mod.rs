@@ -1544,7 +1544,7 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
     );
     let armor_start = out.vertices.len();
     if holds {
-        emit_armor(out, &xf, &m, d, skins);
+        emit_armor(out, &xf, &armor_model(d), d, skins);
     }
     let armor = armor_start..out.vertices.len();
     let mut drawn = emit_layers(out, &xf, &m, d, skins, white);
@@ -2536,6 +2536,22 @@ pub(crate) mod tests {
         d.class = Class::Mob(51);
         assert_eq!(boxes(&armor_model(&d)), zombie);
         assert_ne!(boxes(&model(&d)), zombie);
+    }
+
+    #[test]
+    fn drawn_skeleton_armor_is_as_wide_as_the_zombie_armor() {
+        let skins = Skins::flat();
+        let width = |class| {
+            let mut d = steve();
+            d.class = class;
+            d.armor = [309, 308, 307, 306];
+            let mut out = MeshData::default();
+            emit_armor(&mut out, &Xf::new(&d, false), &armor_model(&d), &d, &skins);
+            let xs = out.vertices.iter().map(|v| v.pos[0]);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        let zombie = width(Class::Mob(54));
+        assert!((width(Class::Mob(51)) - zombie).abs() < 1e-4, "{zombie}");
     }
 
     #[test]

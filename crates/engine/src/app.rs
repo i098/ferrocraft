@@ -152,6 +152,8 @@ pub struct App {
     view_bob: play::ViewBob,
     /// When the last frame was shown, for the `maxFps` limit.
     last_frame: Instant,
+    /// Seed of `FontRenderer.fontRandom` for `§k` glyphs; moves on every frame.
+    font_seed: u32,
     /// `ItemRenderer.equippedProgress` and its previous value, with the item shown.
     equip: (f32, f32, Option<HandItem>),
     /// `GameRenderer.skyDarkness`: the Wither's dimming of the lightmap and the fog.
@@ -234,6 +236,7 @@ impl App {
             mod_drawn: mod_world::Drawn::default(),
             view_bob: play::ViewBob::default(),
             last_frame: Instant::now(),
+            font_seed: 1,
             equip: (1.0, 1.0, None),
             sky_darkness: Default::default(),
             hand_stack: None,
@@ -1274,7 +1277,11 @@ impl App {
             (self.cursor.1 / factor) as i32,
         );
         self.input.set_gui_size(scale.width, scale.height);
-        let mut g = gui::Gui::new(scale, r.font(), 0);
+        self.font_seed = self
+            .font_seed
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        let mut g = gui::Gui::new(scale, r.font(), self.font_seed);
         g.set_bidi(self.ui.bidirectional());
         self.draw_screen_effects(&mut g, (w, h), frac as f32);
         let m = Fm(g.metrics());

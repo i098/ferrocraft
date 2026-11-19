@@ -838,17 +838,16 @@ impl App {
         let Some(p) = &self.game.player else { return };
         let (yaw, on_ground) = (p.yaw, p.on_ground);
         let pitch = self.game.pitch;
-        // `MovementInputFromOptions`: sneaking scales the axes by 0.3.
-        let scale = if input.sneak { 0.3 } else { 1.0 };
+        // `onLivingUpdate` skips the 0.2 item slowdown while riding.
+        let (strafe, forward) = world::Input {
+            using_item: false,
+            ..input
+        }
+        .steer();
         if let Some(s) = self.link.session() {
-            let r = s.send_look(yaw, pitch, on_ground).and_then(|()| {
-                s.send_steer(
-                    input.strafe * scale,
-                    input.forward * scale,
-                    input.jump,
-                    input.sneak,
-                )
-            });
+            let r = s
+                .send_look(yaw, pitch, on_ground)
+                .and_then(|()| s.send_steer(strafe, forward, input.jump, input.sneak));
             self.send_result(r);
         }
     }

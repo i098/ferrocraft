@@ -61,6 +61,23 @@ pub struct Input {
     pub fly_speed: Option<f32>,
 }
 
+impl Input {
+    /// `moveStrafing` and `moveForward` after `onLivingUpdate`: sneak 0.3, item use 0.2, then 0.98.
+    /// `walk` moves the player with them and `C0C` reports them.
+    pub fn steer(&self) -> (f32, f32) {
+        let (mut strafe, mut forward) = (self.strafe, self.forward);
+        if self.sneak {
+            strafe *= 0.3_f32;
+            forward *= 0.3_f32;
+        }
+        if self.using_item {
+            strafe *= 0.2_f32;
+            forward *= 0.2_f32;
+        }
+        (strafe * 0.98, forward * 0.98)
+    }
+}
+
 /// `MathHelper.sin` and `cos`: the vanilla lookup table, not `f32::sin`.
 static SIN_TABLE: LazyLock<Vec<f32>> = LazyLock::new(|| {
     (0..65536)
@@ -238,17 +255,8 @@ impl Player {
         self.handle_water_movement(world);
         self.push_out_of_blocks_at_corners(world);
         self.apply_jump_and_flight_keys(world, input);
-        // `MovementInputFromOptions` (0.3 while sneaking), then `onLivingUpdate` (0.2 while using an item).
-        let (mut strafe, mut forward) = (input.strafe, input.forward);
-        if input.sneak {
-            strafe *= 0.3_f32;
-            forward *= 0.3_f32;
-        }
-        if input.using_item {
-            strafe *= 0.2_f32;
-            forward *= 0.2_f32;
-        }
-        self.move_with_heading(world, strafe * 0.98, forward * 0.98, input.fly_speed);
+        let (strafe, forward) = input.steer();
+        self.move_with_heading(world, strafe, forward, input.fly_speed);
 
         self.jump_movement_factor = FLYING_SPEED;
         if self.sprinting {
@@ -855,3 +863,34 @@ impl Player {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod steer_tests {
+    use super::Input;
+
+    fn steer(strafe: f32, forward: f32, sneak: bool, using_item: bool) -> (f32, f32) {
+        Input {
+            strafe,
+            forward,
+            sneak,
+            using_item,
+            ..Input::default()
+        }
+        .steer()
+    }
+
+    /// Vanilla 1.8.9 `C0C` values: key axis, times 0.3 sneaking, times 0.2 using an item, times 0.98 (f32).
+    #[test]
+    fn steer_matches_vanilla() {
+        assert_eq!(steer(0.0, 1.0, false, false), (0.0, 0.98));
+        assert_eq!(steer(0.0, -1.0, false, false), (0.0, -0.98));
+        assert_eq!(steer(1.0, 1.0, false, false), (0.98, 0.98));
+        assert_eq!(steer(-1.0, 0.0, false, false), (-0.98, 0.0));
+        assert_eq!(
+            steer(1.0, 1.0, true, false),
+            (0.3_f32 * 0.98, 0.3_f32 * 0.98)
+        );
+        assert_eq!(steer(0.0, 1.0, false, true), (0.0, 0.2_f32 * 0.98));
+        assert_eq!(steer(0.0, 1.0, true, true).1, 0.3_f32 * 0.2_f32 * 0.98);
+    }
+}

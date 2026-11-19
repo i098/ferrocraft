@@ -215,7 +215,7 @@ impl Extras {
                     damage: 0,
                     nbt: None,
                 };
-                icons.draw(c, &s, 42 + 24 * i as i32, 109);
+                icons.draw(c, &s, 42 + 22 * i as i32, 109);
             }
         }
     }

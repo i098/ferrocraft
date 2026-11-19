@@ -403,8 +403,8 @@ fn stair_shape(nb: Nb, facing: usize, top: bool) -> &'static str {
         corner(nb, top, facing, facing, &OUTER[facing]),
         corner(nb, top, facing, opposite, &INNER[facing]),
     ) {
-        (Some(v), _) => ["", "outer_right", "outer_left"][v as usize],
-        (None, Some(v)) => ["", "inner_right", "inner_left"][v as usize],
+        (Some(v), _) => ["", "outer_left", "outer_right"][v as usize],
+        (None, Some(v)) => ["", "inner_left", "inner_right"][v as usize],
         (None, None) => "straight",
     }
 }

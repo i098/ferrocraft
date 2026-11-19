@@ -26,6 +26,7 @@ mod light;
 mod mesh;
 mod mesher;
 mod mip;
+mod models;
 mod particles;
 mod post;
 mod shapes;

@@ -49,6 +49,11 @@ fn plants_scene() {
         put(&mut r, x, 64, 6, 31, 1);
     }
     put(&mut r, 10, 64, 6, 32, 0);
+    // Flowers at two heights: the offset hash takes y, so each cell gets its own shift.
+    put(&mut r, 12, 64, 6, 38, 0);
+    put(&mut r, 13, 64, 6, 37, 0);
+    put(&mut r, 14, 64, 6, 1, 0);
+    put(&mut r, 14, 65, 6, 38, 0);
     // Row z 9: logs along x and z, hay bale, flowing water, fire against a log.
     put(&mut r, 1, 64, 9, 17, 4);
     put(&mut r, 3, 64, 9, 17, 8);

@@ -55,6 +55,8 @@ import net.minecraft.flat.SlimeEntity;
  *                                 (float bits in hex), toolNotRequired; needs "start"
  *   minewith <block> <held item id|0> <efficiency> <haste amp|-1> <fatigue amp|-1> <aqua 0/1>
  *                                 mining speed on the ground and in the air (float bits in hex) with that tool and effects; needs "start"
+ *   offset <x> <y> <z>            MathHelper.hashCode(BlockPos) (the position random the block offset uses), then
+ *                                 name|offset type of tallgrass, deadbush, yellow_flower, red_flower, double_plant
  *   bidi <UTF-8 hex>              FontRenderer.bidiReorder of the text: UTF-8 hex of the result
  *   signjson <UTF-8 hex>          the JSON that C12PacketUpdateSign writes for a sign line of that text: UTF-8 hex
  *   achievements                  AchievementList: key|column|row|parent|challenge|item id|damage per line, then the display bounds
@@ -872,6 +874,17 @@ public class Harness {
                 case "minewith":
                     minewithCommand(player, t);
                     break;
+                case "offset": {
+                    System.out.println(net.minecraft.flat.MathHelper.hashCode(new net.minecraft.flat.BlockPos(
+                            Integer.parseInt(t[1]), Integer.parseInt(t[2]), Integer.parseInt(t[3]))));
+                    net.minecraft.flat.Block[] plants = {Blocks.TALLGRASS, Blocks.DEADBUSH, Blocks.YELLOW_FLOWER,
+                            Blocks.RED_FLOWER, Blocks.DOUBLE_PLANT};
+                    String[] names = {"tallgrass", "deadbush", "yellow_flower", "red_flower", "double_plant"};
+                    for (int i = 0; i < plants.length; i++) {
+                        System.out.println(names[i] + "|" + plants[i].getOffsetType());
+                    }
+                    break;
+                }
                 case "eat":
                     eatCommand(player, t);
                     break;

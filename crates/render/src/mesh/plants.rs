@@ -456,4 +456,34 @@ mod tests {
             );
         }
     }
+
+    /// The real 1.8.9 position random and offset types: the hash takes the block's y, so the two
+    /// halves of a double plant (one block apart) and plants at different heights differ.
+    #[test]
+    fn plant_offset_uses_the_real_position_random_with_y() {
+        let mut script = String::new();
+        let cells = [[3, 64, -7], [3, 65, -7], [-12, 70, 9], [-12, 71, 9]];
+        for [x, y, z] in cells {
+            script.push_str(&format!("offset {x} {y} {z}\n"));
+        }
+        let out = oracle::Oracle::get().run(&script).unwrap();
+        assert_eq!(out.len(), cells.len() * 6, "{out:?}");
+        let mut hashes = Vec::new();
+        for (cell, lines) in cells.iter().zip(out.chunks(6)) {
+            assert_eq!(
+                lines[1..],
+                ["tallgrass|XYZ", "deadbush|NONE", "yellow_flower|XZ", "red_flower|XZ", "double_plant|XZ"],
+            );
+            let h: i64 = lines[0].parse().unwrap();
+            hashes.push(h);
+            let f = |shift: u32| ((h >> shift & 15) as f32 / 15.0 - 0.5) * 0.5;
+            assert_eq!(plant_offset(37, *cell), [f(16), 0.0, f(24)]);
+            assert_eq!(plant_offset(175, *cell), [f(16), 0.0, f(24)]);
+            assert_eq!(plant_offset(32, *cell), [0.0; 3]);
+            let dy = ((h >> 20 & 15) as f32 / 15.0 - 1.0) * 0.2;
+            assert_eq!(plant_offset(31, *cell), [f(16), dy, f(24)]);
+        }
+        assert_ne!(hashes[0], hashes[1]);
+        assert_ne!(hashes[2], hashes[3]);
+    }
 }

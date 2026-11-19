@@ -546,45 +546,17 @@ impl Mesher<'_> {
             self.hood.origin.0 * 16 + at[0],
             self.hood.origin.1 * 16 + at[2],
         );
-        let (ox, oz) = if matches!(id, 31 | 32 | 37 | 38 | 175) {
-            plant_offset(wx, 0, wz)
-        } else {
-            (0.0, 0.0)
-        };
-        let planes: &[([f32; 2], [f32; 2])] = if matches!(id, 59 | 141 | 142) {
-            &[
-                ([0.25, 0.0], [0.25, 1.0]),
-                ([0.75, 0.0], [0.75, 1.0]),
-                ([0.0, 0.25], [1.0, 0.25]),
-                ([0.0, 0.75], [1.0, 0.75]),
-            ]
-        } else {
-            &[([0.05, 0.05], [0.95, 0.95]), ([0.05, 0.95], [0.95, 0.05])]
-        };
-        for (a, b) in planes {
-            for (p, q) in [(a, b), (b, a)] {
-                // Both windings so the plane shows from either side.
-                let mut verts = [Vertex::zeroed(); 4];
-                let corners = [
-                    (p, 0.0, [0.0, 1.0]),
-                    (q, 0.0, [1.0, 1.0]),
-                    (q, 1.0, [1.0, 0.0]),
-                    (p, 1.0, [0.0, 0.0]),
-                ];
-                for (v, (xz, y, uv)) in verts.iter_mut().zip(corners) {
-                    *v = Vertex {
-                        pos: [
-                            at[0] as f32 + xz[0] + ox,
-                            at[1] as f32 + y,
-                            at[2] as f32 + xz[1] + oz,
-                        ],
-                        uv: self.atlas.uv(tex, uv),
-                        color: [rgb[0], rgb[1], rgb[2], 1.0],
-                        light,
-                    };
-                }
-                self.push_quad(Pass::Opaque, verts, false);
+        for quad in cross_quads(id, wx, wz) {
+            let mut verts = [Vertex::zeroed(); 4];
+            for (v, (rel, uv)) in verts.iter_mut().zip(quad) {
+                *v = Vertex {
+                    pos: [0, 1, 2].map(|a| at[a] as f32 + rel[a]),
+                    uv: self.atlas.uv(tex, uv),
+                    color: [rgb[0], rgb[1], rgb[2], 1.0],
+                    light,
+                };
             }
+            self.push_quad(Pass::Opaque, verts, false);
         }
     }
 
@@ -690,6 +662,40 @@ fn plant_offset(x: i32, y: i32, z: i32) -> (f32, f32) {
         .wrapping_add(i.wrapping_mul(11));
     let f = |shift: u32| ((i >> shift & 15) as f32 / 15.0 - 0.5) * 0.5;
     (f(16), f(24))
+}
+
+/// The quads of a cross model (`block/cross.json`, `block/crop.json`) of block `id` at world
+/// column `wx`, `wz`: positions relative to the block (with `Block.getOffset`) and sprite uv.
+/// Both windings, so a plane shows from either side.
+pub(crate) fn cross_quads(id: u16, wx: i32, wz: i32) -> Vec<[([f32; 3], [f32; 2]); 4]> {
+    let (ox, oz) = if matches!(id, 31 | 32 | 37 | 38 | 175) {
+        plant_offset(wx, 0, wz)
+    } else {
+        (0.0, 0.0)
+    };
+    let planes: &[([f32; 2], [f32; 2])] = if matches!(id, 59 | 141 | 142) {
+        &[
+            ([0.25, 0.0], [0.25, 1.0]),
+            ([0.75, 0.0], [0.75, 1.0]),
+            ([0.0, 0.25], [1.0, 0.25]),
+            ([0.0, 0.75], [1.0, 0.75]),
+        ]
+    } else {
+        &[([0.05, 0.05], [0.95, 0.95]), ([0.05, 0.95], [0.95, 0.05])]
+    };
+    let mut out = Vec::new();
+    for (a, b) in planes {
+        for (p, q) in [(a, b), (b, a)] {
+            let corners = [
+                (p, 0.0, [0.0, 1.0]),
+                (q, 0.0, [1.0, 1.0]),
+                (q, 1.0, [1.0, 0.0]),
+                (p, 1.0, [0.0, 0.0]),
+            ];
+            out.push(corners.map(|(xz, y, uv)| ([xz[0] + ox, y, xz[1] + oz], uv)));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

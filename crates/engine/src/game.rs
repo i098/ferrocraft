@@ -1019,6 +1019,21 @@ impl Game {
         }
     }
 
+    /// `GuiIngame.showCrosshair` for a spectator: an entity under the crosshair, or a block whose
+    /// tile entity is an `IInventory`.
+    pub fn spectator_crosshair(&self, aim: Option<Aim>) -> bool {
+        // Chest, dispenser, furnace (both), brewing stand, beacon, trapped chest, hopper, dropper.
+        const INVENTORY_BLOCKS: [u16; 9] = [54, 23, 61, 62, 117, 138, 146, 154, 158];
+        match aim {
+            Some(Aim::Entity(..)) => true,
+            Some(Aim::Block(h, _)) => {
+                let [x, y, z] = h.pos;
+                INVENTORY_BLOCKS.contains(&(self.store.get_block(x, y, z) >> 4))
+            }
+            _ => false,
+        }
+    }
+
     /// The outline box of the block under the crosshair, when `outline::draws` allows it.
     pub fn outline(&self, hide_hud: bool, ray: Option<crate::outline::Ray>) -> Option<[f64; 6]> {
         crate::outline::selection(self, hide_hud, ray)

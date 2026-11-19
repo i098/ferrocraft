@@ -6,6 +6,7 @@
 //! [`Request`]s to the server.
 
 mod attributes;
+mod book;
 mod creative;
 pub mod dials;
 pub mod icons;
@@ -109,6 +110,8 @@ pub struct InventoryView<'a> {
     pub effects: &'a Effects,
     /// The model the screen draws: the local player in the inventory screens, the horse in a horse window.
     pub player: Option<&'a EntityDraw>,
+    /// Fraction of the tick since the last one, which animates the enchanting table's book.
+    pub partial_ticks: f32,
 }
 
 /// The model of the screen and the cursor position it turns toward.
@@ -636,6 +639,7 @@ impl ContainerScreen {
             advanced_tooltips,
             effects,
             player,
+            partial_ticks,
         } = *view;
         // `checkStatusEffects`: only the player's own inventory and the creative screen list effects.
         self.effects_shown = !effects.is_empty() && inv.open.is_none();
@@ -653,7 +657,13 @@ impl ContainerScreen {
                 self.draw_background(c, inv, l, t, player.map(|p| (p, at)));
             }
         }
-        self.extras.draw_back(c, inv, l, t, mx, my);
+        self.extras.draw_back(
+            c,
+            inv,
+            (l, t),
+            (mx, my),
+            (partial_ticks, (self.width, self.height)),
+        );
         self.hovered = self.slot_at(mx, my);
         c.push([l as f32, t as f32], 1.0, 0.0);
         for i in 0..self.slots().len() {
@@ -684,6 +694,8 @@ impl ContainerScreen {
                 .hover(c, inv, l, t, mx, my, self.width, self.height);
             self.draw_tooltip(c, inv, mx, my, advanced_tooltips);
         }
+        self.extras
+            .draw_over(c, view, (l, t), (mx, my), (self.width, self.height));
     }
 
     /// The cursor stack, less what a drag split has painted into slots.

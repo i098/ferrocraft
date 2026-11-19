@@ -38,7 +38,7 @@ pub use sky::{celestial_angle, Environment, Fluid};
 pub use ambient::{random_display_ticks, Effect as AmbientEffect};
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use biome::splashes;
-pub use blockent::{Banner, Skull, WornHead};
+pub use blockent::{book_quads, Banner, BookQuad, Skull, WornHead};
 pub use entity::{hanging, item, leash, vehicle};
 pub use entity::{
     nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook, TeamTag, Thrower,

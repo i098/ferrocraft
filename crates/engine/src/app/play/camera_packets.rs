@@ -303,6 +303,45 @@ fn riding_sends_no_entity_action() {
     assert_eq!(ids, [LOOK, STEER]);
 }
 
+/// Jar `bew.t_`/`p` (EntityPlayerSP.onUpdate and onUpdateWalkingPlayer): riding sends no `C0B`; after
+/// the dismount the sneak state that changed meanwhile goes out then.
+#[test]
+fn sneak_released_while_riding_sends_stop_sneak_after_dismount() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    let actions = |app: &mut App| -> Vec<(u8, u8)> {
+        let frames = sent_frames(app, &rx);
+        let pick = |f: &Vec<u8>| (f[0], f[f.len() - 2]);
+        frames
+            .iter()
+            .filter(|f| f[0] == ENTITY_ACTION || f[0] == STEER)
+            .map(pick)
+            .collect()
+    };
+    app.input.on_key(KeyCode::ShiftLeft, true, None);
+    app.tick_once();
+    assert_eq!(
+        actions(&mut app),
+        [(ENTITY_ACTION, 0)],
+        "start sneak on foot"
+    );
+    app.game.vehicle = Some(OTHER_ID);
+    app.input.on_key(KeyCode::ShiftLeft, false, None);
+    app.tick_once();
+    let riding = actions(&mut app);
+    assert!(
+        riding.iter().all(|a| a.0 == STEER),
+        "no C0B while mounted: {riding:?}"
+    );
+    app.game.vehicle = None;
+    app.tick_once();
+    assert_eq!(
+        actions(&mut app),
+        [(ENTITY_ACTION, 1)],
+        "stop sneak after the dismount"
+    );
+}
+
 /// `C0C` carries `moveForward` after `onLivingUpdate`: 1.0 from the key times 0.98.
 #[test]
 fn steer_forward_is_scaled_by_0_98() {

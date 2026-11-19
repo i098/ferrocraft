@@ -280,6 +280,8 @@ pub struct Entity {
     pub age: u32,
     /// Metadata index 7: the mixed colour of the active potion effects, 0 for none.
     pub potion_color: i32,
+    /// Experience orbs: the `count` of `SpawnExperienceOrb` (`xpValue`), which picks the icon.
+    pub xp: i16,
     /// Arrows: id of the shooter; fishing bobbers: id of the player who cast it (the `SpawnObject` data). 0 for any
     /// other entity.
     pub owner: i32,
@@ -454,6 +456,7 @@ impl Entity {
             leash: None,
             age: 0,
             potion_color: 0,
+            xp: 0,
             potion_ambient: false,
             explosions: Vec::new(),
             facing: 0,
@@ -988,6 +991,7 @@ pub enum EntityEvent {
     SpawnExperienceOrb {
         id: i32,
         pos: [i32; 3],
+        count: i16,
     },
     /// `SpawnPainting`: motive name, block position and horizontal facing.
     SpawnPainting {
@@ -1258,8 +1262,9 @@ impl Entities {
                 (e.facing, e.title) = (facing & 3, title);
                 self.map.insert(id, e);
             }
-            E::SpawnExperienceOrb { id, pos } => {
-                let e = Entity::new(id, Kind::ExperienceOrb, pos, 0, 0);
+            E::SpawnExperienceOrb { id, pos, count } => {
+                let mut e = Entity::new(id, Kind::ExperienceOrb, pos, 0, 0);
+                e.xp = count;
                 self.map.insert(id, e);
             }
             E::Move {

@@ -13,6 +13,7 @@ mod baby;
 mod block;
 pub mod crystal;
 mod dragon;
+mod ears;
 mod endermite;
 pub(crate) mod fire;
 mod glint_mask;
@@ -31,6 +32,8 @@ mod mobs3;
 mod mooshroom;
 pub(crate) mod outline;
 mod projectile;
+mod sneak;
+mod undead;
 pub use horse::HorseLook;
 mod rabbit;
 pub(crate) mod shadow;
@@ -225,6 +228,10 @@ pub struct Look {
     pub dragon: Option<Box<world::mob_anim::DragonPose>>,
     /// An invisible entity the viewer can see (`!isInvisibleTo(viewer)`): the body draws at [`GHOST_ALPHA`].
     pub ghost: bool,
+    /// The local player's own draw (`EntityPlayerSP`): `RenderPlayer.doRender` does not lower it when it sneaks.
+    pub local: bool,
+    /// Experience orb: `xpValue`, which picks the icon of `RenderXPOrb`.
+    pub xp: u16,
 }
 
 /// `LivingEntityRenderer.renderModel`: alpha of the body of an invisible entity the viewer can see.
@@ -267,6 +274,8 @@ impl Default for Look {
             viewer: [0.0; 3],
             dragon: None,
             ghost: false,
+            local: false,
+            xp: 0,
         }
     }
 }
@@ -319,6 +328,8 @@ struct Part {
     /// Extra vertical factor of `scale`, for the `scalef(s, 0.5 + s / 2, s)` of a baby horse's legs.
     stretch_y: f32,
     shift: [f32; 3],
+    /// `ModelBiped.render` of a sneaking biped: `translate(0, 0.2, 0)`, in model pixels. Only the drawn box moves; the pivot stays, so held items and arrows keep their own offsets.
+    lower: f32,
     /// Parent `ModelRenderer`s, nearest first, as (pivot, rotation): the part's box is carried
     /// through each one's translate and rotate (`ModelBat` wings).
     parents: Vec<([f32; 3], [f32; 3])>,
@@ -337,6 +348,7 @@ impl Part {
             scale: 1.0,
             stretch_y: 1.0,
             shift: [0.0; 3],
+            lower: 0.0,
             parents: Vec::new(),
         }
     }
@@ -606,6 +618,7 @@ fn biped(
         ];
         parts.extend(wear);
     }
+    sneak::lower(d, &mut parts);
     Model { skin, tint, parts }
 }
 
@@ -815,6 +828,9 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
+    if let Some(m) = undead::model(d) {
+        return m;
+    }
     match d.class {
         Class::Player { slim } => {
             let (skin, arm) = if slim {
@@ -842,11 +858,11 @@ fn adult_model(d: &EntityDraw) -> Model {
 }
 
 /// The model whose boxes the armor layers grow: the body itself, except on a stand, whose armor
-/// has its own `ArmorStandArmorModel`.
+/// has its own `ArmorStandArmorModel`, and the undead of [`undead::armor_model`].
 fn armor_model(d: &EntityDraw) -> Model {
     match d.class {
         Class::Object(78) => armorstand::armor_model(d),
-        _ => model(d),
+        _ => undead::armor_model(d).unwrap_or_else(|| model(d)),
     }
 }
 
@@ -1162,10 +1178,10 @@ struct Xf {
     pitch: f32,
 }
 
-/// Vertical drop of the model: `RenderPlayer` lowers a sneaking player (a stand sneaks through its own
-/// model offset); `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
+/// Vertical drop of the model: `RenderPlayer.doRender` lowers a sneaking player by 0.125 unless it is
+/// the `EntityPlayerSP`; `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
 fn sneak_drop(d: &EntityDraw) -> f32 {
-    if d.sneaking && d.class != Class::Object(78) {
+    if d.sneaking && matches!(d.class, Class::Player { .. }) && !d.look.local {
         0.125
     } else if d.class == Class::Mob(mobs2::BAT) {
         -mobs2::bat_lift(d)
@@ -1189,7 +1205,7 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         // `RenderWitch.preRenderCallback` is the same 15/16.
         Class::Mob(mobs::VILLAGER | witch::WITCH) => 0.9375,
         // `RenderGiantZombie` is built with scale 6; `RenderWither.preRenderCallback` scales by 2 and more while it charges.
-        Class::Mob(GIANT) => 6.0,
+        Class::Mob(GIANT | 51) => undead::scale(d),
         Class::Mob(wither::WITHER) => wither::scale(d),
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
@@ -1205,10 +1221,7 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
 
 impl Xf {
     fn new(d: &EntityDraw, generic: bool) -> Xf {
-        let spinning = matches!(d.class, Class::Orb);
-        let body_yaw = if spinning {
-            (d.age * 0.1).to_degrees()
-        } else if d.class == Class::Mob(dragon::DRAGON) {
+        let body_yaw = if d.class == Class::Mob(dragon::DRAGON) {
             // `RenderDragon.rotateCorpse` turns by `-yaw` of the ring buffer, not by `180 - yaw`.
             d.look
                 .dragon
@@ -1319,9 +1332,11 @@ fn emit_part(out: &mut MeshData, xf: &Xf, part: &Part, grow: f32, color: V3, v_o
             q = rotate(q, rot);
             q = [0, 1, 2].map(|i| q[i] + pivot[i]);
         }
-        xf.world([0, 1, 2].map(|i| {
+        let mut w = [0, 1, 2].map(|i| {
             (q[i] + part.shift[i]) * part.scale * if i == 1 { part.stretch_y } else { 1.0 }
-        }))
+        });
+        w[1] += part.lower;
+        xf.world(w)
     };
     add_box(
         out,
@@ -1363,8 +1378,10 @@ fn cape_shown(d: &EntityDraw) -> bool {
 fn emit_cape(out: &mut MeshData, xf: &Xf, d: &EntityDraw, sway: CapeSway, v_off: f32) {
     let (pitch, twist) = sway.angles(d.sneaking);
     let half = (twist / 2.0).to_radians();
+    // `ModelPlayer.setRotationAngles`: `bipedCape.rotationPointY` is 2 while sneaking, before the layer's rotations.
+    let pivot_y = if d.sneaking { 2.0 } else { 0.0 };
     let tf = |p: V3| -> V3 {
-        let q = rotate(p, [0.0, PI, 0.0]);
+        let q = rotate([p[0], p[1] + pivot_y, p[2]], [0.0, PI, 0.0]);
         let q = rotate(q, [0.0, -half, 0.0]);
         let q = rotate(q, [0.0, 0.0, half]);
         let q = rotate(q, [pitch.to_radians(), 0.0, 0.0]);
@@ -1439,6 +1456,10 @@ impl Drawn {
 /// Projectiles, dropped items, item frames and paintings, which skip the body model; `true` when
 /// `d` was one of them.
 fn other_drawer(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> bool {
+    if d.class == Class::Orb {
+        projectile::orb(out, d, skins);
+        return true;
+    }
     if let Class::Object(id) = d.class {
         if projectile::handles(id) {
             projectile::build(out, id, d, skins);
@@ -1508,7 +1529,7 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
     let (skin, tint) = base_look(&m, d, skins);
     let tint = tint.map(|c| c * mobs3::wet_factor(d));
     let generic = m.skin == Skin::White
-        && matches!(d.class, Class::Mob(_) | Class::Object(_) | Class::Orb)
+        && matches!(d.class, Class::Mob(_) | Class::Object(_))
         && m.parts.len() == 1;
     let xf = Xf::new(d, generic);
     let white = skins.v_offset(Skin::White);
@@ -1523,7 +1544,7 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
     );
     let armor_start = out.vertices.len();
     if holds {
-        emit_armor(out, &xf, &m, d, skins);
+        emit_armor(out, &xf, &armor_model(d), d, skins);
     }
     let armor = armor_start..out.vertices.len();
     let mut drawn = emit_layers(out, &xf, &m, d, skins, white);
@@ -1547,6 +1568,7 @@ fn emit_layers(
             emit_cape(out, xf, d, sway, skins.v_offset(cape));
         }
     }
+    ears::emit(out, xf, m, d, skins);
     arrows::emit(out, xf, m, d, skins);
     if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
         emit_carried(out, xf, d.look.carried, white);
@@ -1905,9 +1927,7 @@ impl TagView<'_> {
         if d.child {
             y -= f64::from(d.size.1) / 2.0;
         }
-        if d.sneaking {
-            y -= 0.25;
-        }
+        y -= sneak::tag_drop(d);
         let below =
             d.team_tag.below.as_ref().filter(|_| {
                 matches!(d.class, Class::Player { .. }) && !d.sneaking && dist_sq < 100.0
@@ -1931,12 +1951,15 @@ impl TagView<'_> {
         let c: Vec<f32> = (0..4)
             .map(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
             .collect();
+        // `Render.renderLivingLabel`: the text of "deadmau5" starts 10 font pixels higher.
+        let lift = ears::tag_lift(text);
+        let scale = 0.026_666_67 * self.px_per_block / c[3];
         (c[3] > 0.0).then(|| NameTag {
             screen: [
                 (c[0] / c[3] * 0.5 + 0.5) * self.size[0],
-                (0.5 - c[1] / c[3] * 0.5) * self.size[1],
+                (0.5 - c[1] / c[3] * 0.5) * self.size[1] - lift * scale,
             ],
-            scale: 0.026_666_67 * self.px_per_block / c[3],
+            scale,
             anchor,
             sneaking: d.sneaking,
             team: matches!(d.class, Class::Player { .. }) && d.team_tag.shown.is_some(),
@@ -2446,13 +2469,116 @@ pub(crate) mod tests {
         assert!(!tag(&|_| {})[0].sneaking);
         let sneak = &tag(&|d| d.sneaking = true)[0];
         assert!(sneak.sneaking);
-        assert!((sneak.anchor[1] - (steve().size.1 as f64 + 0.5 - 0.25)).abs() < 1e-6);
+        // `RenderPlayer.doRender` passes `y - 0.125` to `renderName` for a sneaking player that is not the local one.
+        assert!((sneak.anchor[1] - (steve().size.1 as f64 + 0.5 - 0.25 - 0.125)).abs() < 1e-6);
+        let own = &tag(&|d| {
+            d.sneaking = true;
+            d.look.local = true;
+        })[0];
+        assert!((own.anchor[1] - (steve().size.1 as f64 + 0.5 - 0.25)).abs() < 1e-6);
         let child = &tag(&|d| {
             d.child = true;
             d.size = (0.3, 0.9);
         })[0];
         assert!((child.anchor[1] - (0.9 + 0.5 - 0.45)).abs() < 1e-6);
         assert!(tag(&|d| d.ridden = true).is_empty());
+    }
+
+    #[test]
+    fn deadmau5_tag_sits_ten_font_pixels_higher() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let tag = |name: &str| {
+            let mut d = steve();
+            d.pos = [0.0, 0.0, -10.0];
+            d.name = Some(name.into());
+            nametags(&[d], [0.0; 3], &flip(id), 70.0, 800.0, 600.0).remove(0)
+        };
+        let (plain, mau) = (tag("deadmau6"), tag("deadmau5"));
+        assert!((plain.screen[1] - mau.screen[1] - 10.0 * mau.scale).abs() < 1e-3);
+    }
+
+    fn boxes(m: &Model) -> Vec<([f32; 3], [f32; 3])> {
+        m.parts.iter().map(|p| (p.min, p.size)).collect()
+    }
+
+    #[test]
+    fn sneaking_biped_body_is_lowered_by_a_fifth_of_a_block_and_the_local_player_does_not_drop() {
+        let mut d = steve();
+        assert!(model(&d).parts.iter().all(|p| p.lower == 0.0));
+        d.sneaking = true;
+        assert!(model(&d).parts.iter().all(|p| p.lower == 3.2));
+        assert_eq!(sneak_drop(&d), 0.125);
+        d.look.local = true;
+        assert_eq!(sneak_drop(&d), 0.0);
+    }
+
+    #[test]
+    fn wither_skeleton_is_scaled_and_has_its_own_texture() {
+        let mut d = steve();
+        d.class = Class::Mob(51);
+        assert_eq!(model(&d).skin, Skin::Skeleton);
+        assert_eq!(model_scale(&d), [1.0, 1.0]);
+        d.look.variant = 1;
+        assert_eq!(model(&d).skin, Skin::WitherSkeleton);
+        assert_eq!(model_scale(&d), [1.2, 1.2]);
+    }
+
+    #[test]
+    fn skeleton_armor_has_the_limb_boxes_of_a_zombie() {
+        let mut d = steve();
+        d.class = Class::Mob(54);
+        let zombie = boxes(&armor_model(&d));
+        d.class = Class::Mob(51);
+        assert_eq!(boxes(&armor_model(&d)), zombie);
+        assert_ne!(boxes(&model(&d)), zombie);
+    }
+
+    #[test]
+    fn drawn_skeleton_armor_is_as_wide_as_the_zombie_armor() {
+        let skins = Skins::flat();
+        let width = |class| {
+            let mut d = steve();
+            d.class = class;
+            d.armor = [309, 308, 307, 306];
+            let mut out = MeshData::default();
+            emit_armor(&mut out, &Xf::new(&d, false), &armor_model(&d), &d, &skins);
+            let xs = out.vertices.iter().map(|v| v.pos[0]);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        let zombie = width(Class::Mob(54));
+        assert!((width(Class::Mob(51)) - zombie).abs() < 1e-4, "{zombie}");
+    }
+
+    #[test]
+    fn zombie_villager_has_the_tall_head_and_the_nose() {
+        let mut d = steve();
+        d.class = Class::Mob(54);
+        d.look.variant = 1;
+        let m = model(&d);
+        assert_eq!(m.skin, Skin::ZombieVillager);
+        assert_eq!(m.parts[0].size, [8.0, 10.0, 8.0]);
+        assert_eq!(m.parts.last().unwrap().size, [2.0, 4.0, 2.0]);
+        // The armor keeps the plain zombie head.
+        assert_eq!(armor_model(&d).parts[0].size, [8.0; 3]);
+    }
+
+    #[test]
+    fn xp_orb_is_a_point_three_block_textured_quad() {
+        let skins = Skins::flat();
+        let mut d = steve();
+        d.class = Class::Orb;
+        d.pos = [0.0; 3];
+        d.look.xp = 3;
+        let mut out = MeshData::default();
+        projectile::orb(&mut out, &d, &skins);
+        let ys = out.vertices.iter().map(|v| v.pos[1]);
+        let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(l, h), y| (l.min(y), h.max(y)));
+        assert!((lo + 0.075).abs() < 1e-5 && (hi - 0.225).abs() < 1e-5);
     }
 
     #[test]

@@ -263,6 +263,7 @@ fn spawn_event(packet: &cb::Packet) -> Option<EntityEvent> {
         P::SpawnExperienceOrb(p) => EntityEvent::SpawnExperienceOrb {
             id: p.entity_id.0,
             pos: [p.x, p.y, p.z],
+            count: p.count,
         },
         _ => return None,
     })

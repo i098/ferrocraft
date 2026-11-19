@@ -110,6 +110,9 @@ pub struct App {
     grabbed: bool,
     /// Left-click presses since the last tick that did not hit an entity.
     attack_presses: u32,
+    /// A window opened this frame: the next tick replays the mouse buttons still held, after the
+    /// server's `WindowItems` has filled it.
+    replay_held_mouse: bool,
     /// Right-click presses since the last tick: `Minecraft.runTick` handles them in the tick.
     use_presses: u32,
     show_debug: bool,
@@ -210,6 +213,7 @@ impl App {
             next_tick: Instant::now(),
             grabbed: false,
             attack_presses: 0,
+            replay_held_mouse: false,
             use_presses: 0,
             show_debug: false,
             show_hitboxes: false,

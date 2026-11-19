@@ -334,6 +334,7 @@ impl App {
     }
 
     fn tick_once(&mut self) {
+        self.replay_held_mouse();
         self.chat_tick();
         self.tick_block_entities();
         self.hud.tick();
@@ -1650,6 +1651,8 @@ mod held_slot;
 mod item_packets;
 #[cfg(test)]
 mod transaction_packets;
+#[cfg(test)]
+mod villager_packets;
 #[cfg(test)]
 mod tests {
     use super::{activates, item_used_on, outline_draws, sprint_dust_state, App, ContainerScreen};

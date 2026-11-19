@@ -693,7 +693,10 @@ impl App {
 
     /// A right click on a villager still held when its window opens clicks the slot under the
     /// pointer (half a stack); the release is then ignored.
-    fn replay_held_mouse(&mut self) {
+    pub(super) fn replay_held_mouse(&mut self) {
+        if !std::mem::take(&mut self.replay_held_mouse) || self.container.is_none() {
+            return;
+        }
         for button in self.input.held_mouse_buttons().collect::<Vec<_>>() {
             self.mouse_button(true, button);
         }
@@ -725,7 +728,7 @@ impl App {
                     self.ui.width,
                     self.ui.height,
                 ));
-                self.replay_held_mouse();
+                self.replay_held_mouse = true;
             }
             Effect::CloseWindow => {
                 self.close_screens();

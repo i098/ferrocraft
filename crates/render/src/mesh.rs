@@ -292,8 +292,14 @@ impl Mesher<'_> {
                     return;
                 }
                 let list = boxes(state, &nb);
+                // `waterlily.json`: four y turns picked by the position hash.
+                let orient = if state >> 4 == 111 {
+                    self.orient_at(at, state)
+                } else {
+                    variants::Orient::default()
+                };
                 for b in &list {
-                    self.boxed(at, b, Self::pass_of(state));
+                    self.boxed(at, b, Self::pass_of(state), orient);
                 }
                 if state >> 4 == 117 {
                     self.brewing_spokes(at, state & 7);
@@ -669,7 +675,7 @@ impl Mesher<'_> {
         }
     }
 
-    fn boxed(&mut self, at: [i32; 3], b: &Bx, pass: Pass) {
+    fn boxed(&mut self, at: [i32; 3], b: &Bx, pass: Pass, orient: variants::Orient) {
         let l = Look {
             kind: Kind::Shape,
             tint: b.tint,
@@ -696,7 +702,7 @@ impl Mesher<'_> {
             let mut verts = [Vertex::zeroed(); 4];
             for (i, c) in CORNERS[f].iter().enumerate() {
                 let p = [0, 1, 2].map(|a| if c[a] > 0.5 { b.max[a] } else { b.min[a] });
-                let mut uv = face_uv(f, p);
+                let mut uv = orient.uv(f, p);
                 if f == UP {
                     uv = rot_uv(uv, b.rot);
                 }

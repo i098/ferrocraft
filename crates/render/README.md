@@ -21,7 +21,7 @@ Particles: call `Particles::vertices(renderer.atlas(), yaw, pitch, cam.pos, part
 light at its position like the 1.8.9 particle classes.
 Fireworks: the engine calls `Particles::firework(pos, vel, explosions)` for a blast and `firework_trail(pos, vel)` each tick of rocket flight. It also calls `set_viewer(eye_pos)` each tick and plays the `take_sounds()` entries (blast, twinkle) itself.
 Lightning: `Bolts` holds the client lightning entities (spawn from Spawn Global Entity, `tick` at 20 Hz); `set_lightning(bolts.shapes())` draws them, and `Environment::flash` is `Bolts::flash(partial)`.
-Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds; the engine spawns them as particles.
+Rain splashes: `rain_particles` returns the droplets (and lava smoke) one tick adds, plus the `ambient.weather.rain` sound it may play as a `WeatherSound` (event, position, volume, pitch), as vanilla `EntityRenderer.addRainParticles`; `RainClock` carries the client tick and the rain sound counter. The engine spawns the particles and plays the sound.
 Food crumbs: the engine calls `Particles::eat_crumbs(count, feet, eye, (yaw, pitch), item)` for the local player's eating ticks and finish. For each remote player that holds food with the use flag set, it calls it on the ticks where `remote_crumbs_due(ticks_in_use)` is true.
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow` (radius 10 columns, 5 on Fast graphics); sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.

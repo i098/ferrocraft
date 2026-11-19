@@ -387,7 +387,7 @@ fn stair_on(nb: Nb, side: usize, top: bool) -> Option<usize> {
     (is_stairs(s >> 4) && (s as usize >> 2 & 1 == top as usize)).then_some(s as usize & 3)
 }
 
-/// Corner value (1 right, 2 left) from the stair at `neighbour`, unless an equal stair stands at the table's offset.
+/// Corner value (1 left, 2 right) from the stair at `neighbour`, unless an equal stair stands at the table's offset.
 fn corner(nb: Nb, top: bool, facing: usize, neighbour: usize, table: &Corner) -> Option<u8> {
     let f2 = stair_on(nb, neighbour, top)?;
     table
@@ -396,7 +396,7 @@ fn corner(nb: Nb, top: bool, facing: usize, neighbour: usize, table: &Corner) ->
         .map(|(_, _, v)| if top { 3 - v } else { *v })
 }
 
-/// `BlockStairs.getActualState`: the outer corner wins over the inner one; 1 is the right and 2 the left variant.
+/// `BlockStairs.getActualState`: the outer corner wins over the inner one; 1 is the left and 2 the right variant.
 fn stair_shape(nb: Nb, facing: usize, top: bool) -> &'static str {
     let opposite = [WEST, EAST, NORTH, SOUTH][facing];
     match (

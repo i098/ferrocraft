@@ -176,6 +176,22 @@ fn is_leaves(state: u16) -> bool {
     matches!(state >> 4, 18 | 161)
 }
 
+/// Vertex alpha that tells `fs_world` to sample the atlas at level 0 (`CUTOUT`, not `MIPPED_CUTOUT`).
+pub(crate) const UNMIPPED: f32 = 3.0;
+
+/// Blocks of vanilla's `CUTOUT` layer, drawn after `setBlurMipmap(false, false)` (`EntityRenderer.renderWorldPass`):
+/// plants, torches, rails, doors, glass, webs, fire and the like. Leaves, bars and panes are `CUTOUT_MIPPED`, so they and
+/// every `SOLID` block keep the mip levels.
+const CUTOUT_BLOCKS: [u16; 50] = [
+    6, 20, 26, 27, 28, 30, 31, 32, 37, 38, 39, 40, 50, 51, 52, 55, 59, 64, 65, 66, 71, 75, 76, 81,
+    83, 92, 93, 94, 96, 104, 105, 106, 111, 115, 117, 127, 138, 140, 141, 142, 149, 150, 157, 167,
+    175, 193, 194, 195, 196, 197,
+];
+
+fn is_unmipped(state: u16) -> bool {
+    CUTOUT_BLOCKS.contains(&(state >> 4))
+}
+
 struct Mesher<'a> {
     hood: &'a Neighborhood<'a>,
     atlas: &'a Atlas,
@@ -185,6 +201,8 @@ struct Mesher<'a> {
     fancy: bool,
     light: Light,
     out: Meshes,
+    /// The block being meshed draws in vanilla's `CUTOUT` layer: no mip levels (see [`is_unmipped`]).
+    unmipped: bool,
 }
 
 /// Mesh the chunk into opaque/cutout geometry and blended geometry, in chunk-local coordinates.
@@ -192,6 +210,7 @@ pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool)
     let mut m = Mesher {
         hood,
         atlas,
+        unmipped: false,
         smooth,
         fancy,
         light: Light::compute(hood),
@@ -236,6 +255,7 @@ impl Mesher<'_> {
     }
 
     fn block(&mut self, at: [i32; 3], state: u16) {
+        self.unmipped = is_unmipped(state);
         let l = *cached(state);
         match l.kind {
             Kind::Skip => {}
@@ -293,7 +313,12 @@ impl Mesher<'_> {
         })
     }
 
-    fn push_quad(&mut self, pass: Pass, v: [Vertex; 4], flip: bool) {
+    fn push_quad(&mut self, pass: Pass, mut v: [Vertex; 4], flip: bool) {
+        if self.unmipped && pass == Pass::Opaque {
+            for vert in &mut v {
+                vert.color[3] = UNMIPPED;
+            }
+        }
         let t = self.target(pass);
         let base = t.vertices.len() as u32;
         t.vertices.extend_from_slice(&v);
@@ -722,6 +747,29 @@ mod tests {
     }
 
     #[test]
+    fn cutout_layer_blocks_skip_mip_levels_and_solid_ones_keep_them() {
+        // Poppy (`CUTOUT`), oak leaves (`MIPPED_CUTOUT`) and stone (`SOLID`) side by side.
+        let c = flat(|x, y, z| match (x, y, z) {
+            (2, 70, 4) => 38 << 4,
+            (5, 70, 4) => 18 << 4,
+            (8, 70, 4) => 1 << 4,
+            _ => 0,
+        });
+        let quads = mesh(&c, [None; 8]).opaque.vertices;
+        let by_x = |lo: f32, hi: f32| -> Vec<f32> {
+            quads
+                .iter()
+                .filter(|v| (lo..hi).contains(&v.pos[0]))
+                .map(|v| v.color[3])
+                .collect()
+        };
+        let (poppy, leaves, stone) = (by_x(1.5, 3.6), by_x(5.0, 6.0), by_x(8.0, 9.0));
+        assert!(!poppy.is_empty() && poppy.iter().all(|&a| a == UNMIPPED));
+        assert!(!leaves.is_empty() && leaves.iter().all(|&a| a == 1.0));
+        assert!(!stone.is_empty() && stone.iter().all(|&a| a == 1.0));
+    }
+
+    #[test]
     fn fast_leaves_are_solid_and_cull_inner_faces() {
         // Two oak leaves side by side: `BlockLeaves.isOpaqueCube` is `!fancyGraphics`.
         let c = flat(|x, y, z| {
@@ -905,5 +953,19 @@ mod tests {
         );
         assert!(m.opaque.is_empty());
         assert_eq!(m.water.vertices.len(), 8, "two broad faces only");
+    }
+
+    #[test]
+    #[ignore = "needs a JDK and downloads the 1.8.9 client jar"]
+    fn unmipped_blocks_are_the_cutout_layer_of_the_1_8_9_jar() {
+        let layers = oracle::Oracle::get().run("layer\n").unwrap();
+        assert_eq!(layers.len(), 256, "{layers:?}");
+        for (id, layer) in layers.iter().enumerate() {
+            assert_eq!(
+                is_unmipped((id as u16) << 4),
+                layer == "Cutout",
+                "block {id} is {layer}"
+            );
+        }
     }
 }

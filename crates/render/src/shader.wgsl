@@ -103,9 +103,11 @@ fn lightmap(sky: f32, block: f32) -> vec3<f32> {
 
 @fragment
 fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
-    let t = textureSample(tex, samp, i.uv);
+    // Vertex alpha 3 marks the `CUTOUT` layer: no mip levels. Both samples run in uniform control flow.
+    let unmipped = i.color.a > 2.5;
+    let t = select(textureSample(tex, samp, i.uv), textureSampleLevel(tex, samp, i.uv, 0.0), unmipped);
     // Vertex alpha 2 marks Fast-graphics leaves: a solid block, drawn without the alpha test.
-    let solid = i.color.a > 1.5;
+    let solid = i.color.a > 1.5 && !unmipped;
     if (t.a < 0.1 && !solid) {
         discard;
     }
@@ -124,7 +126,7 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
         fog = exp(-g.fog.y * d);
     }
     rgb = mix(g.fog_color.rgb, rgb, fog);
-    return vec4<f32>(rgb, select(t.a * i.color.a, 1.0, solid));
+    return vec4<f32>(rgb, select(t.a * i.color.a, 1.0, solid || unmipped));
 }
 
 // Entity fire ignores lighting but keeps world fog and alpha testing.

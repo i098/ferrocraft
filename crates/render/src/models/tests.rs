@@ -2,8 +2,9 @@ use super::*;
 use crate::mesh::{face_uv, CORNERS};
 
 fn bake(model: &str, spec: &str) -> Vec<Quad> {
-    let dir =
-        std::env::temp_dir().join(format!("fc-models-{}-{}", std::process::id(), model.len()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fc-models-{}-{n}", std::process::id()));
     let models = dir.join("assets/minecraft/models/block");
     std::fs::create_dir_all(&models).unwrap();
     std::fs::write(models.join("m.json"), model).unwrap();
@@ -217,4 +218,25 @@ fn jar_models_keep_vanilla_uv() {
     let piston = models.quads(34 << 4 | 2, &nb).unwrap();
     assert!(piston.iter().any(|q| &*q.tex == "piston_top_normal"));
     assert!(piston.iter().any(|q| &*q.tex == "piston_side"));
+}
+
+fn y_max(quads: &[Quad]) -> f32 {
+    quads.iter().flat_map(|q| q.pos).map(|p| p[1] * 16.0).fold(0.0, f32::max)
+}
+
+/// Vanilla 1.8.9 pressure_plate_up/down, ladder and end_portal_frame(_eye) element extents, in 1/16 blocks.
+#[test]
+fn jar_flat_blocks_keep_vanilla_extents() {
+    let Some(mut source) = jar() else { return };
+    let models = Models::load(&mut source);
+    let nb = |_, _, _| 0u16;
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    for id in [70u16, 72] {
+        assert!(near(y_max(models.quads(id << 4, &nb).unwrap()), 1.0), "plate {id} up");
+        assert!(near(y_max(models.quads(id << 4 | 1, &nb).unwrap()), 0.5), "plate {id} down");
+    }
+    let ladder = models.quads(65 << 4 | 2, &nb).unwrap();
+    assert!(ladder.iter().any(|q| q.pos.iter().all(|p| near(p[2] * 16.0, 15.2))));
+    assert!(near(y_max(models.quads(120 << 4, &nb).unwrap()), 13.0), "frame");
+    assert!(near(y_max(models.quads(120 << 4 | 4, &nb).unwrap()), 16.0), "frame with eye");
 }

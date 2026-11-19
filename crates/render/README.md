@@ -33,6 +33,7 @@ Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and 
 Burning entities use animated, camera-facing fire layers, including when their bodies are invisible.
 Invisible entities draw their bodies at alpha 0.15 (`Look::ghost`) when the viewer is a spectator or a team mate with see-friendly-invisibles; otherwise bodies are skipped.
 `set_on_fire` draws the local fire overlay after the hand and before the HUD.
+`set_debug_axes(on)` draws the F3 axes (`drawDebugAxes`) at the screen centre after the hand, on a cleared depth buffer; the engine sets it for the full F3 screen with the HUD shown.
 The engine disables that overlay in third-person views and spectator mode.
 Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post` chain from the jar, as vanilla `PostChain`; the GLSL 1.20 programs are rewritten to 4.50 for naga (`glsl.rs`). The effect runs after the hand and before the GUI. A failed load returns `Err` and switches effects off; `toggle_post` is F4. `SHADERS` is the "Super Secret Settings..." cycle.
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.

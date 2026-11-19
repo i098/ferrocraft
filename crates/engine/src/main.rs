@@ -27,6 +27,7 @@ fn main() {
             std::process::exit(2);
         }
     };
+
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = app::App::new(args);

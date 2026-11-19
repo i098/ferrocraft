@@ -348,9 +348,9 @@ fn merchant_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, m
         let hover = inside(mx, my, l + x, t + 23, 12, 19);
         let u = 176
             + if !enabled {
-                23
+                24
             } else if hover {
-                46
+                12
             } else {
                 0
             };

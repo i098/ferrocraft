@@ -638,7 +638,9 @@ mod resolve_tests {
 
     #[test]
     fn unresolvable_host_reads_unknown_host() {
-        let e = super::Session::connect("host.invalid", "Steve", None).err().unwrap();
+        let e = super::Session::connect("host.invalid", "Steve", None)
+            .err()
+            .unwrap();
         assert_eq!(e.to_string(), "Unknown host");
     }
 }

@@ -84,13 +84,19 @@ static SUNFLOWER_TOP: [Elem; 3] = [
         from: [0.8, 0.0, 8.0],
         to: [15.2, 8.0, 8.0],
         turn: Y45,
-        faces: &[(NORTH, [0.0, 8.0, 16.0, 16.0], 0), (SOUTH, [0.0, 8.0, 16.0, 16.0], 0)],
+        faces: &[
+            (NORTH, [0.0, 8.0, 16.0, 16.0], 0),
+            (SOUTH, [0.0, 8.0, 16.0, 16.0], 0),
+        ],
     },
     Elem {
         from: [8.0, 0.0, 0.8],
         to: [8.0, 8.0, 15.2],
         turn: Y45,
-        faces: &[(WEST, [0.0, 8.0, 16.0, 16.0], 0), (EAST, [0.0, 8.0, 16.0, 16.0], 0)],
+        faces: &[
+            (WEST, [0.0, 8.0, 16.0, 16.0], 0),
+            (EAST, [0.0, 8.0, 16.0, 16.0], 0),
+        ],
     },
     Elem {
         from: [9.6, -1.0, 1.0],
@@ -171,7 +177,11 @@ impl Mesher<'_> {
             self.hood.origin.1 * 16 + at[2],
         ];
         let draw = Draw {
-            tex: &[tex, "double_plant_sunflower_back", "double_plant_sunflower_front"],
+            tex: &[
+                tex,
+                "double_plant_sunflower_back",
+                "double_plant_sunflower_front",
+            ],
             rgb: self.base_color(l, tint, at),
             light: self.light_at(at, [0; 3]),
             shade: 1.0,
@@ -197,7 +207,12 @@ impl Mesher<'_> {
         Vertex {
             pos: [0, 1, 2].map(|a| at[a] as f32 + pos[a]),
             uv: self.atlas.uv(d.tex[face.2], uv),
-            color: [d.rgb[0] * d.shade, d.rgb[1] * d.shade, d.rgb[2] * d.shade, 1.0],
+            color: [
+                d.rgb[0] * d.shade,
+                d.rgb[1] * d.shade,
+                d.rgb[2] * d.shade,
+                1.0,
+            ],
             light: d.light,
         }
     }
@@ -211,9 +226,19 @@ fn model_point(e: &Elem, (dir, uv, _): Face, c: [f32; 3], d: &Draw) -> ([f32; 3]
     }
     let p = turn_model(p.map(|v| v / 16.0), d.quarter_turns);
     let [fu, fv] = face_uv(dir, c);
-    let (u1, u2) = if d.flip { (uv[2], uv[0]) } else { (uv[0], uv[2]) };
+    let (u1, u2) = if d.flip {
+        (uv[2], uv[0])
+    } else {
+        (uv[0], uv[2])
+    };
     let pos = [0, 1, 2].map(|a| p[a] + d.offset[a]);
-    (pos, [(u1 + (u2 - u1) * fu) / 16.0, (uv[1] + (uv[3] - uv[1]) * fv) / 16.0])
+    (
+        pos,
+        [
+            (u1 + (u2 - u1) * fu) / 16.0,
+            (uv[1] + (uv[3] - uv[1]) * fv) / 16.0,
+        ],
+    )
 }
 
 /// The quads of the cross or crop model of block `id` at block `at` (with `Block.getOffset`):
@@ -231,7 +256,11 @@ pub(crate) fn cross_quads(id: u16, at: [i32; 3]) -> Vec<[([f32; 3], [f32; 2]); 4
     let d = &d;
     plant_model(id, false)
         .iter()
-        .flat_map(|e| e.faces.iter().map(move |&f| CORNERS[f.0].map(|c| model_point(e, f, c, d))))
+        .flat_map(|e| {
+            e.faces
+                .iter()
+                .map(move |&f| CORNERS[f.0].map(|c| model_point(e, f, c, d)))
+        })
         .collect()
 }
 
@@ -262,18 +291,53 @@ impl Mesher<'_> {
             None => (age as f32 * 2.0 + 1.0, age as f32 * 2.0 + 2.0),
         };
         let (a, b) = (
-            [(NORTH, [0.0, 0.0, 16.0, texel], 0), (SOUTH, [16.0, 0.0, 0.0, texel], 0)],
-            [(WEST, [0.0, 0.0, 16.0, texel], 0), (EAST, [16.0, 0.0, 0.0, texel], 0)],
+            [
+                (NORTH, [0.0, 0.0, 16.0, texel], 0),
+                (SOUTH, [16.0, 0.0, 0.0, texel], 0),
+            ],
+            [
+                (WEST, [0.0, 0.0, 16.0, texel], 0),
+                (EAST, [16.0, 0.0, 0.0, texel], 0),
+            ],
         );
-        let upper = [(NORTH, [9.0, 0.0, 0.0, 16.0], 1), (SOUTH, [0.0, 0.0, 9.0, 16.0], 1)];
-        let elems = [
-            Elem { from: [0.0, -1.0, 8.0], to: [16.0, top, 8.0], turn: Y45, faces: &a },
-            Elem { from: [8.0, -1.0, 0.0], to: [8.0, top, 16.0], turn: Y45, faces: &b },
-            Elem { from: [0.0, 0.0, 8.0], to: [9.0, 16.0, 8.0], turn: None, faces: &upper },
+        let upper = [
+            (NORTH, [9.0, 0.0, 0.0, 16.0], 1),
+            (SOUTH, [0.0, 0.0, 9.0, 16.0], 1),
         ];
-        let connected = if id == 104 { "pumpkin_stem_connected" } else { "melon_stem_connected" };
+        let elems = [
+            Elem {
+                from: [0.0, -1.0, 8.0],
+                to: [16.0, top, 8.0],
+                turn: Y45,
+                faces: &a,
+            },
+            Elem {
+                from: [8.0, -1.0, 0.0],
+                to: [8.0, top, 16.0],
+                turn: Y45,
+                faces: &b,
+            },
+            Elem {
+                from: [0.0, 0.0, 8.0],
+                to: [9.0, 16.0, 8.0],
+                turn: None,
+                faces: &upper,
+            },
+        ];
+        let connected = if id == 104 {
+            "pumpkin_stem_connected"
+        } else {
+            "melon_stem_connected"
+        };
         let draw = Draw {
-            tex: &[if id == 104 { "pumpkin_stem_disconnected" } else { l.tex[0] }, connected],
+            tex: &[
+                if id == 104 {
+                    "pumpkin_stem_disconnected"
+                } else {
+                    l.tex[0]
+                },
+                connected,
+            ],
             // `BlockStem.getRenderColor`: red age*32, green 255 - age*8, blue age*4.
             rgb: [age * 32, 255 - age * 8, age * 4].map(|c| c as f32 / 255.0),
             light: self.light_at(at, [0; 3]),
@@ -365,15 +429,40 @@ fn fire_sides(mask: u8) -> Option<(&'static [Elem<'static>], u8)> {
 
 const SIDE_Y: [f32; 2] = [1.0, 23.4];
 const fn side_plane<'a>(from: [f32; 3], to: [f32; 3], faces: &'a [Face]) -> Elem<'a> {
-    Elem { from, to, turn: None, faces }
+    Elem {
+        from,
+        to,
+        turn: None,
+        faces,
+    }
 }
-const PLANE_N: Elem = side_plane([0.0, SIDE_Y[0], 0.01], [16.0, SIDE_Y[1], 0.01], &[(SOUTH, FULL, 0), (NORTH, FULL, 0)]);
-const PLANE_S: Elem = side_plane([0.0, SIDE_Y[0], 15.99], [16.0, SIDE_Y[1], 15.99], &[(SOUTH, FULL, 0), (NORTH, FULL, 0)]);
-const PLANE_E: Elem = side_plane([15.99, SIDE_Y[0], 0.0], [15.99, SIDE_Y[1], 16.0], &[(EAST, FULL, 0), (WEST, FULL, 0)]);
+const PLANE_N: Elem = side_plane(
+    [0.0, SIDE_Y[0], 0.01],
+    [16.0, SIDE_Y[1], 0.01],
+    &[(SOUTH, FULL, 0), (NORTH, FULL, 0)],
+);
+const PLANE_S: Elem = side_plane(
+    [0.0, SIDE_Y[0], 15.99],
+    [16.0, SIDE_Y[1], 15.99],
+    &[(SOUTH, FULL, 0), (NORTH, FULL, 0)],
+);
+const PLANE_E: Elem = side_plane(
+    [15.99, SIDE_Y[0], 0.0],
+    [15.99, SIDE_Y[1], 16.0],
+    &[(EAST, FULL, 0), (WEST, FULL, 0)],
+);
 // `fire_nsew.json` lists its last west plane from x 15.99 to 0.01, so the baker puts the west face at 15.99.
 const PLANE_W: [Elem; 2] = [
-    side_plane([0.01, SIDE_Y[0], 0.0], [0.01, SIDE_Y[1], 16.0], &[(EAST, FULL, 0)]),
-    side_plane([15.99, SIDE_Y[0], 0.0], [0.01, SIDE_Y[1], 16.0], &[(WEST, FULL, 0)]),
+    side_plane(
+        [0.01, SIDE_Y[0], 0.0],
+        [0.01, SIDE_Y[1], 16.0],
+        &[(EAST, FULL, 0)],
+    ),
+    side_plane(
+        [15.99, SIDE_Y[0], 0.0],
+        [0.01, SIDE_Y[1], 16.0],
+        &[(WEST, FULL, 0)],
+    ),
 ];
 static FIRE_N: [Elem; 1] = [PLANE_N];
 static FIRE_NE: [Elem; 2] = [PLANE_N, PLANE_E];
@@ -388,7 +477,16 @@ const fn lean(from: [f32; 3], to: [f32; 3], axis: usize, angle: f32, face: usize
         WEST => &[(WEST, FULL, 0)],
         _ => &[(EAST, FULL, 0)],
     };
-    Elem { from, to, turn: Some(Turn { axis, origin: [8.0; 3], angle }), faces }
+    Elem {
+        from,
+        to,
+        turn: Some(Turn {
+            axis,
+            origin: [8.0; 3],
+            angle,
+        }),
+        faces,
+    }
 }
 const fn edge(from: [f32; 3], to: [f32; 3], face: usize) -> Elem<'static> {
     let faces: &'static [Face] = match face {
@@ -397,7 +495,12 @@ const fn edge(from: [f32; 3], to: [f32; 3], face: usize) -> Elem<'static> {
         WEST => &[(WEST, FULL, 0)],
         _ => &[(EAST, FULL, 0)],
     };
-    Elem { from, to, turn: None, faces }
+    Elem {
+        from,
+        to,
+        turn: None,
+        faces,
+    }
 }
 /// `fire_floor.json`: four planes leaning 22.5 degrees inwards and four flat planes at the block edge.
 static FIRE_FLOOR: [Elem; 8] = [
@@ -414,13 +517,23 @@ const fn canopy(axis: usize, angle: f32, origin: [f32; 3]) -> Elem<'static> {
     Elem {
         from: [0.0, 16.0, 0.0],
         to: [16.0, 16.0, 16.0],
-        turn: Some(Turn { axis, origin, angle }),
+        turn: Some(Turn {
+            axis,
+            origin,
+            angle,
+        }),
         faces: &[(DOWN, FULL, 0)],
     }
 }
 /// `fire_u1.json` and `fire_u2.json`: the flames that climb a burning block above.
-static FIRE_UPPER_1: [Elem; 2] = [canopy(2, 22.5, [16.0, 16.0, 8.0]), canopy(2, -22.5, [0.0, 16.0, 8.0])];
-static FIRE_UPPER_2: [Elem; 2] = [canopy(0, -22.5, [8.0, 16.0, 16.0]), canopy(0, 22.5, [8.0, 16.0, 0.0])];
+static FIRE_UPPER_1: [Elem; 2] = [
+    canopy(2, 22.5, [16.0, 16.0, 8.0]),
+    canopy(2, -22.5, [0.0, 16.0, 8.0]),
+];
+static FIRE_UPPER_2: [Elem; 2] = [
+    canopy(0, -22.5, [8.0, 16.0, 16.0]),
+    canopy(0, 22.5, [8.0, 16.0, 0.0]),
+];
 
 #[cfg(test)]
 mod tests {
@@ -452,7 +565,8 @@ mod tests {
         for v in quads.iter().flatten().map(|(p, _)| p) {
             assert!(v[1] == -1.0 / 16.0 || v[1] == 15.0 / 16.0, "y {}", v[1]);
             assert!(
-                [4.0 / 16.0, 12.0 / 16.0].contains(&v[0]) || [4.0 / 16.0, 12.0 / 16.0].contains(&v[2])
+                [4.0 / 16.0, 12.0 / 16.0].contains(&v[0])
+                    || [4.0 / 16.0, 12.0 / 16.0].contains(&v[2])
             );
         }
     }
@@ -472,7 +586,13 @@ mod tests {
         for (cell, lines) in cells.iter().zip(out.chunks(6)) {
             assert_eq!(
                 lines[1..],
-                ["tallgrass|XYZ", "deadbush|NONE", "yellow_flower|XZ", "red_flower|XZ", "double_plant|XZ"],
+                [
+                    "tallgrass|XYZ",
+                    "deadbush|NONE",
+                    "yellow_flower|XZ",
+                    "red_flower|XZ",
+                    "double_plant|XZ"
+                ],
             );
             let h: i64 = lines[0].parse().unwrap();
             hashes.push(h);

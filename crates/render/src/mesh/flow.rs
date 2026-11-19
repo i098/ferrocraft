@@ -26,7 +26,8 @@ impl Mesher<'_> {
         same: &dyn Fn(u16) -> bool,
     ) -> Option<f32> {
         let v = self.flow_vector(at, state, same);
-        (v[0] != 0.0 || v[2] != 0.0).then(|| (v[2].atan2(v[0]) - std::f64::consts::FRAC_PI_2) as f32)
+        (v[0] != 0.0 || v[2] != 0.0)
+            .then(|| (v[2].atan2(v[0]) - std::f64::consts::FRAC_PI_2) as f32)
     }
 
     /// `BlockLiquid.getEffectiveFlowDecay`: -1 for another material, else the level (falling liquid as 0).
@@ -40,7 +41,13 @@ impl Mesher<'_> {
     }
 
     /// The pull of one horizontal neighbour `d` on the flow, or `None` when it adds nothing.
-    fn flow_pull(&self, at: [i32; 3], d: [i32; 3], own: i32, same: &dyn Fn(u16) -> bool) -> Option<i32> {
+    fn flow_pull(
+        &self,
+        at: [i32; 3],
+        d: [i32; 3],
+        own: i32,
+        same: &dyn Fn(u16) -> bool,
+    ) -> Option<i32> {
         let j = self.decay(at, d, same);
         if j >= 0 {
             return Some(j - own);

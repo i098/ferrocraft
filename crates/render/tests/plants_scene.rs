@@ -66,7 +66,12 @@ fn plants_scene() {
     put(&mut r, 13, 64, 10, 17, 0);
     put(&mut r, 14, 64, 9, 51, 0);
     put(&mut r, 14, 63, 9, 87, 0);
-    let cam = Camera { pos: [8.0, 72.0, 15.0], yaw: 180.0, pitch: 45.0, ..Camera::default() };
+    let cam = Camera {
+        pos: [8.0, 72.0, 15.0],
+        yaw: 180.0,
+        pitch: 45.0,
+        ..Camera::default()
+    };
     let (w, h, rgba) = r.render_to_rgba(&cam, &[]);
     assert!(rgba.iter().any(|&b| b != 0));
     if let Some(dir) = std::env::var_os("PLANTS_OUT") {

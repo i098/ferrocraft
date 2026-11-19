@@ -5,8 +5,8 @@
 use crate::assets::Atlas;
 use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
-    cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light,
-    Kind, Look, Tint, DOWN, NORTH, UP,
+    cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light, Kind, Look, Tint,
+    DOWN, NORTH, UP,
 };
 use crate::light::Light;
 use crate::shapes::{boxes, Bx, BREWING_SPOKES};
@@ -522,7 +522,10 @@ impl Mesher<'_> {
                     at[1] as f32 + p[1],
                     at[2] as f32 + p[2],
                 ],
-                uv: self.atlas.uv(tex, angle.map_or_else(|| liquid_uv(f, p), |a| flow::flow_uv(a, c))),
+                uv: self.atlas.uv(
+                    tex,
+                    angle.map_or_else(|| liquid_uv(f, p), |a| flow::flow_uv(a, c)),
+                ),
                 color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
                 light,
             }

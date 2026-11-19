@@ -19,7 +19,7 @@ pub(super) struct Orient {
 impl Orient {
     /// A point (relative to the cube centre) of the world mapped back into the unturned model:
     /// the inverse of `ModelRotation`, which turns by `-x` about the x axis, then `-y` about y.
-    fn to_model(&self, mut p: [f32; 3]) -> [f32; 3] {
+    fn to_model(self, mut p: [f32; 3]) -> [f32; 3] {
         for _ in 0..self.y {
             p = [p[2], p[1], -p[0]];
         }
@@ -39,7 +39,10 @@ impl Orient {
         let model_face = model_face.expect("quarter turns keep axis directions");
         let c = self.to_model(corner.map(|v| v - 0.5)).map(|v| v + 0.5);
         let [u, v] = face_uv(model_face, c);
-        rot_uv([if self.mirror { 1.0 - u } else { u }, v], self.turns[model_face])
+        rot_uv(
+            [if self.mirror { 1.0 - u } else { u }, v],
+            self.turns[model_face],
+        )
     }
 }
 
@@ -71,24 +74,42 @@ fn axis_orient(id: u16, meta: u16) -> Orient {
     match (id, meta >> 2 & 3) {
         (17 | 162 | 170, 1) => column_side(1),
         (17 | 162 | 170, 2) => column_side(0),
-        (155, _) if meta == 3 => Orient { x: 1, y: 1, ..Orient::default() },
-        (155, _) if meta == 4 => Orient { x: 1, ..Orient::default() },
+        (155, _) if meta == 3 => Orient {
+            x: 1,
+            y: 1,
+            ..Orient::default()
+        },
+        (155, _) if meta == 4 => Orient {
+            x: 1,
+            ..Orient::default()
+        },
         _ => Orient::default(),
     }
 }
 
 /// Random variant lists of the blockstate, picked by the position hash.
 fn random_orient(id: u16, world: [i32; 3]) -> Orient {
-    let turned = |y: u8| Orient { y, ..Orient::default() };
+    let turned = |y: u8| Orient {
+        y,
+        ..Orient::default()
+    };
     match id {
         2 | 3 | 12 | 46 => turned(pick(world, 4)),
         1 | 7 => {
             let k = pick(world, 4);
-            Orient { y: k >> 1 << 1, mirror: k & 1 == 1, ..Orient::default() }
+            Orient {
+                y: k >> 1 << 1,
+                mirror: k & 1 == 1,
+                ..Orient::default()
+            }
         }
         87 => {
             let k = pick(world, 16);
-            Orient { x: k & 3, y: k >> 2, ..Orient::default() }
+            Orient {
+                x: k & 3,
+                y: k >> 2,
+                ..Orient::default()
+            }
         }
         _ => Orient::default(),
     }
@@ -129,7 +150,9 @@ mod tests {
     /// Variant counts of `blockstates/{name}.json` `variants.normal` (a list) in the 1.8.9 jar.
     fn jar_variants(jar: &std::path::Path, name: &str) -> usize {
         let mut zip = zip::ZipArchive::new(std::fs::File::open(jar).unwrap()).unwrap();
-        let file = zip.by_name(&format!("assets/minecraft/blockstates/{name}.json")).unwrap();
+        let file = zip
+            .by_name(&format!("assets/minecraft/blockstates/{name}.json"))
+            .unwrap();
         let json: serde_json::Value = serde_json::from_reader(file).unwrap();
         json["variants"]["normal"].as_array().map_or(1, Vec::len)
     }
@@ -137,7 +160,10 @@ mod tests {
     #[test]
     fn random_variant_counts_follow_the_blockstates() {
         // tnt, stone, bedrock: 4 variants; netherrack: 16 (`blockstates/*.json` of 1.8.9).
-        assert_eq!([distinct(46), distinct(1), distinct(7), distinct(87)], [4, 4, 4, 16]);
+        assert_eq!(
+            [distinct(46), distinct(1), distinct(7), distinct(87)],
+            [4, 4, 4, 16]
+        );
         assert_eq!([distinct(2), distinct(3), distinct(12)], [4, 4, 4]);
     }
 
@@ -146,7 +172,9 @@ mod tests {
     fn jar_blockstates_have_the_counts_the_pick_uses() {
         let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client jar");
         let jar = std::path::Path::new(&jar);
-        let counts: Vec<usize> = ["tnt", "stone", "bedrock", "netherrack"].map(|n| jar_variants(jar, n)).into();
+        let counts: Vec<usize> = ["tnt", "stone", "bedrock", "netherrack"]
+            .map(|n| jar_variants(jar, n))
+            .into();
         assert_eq!(counts, [4, 4, 4, 16]);
     }
 }

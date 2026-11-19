@@ -7,7 +7,7 @@ use super::{modal, tooltip, Icons, InventoryView, Key, Mods, Request, LABEL};
 use crate::screens::{key, Canvas, Metrics, TextField};
 use render::JavaRandom;
 use world::effects;
-use world::inventory::{items, merchant, Inventory, ItemStack, Kind, Slot};
+use world::inventory::{merchant, Inventory, ItemStack, Kind, Slot};
 
 const SGA: &str = "textures/font/ascii_sga.png";
 const ENCHANT: &str = "textures/gui/container/enchanting_table.png";

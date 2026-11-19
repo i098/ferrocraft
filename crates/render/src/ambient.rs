@@ -12,6 +12,7 @@ const RADIUS: i32 = 16;
 const SAMPLES: usize = 1000;
 /// `WorldRenderer.tryAddParticle` drops a particle more than 16 blocks from the camera entity.
 const RANGE_SQ: f64 = 256.0;
+const BARRIER_BLOCK: u16 = 166;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
@@ -56,12 +57,14 @@ impl Cx<'_> {
 
 /// One client tick of `doRandomDisplayTicks` around `feet`. `view` is the camera entity position and
 /// `option` is `gameSettings.particles` (0 all, 1 decreased, 2 minimal): they cull particles as
-/// `tryAddParticle` does. `block(x, y, z)` is a block state id, `raining(x, y, z)` is `World.isRaining(pos)`.
+/// `tryAddParticle` does. `barrier` is true for a creative player who holds a barrier block: every barrier block
+/// sampled then shows its icon (`showBarrierParticles`). `block(x, y, z)` is a block state id, `raining(x, y, z)` is `World.isRaining(pos)`.
 /// shortcut: the sampling and the blocks share one generator; vanilla uses `World.random` and a fresh `Random`.
 pub fn random_display_ticks(
     feet: [i32; 3],
     view: [f64; 3],
     option: i32,
+    barrier: bool,
     rng: &mut JavaRandom,
     block: &dyn Fn(i32, i32, i32) -> u16,
     raining: &dyn Fn(i32, i32, i32) -> bool,
@@ -78,6 +81,9 @@ pub fn random_display_ticks(
         }
         let state = cx.at(cell);
         display_tick(&mut cx, state, cell, rng);
+        if barrier && state >> 4 == BARRIER_BLOCK {
+            cx.particle(Kind::Barrier, cell.map(|c| f64::from(c) + 0.5), [0.0; 3]);
+        }
     }
     cx.out.retain(|e| match *e {
         Effect::Sound { .. } => true,
@@ -600,7 +606,7 @@ mod tests {
         let ticks = 4000;
         let flames = (0..ticks)
             .flat_map(|_| {
-                random_display_ticks([0, 0, 0], [0.0; 3], 0, &mut rng, &torch_cell, &never)
+                random_display_ticks([0, 0, 0], [0.0; 3], 0, false, &mut rng, &torch_cell, &never)
             })
             .filter(|e| {
                 matches!(
@@ -614,6 +620,37 @@ mod tests {
             .count();
         let rate = flames as f64 / f64::from(ticks);
         assert!((0.2..0.29).contains(&rate), "{rate}");
+    }
+
+    #[test]
+    fn barrier_icons_show_only_when_a_creative_player_holds_a_barrier() {
+        let block = |_: i32, _: i32, _: i32| 166u16 << 4;
+        let never = |_: i32, _: i32, _: i32| false;
+        let count = |barrier| {
+            random_display_ticks(
+                [0; 3],
+                [0.0; 3],
+                0,
+                barrier,
+                &mut JavaRandom::new(3),
+                &block,
+                &never,
+            )
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    Effect::Particle {
+                        kind: Kind::Barrier,
+                        ..
+                    }
+                )
+            })
+            .count()
+        };
+        assert_eq!(count(false), 0);
+        // Samples more than 16 blocks from the camera are culled.
+        assert!((800..=1000).contains(&count(true)));
     }
 
     #[test]

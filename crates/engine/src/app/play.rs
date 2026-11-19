@@ -661,6 +661,13 @@ impl App {
             p.pos.map(|v| v.floor() as i32),
             p.pos,
             self.ui.settings.particles,
+            self.game.gamemode == 1
+                && self
+                    .game
+                    .inv
+                    .held_stack()
+                    .as_ref()
+                    .is_some_and(|s| s.id == 166),
             &mut render::JavaRandom::new(seed),
             &|x, y, z| store.get_block(x, y, z),
             &raining,
@@ -963,7 +970,11 @@ impl App {
 
     fn broken_effects(&mut self) {
         for (pos, state) in std::mem::take(&mut self.game.broken) {
-            self.particles.break_block(pos, state);
+            self.particles.break_block(pos, state, |x, z| {
+                self.game.store.get(x >> 4, z >> 4).map_or(1, |c| {
+                    c.biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize)
+                })
+            });
             if let Some(s) = &mut self.sound {
                 s.dig(state >> 4, pos.map(|v| f64::from(v) + 0.5));
             }
@@ -980,7 +991,12 @@ impl App {
             if state != 0 {
                 let bounds =
                     world::dig::selection_box(&at, h.pos).unwrap_or([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
-                self.particles.dig_hit(h.pos, h.face, state, bounds);
+                self.particles
+                    .dig_hit(h.pos, h.face, state, bounds, |x, z| {
+                        self.game.store.get(x >> 4, z >> 4).map_or(1, |c| {
+                            c.biome(x.rem_euclid(16) as usize, z.rem_euclid(16) as usize)
+                        })
+                    });
                 if let Some(s) = &mut self.sound {
                     s.dig_hit(state >> 4, h.pos.map(|v| f64::from(v) + 0.5));
                 }

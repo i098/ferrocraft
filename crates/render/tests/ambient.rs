@@ -67,7 +67,8 @@ fn block_ambient_effects_change_the_frame() {
     let mut sounds = 0;
     for _ in 0..60 {
         let view = [5.0, 61.0, 4.0];
-        let effects = random_display_ticks(feet, view, 0, &mut rng, &block_at, &|_, _, _| false);
+        let effects =
+            random_display_ticks(feet, view, 0, false, &mut rng, &block_at, &|_, _, _| false);
         for e in effects {
             match e {
                 AmbientEffect::Particle { kind, pos, motion } => ps.spawn(kind, pos, motion, 0),

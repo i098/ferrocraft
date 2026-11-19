@@ -10,6 +10,9 @@ use crate::entity::guardian::{self, Curse};
 use crate::mesh::Vertex;
 use world::entities::FireworkExplosion;
 
+mod fx;
+mod shard;
+
 const MAX_PARTICLES: usize = 4000;
 
 /// Particle types of the 1.8.9 `EnumParticleTypes` ids carried by Particle 0x2A.
@@ -60,14 +63,18 @@ pub enum Kind {
     DripLava,
     Enchant,
     SnowShovel,
-    /// `blockcrack`/`blockdust`: `id | meta << 12` in the packet data.
+    /// `blockcrack` (37): `id | meta << 12` in the packet data.
     BlockCrack,
+    /// `blockdust` (38): the same data, but the packet motion is the exact start motion (`EntityBlockDustFX`).
+    BlockDust,
     /// `footstep` (28).
     Footstep,
     /// `snowballpoof` (31), `slime` (33), `barrier` (35).
     Snowball,
     Slime,
     Barrier,
+    /// `wake` (6): `EntityFishWakeFX`.
+    Wake,
     /// `iconcrack_` (36): the packet data is the item id and its damage.
     ItemCrack,
     /// `mobappearance` (41): the elder guardian curse.
@@ -76,12 +83,13 @@ pub enum Kind {
 
 impl Kind {
     pub fn from_id(id: i32) -> Option<Kind> {
-        const IDS: [(i32, i32, Kind); 39] = [
+        const IDS: [(i32, i32, Kind); 41] = [
             (0, 0, Kind::Explode),
             (2, 2, Kind::HugeExplode),
             (1, 1, Kind::LargeExplode),
             (4, 4, Kind::Bubble),
-            (5, 6, Kind::Splash),
+            (5, 5, Kind::Splash),
+            (6, 6, Kind::Wake),
             (9, 9, Kind::Crit),
             (10, 10, Kind::MagicCrit),
             (11, 11, Kind::Smoke),
@@ -100,7 +108,8 @@ impl Kind {
             (29, 29, Kind::Cloud),
             (30, 30, Kind::RedDust),
             (34, 34, Kind::Heart),
-            (37, 38, Kind::BlockCrack),
+            (37, 37, Kind::BlockCrack),
+            (38, 38, Kind::BlockDust),
             (39, 39, Kind::Droplet),
             (3, 3, Kind::FireworksSpark),
             (7, 7, Kind::Suspended),
@@ -126,7 +135,12 @@ impl Kind {
 #[derive(Clone, Copy)]
 enum Sprite {
     /// Block-atlas texture with the 4x4 sub-square picked by the jitter (vanilla `EntityDiggingFX`).
-    Block { state: u16, jitter: [f32; 2] },
+    Block {
+        state: u16,
+        jitter: [f32; 2],
+        /// Where the block stood, for the biome colour of a broken or hit block; `None` for a packet shard.
+        site: Option<shard::Site>,
+    },
     /// Sheet tile `base`; `anim` picks `base + 7 - age*8/max_age` like vanilla's generic particles.
     Sheet { base: u32, anim: bool },
     /// 4x4 frames of `textures/entity/explosion.png`, picked by age (`LargeExplosionParticle`).
@@ -168,6 +182,16 @@ enum Behavior {
     Spark,
     /// `FireworksParticles.Overlay`: a flash whose size and alpha follow its age.
     Overlay,
+    /// `EntityFlameFX`: no collision, shrinks to half size.
+    Flame,
+    /// `EntityLavaFX`: shrinks to nothing and leaves smoke.
+    Lava,
+    /// `EntityNoteFX` and `EntityHeartFX`: grow in, creep on a floor, drag only.
+    Drift,
+    /// `EntityBubbleFX`: rises, dies outside water.
+    Bubble,
+    /// `EntityFishWakeFX`: no gravity, a box that grows.
+    Wake,
 }
 
 #[derive(Clone, Copy)]
@@ -447,20 +471,7 @@ impl Particles {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
         match kind {
-            Kind::BlockCrack => {
-                let jitter = [(self.rand() * 3.0) as f32, (self.rand() * 3.0) as f32];
-                p = self.base(
-                    pos,
-                    motion,
-                    Sprite::Block {
-                        state: (data & 0xFFFF) as u16,
-                        jitter,
-                    },
-                );
-                p.gravity = 1.0;
-                p.color = [0.6; 3];
-                p.scale /= 2.0;
-            }
+            Kind::BlockCrack | Kind::BlockDust => p = self.block_shard(kind, pos, motion, data)?,
             Kind::Smoke | Kind::LargeSmoke => {
                 // `SmokeParticle`: the lifetime is cut to an int before the scale multiplies it.
                 let s = if kind == Kind::LargeSmoke { 2.5 } else { 1.0 };
@@ -505,15 +516,7 @@ impl Particles {
         let sheet = |base, anim| Sprite::Sheet { base, anim };
         let mut p;
         match kind {
-            Kind::Lava => {
-                p = self.base(pos, [0.0; 3], sheet(49, false));
-                p.vel = [0.0, 0.0, 0.0];
-                p.vel[0] = (self.rand() * 2.0 - 1.0) * 0.4 * 0.4;
-                p.vel[2] = (self.rand() * 2.0 - 1.0) * 0.4 * 0.4;
-                p.vel[1] = self.rand() * 0.4 * 0.4 + 0.1;
-                p.gravity = 0.75;
-                p.max_age = (16.0 / (self.rand() * 0.8 + 0.2)) as u32;
-            }
+            Kind::Lava => p = self.lava(pos),
             Kind::Droplet => {
                 let tile = 19 + (self.rand() * 4.0) as u32;
                 p = self.rain(pos, tile);
@@ -527,13 +530,8 @@ impl Particles {
                     p.vel = [motion[0], motion[1] + 0.1, motion[2]];
                 }
             }
-            Kind::Bubble => {
-                p = self.base(pos, motion, sheet(32, false));
-                p.gravity = -0.02;
-                p.drag = 0.85;
-                p.scale *= 0.5;
-                p.max_age = (8.0 / (self.rand() * 0.8 + 0.2)) as u32;
-            }
+            Kind::Bubble => p = self.bubble(pos, motion),
+            Kind::Wake => p = self.wake(pos, motion),
             Kind::Cloud => {
                 p = self.base(pos, motion, sheet(0, true));
                 p.color = [1.0; 3];
@@ -746,27 +744,9 @@ impl Particles {
                     p.sprite = sheet(66, false);
                 }
             }
-            Kind::Flame => {
-                p = self.base(pos, [0.0; 3], sheet(48, false));
-                p.vel = motion;
-                p.max_age = 8 + (self.rand() * 8.0) as u32;
-                p.drag = 0.96;
-                p.scale *= 0.5;
-            }
-            Kind::Heart | Kind::AngryVillager => {
-                let tile = if kind == Kind::Heart { 80 } else { 81 };
-                p = self.base(pos, [0.0; 3], sheet(tile, false));
-                p.vel = [motion[0] * 0.01, motion[1] * 0.01 + 0.1, motion[2] * 0.01];
-                p.scale *= 1.5;
-                p.max_age = 16;
-                p.drag = 0.86;
-            }
-            Kind::Note => {
-                p = self.base(pos, [0.0; 3], sheet(64, false));
-                p.vel = [motion[0] * 0.01, motion[1] * 0.01 + 0.2, motion[2] * 0.01];
-                p.scale *= 2.0;
-                p.max_age = 6;
-                p.drag = 0.66;
+            Kind::Flame => p = self.flame(pos, motion),
+            Kind::Heart | Kind::AngryVillager | Kind::Note => {
+                p = self.drift_icon(kind, pos, motion)
             }
             Kind::Portal => {
                 // `PortalParticle`: a fixed curve from the spawn point along `motion`; tiles 0..8 tinted purple.
@@ -802,7 +782,7 @@ impl Particles {
         };
         let d = data.first().copied().unwrap_or(0);
         let data0 = match kind {
-            Kind::BlockCrack => ((d & 0xfff) << 4) | ((d >> 12) & 0xf),
+            Kind::BlockCrack | Kind::BlockDust => ((d & 0xfff) << 4) | ((d >> 12) & 0xf),
             Kind::ItemCrack => (d & 0xFFFF) | (data.get(1).copied().unwrap_or(0) << 16),
             _ => 0,
         };
@@ -1317,10 +1297,17 @@ impl Particles {
             pos[2] + (self.rand() - 0.5) * w,
         ];
         let m = [-vel[0] * 4.0, 1.5, -vel[2] * 4.0];
-        self.spawn(Kind::BlockCrack, at, m, i32::from(state));
+        self.spawn(Kind::BlockDust, at, m, i32::from(state));
     }
-    /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block.
-    pub fn break_block(&mut self, [x, y, z]: [i32; 3], state: u16) {
+    /// `EffectRenderer.addBlockDestroyEffects`: 4x4x4 shards flying out of the broken block. `biome_at(x, z)` is the
+    /// biome id of a column, for the colour `colorMultiplier` gives the shards.
+    pub fn break_block(
+        &mut self,
+        [x, y, z]: [i32; 3],
+        state: u16,
+        biome_at: impl Fn(i32, i32) -> u8,
+    ) {
+        let site = shard::Site::new([x, y, z], biome_at);
         for i in 0..4 {
             for j in 0..4 {
                 for k in 0..4 {
@@ -1335,6 +1322,7 @@ impl Particles {
                         c[2] - f64::from(z) - 0.5,
                     ];
                     self.spawn(Kind::BlockCrack, c, m, i32::from(state));
+                    self.shade_last(site);
                 }
             }
         }
@@ -1342,7 +1330,14 @@ impl Particles {
 
     /// `EffectRenderer.addBlockHitEffects`: one shard on the hit `face` (0 down .. 5 east) while mining.
     /// `bounds` is the block's `[min x, y, z, max x, y, z]` inside its cell, as vanilla `getMinX()`..`getMaxZ()`.
-    pub fn dig_hit(&mut self, [x, y, z]: [i32; 3], face: u8, state: u16, bounds: [f64; 6]) {
+    pub fn dig_hit(
+        &mut self,
+        [x, y, z]: [i32; 3],
+        face: u8,
+        state: u16,
+        bounds: [f64; 6],
+        biome_at: impl Fn(i32, i32) -> u8,
+    ) {
         let o = [x, y, z].map(f64::from);
         // Vanilla `float f = 0.1F` widened to double.
         let e = f64::from(0.1_f32);
@@ -1357,6 +1352,7 @@ impl Particles {
             _ => c[0] = o[0] + bounds[3] + e,
         }
         self.spawn(Kind::BlockCrack, c, [0.0; 3], i32::from(state));
+        self.shade_last(shard::Site::new([x, y, z], biome_at));
         if let Some(p) = self.list.last_mut() {
             // `multiplyVelocity(0.2)` keeps the 0.1 upward offset; `multiplySize(0.6)` also shrinks the box.
             p.vel = [p.vel[0] * 0.2, (p.vel[1] - 0.1) * 0.2 + 0.1, p.vel[2] * 0.2];
@@ -1478,6 +1474,7 @@ impl Particles {
                 p.age += 1;
                 alive
             }
+            Behavior::Lava | Behavior::Bubble | Behavior::Wake => self.tick_fx(p, block, spawned),
             Behavior::DripWater | Behavior::DripLava => tick_drip(p, block, spawned),
             Behavior::Rain => self.tick_rain(p, block),
             _ => return None,
@@ -1528,6 +1525,8 @@ impl Particles {
             } else {
                 p
             };
+            let shaded = shard::shaded(p, &atlas.colormaps);
+            let p = shaded.as_ref().unwrap_or(p);
             let t = f64::from(partial);
             let c = [0, 1, 2].map(|i| (p.prev[i] + (p.pos[i] - p.prev[i]) * t - cam_pos[i]) as f32);
             if let Sprite::Appearance { tail } = p.sprite {
@@ -1630,14 +1629,16 @@ fn hidden_flicker(p: &Particle) -> bool {
     p.flicker && p.age >= p.max_age / 3 && !((p.age + p.max_age) / 3).is_multiple_of(2)
 }
 
-/// Particle size at draw time: smoke, redstone and crit grow in over the first 1/32 of their life,
-/// portal particles follow `1 - (1 - t)^2`.
+/// Particle size at draw time: smoke, redstone, crit, note and heart grow in over the first 1/32 of their
+/// life, portal particles follow `1 - (1 - t)^2`, flames shrink to half and lava pops to nothing.
 fn render_scale(p: &Particle, partial: f32) -> f32 {
     let t = (p.age as f32 + partial) / p.max_age.max(1) as f32;
     match p.behavior {
-        Behavior::Smoke | Behavior::RedDust | Behavior::Crit | Behavior::Snow => {
+        Behavior::Smoke | Behavior::RedDust | Behavior::Crit | Behavior::Snow | Behavior::Drift => {
             p.init_scale * (t * 32.0).clamp(0.0, 1.0)
         }
+        Behavior::Flame => p.init_scale * (1.0 - t * t * 0.5),
+        Behavior::Lava => p.init_scale * (1.0 - t * t),
         Behavior::Portal => p.init_scale * (1.0 - (1.0 - t) * (1.0 - t)),
         // The flash is `7.1 * sin(..)` blocks from its centre; a quad is `0.1 * scale` from it.
         Behavior::Overlay => {
@@ -1683,7 +1684,7 @@ fn particle_light(p: &Particle, partial: f32, light: &impl Fn([f64; 3]) -> [f32;
 /// Which texture the sprite samples, and its two corner uvs; `None` when nothing is drawn.
 fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32; 2]; 2])> {
     Some(match p.sprite {
-        Sprite::Block { state, jitter } => {
+        Sprite::Block { state, jitter, .. } => {
             let name = crate::blocks::look(state).tex[crate::blocks::NORTH];
             let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
             let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
@@ -1836,6 +1837,7 @@ fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
             p.vel = p.vel.map(|v| v * f64::from(0.7_f32));
             p.vel[1] -= f64::from(0.02_f32);
         }
+        Behavior::Flame | Behavior::Drift => fx::move_fx(p, solid),
         _ => {
             p.vel[1] -= 0.04 * p.gravity;
             step(p, solid);
@@ -2086,7 +2088,7 @@ mod tests {
     #[test]
     fn break_block_spawns_64_shards_that_fall_and_expire() {
         let mut ps = Particles::new();
-        ps.break_block([0, 10, 0], 1 << 4);
+        ps.break_block([0, 10, 0], 1 << 4, |_, _| 1);
         assert_eq!(ps.len(), 64);
         for _ in 0..200 {
             ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
@@ -2147,7 +2149,13 @@ mod tests {
     fn mining_shard_on_a_lower_slab_top_sits_just_above_its_surface() {
         let mut ps = Particles::new();
         for _ in 0..50 {
-            ps.dig_hit([3, 10, 4], 1, 44 << 4, [0.0, 0.0, 0.0, 1.0, 0.5, 1.0]);
+            ps.dig_hit(
+                [3, 10, 4],
+                1,
+                44 << 4,
+                [0.0, 0.0, 0.0, 1.0, 0.5, 1.0],
+                |_, _| 1,
+            );
         }
         for p in &ps.list {
             // Vanilla `maxY + (double) 0.1F`: the float widens to 0.10000000149, not 0.1.
@@ -2164,7 +2172,13 @@ mod tests {
     fn mining_shard_velocity_uses_0_2_around_the_upward_offset() {
         let mut ps = Particles::new();
         for _ in 0..200 {
-            ps.dig_hit([0, 0, 0], 4, 1 << 4, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+            ps.dig_hit(
+                [0, 0, 0],
+                4,
+                1 << 4,
+                [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                |_, _| 1,
+            );
         }
         // Fresh `EntityFX` motion is at most 0.45 * 0.4 per axis, so x and z stay within 0.2 * that.
         for p in &ps.list {

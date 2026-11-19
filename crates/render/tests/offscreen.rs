@@ -222,7 +222,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     );
 
     let mut ps = Particles::new();
-    ps.break_block([7, 66, 12], 1 << 4);
+    ps.break_block([7, 66, 12], 1 << 4, |_, _| 1);
     ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
     ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
     r.set_particles(

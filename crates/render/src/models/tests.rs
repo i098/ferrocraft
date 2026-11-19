@@ -186,13 +186,15 @@ fn jar_variants_exist_for_every_state() {
     let nb = |_, _, _| 0u16;
     for id in [
         50u16, 75, 76, 93, 94, 149, 150, 127, 145, 34, 69, 70, 72, 147, 148, 65, 120, 131, 64, 71,
-        193, 194, 195, 196, 197,
+        193, 194, 195, 196, 197, 29, 33, 55, 66, 27, 28, 157,
     ] {
         for meta in 0..16u16 {
             // Meta values a block never uses (torch 0/6.., ladder 0/1, ...) may have no variant.
             let used = match id {
                 65 => (2..=5).contains(&meta),
                 127 | 145 => meta < 12,
+                66 => meta < 10,
+                27 | 28 | 157 => meta & 7 < 6,
                 _ => true,
             };
             if used {
@@ -204,6 +206,55 @@ fn jar_variants_exist_for_every_state() {
             }
         }
     }
+}
+
+/// `BlockRedstoneWire.getActualState`: a lone dust is a dot; dust beside stone climbs it only when
+/// the block above the dust is not solid; a lever beside the dust connects on that side.
+#[test]
+fn redstone_wire_sides_follow_get_attach_position() {
+    let key = |nb: &dyn Fn(i32, i32, i32) -> u16| variant(55 << 4, nb).unwrap().1;
+    let wire = 55 << 4;
+    let stone = 1 << 4;
+    assert_eq!(
+        key(&|_, _, _| 0),
+        "east=none,north=none,south=none,west=none"
+    );
+    assert_eq!(
+        key(&|x, y, z| if (x, y, z) == (1, 0, 0) { wire } else { 0 }),
+        "east=side,north=none,south=none,west=none"
+    );
+    // Stone to the north with wire on top of it: climbs (`up`) unless a solid block covers the dust.
+    let climb = |roof: u16| {
+        key(&move |x, y, z| match (x, y, z) {
+            (0, 0, -1) => stone,
+            (0, 1, -1) => wire,
+            (0, 1, 0) => roof,
+            _ => 0,
+        })
+    };
+    assert_eq!(climb(0), "east=none,north=up,south=none,west=none");
+    assert_eq!(climb(stone), "east=none,north=none,south=none,west=none");
+    // Wire one step down beside the dust connects only through a non-solid neighbour.
+    assert_eq!(
+        key(&|x, y, z| if (x, y, z) == (0, -1, 1) { wire } else { 0 }),
+        "east=none,north=none,south=side,west=none"
+    );
+    // A repeater joins only along its axis; a lever joins from any side.
+    let repeater = |facing: u16| {
+        key(&move |x, y, z| {
+            if (x, y, z) == (1, 0, 0) {
+                93 << 4 | facing
+            } else {
+                0
+            }
+        })
+    };
+    assert_eq!(repeater(3), "east=side,north=none,south=none,west=none");
+    assert_eq!(repeater(0), "east=none,north=none,south=none,west=none");
+    assert_eq!(
+        key(&|x, y, z| if (x, y, z) == (-1, 0, 0) { 69 << 4 } else { 0 }),
+        "east=none,north=none,south=none,west=side"
+    );
 }
 
 /// `BlockFaceUV`: vertex `i` takes corner `(i + rotation / 90) % 4` of (u1,v1) (u1,v2) (u2,v2) (u2,v1).

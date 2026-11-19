@@ -18,6 +18,9 @@ pub(super) fn variant(state: u16, nb: Nb) -> Found {
         127 => cocoa(meta, facing),
         145 => anvil(meta, facing),
         34 => piston_head(meta),
+        29 | 33 => piston(id, meta),
+        27 | 28 | 66 | 157 => rail(id, meta),
+        55 => redstone_wire(nb),
         69 => lever(meta),
         70 | 72 => pressure_plate(id, meta),
         147 | 148 => weighted_plate(id, meta),
@@ -109,6 +112,119 @@ fn piston_head(meta: usize) -> Found {
             FRONT[(meta & 7) % 6],
             ["normal", "sticky"][meta >> 3]
         ),
+    ))
+}
+
+/// `BlockPistonBase`: bit 8 is `extended`, the low bits the facing. Id 33 is the plain piston, 29 the sticky one.
+fn piston(id: u16, meta: usize) -> Found {
+    Some((
+        ["sticky_piston", "piston"][usize::from(id == 33)],
+        format!(
+            "extended={},facing={}",
+            meta & 8 != 0,
+            FRONT[(meta & 7) % 6]
+        ),
+    ))
+}
+
+/// `BlockRailBase.EnumRailDirection` by metadata; only the plain rail has the four curves (6..9).
+const RAIL_SHAPES: [&str; 10] = [
+    "north_south",
+    "east_west",
+    "ascending_east",
+    "ascending_west",
+    "ascending_north",
+    "ascending_south",
+    "south_east",
+    "south_west",
+    "north_west",
+    "north_east",
+];
+
+/// Rails 27 (powered), 28 (detector) and 157 (activator) carry `powered` in bit 8 and the shape in bits 0..2.
+fn rail(id: u16, meta: usize) -> Found {
+    if id == 66 {
+        return Some(("rail", format!("shape={}", RAIL_SHAPES[meta.min(9)])));
+    }
+    let name = match id {
+        27 => "golden_rail",
+        28 => "detector_rail",
+        _ => "activator_rail",
+    };
+    Some((
+        name,
+        format!("powered={},shape={}", meta & 8 != 0, RAIL_SHAPES[meta & 7]),
+    ))
+}
+
+/// Horizontal offsets in the order of the wire properties `east, north, south, west`, with the
+/// direction a neighbour in that offset is seen from the wire (`EnumFacing` index in `HORIZONTAL`).
+const WIRE_SIDES: [(&str, [i32; 2], usize); 4] = [
+    ("east", [1, 0], 3),
+    ("north", [0, -1], 2),
+    ("south", [0, 1], 0),
+    ("west", [-1, 0], 1),
+];
+
+/// `BlockRedstoneWire.canConnectTo`: wire, a repeater lying along the line, or any block that
+/// provides power. `side` is the `HORIZONTAL` index of the direction from the wire, `None` for the
+/// check from above or below.
+fn wire_connects(state: u16, side: Option<usize>) -> bool {
+    let id = state >> 4;
+    match id {
+        55 => true,
+        93 | 94 => side.is_some_and(|s| {
+            let facing = state as usize & 3;
+            facing == s || facing == (s + 2) % 4
+        }),
+        // Torches, lever, buttons, plates, tripwire hook, detector rail, trapped chest,
+        // redstone block, repeaters/comparators, daylight sensors.
+        _ => {
+            side.is_some()
+                && matches!(
+                    id,
+                    28 | 69
+                        | 70
+                        | 72
+                        | 75
+                        | 76
+                        | 77
+                        | 143
+                        | 131
+                        | 146
+                        | 147
+                        | 148
+                        | 149
+                        | 150
+                        | 151
+                        | 152
+                        | 178
+                )
+        }
+    }
+}
+
+/// `BlockRedstoneWire.getActualState` / `getAttachPosition`: per side `none`, `side` or `up`.
+fn redstone_wire(nb: Nb) -> Found {
+    let solid = |s: u16| crate::blocks::look(s).kind == crate::blocks::Kind::Opaque;
+    let above_solid = solid(nb(0, 1, 0));
+    let attach = |[dx, dz]: [i32; 2], side: usize| {
+        let next = nb(dx, 0, dz);
+        if !wire_connects(next, Some(side)) && (solid(next) || !wire_connects(nb(dx, -1, dz), None))
+        {
+            if !above_solid && solid(next) && wire_connects(nb(dx, 1, dz), None) {
+                "up"
+            } else {
+                "none"
+            }
+        } else {
+            "side"
+        }
+    };
+    let [e, n, s, w] = WIRE_SIDES.map(|(_, d, side)| attach(d, side));
+    Some((
+        "redstone_wire",
+        format!("east={e},north={n},south={s},west={w}"),
     ))
 }
 

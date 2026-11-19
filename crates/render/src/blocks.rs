@@ -401,11 +401,17 @@ fn look_3(id: u16, meta: u16) -> Look {
                 "rail_detector"
             }; 6],
         ),
-        29 | 33 => cube3(
+        // Not a full cube (`BlockPistonBase.isOpaqueCube`): drawn from `piston`/`sticky_piston`; these name the atlas tiles.
+        29 | 33 => shape(
             0x9a8260,
-            "piston_top_normal",
-            "piston_bottom",
-            "piston_side",
+            [
+                "piston_top_normal",
+                "piston_bottom",
+                "piston_side",
+                "piston_inner",
+                "piston_top_sticky",
+                "piston_side",
+            ],
         ),
         30 => cross(0xe0e0e0, "web", Tint::None),
         31 => match meta {

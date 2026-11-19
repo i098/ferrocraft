@@ -33,7 +33,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 24] = [
+const BLOCKSTATES: [&str; 31] = [
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",
@@ -44,6 +44,13 @@ const BLOCKSTATES: [&str; 24] = [
     "cocoa",
     "anvil",
     "piston_head",
+    "piston",
+    "sticky_piston",
+    "rail",
+    "golden_rail",
+    "detector_rail",
+    "activator_rail",
+    "redstone_wire",
     "lever",
     "stone_pressure_plate",
     "wooden_pressure_plate",
@@ -152,6 +159,7 @@ fn parse_element(e: &Value) -> Option<Element> {
             uv,
             turns: f.get("rotation").and_then(Value::as_u64).unwrap_or(0) as usize / 90,
             tex: f.get("texture")?.as_str()?.to_owned(),
+            tint: f.get("tintindex").is_some(),
             cull: f
                 .get("cullface")
                 .and_then(Value::as_str)

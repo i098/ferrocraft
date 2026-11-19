@@ -91,13 +91,9 @@ fn explicit_uv_rotation_and_blockstate_turn_are_kept() {
     assert_eq!(up.uv[0], [0.0, 0.5]);
 }
 
-/// Issue #547 oracles: wall torch side samples v 6..16 and a cocoa pod side samples [11,4,15,9].
+/// Issue #547 oracle: a cocoa pod side samples [11,4,15,9].
 #[test]
-fn explicit_uv_of_wall_torch_and_cocoa_sides_is_kept() {
-    let torch = r##"{"textures": {"t": "blocks/torch_on"}, "elements": [{"from": [-1,3.5,7], "to": [1,19.5,9],
-        "faces": {"west": {"uv": [7,6,9,16], "texture": "#t"}}}]}"##;
-    let quads = bake(torch, r#"{"model": "m"}"#);
-    assert!(has_uv(&quads, "torch_on", [7.0, 6.0, 9.0, 16.0]));
+fn explicit_uv_of_cocoa_side_is_kept() {
     let cocoa = r##"{"textures": {"t": "blocks/cocoa_stage_2"}, "elements": [{"from": [6,2,1], "to": [10,9,5],
         "faces": {"north": {"uv": [11,4,15,9], "texture": "#t"}}}]}"##;
     let quads = bake(cocoa, r#"{"model": "m"}"#);
@@ -116,15 +112,30 @@ fn repeater_door_and_piston_faces_follow_vanilla_uv_rules() {
     };
     let corners = |quads: &[Quad]| quads[0].uv.map(|c| [c[0] * 16.0, c[1] * 16.0]);
 
-    let repeater = bake(&face("redstone_torch_on", "[7,6,9,11]", 0), r#"{"model": "m"}"#);
-    assert_eq!(corners(&repeater), [[7.0, 6.0], [7.0, 11.0], [9.0, 11.0], [9.0, 6.0]]);
+    let repeater = bake(
+        &face("redstone_torch_on", "[7,6,9,11]", 0),
+        r#"{"model": "m"}"#,
+    );
+    assert_eq!(
+        corners(&repeater),
+        [[7.0, 6.0], [7.0, 11.0], [9.0, 11.0], [9.0, 6.0]]
+    );
 
-    let door = bake(&face("door_wood_lower", "[3,0,0,16]", 0), r#"{"model": "m", "y": 90}"#);
+    let door = bake(
+        &face("door_wood_lower", "[3,0,0,16]", 0),
+        r#"{"model": "m", "y": 90}"#,
+    );
     assert_eq!(door[0].face, 5);
-    assert_eq!(corners(&door), [[3.0, 0.0], [3.0, 16.0], [0.0, 16.0], [0.0, 0.0]]);
+    assert_eq!(
+        corners(&door),
+        [[3.0, 0.0], [3.0, 16.0], [0.0, 16.0], [0.0, 0.0]]
+    );
 
     let piston = bake(&face("piston_side", "[0,0,4,12]", 270), r#"{"model": "m"}"#);
-    assert_eq!(corners(&piston), [[4.0, 0.0], [0.0, 0.0], [0.0, 12.0], [4.0, 12.0]]);
+    assert_eq!(
+        corners(&piston),
+        [[4.0, 0.0], [0.0, 0.0], [0.0, 12.0], [4.0, 12.0]]
+    );
 }
 
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
@@ -144,7 +155,10 @@ fn jar() -> Option<AssetSource> {
         eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
         return None;
     };
-    AssetSource::open(std::path::Path::new(&path))
+    Some(
+        AssetSource::open(std::path::Path::new(&path))
+            .expect("FERROCRAFT_CLIENT_JAR set but unreadable"),
+    )
 }
 
 fn has_uv(quads: &[Quad], tex: &str, uv: [f32; 4]) -> bool {
@@ -183,60 +197,243 @@ fn jar_variants_exist_for_every_state() {
     }
 }
 
-#[test]
-fn jar_models_keep_vanilla_uv() {
-    let Some(mut source) = jar() else { return };
-    let models = Models::load(&mut source);
-    let nb = |_, _, _| 0u16;
-    // Comparator rear torch: vanilla uv [7,6,9,11] on every side (the cube default would be [10,9,12,14]).
-    let comparator = models.quads(149 << 4, &nb).unwrap();
-    assert!(has_uv(
-        comparator,
-        "redstone_torch_off",
-        [7.0, 6.0, 9.0, 11.0]
-    ));
-    // Cocoa age 1 pod side: vanilla [9,4,15,11] (south facing, no turn).
-    let cocoa = models.quads(127 << 4 | 4, &nb).unwrap();
-    assert!(has_uv(cocoa, "cocoa_stage_1", [9.0, 4.0, 15.0, 11.0]));
-    // Wall torch (facing east): the side planes sample v 6..16 (the cube default would be v 3..13).
-    let torch = models.quads(50 << 4 | 1, &nb).unwrap();
-    assert!(torch.iter().any(|q| {
-        let v = q.uv.iter().map(|p| p[1] * 16.0);
-        &*q.tex == "torch_on"
-            && v.clone().fold(99.0, f32::min) == 6.0
-            && v.fold(-9.0, f32::max) == 16.0
-    }));
-    // Upper door half draws the upper texture; the hinge comes from the upper half.
-    let upper = |meta: u16| move |_, dy, _| if dy < 0 { 64 << 4 } else { 64 << 4 | meta };
-    let left = models.quads(64 << 4 | 8, &upper(8)).unwrap();
-    // The cap (up face) uses the lower texture in the vanilla model; every side uses the upper one.
-    assert!(left
-        .iter()
-        .filter(|q| q.face != 0)
-        .all(|q| &*q.tex == "door_wood_upper"));
-    // Piston head platform and shaft come from the model, with the textures of piston_head_normal.json.
-    let piston = models.quads(34 << 4 | 2, &nb).unwrap();
-    assert!(piston.iter().any(|q| &*q.tex == "piston_top_normal"));
-    assert!(piston.iter().any(|q| &*q.tex == "piston_side"));
+/// `BlockFaceUV`: vertex `i` takes corner `(i + rotation / 90) % 4` of (u1,v1) (u1,v2) (u2,v2) (u2,v1).
+fn corners(uv: [f32; 4], rot: usize) -> [[f32; 2]; 4] {
+    let c = [
+        [uv[0], uv[1]],
+        [uv[0], uv[3]],
+        [uv[2], uv[3]],
+        [uv[2], uv[1]],
+    ];
+    std::array::from_fn(|i| c[(i + rot / 90) % 4])
 }
 
-fn y_max(quads: &[Quad]) -> f32 {
-    quads.iter().flat_map(|q| q.pos).map(|p| p[1] * 16.0).fold(0.0, f32::max)
+/// One face of a vanilla model JSON: texture, face index when the state is not turned, `uv` and `rotation`.
+type Expect = (&'static str, Option<usize>, [f32; 4], usize);
+
+fn drawn(quads: &[Quad], (tex, face, uv, rot): Expect) -> bool {
+    let want = corners(uv, rot);
+    quads.iter().any(|q| {
+        &*q.tex == tex
+            && face.is_none_or(|f| q.face == f)
+            && q.uv.iter().zip(want).all(|(g, w)| {
+                (g[0] * 16.0 - w[0]).abs() < 1e-3 && (g[1] * 16.0 - w[1]).abs() < 1e-3
+            })
+    })
 }
 
-/// Vanilla 1.8.9 pressure_plate_up/down, ladder and end_portal_frame(_eye) element extents, in 1/16 blocks.
-#[test]
-fn jar_flat_blocks_keep_vanilla_extents() {
-    let Some(mut source) = jar() else { return };
-    let models = Models::load(&mut source);
-    let nb = |_, _, _| 0u16;
-    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
-    for id in [70u16, 72, 147, 148] {
-        assert!(near(y_max(models.quads(id << 4, &nb).unwrap()), 1.0), "plate {id} up");
-        assert!(near(y_max(models.quads(id << 4 | 1, &nb).unwrap()), 0.5), "plate {id} down");
+fn assert_drawn(models: &Models, state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, faces: &[Expect]) {
+    let quads = models.quads(state, nb).unwrap();
+    for f in faces {
+        assert!(drawn(quads, *f), "state {state:#x}: {f:?} missing");
     }
-    let ladder = models.quads(65 << 4 | 2, &nb).unwrap();
-    assert!(ladder.iter().any(|q| q.pos.iter().all(|p| near(p[2] * 16.0, 15.2))));
-    assert!(near(y_max(models.quads(120 << 4, &nb).unwrap()), 13.0), "frame");
-    assert!(near(y_max(models.quads(120 << 4 | 4, &nb).unwrap()), 16.0), "frame with eye");
+}
+
+fn jar_models() -> Option<Models> {
+    Some(Models::load(&mut jar()?))
+}
+
+const NB: &dyn Fn(i32, i32, i32) -> u16 = &|_, _, _| 0;
+const UP: usize = 0;
+const DOWN: usize = 1;
+const NORTH: usize = 2;
+const SOUTH: usize = 3;
+const WEST: usize = 4;
+const EAST: usize = 5;
+
+/// comparator_unlit.json, repeater_1tick.json, cocoa_age1_s.json and normal_torch_wall.json.
+#[test]
+fn jar_torch_comparator_repeater_and_cocoa_keep_vanilla_uv() {
+    let Some(models) = jar_models() else { return };
+    let torch = |t: &'static str| -> Vec<Expect> {
+        let side = [NORTH, SOUTH, WEST, EAST].map(|f| (t, Some(f), [7.0, 6.0, 9.0, 11.0], 0));
+        let mut v = side.to_vec();
+        v.push((t, Some(DOWN), [7.0, 13.0, 9.0, 15.0], 0));
+        v.push((t, Some(UP), [7.0, 6.0, 9.0, 8.0], 0));
+        v
+    };
+    assert_drawn(&models, 149 << 4, NB, &torch("redstone_torch_off"));
+    assert_drawn(
+        &models,
+        149 << 4,
+        NB,
+        &[("redstone_torch_off", Some(NORTH), [7.0, 6.0, 9.0, 8.0], 0)],
+    );
+    assert_drawn(&models, 93 << 4, NB, &torch("redstone_torch_off"));
+    let slab =
+        [NORTH, SOUTH, WEST, EAST].map(|f| ("stone_slab_top", Some(f), [0.0, 14.0, 16.0, 16.0], 0));
+    assert_drawn(&models, 93 << 4, NB, &slab);
+    assert_drawn(
+        &models,
+        93 << 4,
+        NB,
+        &[("repeater_off", Some(UP), [0.0, 0.0, 16.0, 16.0], 0)],
+    );
+    let cocoa =
+        [NORTH, SOUTH, WEST, EAST].map(|f| ("cocoa_stage_1", Some(f), [9.0, 4.0, 15.0, 11.0], 0));
+    assert_drawn(&models, 127 << 4 | 4, NB, &cocoa);
+    // Wall torch facing east: the side planes sample the whole tile, the caps the torch head.
+    let wall = [
+        ("torch_on", Some(WEST), [0.0, 0.0, 16.0, 16.0], 0),
+        ("torch_on", Some(EAST), [0.0, 0.0, 16.0, 16.0], 0),
+        ("torch_on", Some(UP), [7.0, 6.0, 9.0, 8.0], 0),
+        ("torch_on", Some(DOWN), [7.0, 13.0, 9.0, 15.0], 0),
+    ];
+    assert_drawn(&models, 50 << 4 | 1, NB, &wall);
+}
+
+/// door_bottom(_rh).json and door_top(_rh).json, closed, facing east; the hinge picks the mirrored model.
+#[test]
+fn jar_doors_keep_vanilla_uv() {
+    let Some(models) = jar_models() else { return };
+    let side = |t: &'static str, w: [f32; 4], e: [f32; 4]| -> Vec<Expect> {
+        vec![
+            (t, Some(NORTH), [3.0, 0.0, 0.0, 16.0], 0),
+            (t, Some(SOUTH), [0.0, 0.0, 3.0, 16.0], 0),
+            (t, Some(WEST), w, 0),
+            (t, Some(EAST), e, 0),
+        ]
+    };
+    let plain = ([0.0, 0.0, 16.0, 16.0], [16.0, 0.0, 0.0, 16.0]);
+    let mirrored = (plain.1, plain.0);
+    for (hinge, (w, e)) in [(0u16, plain), (1, mirrored)] {
+        let lower = move |_, dy, _| if dy > 0 { 64 << 4 | 8 | hinge } else { 64 << 4 };
+        let mut faces = side("door_wood_lower", w, e);
+        faces.push(("door_wood_lower", Some(DOWN), [13.0, 0.0, 16.0, 16.0], 0));
+        assert_drawn(&models, 64 << 4, &lower, &faces);
+        let upper = move |_, dy, _| if dy < 0 { 64 << 4 } else { 64 << 4 | 8 | hinge };
+        let mut faces = side("door_wood_upper", w, e);
+        faces.push(("door_wood_lower", Some(UP), [13.0, 0.0, 16.0, 16.0], 0));
+        assert_drawn(&models, 64 << 4 | 8 | hinge, &upper, &faces);
+    }
+}
+
+/// piston_head.json via piston_head_normal.json: platform and both shaft boxes, facing up (x 270) and east (y 90).
+#[test]
+fn jar_piston_head_keeps_vanilla_uv() {
+    let Some(models) = jar_models() else { return };
+    let (s, p) = ("piston_side", "piston_top_normal");
+    let faces: [Expect; 14] = [
+        (s, None, [0.0, 0.0, 16.0, 4.0], 180),
+        (s, None, [0.0, 0.0, 16.0, 4.0], 0),
+        (s, None, [0.0, 0.0, 16.0, 4.0], 270),
+        (s, None, [0.0, 0.0, 16.0, 4.0], 90),
+        (p, None, [0.0, 0.0, 16.0, 16.0], 0),
+        (s, None, [4.0, 0.0, 16.0, 4.0], 90),
+        (s, None, [4.0, 0.0, 16.0, 4.0], 270),
+        (s, None, [16.0, 4.0, 4.0, 0.0], 0),
+        (s, None, [4.0, 0.0, 16.0, 4.0], 0),
+        (s, None, [0.0, 0.0, 4.0, 4.0], 90),
+        (s, None, [0.0, 0.0, 4.0, 4.0], 270),
+        (s, None, [4.0, 4.0, 0.0, 0.0], 0),
+        (s, None, [0.0, 0.0, 4.0, 4.0], 0),
+        (p, None, [0.0, 0.0, 16.0, 16.0], 0),
+    ];
+    for meta in [1u16, 5] {
+        assert_drawn(&models, 34 << 4 | meta, NB, &faces);
+    }
+}
+
+/// lever.json / lever_off.json: cobblestone base and handle uv, unpowered and powered.
+#[test]
+fn jar_lever_keeps_vanilla_uv() {
+    let Some(models) = jar_models() else { return };
+    let c = "cobblestone";
+    let faces = [
+        (c, Some(DOWN), [5.0, 4.0, 11.0, 12.0], 0),
+        (c, Some(UP), [5.0, 4.0, 11.0, 12.0], 0),
+        (c, Some(NORTH), [5.0, 0.0, 11.0, 3.0], 0),
+        (c, Some(SOUTH), [5.0, 0.0, 11.0, 3.0], 0),
+        (c, Some(WEST), [4.0, 0.0, 12.0, 3.0], 0),
+        (c, Some(EAST), [4.0, 0.0, 12.0, 3.0], 0),
+        ("lever", Some(DOWN), [7.0, 6.0, 9.0, 8.0], 0),
+        ("lever", Some(UP), [7.0, 6.0, 9.0, 8.0], 0),
+        ("lever", Some(NORTH), [7.0, 6.0, 9.0, 16.0], 0),
+        ("lever", Some(EAST), [7.0, 6.0, 9.0, 16.0], 0),
+    ];
+    for meta in [5u16, 13] {
+        assert_drawn(&models, 69 << 4 | meta, NB, &faces);
+    }
+}
+
+/// tripwire_hook_attached.json (facing south is turned y 180, so faces are not pinned).
+#[test]
+fn jar_tripwire_hook_keeps_vanilla_uv() {
+    let Some(models) = jar_models() else { return };
+    let (h, w, t) = ("trip_wire_source", "planks_oak", "trip_wire");
+    let faces = [
+        (h, None, [5.0, 3.0, 11.0, 9.0], 0),
+        (h, None, [5.0, 3.0, 11.0, 4.0], 0),
+        (h, None, [5.0, 8.0, 11.0, 9.0], 0),
+        (h, None, [7.0, 8.0, 9.0, 9.0], 0),
+        (h, None, [7.0, 3.0, 9.0, 4.0], 0),
+        (w, None, [7.0, 2.0, 9.0, 7.0], 0),
+        (w, None, [7.0, 9.0, 9.0, 14.0], 0),
+        (w, None, [7.0, 9.0, 9.0, 11.0], 0),
+        (w, None, [2.0, 9.0, 7.0, 11.0], 0),
+        (w, None, [9.0, 9.0, 14.0, 11.0], 0),
+        (w, None, [6.0, 14.0, 10.0, 16.0], 0),
+        (w, None, [6.0, 0.0, 10.0, 2.0], 0),
+        (w, None, [6.0, 7.0, 10.0, 15.0], 0),
+        (w, None, [0.0, 7.0, 2.0, 15.0], 0),
+        (w, None, [14.0, 7.0, 16.0, 15.0], 0),
+        (t, None, [0.0, 6.0, 16.0, 8.0], 90),
+        (t, None, [0.0, 8.0, 16.0, 6.0], 90),
+    ];
+    assert_drawn(&models, 131 << 4 | 4, NB, &faces);
+}
+
+fn extent(quads: &[Quad], axis: usize) -> (f32, f32) {
+    let v = quads.iter().flat_map(|q| q.pos).map(|p| p[axis] * 16.0);
+    (v.clone().fold(99.0, f32::min), v.fold(-9.0, f32::max))
+}
+
+/// pressure_plate_up/down (stone, wood, light, heavy), ladder and end_portal_frame_empty/filled: boxes and uv.
+#[test]
+fn jar_flat_blocks_keep_vanilla_boxes_and_uv() {
+    let Some(models) = jar_models() else { return };
+    let near = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+    for (id, t) in [
+        (70u16, "stone"),
+        (72, "planks_oak"),
+        (147, "gold_block"),
+        (148, "iron_block"),
+    ] {
+        for (meta, top, edge) in [(0u16, 1.0, 15.0), (1, 0.5, 15.5)] {
+            let quads = models.quads(id << 4 | meta, NB).unwrap();
+            assert!(near(extent(quads, 1), (0.0, top)) && near(extent(quads, 0), (1.0, 15.0)));
+            assert!(near(extent(quads, 2), (1.0, 15.0)), "plate {id} {meta}");
+            let faces = [
+                (t, Some(UP), [1.0, 1.0, 15.0, 15.0], 0),
+                (t, Some(DOWN), [1.0, 1.0, 15.0, 15.0], 0),
+                (t, Some(NORTH), [1.0, edge, 15.0, 16.0], 0),
+                (t, Some(EAST), [1.0, edge, 15.0, 16.0], 0),
+            ];
+            assert_drawn(&models, id << 4 | meta, NB, &faces);
+        }
+    }
+    let ladder = models.quads(65 << 4 | 2, NB).unwrap();
+    assert!(near(extent(ladder, 2), (15.2, 15.2)) && near(extent(ladder, 0), (0.0, 16.0)));
+    assert_drawn(
+        &models,
+        65 << 4 | 2,
+        NB,
+        &[("ladder", None, [0.0, 0.0, 16.0, 16.0], 0)],
+    );
+    let frame = models.quads(120 << 4, NB).unwrap();
+    assert!(near(extent(frame, 1), (0.0, 13.0)) && near(extent(frame, 0), (0.0, 16.0)));
+    let empty = [
+        ("end_stone", Some(DOWN), [0.0, 0.0, 16.0, 16.0], 0),
+        ("endframe_top", Some(UP), [0.0, 0.0, 16.0, 16.0], 0),
+        ("endframe_side", Some(NORTH), [0.0, 3.0, 16.0, 16.0], 0),
+    ];
+    assert_drawn(&models, 120 << 4, NB, &empty);
+    let eye = models.quads(120 << 4 | 4, NB).unwrap();
+    assert!(near(extent(eye, 1), (0.0, 16.0)) && near(extent(eye, 0), (0.0, 16.0)));
+    let faces = [
+        ("endframe_eye", Some(UP), [4.0, 4.0, 12.0, 12.0], 0),
+        ("endframe_eye", Some(DOWN), [4.0, 4.0, 12.0, 12.0], 0),
+        ("endframe_eye", None, [4.0, 0.0, 12.0, 3.0], 0),
+    ];
+    assert_drawn(&models, 120 << 4 | 4, NB, &faces);
 }

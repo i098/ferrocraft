@@ -105,3 +105,58 @@ fn a_thrown_eye_of_ender_and_xp_bottle_draw_as_sprites() {
         encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
     }
 }
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn a_thrown_snowball_and_pearl_draw_near_and_far() {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(800, 450, Some(std::path::Path::new(&jar)));
+    let cam = Camera {
+        pos: [0.0, 65.0, 0.0],
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    for cx in -1..=1 {
+        for cz in -1..=2 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    let base = mob(0, 0.0, 0.0, (0.25, 0.25), 0);
+    let at = |id: i8, x: f64, z: f64| EntityDraw {
+        class: Class::Object(id),
+        pos: [x, 65.0, z],
+        ..base.clone()
+    };
+    let mut frame = |z: f64, ids: [i8; 2]| {
+        r.set_entities(&[at(ids[0], -0.4, z), at(ids[1], 0.4, z)]);
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let empty = frame(3.0, [99, 99]);
+    for z in [0.6, 1.0, 3.0] {
+        let f = frame(z, [61, 65]);
+        if let Some(dir) = std::env::var_os("THROWN_PROOF_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            encode_png(&dir.join(format!("sp_{z}.png")), 800, 450, &f).unwrap();
+        }
+        assert_ne!(empty, f, "z={z}");
+    }
+    for (yaw, pitch) in [(90.0f32, 0.0f32), (200.0, 20.0)] {
+        let cam = Camera { yaw, pitch, ..cam.clone() };
+        let (sy, cy) = (yaw.to_radians().sin(), yaw.to_radians().cos());
+        let mk = |id: i8, side: f64| EntityDraw {
+            class: Class::Object(id),
+            pos: [-f64::from(sy) * 3.0 + f64::from(cy) * side, 65.0, f64::from(cy) * 3.0 + f64::from(sy) * side],
+            view: [yaw, pitch],
+            ..base.clone()
+        };
+        r.set_entities(&[mk(61, -0.4), mk(65, 0.4)]);
+        let f = r.render_to_rgba(&cam, &[]).2;
+        r.set_entities(&[]);
+        let none = r.render_to_rgba(&cam, &[]).2;
+        if let Some(dir) = std::env::var_os("THROWN_PROOF_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            encode_png(&dir.join(format!("yaw_{yaw}.png")), 800, 450, &f).unwrap();
+        }
+        assert_ne!(none, f, "yaw={yaw}");
+    }
+}

@@ -9,9 +9,11 @@ pub struct Args {
     /// `--accessToken` (or `FERROCRAFT_ACCESS_TOKEN`) with `--uuid`: needed for online-mode servers.
     pub auth: Option<Auth>,
     pub assets_dir: Option<PathBuf>,
+    /// The folder that holds `--assetsDir` (`assets/indexes` and `assets/objects` sit under it).
+    pub assets_root: Option<PathBuf>,
     /// `--server`/`--port`/`FERROCRAFT_SERVER`: join this server at once; without it the title screen opens.
     pub server: Option<String>,
-    /// `--gameDir`, else `~/.minecraft`: holds `options.txt`, `servers.dat` and the sound assets.
+    /// `--gameDir`, else `~/.minecraft`: holds `options.txt` and `servers.dat`; a fallback place for `assets/` after `assets_root`.
     pub game_dir: PathBuf,
     /// `--width` and `--height`: the initial window size.
     pub width: u32,
@@ -27,6 +29,7 @@ impl Default for Args {
             username: "Player".to_string(),
             auth: None,
             assets_dir: None,
+            assets_root: None,
             server: None,
             game_dir: default_game_dir(),
             width: 854,
@@ -88,6 +91,10 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
             .zip(uuid)
             .filter(|(t, _)| !t.is_empty())
             .map(|(t, u)| Auth::new(t, &u)),
+        assets_root: assets_dir
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf),
         assets_dir: resolve_assets(assets_dir, Some(&game_dir), version.as_deref()),
         server,
         game_dir,
@@ -158,6 +165,9 @@ mod tests {
         .unwrap();
         assert_eq!(a.username, "Bob");
         assert_eq!(a.assets_dir, Some(PathBuf::from("/a")));
+        // The language list reads `pack.mcmeta` from the index under `--assetsDir`, not `--gameDir`.
+        let a = parse(&v("--gameDir /g --assetsDir /x/mc/assets"), None).unwrap();
+        assert_eq!(a.assets_root, Some(PathBuf::from("/x/mc")));
         let mc = std::env::temp_dir().join(format!("fc-args-{}", std::process::id()));
         std::fs::create_dir_all(mc.join("assets")).unwrap();
         std::fs::create_dir_all(mc.join("versions/1.8.9")).unwrap();

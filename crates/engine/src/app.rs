@@ -302,13 +302,23 @@ impl App {
     }
 
     fn asset_index(&self) -> Option<AssetIndex> {
+        self.minecraft_dirs()
+            .iter()
+            .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
+    }
+
+    /// Folders that may hold `assets/indexes`: the one that holds `--assetsDir` (the launcher's
+    /// own, as vanilla reads it), then `--gameDir` and its parent.
+    fn minecraft_dirs(&self) -> Vec<std::path::PathBuf> {
+        let a = &self.args;
         [
-            Some(self.args.game_dir.as_path()),
-            self.args.game_dir.parent(),
+            a.assets_root.clone(),
+            Some(a.game_dir.clone()),
+            a.game_dir.parent().map(|p| p.to_path_buf()),
         ]
         .into_iter()
         .flatten()
-        .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
+        .collect()
     }
 
     /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
@@ -335,12 +345,8 @@ impl App {
             .into_iter()
             .map(input_audio::sound::index::Pack::new)
             .collect();
-        let dirs = [
-            Some(self.args.game_dir.clone()),
-            self.args.game_dir.parent().map(|p| p.to_path_buf()),
-        ];
         self.sound = None;
-        for dir in dirs.into_iter().flatten() {
+        for dir in self.minecraft_dirs() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
                 for d in s.dropped() {
                     crate::log::line(d);
@@ -1809,6 +1815,49 @@ fn screenshot_stamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_list_reads_pack_mcmeta_from_assets_dir_not_game_dir() {
+        let root = std::env::temp_dir().join(format!("fc-lang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mc = root.join("mc");
+        let hash = "ab12cd34";
+        let obj = mc.join("assets/objects/ab");
+        std::fs::create_dir_all(&obj).unwrap();
+        std::fs::create_dir_all(mc.join("assets/indexes")).unwrap();
+        std::fs::create_dir_all(root.join("game")).unwrap();
+        std::fs::write(
+            mc.join("assets/indexes/1.8.json"),
+            format!(r#"{{"objects":{{"pack.mcmeta":{{"hash":"{hash}","size":1}}}}}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            obj.join(hash),
+            r#"{"language":{"fr_FR":{"name":"Fran\u00e7ais","region":"France"},"en_US":{"name":"English","region":"US"}}}"#,
+        )
+        .unwrap();
+        let args = crate::args::parse(
+            &[
+                "--gameDir".to_string(),
+                root.join("game").display().to_string(),
+                "--assetsDir".to_string(),
+                mc.join("assets").display().to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        let mut app = App::new(args);
+        app.load_texts();
+        let codes: Vec<&str> = app
+            .ui
+            .texts
+            .languages
+            .iter()
+            .map(|l| l.code.as_str())
+            .collect();
+        assert_eq!(codes, ["en_US", "fr_FR"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn regeneration_bounce_wraps_on_max_health_even_at_zero_health() {

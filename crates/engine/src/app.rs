@@ -167,12 +167,19 @@ pub struct App {
     skins: PlayerSkins,
     /// `FERROCRAFT_WINDOW_SECS`: exit after this long, for smoke tests.
     deadline: Option<Instant>,
+    /// `--width`, `--height`, `--fullscreen`: the initial window.
+    window_args: crate::args::WindowArgs,
 }
 
 /// `view_ray`'s eye, yaw, pitch, viewer id and its vehicle.
 type ViewRay = ([f64; 3], f32, f32, i32, Option<i32>);
 
 impl App {
+    pub fn with_window(mut self, window_args: crate::args::WindowArgs) -> App {
+        self.window_args = window_args;
+        self
+    }
+
     pub fn new(args: Args) -> App {
         let mut ui = Ui::new(args.game_dir.clone(), Texts::default());
         ui.player_id = args
@@ -241,6 +248,7 @@ impl App {
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
                 .map(|s| Instant::now() + Duration::from_secs(s)),
+            window_args: crate::args::WindowArgs::default(),
             args,
         };
         app.apply_settings();
@@ -1489,7 +1497,12 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Minecraft 1.8.9");
+        let attrs = Window::default_attributes()
+            .with_title("Minecraft 1.8.9")
+            .with_inner_size(winit::dpi::PhysicalSize::new(
+                self.window_args.width,
+                self.window_args.height,
+            ));
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
@@ -1498,6 +1511,10 @@ impl ApplicationHandler for App {
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
+        // `Minecraft.startGame`: `--fullscreen` toggles full screen on, which sets `gameSettings.fullScreen`.
+        if self.window_args.fullscreen {
+            self.ui.settings.fullscreen = true;
+        }
         self.apply_settings();
         self.start_screen();
     }

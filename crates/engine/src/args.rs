@@ -15,6 +15,51 @@ pub struct Args {
     pub game_dir: PathBuf,
 }
 
+/// `--width`, `--height` and `--fullscreen`, as `net.minecraft.client.main.Main` reads them.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct WindowArgs {
+    pub width: u32,
+    pub height: u32,
+    pub fullscreen: bool,
+}
+
+impl Default for WindowArgs {
+    /// Vanilla defaults: `Main` declares `--width` 854 and `--height` 480.
+    fn default() -> Self {
+        WindowArgs {
+            width: 854,
+            height: 480,
+            fullscreen: false,
+        }
+    }
+}
+
+/// Parse the window flags. A value that is not an integer is an error, as in vanilla
+/// (`OptionParser` rejects it); `Minecraft.<init>` turns a size below 1 into 1.
+pub fn parse_window(args: &[String]) -> Result<WindowArgs, String> {
+    let mut w = WindowArgs::default();
+    let mut it = args.iter().peekable();
+    while let Some(flag) = it.next() {
+        if !flag.starts_with("--") {
+            continue;
+        }
+        let val = it.next_if(|v| !v.starts_with("--"));
+        let size = |v: Option<&String>| {
+            let v = v.ok_or(format!("{flag} needs a value"))?;
+            v.parse::<i32>()
+                .map(|n| n.max(1) as u32)
+                .map_err(|e| format!("{flag}: {e}"))
+        };
+        match flag.as_str() {
+            "--width" => w.width = size(val)?,
+            "--height" => w.height = size(val)?,
+            "--fullscreen" => w.fullscreen = true,
+            _ => {}
+        }
+    }
+    Ok(w)
+}
+
 /// Parse `--username`, `--uuid`, `--accessToken`, `--assetsDir`, `--gameDir`, `--version`,
 /// `--server` and `--port`; other vanilla flags are ignored. The Fabric mod hands the token over
 /// in `FERROCRAFT_ACCESS_TOKEN`, so it stays out of the process list. A flag takes the next token as its value
@@ -162,6 +207,34 @@ mod tests {
             Some("h:9".into())
         );
         assert!(parse(&v("--port x"), None).is_err());
+        assert_eq!(parse_window(&v("--width 0 --height -5")).unwrap().width, 1);
+        assert_eq!(parse_window(&v("--width 0 --height -5")).unwrap().height, 1);
+    }
+
+    #[test]
+    fn window_args_values_defaults_and_bad_values() {
+        let d = parse_window(&v("--username A --server 127.0.0.1")).unwrap();
+        assert_eq!(
+            d,
+            WindowArgs {
+                width: 854,
+                height: 480,
+                fullscreen: false
+            }
+        );
+        let w = parse_window(&v("--username A --width 1280 --height 720 --fullscreen")).unwrap();
+        assert_eq!(
+            w,
+            WindowArgs {
+                width: 1280,
+                height: 720,
+                fullscreen: true
+            }
+        );
+        assert_eq!(parse_window(&v("--width 640")).unwrap().height, 480);
+        for bad in ["--width x", "--width", "--height 1.5"] {
+            assert!(parse_window(&v(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

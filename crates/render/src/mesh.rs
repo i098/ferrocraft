@@ -201,13 +201,25 @@ struct Mesher<'a> {
     fancy: bool,
     light: Light,
     out: Meshes,
+    /// Colors keep the tint only: no face shade and no ambient occlusion (the GUI lights the block itself).
+    flat: bool,
     /// The block being meshed draws in vanilla's `CUTOUT` layer: no mip levels (see [`is_unmipped`]).
     unmipped: bool,
 }
 
 /// Mesh the chunk into opaque/cutout geometry and blended geometry, in chunk-local coordinates.
 pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool) -> Meshes {
+    mesh(hood, atlas, smooth, fancy, false)
+}
+
+/// [`mesh_chunk`] with vertex colors holding the tint alone, as vanilla's GUI item draws a block.
+pub fn mesh_chunk_flat(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool) -> Meshes {
+    mesh(hood, atlas, smooth, fancy, true)
+}
+
+fn mesh(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool, flat: bool) -> Meshes {
     let mut m = Mesher {
+        flat,
         hood,
         atlas,
         unmipped: false,
@@ -231,6 +243,15 @@ pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool)
 }
 
 impl Mesher<'_> {
+    /// A face shade, or 1 when the colors hold the tint alone.
+    fn lit(&self, shade: f32) -> f32 {
+        if self.flat {
+            1.0
+        } else {
+            shade
+        }
+    }
+
     fn st(&self, at: [i32; 3], d: [i32; 3]) -> u16 {
         self.hood.block(at[0] + d[0], at[1] + d[1], at[2] + d[2])
     }
@@ -382,7 +403,7 @@ impl Mesher<'_> {
             for (i, c) in CORNERS[f].iter().enumerate() {
                 let (light, a) = self.corner_light(at, f, *c, emissive);
                 ao[i] = a;
-                let k = SHADE[f] * a;
+                let k = self.lit(SHADE[f] * a);
                 verts[i] = Vertex {
                     pos: [
                         at[0] as f32 + c[0],
@@ -533,7 +554,7 @@ impl Mesher<'_> {
         rgb: [f32; 3],
         light: [f32; 2],
     ) -> [Vertex; 4] {
-        let k = SHADE[f];
+        let k = self.lit(SHADE[f]);
         // `BlockFluidRenderer`: a flowing top uses the `_flow` sprite turned by the flow angle.
         let tex = match angle {
             Some(_) => l.tex[2],
@@ -629,7 +650,11 @@ impl Mesher<'_> {
                 continue;
             }
             let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));
-            let k = if q.shade { SHADE[q.face] } else { 1.0 };
+            let k = if q.shade {
+                self.lit(SHADE[q.face])
+            } else {
+                1.0
+            };
             let verts = std::array::from_fn(|i| Vertex {
                 pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
                 uv: self.atlas.uv(&q.tex, q.uv[i]),
@@ -671,7 +696,7 @@ impl Mesher<'_> {
                 if f == UP {
                     uv = rot_uv(uv, b.rot);
                 }
-                let k = SHADE[f];
+                let k = self.lit(SHADE[f]);
                 verts[i] = Vertex {
                     pos: [
                         at[0] as f32 + p[0],

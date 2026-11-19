@@ -43,6 +43,8 @@ struct Layer {
     mesh: MeshData,
     /// One normal per quad of a sprite; block meshes carry their shade in the vertex color.
     normals: Option<Vec<V3>>,
+    /// Block meshes only: each vertex color without face shade and AO, for the GUI.
+    flat: Vec<[f32; 4]>,
     /// The opaque texels of a sprite, for the GUI glint.
     mask: Option<Mask>,
 }
@@ -147,6 +149,7 @@ fn geometry(
                         tex: ItemTex::Sprite(texture),
                         mesh,
                         normals: Some(flat.normals),
+                        flat: Vec::new(),
                         mask: Some(Mask::of(&image)),
                     })
                 })
@@ -162,8 +165,13 @@ fn geometry(
     let state = ((id as u16) << 4) | (damage.max(0) as u16 & 15);
     Some(vec![Layer {
         tex: ItemTex::Atlas,
-        mesh: hand::held_mesh(state, atlas),
+        mesh: hand::held_mesh(state, atlas, false),
         normals: None,
+        flat: hand::held_mesh(state, atlas, true)
+            .vertices
+            .iter()
+            .map(|v| v.color)
+            .collect(),
         mask: None,
     }])
 }
@@ -302,9 +310,12 @@ impl Items {
             if direct && layer.normals.is_some() {
                 vertices[..4].reverse();
             }
-            for v in &mut vertices {
+            for (j, v) in vertices.iter_mut().enumerate() {
                 v.pos = to_world(v.pos);
                 v.light = level;
+                if super::UNSHADED.get() && layer.normals.is_none() {
+                    v.color = layer.flat[j];
+                }
             }
             if let Some(normals) = &layer.normals {
                 let rgb = world::inventory::items::tint(model.id, model.damage, self.dye, i);
@@ -485,13 +496,22 @@ fn hand_matrix(d: &EntityDraw, m: &ItemModel) -> Option<Mat> {
     Some(mat)
 }
 
+/// `ItemRenderer.renderItem` doubles a block model (`shouldRenderItemIn3D`) before the display
+/// transform; `RenderItem.renderItem` then halves it. A flat model keeps its size.
+fn held_prepare(gui3d: bool) -> Mat {
+    if gui3d {
+        scale(2.0)
+    } else {
+        ident()
+    }
+}
+
 /// `ItemInHandLayer.render`: from the right arm's pivot and rotation (`translateRightArm`), then
 /// the item's `thirdperson` transform. Model units are the entity model's pixels over 16.
 fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     let xf = Xf::new(d, false);
     let Some(mat) = hand_matrix(d, m) else { return };
-    // `renderItemInHand` scales flat models by 2 before the display transform.
-    let prepare = if m.gui3d { ident() } else { scale(2.0) };
+    let prepare = held_prepare(m.gui3d);
     let mat = chain(&[mat, prepare, m.third, scale(0.5)]);
     // Model space is the biped's pixel frame; `Xf` maps it to the world.
     let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
@@ -560,4 +580,53 @@ fn copy_matrix(m: &ItemModel, base: &mut Mat, random: &mut JavaRandom, i: usize)
     let placed = chain(&[*base, m.ground, scale(0.5)]);
     *base = mul(*base, translate(0.0, 0.0, 0.046_875 * m.ground_scale[2]));
     placed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ItemRenderer.renderItem` doubles a block and `RenderItem.renderItem` halves everything,
+    /// so a unit block stays one unit wide; a flat sprite ends up half as wide.
+    #[test]
+    fn held_block_keeps_its_size_and_flat_item_halves() {
+        let edge = |gui3d| point(&chain(&[held_prepare(gui3d), scale(0.5)]), [0.5, 0.0, 0.0]);
+        assert_eq!(edge(true), [0.5, 0.0, 0.0]);
+        assert_eq!(edge(false), [0.25, 0.0, 0.0]);
+    }
+
+    fn top_color(mesh: &MeshData) -> [f32; 4] {
+        mesh.vertices.iter().find(|v| v.pos[1] > 0.4).unwrap().color
+    }
+
+    fn textured() -> Atlas {
+        let mut atlas = Atlas::flat();
+        atlas.textured = true;
+        atlas
+    }
+
+    fn rgb([r, g, b, _]: [f32; 4]) -> u32 {
+        [r, g, b]
+            .iter()
+            .fold(0, |acc, c| acc << 8 | (c * 255.0).round() as u32)
+    }
+
+    /// `RenderItem` draws block quads white, or in their plains tint (`GrassColors`,
+    /// `FoliageColors` at 0.5/1.0: 0x91bd59, 0x77ab2f) with no face shade or AO.
+    #[test]
+    fn flat_held_block_colors_are_the_tint_or_white() {
+        let atlas = textured();
+        for (id, tint) in [(1u16, 0xff_ffff), (2, 0x91_bd59), (18, 0x77_ab2f)] {
+            let flat = hand::held_mesh(id << 4, &atlas, true);
+            let colors: Vec<u32> = flat.vertices.iter().map(|v| rgb(v.color)).collect();
+            assert_eq!(rgb(top_color(&flat)), tint, "block {id} top");
+            assert!(
+                colors.iter().all(|&c| c == tint || c == 0xff_ffff),
+                "block {id}"
+            );
+            if id != 2 {
+                assert!(colors.iter().all(|&c| c == tint), "block {id}");
+            }
+        }
+    }
 }

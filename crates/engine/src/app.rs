@@ -302,13 +302,23 @@ impl App {
     }
 
     fn asset_index(&self) -> Option<AssetIndex> {
+        self.minecraft_dirs()
+            .iter()
+            .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
+    }
+
+    /// Folders that may hold `assets/indexes`: the one that holds `--assetsDir` (the launcher's
+    /// own, as vanilla reads it), then `--gameDir` and its parent.
+    fn minecraft_dirs(&self) -> Vec<std::path::PathBuf> {
+        let a = &self.args;
         [
-            Some(self.args.game_dir.as_path()),
-            self.args.game_dir.parent(),
+            a.assets_root.clone(),
+            Some(a.game_dir.clone()),
+            a.game_dir.parent().map(|p| p.to_path_buf()),
         ]
         .into_iter()
         .flatten()
-        .find_map(|d| AssetIndex::load(d, "1.8.9").ok())
+        .collect()
     }
 
     /// `Minecraft.refreshResources`'s resource manager: the selected packs, top first, over the jar.
@@ -335,12 +345,8 @@ impl App {
             .into_iter()
             .map(input_audio::sound::index::Pack::new)
             .collect();
-        let dirs = [
-            Some(self.args.game_dir.clone()),
-            self.args.game_dir.parent().map(|p| p.to_path_buf()),
-        ];
         self.sound = None;
-        for dir in dirs.into_iter().flatten() {
+        for dir in self.minecraft_dirs() {
             if let Ok(s) = Sound::new(&dir, "1.8.9", &packs) {
                 for d in s.dropped() {
                     crate::log::line(d);

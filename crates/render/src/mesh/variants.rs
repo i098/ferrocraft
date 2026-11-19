@@ -66,51 +66,44 @@ fn pick(world: [i32; 3], n: i32) -> u8 {
     }
 }
 
+/// Axis models: logs, hay bales and quartz pillars (`axis` and `variant` blockstate properties).
+fn axis_orient(id: u16, meta: u16) -> Orient {
+    match (id, meta >> 2 & 3) {
+        (17 | 162 | 170, 1) => column_side(1),
+        (17 | 162 | 170, 2) => column_side(0),
+        (155, _) if meta == 3 => Orient { x: 1, y: 1, ..Orient::default() },
+        (155, _) if meta == 4 => Orient { x: 1, ..Orient::default() },
+        _ => Orient::default(),
+    }
+}
+
+/// Random variant lists of the blockstate, picked by the position hash.
+fn random_orient(id: u16, world: [i32; 3]) -> Orient {
+    let turned = |y: u8| Orient { y, ..Orient::default() };
+    match id {
+        2 | 3 | 12 | 46 => turned(pick(world, 4)),
+        1 | 7 => {
+            let k = pick(world, 4);
+            Orient { y: k >> 1 << 1, mirror: k & 1 == 1, ..Orient::default() }
+        }
+        87 => {
+            let k = pick(world, 16);
+            Orient { x: k & 3, y: k >> 2, ..Orient::default() }
+        }
+        _ => Orient::default(),
+    }
+}
+
 /// Orientation of the block `state` at world position `world`; `snowy` is the grass block `snowy` property.
 pub(super) fn orient(state: u16, world: [i32; 3], snowy: bool) -> Orient {
     let (id, meta) = (state >> 4, state & 15);
-    let pick = |n: i32| pick(world, n);
-    let turned = |y: u8| Orient {
-        y,
-        ..Orient::default()
-    };
-    match id {
-        17 | 162 | 170 => match meta >> 2 & 3 {
-            1 => column_side(1),
-            2 => column_side(0),
-            _ => Orient::default(),
-        },
-        155 => match meta {
-            3 => Orient {
-                x: 1,
-                y: 1,
-                ..Orient::default()
-            },
-            4 => Orient {
-                x: 1,
-                ..Orient::default()
-            },
-            _ => Orient::default(),
-        },
-        2 if !snowy => turned(pick(4)),
-        3 if meta == 0 => turned(pick(4)),
-        12 | 46 => turned(pick(4)),
-        1 | 7 if id == 7 || meta == 0 => {
-            let k = pick(4);
-            Orient {
-                y: k >> 1 << 1,
-                mirror: k & 1 == 1,
-                ..Orient::default()
-            }
-        }
-        87 => {
-            let k = pick(16);
-            Orient {
-                x: k & 3,
-                y: k >> 2,
-                ..Orient::default()
-            }
-        }
-        _ => Orient::default(),
+    // Snowy grass, coarse dirt and stone variants other than plain stone have a single model.
+    let single = (id == 2 && snowy) || (id == 3 && meta != 0) || (id == 1 && meta != 0);
+    if single {
+        Orient::default()
+    } else if matches!(id, 17 | 162 | 170 | 155) {
+        axis_orient(id, meta)
+    } else {
+        random_orient(id, world)
     }
 }

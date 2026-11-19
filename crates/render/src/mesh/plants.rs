@@ -6,7 +6,6 @@ use super::{face_uv, position_random, Mesher, Pass, Vertex, CORNERS};
 use crate::ambient::flammable;
 use crate::blocks::{Look, DOWN, EAST, NORTH, SOUTH, WEST};
 use world::place::solid_top;
-use bytemuck::Zeroable;
 
 /// A face of an element: direction, UV rectangle `[u1, v1, u2, v2]` in texels, texture slot.
 pub(super) type Face = (usize, [f32; 4], usize);
@@ -180,40 +179,45 @@ impl Mesher<'_> {
             offset: plant_offset(id, world),
             flip: false,
         };
-        let model: &[Elem] = match id {
-            59 | 115 | 141 | 142 => &CROP,
-            _ if sunflower => &SUNFLOWER_TOP,
-            _ => &CROSS,
-        };
-        self.draw_model(at, model, &draw);
+        self.draw_model(at, plant_model(id, sunflower), &draw);
     }
 
     /// Emit every face of `elems` as a one-sided quad, as the model baker does.
     pub(super) fn draw_model(&mut self, at: [i32; 3], elems: &[Elem], d: &Draw) {
         for e in elems {
             for &(dir, uv, slot) in e.faces {
-                let mut verts = [Vertex::zeroed(); 4];
-                for (v, c) in verts.iter_mut().zip(CORNERS[dir]) {
-                    let mut p = [0, 1, 2].map(|a| if c[a] > 0.5 { e.to[a] } else { e.from[a] });
-                    if let Some(t) = e.turn {
-                        p = t.apply(p);
-                    }
-                    let p = turn_model(p.map(|v| v / 16.0), d.quarter_turns);
-                    let [fu, fv] = face_uv(dir, c);
-                    let (u1, u2) = if d.flip { (uv[2], uv[0]) } else { (uv[0], uv[2]) };
-                    *v = Vertex {
-                        pos: [0, 1, 2].map(|a| at[a] as f32 + p[a] + d.offset[a]),
-                        uv: self.atlas.uv(
-                            d.tex[slot],
-                            [(u1 + (u2 - u1) * fu) / 16.0, (uv[1] + (uv[3] - uv[1]) * fv) / 16.0],
-                        ),
-                        color: [d.rgb[0] * d.shade, d.rgb[1] * d.shade, d.rgb[2] * d.shade, 1.0],
-                        light: d.light,
-                    };
-                }
+                let verts = CORNERS[dir].map(|c| self.model_vertex(at, e, (dir, uv, slot), c, d));
                 self.push_quad(Pass::Opaque, verts, false);
             }
         }
+    }
+
+    fn model_vertex(&self, at: [i32; 3], e: &Elem, (dir, uv, slot): Face, c: [f32; 3], d: &Draw) -> Vertex {
+        let mut p = [0, 1, 2].map(|a| if c[a] > 0.5 { e.to[a] } else { e.from[a] });
+        if let Some(t) = e.turn {
+            p = t.apply(p);
+        }
+        let p = turn_model(p.map(|v| v / 16.0), d.quarter_turns);
+        let [fu, fv] = face_uv(dir, c);
+        let (u1, u2) = if d.flip { (uv[2], uv[0]) } else { (uv[0], uv[2]) };
+        Vertex {
+            pos: [0, 1, 2].map(|a| at[a] as f32 + p[a] + d.offset[a]),
+            uv: self.atlas.uv(
+                d.tex[slot],
+                [(u1 + (u2 - u1) * fu) / 16.0, (uv[1] + (uv[3] - uv[1]) * fv) / 16.0],
+            ),
+            color: [d.rgb[0] * d.shade, d.rgb[1] * d.shade, d.rgb[2] * d.shade, 1.0],
+            light: d.light,
+        }
+    }
+}
+
+/// The model of a plain plant block: crops, the sunflower head, or the cross.
+fn plant_model(id: u16, sunflower: bool) -> &'static [Elem<'static>] {
+    match id {
+        59 | 115 | 141 | 142 => &CROP,
+        _ if sunflower => &SUNFLOWER_TOP,
+        _ => &CROSS,
     }
 }
 
@@ -263,13 +267,12 @@ impl Mesher<'_> {
 
     /// `BlockFire.getActualState` and `blockstates/fire.json`.
     fn fire(&mut self, at: [i32; 3]) {
-        let [x, y, z] = [
+        let world = [
             self.hood.origin.0 * 16 + at[0],
             at[1],
             self.hood.origin.1 * 16 + at[2],
         ];
         let below = self.st(at, [0, -1, 0]);
-        let burns = |d: [i32; 3]| flammable(self.st(at, d) >> 4);
         let mut draw = Draw {
             tex: &["fire_layer_0", "fire_layer_1"],
             rgb: [1.0; 3],
@@ -282,32 +285,40 @@ impl Mesher<'_> {
         if solid_top(below) || flammable(below >> 4) {
             return self.draw_model(at, &FIRE_FLOOR, &draw);
         }
-        let flip = (x + y + z) & 1 == 1;
-        let alt = (x / 2 + y / 2 + z / 2) & 1 == 1;
-        let upper = match (burns([0, 1, 0]), flip) {
-            (false, _) => None,
-            (true, true) => Some(&FIRE_UPPER_1),
-            (true, false) => Some(&FIRE_UPPER_2),
-        };
+        let burns = |d: [i32; 3]| flammable(self.st(at, d) >> 4);
         let mask = HORIZONTAL
             .iter()
             .enumerate()
             .fold(0u8, |m, (i, &d)| m | u8::from(burns(d)) << i);
-        let Some((sides, turns)) = fire_sides(mask) else {
-            // No flammable side: the floor flames, or only the canopy above.
-            return match upper {
-                Some(u) => self.draw_model(at, u, &draw),
-                None => self.draw_model(at, &FIRE_FLOOR, &draw),
-            };
+        let upper = fire_upper(burns([0, 1, 0]), world);
+        let [x, y, z] = world;
+        // `getActualState`: `flip` is (x+y+z)&1 and `alt` is (x/2+y/2+z/2)&1, which picks the second layer.
+        draw.flip = (x + y + z) & 1 == 1;
+        draw.tex = if (x / 2 + y / 2 + z / 2) & 1 == 1 {
+            &["fire_layer_1"]
+        } else {
+            &["fire_layer_0"]
         };
-        draw.quarter_turns = turns;
-        draw.flip = flip;
-        draw.tex = if alt { &["fire_layer_1"] } else { &["fire_layer_0"] };
-        self.draw_model(at, sides, &draw);
-        if let Some(u) = upper {
-            draw.flip = false;
-            self.draw_model(at, u, &draw);
+        match fire_sides(mask) {
+            None => self.draw_model(at, upper.unwrap_or(&FIRE_FLOOR), &draw),
+            Some((sides, turns)) => {
+                draw.quarter_turns = turns;
+                self.draw_model(at, sides, &draw);
+                if let Some(u) = upper {
+                    draw.flip = false;
+                    self.draw_model(at, u, &draw);
+                }
+            }
         }
+    }
+}
+
+/// The canopy model over a burning block above: `fire_u1` or `fire_u2` by position parity.
+fn fire_upper(burning_above: bool, [x, y, z]: [i32; 3]) -> Option<&'static [Elem<'static>]> {
+    match (burning_above, (x + y + z) & 1 == 1) {
+        (false, _) => None,
+        (true, true) => Some(&FIRE_UPPER_1),
+        (true, false) => Some(&FIRE_UPPER_2),
     }
 }
 

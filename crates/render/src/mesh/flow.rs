@@ -29,34 +29,37 @@ impl Mesher<'_> {
         (v[0] != 0.0 || v[2] != 0.0).then(|| (v[2].atan2(v[0]) - std::f64::consts::FRAC_PI_2) as f32)
     }
 
+    /// `BlockLiquid.getEffectiveFlowDecay`: -1 for another material, else the level (falling liquid as 0).
+    fn decay(&self, at: [i32; 3], d: [i32; 3], same: &dyn Fn(u16) -> bool) -> i32 {
+        let s = self.st(at, d);
+        match (same(s), s & 15) {
+            (false, _) => -1,
+            (true, m) if m >= 8 => 0,
+            (true, m) => i32::from(m),
+        }
+    }
+
+    /// The pull of one horizontal neighbour `d` on the flow, or `None` when it adds nothing.
+    fn flow_pull(&self, at: [i32; 3], d: [i32; 3], own: i32, same: &dyn Fn(u16) -> bool) -> Option<i32> {
+        let j = self.decay(at, d, same);
+        if j >= 0 {
+            return Some(j - own);
+        }
+        if blocks_movement(self.st(at, d) >> 4) {
+            return None;
+        }
+        let below = self.decay(at, [d[0], -1, d[2]], same);
+        (below >= 0).then(|| below - (own - 8))
+    }
+
     fn flow_vector(&self, at: [i32; 3], state: u16, same: &dyn Fn(u16) -> bool) -> [f64; 3] {
-        // `getEffectiveFlowDecay`: -1 for another material, else the level with falling liquid as 0.
-        let decay = |d: [i32; 3]| {
-            let s = self.st(at, d);
-            match (same(s), s & 15) {
-                (false, _) => -1,
-                (true, m) if m >= 8 => 0,
-                (true, m) => m as i32,
-            }
-        };
-        let own = decay([0; 3]);
+        let own = self.decay(at, [0; 3], same);
         let mut v = [0.0f64; 3];
         for d in HORIZONTAL {
-            let j = decay(d);
-            let k = if j < 0 {
-                let beside = self.st(at, d);
-                if blocks_movement(beside >> 4) {
-                    continue;
-                }
-                match decay([d[0], -1, d[2]]) {
-                    below if below >= 0 => below - (own - 8),
-                    _ => continue,
-                }
-            } else {
-                j - own
-            };
-            v[0] += f64::from(d[0] * k);
-            v[2] += f64::from(d[2] * k);
+            if let Some(k) = self.flow_pull(at, d, own, same) {
+                v[0] += f64::from(d[0] * k);
+                v[2] += f64::from(d[2] * k);
+            }
         }
         if state & 15 >= 8 && HORIZONTAL.iter().any(|&d| self.liquid_wall(at, d, same)) {
             v = normalize(v);

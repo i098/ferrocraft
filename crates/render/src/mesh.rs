@@ -318,17 +318,21 @@ impl Mesher<'_> {
         !self.fancy && is_leaves(state)
     }
 
-    fn cube(&mut self, at: [i32; 3], state: u16, l: &Look) {
-        let pass = Self::pass_of(state);
-        let emissive = crate::blocks::emission(state) > 0;
-        let alpha = if self.solid_leaves(state) { 2.0 } else { 1.0 };
+    /// The blockstate variant of the cube at `at` (see `variants`).
+    fn orient_at(&self, at: [i32; 3], state: u16) -> variants::Orient {
         let world = [
             self.hood.origin.0 * 16 + at[0],
             at[1],
             self.hood.origin.1 * 16 + at[2],
         ];
-        let snowy = matches!(self.st(at, [0, 1, 0]) >> 4, 78 | 80);
-        let orient = variants::orient(state, world, snowy);
+        variants::orient(state, world, matches!(self.st(at, [0, 1, 0]) >> 4, 78 | 80))
+    }
+
+    fn cube(&mut self, at: [i32; 3], state: u16, l: &Look) {
+        let pass = Self::pass_of(state);
+        let emissive = crate::blocks::emission(state) > 0;
+        let alpha = if self.solid_leaves(state) { 2.0 } else { 1.0 };
+        let orient = self.orient_at(at, state);
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
             if !self.visible(state, l, n) {
@@ -454,6 +458,7 @@ impl Mesher<'_> {
         ];
         let own = self.light_at(at, [0; 3]);
         let gap = self.liquid_gap_above(at, &same);
+        let flow = self.flow_angle(at, state, &same);
         for (f, &dir) in DIRS.iter().enumerate() {
             let n = self.st(at, dir);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
@@ -469,8 +474,7 @@ impl Mesher<'_> {
             if lava {
                 light[1] = 1.0;
             }
-            let angle = if f == UP { self.flow_angle(at, state, &same) } else { None };
-            let mut verts = self.liquid_face(at, f, &h, (l, angle), rgb, light);
+            let mut verts = self.liquid_face(at, f, &h, (l, flow.filter(|_| f == UP)), rgb, light);
             self.push_quad(pass, verts, false);
             if f >= NORTH || (f == UP && gap) {
                 verts.reverse();

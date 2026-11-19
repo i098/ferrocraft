@@ -4,6 +4,7 @@ use crate::animation::Animation;
 use crate::biome::Colormaps;
 use crate::blocks::texture_names;
 use crate::mip;
+use crate::models::Models;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -125,11 +126,13 @@ pub struct Atlas {
     pub height: u32,
     pub tile: u32,
     pub rgba: Vec<u8>,
-    cells: HashMap<&'static str, u32>,
+    cells: HashMap<String, u32>,
     /// Animated cells (`.png.mcmeta`), stepped by [`crate::animation::Animator`].
     pub(crate) animations: Vec<Animation>,
     /// Grass and foliage color maps of the biome tints.
     pub colormaps: Colormaps,
+    /// Blocks drawn from their vanilla models.
+    pub(crate) models: Models,
 }
 
 impl Atlas {
@@ -144,11 +147,16 @@ impl Atlas {
             cells: HashMap::new(),
             animations: Vec::new(),
             colormaps: Colormaps::plains(),
+            models: Models::default(),
         }
     }
 
     pub fn from_assets(source: &mut AssetSource) -> Atlas {
-        let names = texture_names();
+        let models = Models::load(source);
+        let mut names: Vec<String> = texture_names().into_iter().map(String::from).collect();
+        names.extend(models.textures().iter().map(|t| t.to_string()));
+        names.sort_unstable();
+        names.dedup();
         let mut images: Vec<Image> = Vec::with_capacity(names.len());
         for name in &names {
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
@@ -183,7 +191,7 @@ impl Atlas {
                 ));
                 animations.extend(meta.and_then(|m| Animation::new(cell as u32, image, tile, &m)));
             }
-            cells.insert(*name, cell as u32);
+            cells.insert(name.clone(), cell as u32);
         }
         if loaded == 0 {
             eprintln!("ferrocraft-render: no block textures found; blocks use the missing tile");
@@ -197,6 +205,7 @@ impl Atlas {
             cells,
             animations,
             colormaps: Colormaps::load(source),
+            models,
         }
     }
     /// Most mip levels the atlas can hold: the side of a tile halves per level down to 1 px, and the Mipmap Levels
@@ -394,9 +403,10 @@ mod tests {
             height: (2 * tile) as u32,
             tile: tile as u32,
             rgba: Vec::new(),
-            cells: HashMap::from([("a", 17)]),
+            cells: HashMap::from([("a".to_owned(), 17)]),
             animations: Vec::new(),
             colormaps: Colormaps::plains(),
+            models: Models::default(),
         };
         assert_eq!(atlas.uv("a", [0.0, 0.0]), [1.0 / 16.0, 0.5]);
         assert_eq!(atlas.uv("a", [1.0, 1.0]), [2.0 / 16.0, 1.0]);

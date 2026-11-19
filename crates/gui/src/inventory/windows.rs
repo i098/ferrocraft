@@ -7,7 +7,7 @@ use super::{modal, tooltip, Icons, InventoryView, Key, Mods, Request, LABEL};
 use crate::screens::{key, Canvas, Metrics, TextField};
 use render::JavaRandom;
 use world::effects;
-use world::inventory::{items, merchant, Inventory, ItemStack, Kind, Slot};
+use world::inventory::{merchant, Inventory, ItemStack, Kind, Slot};
 
 const SGA: &str = "textures/font/ascii_sga.png";
 const ENCHANT: &str = "textures/gui/container/enchanting_table.png";
@@ -495,23 +495,44 @@ fn beacon_back(c: &mut dyn Canvas, inv: &Inventory, l: i32, t: i32, mx: i32, my:
 
 fn enchant_hover(inv: &Inventory, l: i32, t: i32, mx: i32, my: i32) -> Option<Vec<String>> {
     let w = inv.open.as_ref()?;
-    let i = (0..3)
-        .find(|&i| inside(mx - l, my - t, 60, 14 + 19 * i, 108, 17) && w.props[i as usize] > 0)?;
+    let i = (0..3).find(|&i| inside(mx - l, my - t, 60, 14 + 19 * i, 108, 17))?;
     let level = i32::from(w.props[i as usize]);
+    let clue = i32::from(w.props[4 + i as usize]);
+    if level <= 0 || clue < 0 {
+        return None;
+    }
+    let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
+    Some(enchant_lines(
+        inv.creative,
+        inv.xp_level,
+        level,
+        i + 1,
+        lapis,
+        clue,
+    ))
+}
+
+/// `GuiEnchantment.drawScreen` hover text. `clue` is the packed `enchantClue`:
+/// the enchantment id in the low byte, its level in the next.
+fn enchant_lines(
+    creative: bool,
+    xp: i32,
+    level: i32,
+    n: i32,
+    lapis: i32,
+    clue: i32,
+) -> Vec<String> {
     let mut lines = Vec::new();
-    let clue = items::enchantment(w.props[4 + i as usize])
-        .and_then(|_| tooltip::enchantment_name(w.props[4 + i as usize], w.props[7 + i as usize]));
-    if let Some(name) = &clue {
+    if let Some(name) =
+        tooltip::enchantment_name((clue & 255) as i16, ((clue & 0xff00) >> 8) as i16)
+    {
         lines.push(format!("\u{a7}f\u{a7}o{name} . . . ?"));
     }
-    if !inv.creative {
-        if clue.is_some() {
-            lines.push(String::new());
-        }
-        let lapis = w.own[1].as_ref().map_or(0, |s| i32::from(s.count));
-        enchant_cost_lines(&mut lines, inv.xp_level, level, i + 1, lapis);
+    if !creative {
+        lines.push(String::new());
+        enchant_cost_lines(&mut lines, xp, level, n, lapis);
     }
-    Some(lines)
+    lines
 }
 
 fn enchant_cost_lines(lines: &mut Vec<String>, xp: i32, level: i32, n: i32, lapis: i32) {
@@ -740,5 +761,15 @@ mod tests {
         assert_eq!(galactic_width('C'), 3);
         assert_eq!(galactic_width(' '), 4);
         assert_eq!(galactic_width('5'), 1);
+    }
+
+    #[test]
+    fn enchant_hint_reads_the_packed_clue() {
+        // Unbreaking (34) level 1, packed as `id | level << 8`.
+        let lines = enchant_lines(false, 30, 7, 2, 5, 34 | 1 << 8);
+        assert_eq!(lines[0], "\u{a7}f\u{a7}oUnbreaking I . . . ?");
+        assert_eq!(lines[1], "");
+        assert_eq!(lines[2], "\u{a7}72 Lapis Lazuli");
+        assert_eq!(lines[3], "\u{a7}72 Enchantment Levels");
     }
 }

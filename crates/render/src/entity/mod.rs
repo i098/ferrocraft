@@ -13,6 +13,7 @@ mod baby;
 mod block;
 pub mod crystal;
 mod dragon;
+mod ears;
 mod endermite;
 pub(crate) mod fire;
 mod glint_mask;
@@ -31,6 +32,8 @@ mod mobs3;
 mod mooshroom;
 pub(crate) mod outline;
 mod projectile;
+mod sneak;
+mod undead;
 pub use horse::HorseLook;
 mod rabbit;
 pub(crate) mod shadow;
@@ -615,11 +618,7 @@ fn biped(
         ];
         parts.extend(wear);
     }
-    if d.sneaking && !d.child {
-        for part in &mut parts {
-            part.lower = SNEAK_LOWER;
-        }
-    }
+    sneak::lower(d, &mut parts);
     Model { skin, tint, parts }
 }
 
@@ -829,6 +828,9 @@ fn ported_mob(d: &EntityDraw, id: u8) -> Option<Model> {
 }
 
 fn adult_model(d: &EntityDraw) -> Model {
+    if let Some(m) = undead::model(d) {
+        return m;
+    }
     match d.class {
         Class::Player { slim } => {
             let (skin, arm) = if slim {
@@ -839,13 +841,8 @@ fn adult_model(d: &EntityDraw) -> Model {
             biped(d, skin, [1.0; 3], arm, 4.0, false)
         }
         // `RenderGiantZombie` draws a `ModelZombie` of the zombie skin, scaled 6 by `model_scale`.
-        Class::Mob(54) if d.look.variant == 1 => zombie_villager(d),
         Class::Mob(53 | 54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(57) => biped(d, Skin::PigZombie, [1.0; 3], 4.0, 4.0, true),
-        // `RenderSkeleton.getEntityTexture`: type 1 is the wither skeleton.
-        Class::Mob(51) if d.look.variant == 1 => {
-            biped(d, Skin::WitherSkeleton, [1.0; 3], 2.0, 2.0, true)
-        }
         Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 2.0, 2.0, true),
         Class::Mob(50) => creeper(d),
         Class::Mob(90) => pig(d),
@@ -861,26 +858,12 @@ fn adult_model(d: &EntityDraw) -> Model {
 }
 
 /// The model whose boxes the armor layers grow: the body itself, except on a stand, whose armor
-/// has its own `ArmorStandArmorModel`, a skeleton, whose `ModelSkeleton(f, true)` keeps the 4x12x4
-/// limbs of a biped, and a zombie villager, whose armor is `ModelZombieVillager(f, 0, true)` with a plain head.
+/// has its own `ArmorStandArmorModel`, and the undead of [`undead::armor_model`].
 fn armor_model(d: &EntityDraw) -> Model {
     match d.class {
         Class::Object(78) => armorstand::armor_model(d),
-        Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 4.0, 4.0, true),
-        Class::Mob(54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
-        _ => model(d),
+        _ => undead::armor_model(d).unwrap_or_else(|| model(d)),
     }
-}
-
-/// `ModelZombieVillager`: a zombie whose 8x10x8 head (texture 0, 32) has a 2x4x2 nose (24, 32).
-fn zombie_villager(d: &EntityDraw) -> Model {
-    let mut m = biped(d, Skin::ZombieVillager, [1.0; 3], 4.0, 4.0, true);
-    let mut nose = m.parts[0].clone();
-    (nose.min, nose.size, nose.uv) = ([-1.0, -3.0, -6.0], [2.0, 4.0, 2.0], (24.0, 32.0));
-    let head = &mut m.parts[0];
-    (head.min, head.size, head.uv) = ([-4.0, -10.0, -4.0], [8.0, 10.0, 8.0], (0.0, 32.0));
-    m.parts.push(nose);
-    m
 }
 
 fn tint_of(class: Class) -> [f32; 3] {
@@ -1195,9 +1178,6 @@ struct Xf {
     pitch: f32,
 }
 
-/// `ModelBiped.render` and `ModelPlayer.render`: a sneaking biped is drawn `translate(0, 0.2, 0)` lower, in model pixels.
-const SNEAK_LOWER: f32 = 0.2 * 16.0;
-
 /// Vertical drop of the model: `RenderPlayer.doRender` lowers a sneaking player by 0.125 unless it is
 /// the `EntityPlayerSP`; `RenderBat.rotateCorpse` lifts a flying bat and drops a roosting one.
 fn sneak_drop(d: &EntityDraw) -> f32 {
@@ -1225,9 +1205,7 @@ fn model_scale(d: &EntityDraw) -> [f32; 2] {
         // `RenderWitch.preRenderCallback` is the same 15/16.
         Class::Mob(mobs::VILLAGER | witch::WITCH) => 0.9375,
         // `RenderGiantZombie` is built with scale 6; `RenderWither.preRenderCallback` scales by 2 and more while it charges.
-        Class::Mob(GIANT) => 6.0,
-        // `RenderSkeleton.preRenderCallback`: the wither skeleton by 1.2.
-        Class::Mob(51) if d.look.variant == 1 => 1.2,
+        Class::Mob(GIANT | 51) => undead::scale(d),
         Class::Mob(wither::WITHER) => wither::scale(d),
         // `RenderGhast.preRenderCallback` (8 + 1) / 2 and `RenderBat.preRenderCallback`.
         Class::Mob(mobs2::GHAST) => 4.5,
@@ -1590,11 +1568,7 @@ fn emit_layers(
             emit_cape(out, xf, d, sway, skins.v_offset(cape));
         }
     }
-    if d.name.as_deref() == Some(DEADMAU5) && !d.invisible {
-        if let Some(own) = d.skin.and_then(|k| skins.player(k)) {
-            emit_ears(out, xf, m, skins.v_offset(own));
-        }
-    }
+    ears::emit(out, xf, m, d, skins);
     arrows::emit(out, xf, m, d, skins);
     if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
         emit_carried(out, xf, d.look.carried, white);
@@ -1619,26 +1593,6 @@ fn emit_layers(
     Drawn {
         bright: bright.unwrap_or(out.vertices.len()),
         plain,
-    }
-}
-
-/// The name whose bearer gets the ears of `LayerDeadmau5Head` and a name tag 10 font pixels higher.
-const DEADMAU5: &str = "deadmau5";
-
-/// `LayerDeadmau5Head`: two 6x6x1 ears (skin texture 24, 0) scaled 4/3, at (+-6, -6) px from the head
-/// pivot in the head's own rotation; the layer undoes the head rotation before the ear model applies it again.
-fn emit_ears(out: &mut MeshData, xf: &Xf, m: &Model, v_off: f32) {
-    let head = &m.parts[0];
-    for side in [-1.0, 1.0] {
-        let mut ear = Part::new(
-            [4.5 * side, -4.5, 0.0],
-            [-3.0, -6.0, -1.0],
-            [6.0, 6.0, 1.0],
-            (24.0, 0.0),
-        );
-        ear.scale = 4.0 / 3.0;
-        ear.parents = vec![([0.0; 3], head.rot)];
-        emit_part(out, xf, &ear, 0.0, [1.0; 3], v_off);
     }
 }
 
@@ -1973,13 +1927,7 @@ impl TagView<'_> {
         if d.child {
             y -= f64::from(d.size.1) / 2.0;
         }
-        if d.sneaking {
-            // `Render.renderLivingLabel` lowers a sneaking tag by 0.25; `RenderPlayer.doRender` passes `y - 0.125` on.
-            y -= 0.25;
-            if matches!(d.class, Class::Player { .. }) && !d.look.local {
-                y -= 0.125;
-            }
-        }
+        y -= sneak::tag_drop(d);
         let below =
             d.team_tag.below.as_ref().filter(|_| {
                 matches!(d.class, Class::Player { .. }) && !d.sneaking && dist_sq < 100.0
@@ -2004,7 +1952,7 @@ impl TagView<'_> {
             .map(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
             .collect();
         // `Render.renderLivingLabel`: the text of "deadmau5" starts 10 font pixels higher.
-        let lift = if text == DEADMAU5 { 10.0 } else { 0.0 };
+        let lift = ears::tag_lift(text);
         let scale = 0.026_666_67 * self.px_per_block / c[3];
         (c[3] > 0.0).then(|| NameTag {
             screen: [

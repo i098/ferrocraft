@@ -1579,6 +1579,17 @@ fn remote_using(e: &Entity) -> Option<UseAction> {
 
 /// Flags and pose of an armor stand. The worn item's damage (the skull type, or the block variant)
 /// is read for every entity, because `LayerCustomHead` serves players and mobs too.
+/// The per-kind variant byte the models read (see `render::entity::Look::variant`).
+fn look_variant(e: &Entity) -> u8 {
+    match e.kind {
+        Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
+        Kind::Mob(120 | 68) => e.meta.guardian.map_or(0, |p| p as u8),
+        // A skeleton's type (1 is the wither skeleton) and a zombie's `isVillager`, both metadata byte 13.
+        Kind::Mob(51 | 54) => e.meta.skeleton.unwrap_or(0),
+        _ => 0,
+    }
+}
+
 fn stand_look(e: &Entity) -> StandLook {
     let head_damage = e.equipment[4].map_or(0, |i| i.damage);
     if e.kind != Kind::Object(78) {
@@ -1677,13 +1688,7 @@ fn entity_draw(
             // Metadata 10 of a player is the skin parts byte; a sheep keeps its fleece, a slime or magma cube its size, a ghast its attack flag and a bat its roost flag in byte 16 and a
             // villager its profession in int 16. A server that never sent the byte shows every part.
             skin_parts: e.meta.stand.unwrap_or(0x7F),
-            variant: match e.kind {
-                Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
-                Kind::Mob(120 | 68) => e.meta.guardian.map_or(0, |p| p as u8),
-                // A skeleton's type (1 is the wither skeleton) and a zombie's `isVillager`, both metadata byte 13.
-                Kind::Mob(51 | 54) => e.meta.skeleton.unwrap_or(0),
-                _ => 0,
-            },
+            variant: look_variant(e),
             cape: Some(CapeSway::default()),
             stand: stand_look(e),
             head_owner: e.equipment[4].and_then(|i| i.owner),

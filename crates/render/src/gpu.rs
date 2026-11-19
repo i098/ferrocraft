@@ -2071,6 +2071,8 @@ impl Renderer {
         }
         self.draw_fire_overlay(&mut pass, fire);
         if self.axes.on {
+            drop(pass);
+            pass = overlay_pass(enc, world, &self.depth);
             self.axes.draw(&mut pass, &self.line_pipe);
         }
         // `renderEntityOutlines` blends the outlines in before the effect.

@@ -85,7 +85,13 @@ struct Mask {
 
 impl Mask {
     fn of(img: &render::Image) -> Mask {
-        let opaque = img.rgba.chunks_exact(4).map(|p| p[3] >= 26).collect();
+        let opaque = img
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[3] >= 26)
+            .collect();
         Mask {
             w: img.width,
             h: img.height,
@@ -108,6 +114,9 @@ impl Mask {
     }
 }
 
+/// Four corners in screen or texture space.
+type Quad = [[f32; 2]; 4];
+
 /// Cuts a parallelogram `pts` (texture coordinates `muv` in the masked texture) into the opaque
 /// texels; each piece comes with the glint coordinates `guv` has there. A quad with no area in
 /// texture space stays whole.
@@ -116,7 +125,7 @@ fn cut(
     muv: [[f32; 2]; 4],
     guv: [[f32; 2]; 4],
     mask: &Mask,
-) -> Vec<([[f32; 2]; 4], [[f32; 2]; 4])> {
+) -> Vec<(Quad, Quad)> {
     let a = [muv[1][0] - muv[0][0], muv[1][1] - muv[0][1]];
     let b = [muv[3][0] - muv[0][0], muv[3][1] - muv[0][1]];
     let det = a[0] * b[1] - a[1] * b[0];

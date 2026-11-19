@@ -55,6 +55,8 @@ pub struct Icons {
     models: HashMap<&'static str, Model>,
     /// Frame height over texture height for animated (vertical strip) textures.
     frames: HashMap<String, f32>,
+    /// Texels each texture draws: the glint shows only there (`GL_EQUAL` depth in vanilla).
+    masks: HashMap<String, Mask>,
     /// `Minecraft.getSystemTime()`, which moves the enchantment glint.
     pub now_ms: u64,
     /// The needles of the compass and clock sprites; the engine ticks them.
@@ -71,6 +73,97 @@ const ATLAS_SHARE: f32 = 16.0 / 1024.0;
 
 fn texture_path(name: &str) -> String {
     format!("textures/{name}.png")
+}
+
+/// Which texels of a texture the model draws (alpha test `GL_GREATER, 0.1`: alpha 26 or more).
+#[derive(Clone, Debug)]
+struct Mask {
+    w: usize,
+    h: usize,
+    opaque: Vec<bool>,
+}
+
+impl Mask {
+    fn of(img: &render::Image) -> Mask {
+        let opaque = img.rgba.chunks_exact(4).map(|p| p[3] >= 26).collect();
+        Mask {
+            w: img.width,
+            h: img.height,
+            opaque,
+        }
+    }
+
+    /// Texels either mask draws; a mask of another size adds nothing.
+    fn union(mut self, o: &Mask) -> Mask {
+        if (self.w, self.h) == (o.w, o.h) {
+            for (a, b) in self.opaque.iter_mut().zip(&o.opaque) {
+                *a |= b;
+            }
+        }
+        self
+    }
+
+    fn at(&self, x: usize, y: usize) -> bool {
+        x < self.w && y < self.h && self.opaque[y * self.w + x]
+    }
+}
+
+/// Cuts a parallelogram `pts` (texture coordinates `muv` in the masked texture) into the opaque
+/// texels; each piece comes with the glint coordinates `guv` has there. A quad with no area in
+/// texture space stays whole.
+fn cut(
+    pts: [[f32; 2]; 4],
+    muv: [[f32; 2]; 4],
+    guv: [[f32; 2]; 4],
+    mask: &Mask,
+) -> Vec<([[f32; 2]; 4], [[f32; 2]; 4])> {
+    let a = [muv[1][0] - muv[0][0], muv[1][1] - muv[0][1]];
+    let b = [muv[3][0] - muv[0][0], muv[3][1] - muv[0][1]];
+    let det = a[0] * b[1] - a[1] * b[0];
+    if det.abs() < 1e-9 {
+        return vec![(pts, guv)];
+    }
+    let at = |q: [[f32; 2]; 4], s: f32, t: f32| {
+        [0, 1].map(|i| q[0][i] + s * (q[1][i] - q[0][i]) + t * (q[3][i] - q[0][i]))
+    };
+    let range = |axis: usize| {
+        let lo = muv.iter().map(|p| p[axis]).fold(f32::MAX, f32::min);
+        let hi = muv.iter().map(|p| p[axis]).fold(f32::MIN, f32::max);
+        (lo, hi)
+    };
+    let ((ulo, uhi), (vlo, vhi)) = (range(0), range(1));
+    let span = |lo: f32, hi: f32, n: usize| {
+        let n = n as f32;
+        (lo * n + 1e-3).floor() as usize..(hi * n - 1e-3).ceil() as usize
+    };
+    let mut out = Vec::new();
+    for j in span(vlo, vhi, mask.h) {
+        for i in span(ulo, uhi, mask.w) {
+            if !mask.at(i, j) {
+                continue;
+            }
+            let u = [
+                (i as f32 / mask.w as f32).max(ulo),
+                ((i + 1) as f32 / mask.w as f32).min(uhi),
+            ];
+            let v = [
+                (j as f32 / mask.h as f32).max(vlo),
+                ((j + 1) as f32 / mask.h as f32).min(vhi),
+            ];
+            let corners = [[u[0], v[0]], [u[1], v[0]], [u[1], v[1]], [u[0], v[1]]].map(|p| {
+                let d = [p[0] - muv[0][0], p[1] - muv[0][1]];
+                [
+                    (d[0] * b[1] - d[1] * b[0]) / det,
+                    (a[0] * d[1] - a[1] * d[0]) / det,
+                ]
+            });
+            out.push((
+                corners.map(|[s, t]| at(pts, s, t)),
+                corners.map(|[s, t]| at(guv, s, t)),
+            ));
+        }
+    }
+    out
 }
 
 /// Width and height from a PNG `IHDR`.
@@ -531,6 +624,7 @@ impl Icons {
         let mut icons = Icons {
             models: HashMap::new(),
             frames: HashMap::new(),
+            masks: HashMap::new(),
             now_ms: 0,
             dials: Dials::default(),
         };
@@ -544,11 +638,18 @@ impl Icons {
 
     fn frame(&mut self, read: &mut dyn FnMut(&str) -> Option<Vec<u8>>, tex: &str) {
         if !self.frames.contains_key(tex) {
-            let k = read(tex)
-                .as_deref()
-                .and_then(png_size)
-                .map_or(1.0, |(w, h)| if h > w { w as f32 / h as f32 } else { 1.0 });
+            let png = read(tex);
+            let k = png.as_deref().and_then(png_size).map_or(1.0, |(w, h)| {
+                if h > w {
+                    w as f32 / h as f32
+                } else {
+                    1.0
+                }
+            });
             self.frames.insert(tex.to_string(), k);
+            if let Some(img) = png.as_deref().and_then(render::decode_png) {
+                self.masks.insert(tex.to_string(), Mask::of(&img));
+            }
         }
     }
 
@@ -619,7 +720,25 @@ impl Icons {
                 }
                 if glint {
                     let pts = [[x, y], [x + 16.0, y], [x + 16.0, y + 16.0], [x, y + 16.0]];
-                    self.glint(c, pts, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+                    let k = layers.first().map_or(1.0, |t| self.frame_scale(t));
+                    let v = layers
+                        .first()
+                        .map_or(0.0, |t| self.dial_frame(t, k) as f32 * k);
+                    let muv = [[0.0, v], [1.0, v], [1.0, v + k], [0.0, v + k]];
+                    let mask = layers.iter().filter_map(|t| self.masks.get(t)).fold(
+                        None,
+                        |acc: Option<Mask>, m| match acc {
+                            Some(a) => Some(a.union(m)),
+                            None => Some(m.clone()),
+                        },
+                    );
+                    self.glint_masked(
+                        c,
+                        pts,
+                        muv,
+                        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                        mask.as_ref(),
+                    );
                 }
             }
             Model::Solid { faces, gui } => {
@@ -646,10 +765,30 @@ impl Icons {
                     let uv = [0, 3, 2, 1].map(|i| [f.uv[i][0], f.uv[i][1] * k]);
                     c.quad(&f.tex, *pts, uv, [*color; 4]);
                     if glint {
-                        self.glint(c, *pts, uv);
+                        self.glint_masked(c, *pts, uv, uv, self.masks.get(&f.tex));
                     }
                 }
             }
+        }
+    }
+
+    /// The glint over the texels `mask` draws; `muv` are the quad's texture coordinates in the
+    /// model texture, `guv` the ones the glint turns. No mask: the whole quad.
+    fn glint_masked(
+        &self,
+        c: &mut dyn Canvas,
+        pts: [[f32; 2]; 4],
+        muv: [[f32; 2]; 4],
+        guv: [[f32; 2]; 4],
+        mask: Option<&Mask>,
+    ) {
+        match mask {
+            Some(m) => {
+                for (p, g) in cut(pts, muv, guv, m) {
+                    self.glint(c, p, g);
+                }
+            }
+            None => self.glint(c, pts, guv),
         }
     }
 
@@ -718,6 +857,21 @@ impl Icons {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The glint covers the opaque texels only: two of the four texels of a unit quad.
+    #[test]
+    fn glint_is_cut_to_opaque_texels() {
+        let mask = Mask {
+            w: 2,
+            h: 2,
+            opaque: vec![true, false, false, true],
+        };
+        let sq = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let cells = cut(sq, sq, sq, &mask);
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].0, [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]]);
+        assert_eq!(cells[1].0, [[0.5, 0.5], [1.0, 0.5], [1.0, 1.0], [0.5, 1.0]]);
+    }
 
     /// A unit cube shows its top, north and east faces, the top brightest.
     #[test]

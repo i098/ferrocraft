@@ -13,6 +13,7 @@ mod swing;
 mod tag_gate;
 mod ui;
 mod weather;
+mod x11_focus;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 

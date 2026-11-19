@@ -19,6 +19,7 @@ gui = { path = "../gui" }
 ferrocraft-modhost = { path = "../modhost" }
 ferrocraft-oneclient = { path = "../oneclient" }
 winit = "0.30"
+x11-dl = "2"
 arboard = { version = "3", default-features = false }
 
 [dev-dependencies]

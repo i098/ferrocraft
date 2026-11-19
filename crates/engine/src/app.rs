@@ -82,6 +82,7 @@ pub struct App {
     game: Game,
     input: InputState,
     window: Option<Arc<Window>>,
+    x11_focus: crate::x11_focus::FocusFallback,
     renderer: Option<Renderer>,
     hud: gui::Hud,
     /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set or the game dir is a OneClient cluster.
@@ -190,6 +191,7 @@ impl App {
             link: Link::Offline,
             game: Game::new(),
             window: None,
+            x11_focus: crate::x11_focus::FocusFallback::new(),
             renderer: None,
             hud: gui::Hud::default(),
             mods: None,
@@ -1531,6 +1533,7 @@ impl ApplicationHandler for App {
                 }
                 self.resize_screens();
             }
+            WindowEvent::Focused(f) => self.x11_focus.on_focused(f),
             WindowEvent::RedrawRequested => self.draw(),
             _ => {}
         }
@@ -1546,6 +1549,9 @@ impl ApplicationHandler for App {
         if let Some(done) = self.mods_boot.as_ref().and_then(mod_boot::poll) {
             self.mods = done;
             self.mods_boot = None;
+        }
+        if let Some(w) = &self.window {
+            self.x11_focus.poll(w);
         }
         self.pump_network();
         let due = self.pace_frame(el);

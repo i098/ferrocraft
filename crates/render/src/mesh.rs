@@ -5,12 +5,16 @@
 use crate::assets::Atlas;
 use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
-    cached, double_plant_top, is_opaque_cube, material_solid, tint_color, uses_neighbor_light,
-    Kind, Look, Tint, DOWN, NORTH, UP,
+    cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light, Kind, Look, Tint,
+    DOWN, NORTH, UP,
 };
 use crate::light::Light;
 use crate::shapes::{boxes, Bx, BREWING_SPOKES};
 use bytemuck::{Pod, Zeroable};
+
+mod flow;
+mod plants;
+mod variants;
 
 pub const HEIGHT: usize = 256;
 /// Blocks of one chunk, index `(y * 16 + z) * 16 + x`, 1.8 block state ids.
@@ -314,10 +318,21 @@ impl Mesher<'_> {
         !self.fancy && is_leaves(state)
     }
 
+    /// The blockstate variant of the cube at `at` (see `variants`).
+    fn orient_at(&self, at: [i32; 3], state: u16) -> variants::Orient {
+        let world = [
+            self.hood.origin.0 * 16 + at[0],
+            at[1],
+            self.hood.origin.1 * 16 + at[2],
+        ];
+        variants::orient(state, world, matches!(self.st(at, [0, 1, 0]) >> 4, 78 | 80))
+    }
+
     fn cube(&mut self, at: [i32; 3], state: u16, l: &Look) {
         let pass = Self::pass_of(state);
         let emissive = crate::blocks::emission(state) > 0;
         let alpha = if self.solid_leaves(state) { 2.0 } else { 1.0 };
+        let orient = self.orient_at(at, state);
         for f in 0..6 {
             let n = self.st(at, DIRS[f]);
             if !self.visible(state, l, n) {
@@ -344,7 +359,7 @@ impl Mesher<'_> {
                         at[1] as f32 + c[1],
                         at[2] as f32 + c[2],
                     ],
-                    uv: self.atlas.uv(tex, face_uv(f, *c)),
+                    uv: self.atlas.uv(tex, orient.uv(f, *c)),
                     color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, alpha],
                     light,
                 };
@@ -443,6 +458,7 @@ impl Mesher<'_> {
         ];
         let own = self.light_at(at, [0; 3]);
         let gap = self.liquid_gap_above(at, &same);
+        let flow = self.flow_angle(at, state, &same);
         for (f, &dir) in DIRS.iter().enumerate() {
             let n = self.st(at, dir);
             // `BlockLiquid.shouldSideBeRendered`: the top face shows even under an opaque block.
@@ -458,14 +474,13 @@ impl Mesher<'_> {
             if lava {
                 light[1] = 1.0;
             }
-            let mut verts = self.liquid_face(at, f, &h, l, rgb, light);
+            let mut verts = self.liquid_face(at, f, &h, (l, flow.filter(|_| f == UP)), rgb, light);
             self.push_quad(pass, verts, false);
             if f >= NORTH || (f == UP && gap) {
                 verts.reverse();
                 self.push_quad(pass, verts, false);
             }
         }
-        let _ = state;
     }
 
     /// `LiquidRenderer` draws sides from both sides, and the top too while a cell above is open
@@ -484,11 +499,16 @@ impl Mesher<'_> {
         at: [i32; 3],
         f: usize,
         h: &[[f32; 2]; 2],
-        l: &Look,
+        (l, angle): (&Look, Option<f32>),
         rgb: [f32; 3],
         light: [f32; 2],
     ) -> [Vertex; 4] {
         let k = SHADE[f];
+        // `BlockFluidRenderer`: a flowing top uses the `_flow` sprite turned by the flow angle.
+        let tex = match angle {
+            Some(_) => l.tex[2],
+            None => l.tex[f],
+        };
         CORNERS[f].map(|c| {
             let y = if c[1] > 0.5 {
                 h[c[0] as usize][c[2] as usize]
@@ -502,7 +522,10 @@ impl Mesher<'_> {
                     at[1] as f32 + p[1],
                     at[2] as f32 + p[2],
                 ],
-                uv: self.atlas.uv(l.tex[f], liquid_uv(f, p)),
+                uv: self.atlas.uv(
+                    tex,
+                    angle.map_or_else(|| liquid_uv(f, p), |a| flow::flow_uv(a, c)),
+                ),
                 color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
                 light,
             }
@@ -532,32 +555,6 @@ impl Mesher<'_> {
             }
         }
         1.0 - f / n
-    }
-
-    fn cross(&mut self, at: [i32; 3], state: u16, l: &Look) {
-        let (id, meta) = (state >> 4, state & 15);
-        let (mut tex, mut tint) = (l.tex[0], l.tint);
-        if id == 175 && meta & 8 != 0 {
-            (tex, tint) = double_plant_top(self.st(at, [0, -1, 0]));
-        }
-        let rgb = self.base_color(l, tint, at);
-        let light = self.light_at(at, [0; 3]);
-        let (wx, wz) = (
-            self.hood.origin.0 * 16 + at[0],
-            self.hood.origin.1 * 16 + at[2],
-        );
-        for quad in cross_quads(id, wx, wz) {
-            let mut verts = [Vertex::zeroed(); 4];
-            for (v, (rel, uv)) in verts.iter_mut().zip(quad) {
-                *v = Vertex {
-                    pos: [0, 1, 2].map(|a| at[a] as f32 + rel[a]),
-                    uv: self.atlas.uv(tex, uv),
-                    color: [rgb[0], rgb[1], rgb[2], 1.0],
-                    light,
-                };
-            }
-            self.push_quad(Pass::Opaque, verts, false);
-        }
     }
 
     /// The three crossed planes of a brewing stand; a set bottle bit shows the bottle half of the texture.
@@ -653,49 +650,17 @@ fn liquid_uv(f: usize, p: [f32; 3]) -> [f32; 2] {
     }
 }
 
-/// Vanilla `Block.getOffset` for the XZ offset type: a stable pseudo-random shift of up to a quarter block.
-fn plant_offset(x: i32, y: i32, z: i32) -> (f32, f32) {
-    let mut i = x.wrapping_mul(3129871) as i64 ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
-    i = i
-        .wrapping_mul(i)
+/// `MathHelper.getPositionRandom`: the hash vanilla keys block offsets and model variants on.
+pub(crate) fn position_random(x: i32, y: i32, z: i32) -> i64 {
+    let i = x.wrapping_mul(3129871) as i64 ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
+    i.wrapping_mul(i)
         .wrapping_mul(42317861)
-        .wrapping_add(i.wrapping_mul(11));
-    let f = |shift: u32| ((i >> shift & 15) as f32 / 15.0 - 0.5) * 0.5;
-    (f(16), f(24))
+        .wrapping_add(i.wrapping_mul(11))
 }
 
-/// The quads of a cross model (`block/cross.json`, `block/crop.json`) of block `id` at world
-/// column `wx`, `wz`: positions relative to the block (with `Block.getOffset`) and sprite uv.
-/// Both windings, so a plane shows from either side.
-pub(crate) fn cross_quads(id: u16, wx: i32, wz: i32) -> Vec<[([f32; 3], [f32; 2]); 4]> {
-    let (ox, oz) = if matches!(id, 31 | 32 | 37 | 38 | 175) {
-        plant_offset(wx, 0, wz)
-    } else {
-        (0.0, 0.0)
-    };
-    let planes: &[([f32; 2], [f32; 2])] = if matches!(id, 59 | 141 | 142) {
-        &[
-            ([0.25, 0.0], [0.25, 1.0]),
-            ([0.75, 0.0], [0.75, 1.0]),
-            ([0.0, 0.25], [1.0, 0.25]),
-            ([0.0, 0.75], [1.0, 0.75]),
-        ]
-    } else {
-        &[([0.05, 0.05], [0.95, 0.95]), ([0.05, 0.95], [0.95, 0.05])]
-    };
-    let mut out = Vec::new();
-    for (a, b) in planes {
-        for (p, q) in [(a, b), (b, a)] {
-            let corners = [
-                (p, 0.0, [0.0, 1.0]),
-                (q, 0.0, [1.0, 1.0]),
-                (q, 1.0, [1.0, 0.0]),
-                (p, 1.0, [0.0, 0.0]),
-            ];
-            out.push(corners.map(|(xz, y, uv)| ([xz[0] + ox, y, xz[1] + oz], uv)));
-        }
-    }
-    out
+/// Quads of a plant model for the block-break overlay (see `plants::cross_quads`).
+pub(crate) fn cross_quads(id: u16, at: [i32; 3]) -> Vec<[([f32; 3], [f32; 2]); 4]> {
+    plants::cross_quads(id, at)
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ const COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
 /// `BlockRendererDispatcher.renderBlockDamage` retextures every quad of a plant model: its uv
 /// runs over the whole `destroy_stage_N` sprite, as over the block's own sprite.
 fn cross(at: [i32; 3], state: u16) -> Vec<Vertex> {
-    cross_quads(state >> 4, at[0], at[2])
+    cross_quads(state >> 4, at)
         .into_iter()
         .flatten()
         .map(|(rel, uv)| Vertex {

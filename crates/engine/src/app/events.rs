@@ -746,10 +746,7 @@ impl App {
                 self.container = None;
                 self.game.inv.close_window();
                 let m = metrics!(self);
-                let q = self.ui.open(
-                    &m,
-                    boxed(Death::new(self.game.death_message.clone(), self.game.score)),
-                );
+                let q = self.ui.open(&m, boxed(Death::new(self.game.score)));
                 self.run_effects(q);
             }
         }
@@ -1250,7 +1247,7 @@ mod tests {
             .spawn_packet(41, [0.0; 3], [0.0; 3], 0.0, 0, &[]);
         assert!(!app.particles.is_empty());
         let m = metrics!(app);
-        app.ui.open(&m, boxed(Death::new(None, 0)));
+        app.ui.open(&m, boxed(Death::new(0)));
         assert!(app.ui.is_game_over());
         app.on_event(
             NetEvent::Respawn { dimension_changed },

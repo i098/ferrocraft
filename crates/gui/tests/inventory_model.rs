@@ -63,6 +63,7 @@ fn frame(r: &mut Renderer, icons: &Icons, with_model: bool, me: EntityDraw) -> V
         advanced_tooltips: false,
         effects: &effects,
         player: Some(&me),
+        partial_ticks: 0.0,
     };
     let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
     screen.draw(&mut GuiCanvas::new(&mut g), &view, 300, 60);
@@ -219,6 +220,7 @@ fn horse_frame(r: &mut Renderer, icons: &Icons, with_model: bool) -> Vec<render:
         advanced_tooltips: false,
         effects: &effects,
         player: Some(&horse),
+        partial_ticks: 0.0,
     };
     let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
     screen.draw(&mut GuiCanvas::new(&mut g), &view, 300, 60);

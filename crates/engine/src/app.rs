@@ -1307,6 +1307,12 @@ impl App {
                 icons,
                 bob: self.game.bob,
             });
+            let spectator_aim = self.game.gamemode == 3
+                && self.game.spectator_crosshair(self.view_ray(frac).and_then(
+                    |(eye, yaw, pitch, skip, vehicle)| {
+                        self.game.aim(eye, yaw, pitch, skip, vehicle)
+                    },
+                ));
             let mut frame = gui::Frame {
                 partial_ticks: frac as f32,
                 chat_input: self.input.chat_field(),
@@ -1338,6 +1344,7 @@ impl App {
                         .is_some_and(|s| s.id == PUMPKIN),
                 nausea: self.game.effects.has(Fx::NAUSEA),
                 no_crosshair: false,
+                spectator_aim,
             };
             self.leave_out_mod_hud(&mut frame);
             self.hud.draw(&mut g, &frame);
@@ -1371,6 +1378,7 @@ impl App {
                 advanced_tooltips: self.ui.settings.advanced_item_tooltips,
                 effects: &self.game.effects,
                 player: player.as_ref(),
+                partial_ticks: frac as f32,
             };
             cs.draw(&mut c, &view, mx, my);
         }

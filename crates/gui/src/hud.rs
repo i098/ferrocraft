@@ -86,6 +86,8 @@ pub struct Frame<'a> {
     pub nausea: bool,
     /// A mod draws the crosshair (it cancelled `CROSSHAIRS`): the vanilla one is left out.
     pub no_crosshair: bool,
+    /// A spectator aims at an entity or at an inventory block, which keeps the crosshair.
+    pub spectator_aim: bool,
 }
 
 impl Hud {
@@ -149,7 +151,10 @@ impl Hud {
         let spectator = f.status.is_some_and(|s| s.spectator);
         self.draw_bar(gui, f, spectator);
         gui.set_color(0xFFFF_FFFF);
-        if (f.debug.is_none() || f.reduced_debug) && !spectator && !f.no_crosshair {
+        if (f.debug.is_none() || f.reduced_debug)
+            && (!spectator || f.spectator_aim)
+            && !f.no_crosshair
+        {
             gui.set_blend(Blend::Invert);
             gui.blit(ICONS, w / 2 - 7, h / 2 - 7, 0, 0, 16, 16);
         }

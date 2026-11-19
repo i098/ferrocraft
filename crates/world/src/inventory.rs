@@ -6,11 +6,13 @@
 //! Window 0 is `ContainerPlayer`: 0 craft result, 1-4 craft grid, 5-8 armor (helmet first),
 //! 9-35 main, 36-44 hotbar. Every other window is its own slots, then the 27 main slots, then
 //! the 9 hotbar slots, which are the same stacks as window 0 slots 9-44.
-//! Not ported: crafting and smelting recipes (the server sends the result slot), the anvil
+//! The craft result slot is computed on the client for shaped and shapeless recipes (`recipes`).
+//! Not ported: the special crafting recipes, smelting, the anvil
 //! cost and rename logic, the enchantment offers, brewing and the horse window.
 
 pub mod items;
 pub mod merchant;
+pub mod recipes;
 
 pub use ferrocraft_protocol::codec::{ItemStack, Slot};
 pub use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
@@ -335,6 +337,9 @@ impl Inventory {
             if let Some(s) = self.player.get_mut(i) {
                 *s = item;
             }
+            if (1..5).contains(&i) && self.open.is_none() {
+                self.refresh_craft();
+            }
         } else if self
             .open
             .as_ref()
@@ -345,7 +350,22 @@ impl Inventory {
             if i < 2 {
                 self.refresh_merchant();
             }
+            if (1..10).contains(&i) {
+                self.refresh_craft();
+            }
         }
+    }
+
+    /// `ContainerPlayer`/`ContainerWorkbench.onCraftMatrixChanged`: the result slot shows the recipe
+    /// the grid matches, or nothing.
+    fn refresh_craft(&mut self) {
+        let (side, n) = match self.kind() {
+            Kind::Player => (2, 4),
+            Kind::Crafting => (3, 9),
+            _ => return,
+        };
+        let grid: Vec<Slot> = (1..=n).map(|i| self.slot(i).clone()).collect();
+        *self.slot_mut(0) = recipes::find(&grid, side);
     }
 
     /// `S30 WindowItems`.
@@ -354,11 +374,15 @@ impl Inventory {
             for (s, item) in self.player.iter_mut().zip(items) {
                 *s = item;
             }
+            if self.open.is_none() {
+                self.refresh_craft();
+            }
         } else if self.window_id() == window_id {
             let n = self.slot_count();
             for (i, item) in items.into_iter().take(n).enumerate() {
                 *self.slot_mut(i) = item;
             }
+            self.refresh_craft();
         }
     }
 
@@ -499,6 +523,7 @@ impl Inventory {
     pub fn slot_click(&mut self, slot_id: i32, button: i32, mode: i8) -> Slot {
         let sent = self.click_inner(slot_id, button, mode);
         self.refresh_merchant();
+        self.refresh_craft();
         sent
     }
 

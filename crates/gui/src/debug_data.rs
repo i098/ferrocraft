@@ -177,7 +177,7 @@ pub struct RightInfo {
     pub version: String,
 }
 
-/// Java's `% 2d` prints a space before a non-negative number.
+/// Java's `% 2d`: the space flag puts a space before any non-negative number.
 fn spaced(v: u64) -> String {
     format!(" {v}")
 }

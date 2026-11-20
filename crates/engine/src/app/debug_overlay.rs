@@ -151,7 +151,7 @@ impl App {
         let gpu = self.renderer.as_ref().map(|r| r.gpu_info().clone());
         let gpu = gpu.unwrap_or_default();
         right_lines(&RightInfo {
-            java: "Ferrocraft (Rust)".to_owned(),
+            java: env!("CARGO_PKG_VERSION").to_owned(),
             bits: usize::BITS,
             max,
             total,
@@ -182,10 +182,9 @@ static CPU: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     }
 });
 
-/// `(maxMemory, totalMemory, used)` in bytes: the machine memory, the process data size and its resident size.
-/// Zero where `/proc` is missing. shortcut: 4 KiB pages assumed, read the page size when a platform needs it.
+/// `(maxMemory, totalMemory, used)` in bytes for this process: `Runtime.maxMemory`'s rule, the resident
+/// size now, and its peak resident size. Zero where `/proc` is missing.
 fn process_memory() -> (u64, u64, u64) {
-    const PAGE: u64 = 4096;
     let kb = |text: &str, key: &str| {
         text.lines()
             .find_map(|l| l.strip_prefix(key))
@@ -193,18 +192,27 @@ fn process_memory() -> (u64, u64, u64) {
             .unwrap_or(0)
             * 1024
     };
-    let max = kb(
-        &std::fs::read_to_string("/proc/meminfo").unwrap_or_default(),
-        "MemTotal:",
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let used = kb(&status, "VmRSS:");
+    let total = kb(&status, "VmHWM:").max(used);
+    let limit = |p| std::fs::read_to_string(p).ok();
+    let max = jvm_max_memory(
+        limit("/sys/fs/cgroup/memory.max").as_deref(),
+        limit("/sys/fs/cgroup/memory/memory.limit_in_bytes").as_deref(),
+        kb(&meminfo, "MemTotal:"),
     );
-    let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    let pages: Vec<u64> = statm
-        .split_whitespace()
-        .filter_map(|v| v.parse().ok())
-        .collect();
-    let at = |i: usize| pages.get(i).copied().unwrap_or(0) * PAGE;
-    let used = at(1);
-    (max, at(5).max(used).min(max.max(used)), used)
+    (max, total, used)
+}
+
+/// The cgroup v2 or v1 memory limit when one is set, else a quarter of the machine's memory.
+fn jvm_max_memory(cgroup_v2: Option<&str>, cgroup_v1: Option<&str>, mem_total: u64) -> u64 {
+    [cgroup_v2, cgroup_v1]
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.trim().parse::<u64>().ok())
+        .find(|&v| v < 1 << 60)
+        .unwrap_or(mem_total / 4)
 }
 
 /// `RenderManager.shouldRender` for one entity: in range, in a visible section and inside the frustum.
@@ -233,4 +241,26 @@ fn entity_in_view(
         (d.pos[2].floor() as i32) >> 4,
     );
     dist < reach * reach && sections.contains(&section) && frustum.contains(min, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::jvm_max_memory;
+
+    const GIB: u64 = 1 << 30;
+
+    #[test]
+    fn max_memory_follows_the_jvm_rule() {
+        assert_eq!(
+            jvm_max_memory(Some("2147483648\n"), None, 16 * GIB),
+            2 * GIB
+        );
+        assert_eq!(jvm_max_memory(Some("max\n"), None, 16 * GIB), 4 * GIB);
+        assert_eq!(jvm_max_memory(None, Some("1073741824\n"), 16 * GIB), GIB);
+        assert_eq!(
+            jvm_max_memory(None, Some("9223372036854771712\n"), 16 * GIB),
+            4 * GIB
+        );
+        assert_eq!(jvm_max_memory(None, None, 16 * GIB), 4 * GIB);
+    }
 }

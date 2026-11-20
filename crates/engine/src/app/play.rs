@@ -445,6 +445,12 @@ impl App {
                 world::entities::Fx::Death { pos, size } => self.particles.death_puff(pos, size),
                 world::entities::Fx::Mood { mood, pos, size } => self.mood_fx(mood, pos, size),
                 world::entities::Fx::Witch { pos, size } => self.particles.witch_magic(pos, size),
+                world::entities::Fx::Wither {
+                    pos,
+                    body_yaw,
+                    half,
+                    invul,
+                } => self.particles.wither(pos, body_yaw, half, invul),
                 // `ArrowEntity.tick`: `World.playSound` at the arrow, volume 1.2.
                 world::entities::Fx::BowHit { pos, pitch } => self.bow_hit(pos, pitch),
                 world::entities::Fx::Firework {

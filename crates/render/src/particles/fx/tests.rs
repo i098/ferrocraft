@@ -72,8 +72,8 @@ fn lava_pop_shrinks_to_nothing_and_leaves_smoke() {
 #[test]
 fn note_color_follows_the_pitch() {
     let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
-    assert!(close(note_color(0.0), [0.35, 0.9129, 0.0]));
-    assert!(close(note_color(0.5), [0.35, 0.0, 0.9129]));
+    assert!(close(note_color(0.0), [0.35, 0.9129, -0.2129]));
+    assert!(close(note_color(0.5), [0.35, -0.2129, 0.9129]));
 }
 
 #[test]

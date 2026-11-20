@@ -158,6 +158,8 @@ pub struct Renderer {
     /// Held and dropped item meshes: the block atlas (`None`) or the sprite texture they sample.
     item_meshes: Vec<(Option<String>, GpuMesh)>,
     fires: Vec<entity::fire::Fire>,
+    /// Name tag quads: drawn inside the world pass, before the fire (`Render.doRender` before `doRenderShadowAndFire`).
+    tag_quads: Vec<Quad>,
     on_fire: bool,
     fire_frames: [u32; 2],
     fire_pipe: wgpu::RenderPipeline,
@@ -513,6 +515,7 @@ impl Renderer {
             map_icons: HashMap::new(),
             item_meshes: Vec::new(),
             fires: Vec::new(),
+            tag_quads: Vec::new(),
             on_fire: false,
             fire_frames: [0; 2],
             fire_pipe,
@@ -1266,6 +1269,12 @@ impl Renderer {
             });
             self.frame_compasses.insert(key, model);
         }
+    }
+
+    /// The name tags of the frame, in window pixels. The world pass draws them with no depth test and no depth
+    /// write, so fire and later layers that pass the depth test cover them as in vanilla.
+    pub fn set_tag_quads(&mut self, quads: Vec<Quad>) {
+        self.tag_quads = quads;
     }
 
     pub fn set_on_fire(&mut self, on_fire: bool) {
@@ -2038,6 +2047,19 @@ impl Renderer {
                 })
         });
 
+        let tag_quads = std::mem::take(&mut self.tag_quads);
+        tag_quads.iter().for_each(|q| self.load_texture(&q.tex));
+        let tag_buf = (!tag_quads.is_empty()).then(|| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("name tags"),
+                    contents: bytemuck::cast_slice(
+                        &tag_quads.iter().flat_map(quad_vertices).collect::<Vec<_>>(),
+                    ),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
         let sel_buf = self.selection.map(|b| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2152,6 +2174,11 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
                 pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(buf) = &tag_buf {
+                self.draw_gui(&mut pass, buf, &tag_quads);
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.opaque_pipe);
             }
             if let Some(m) = &shadow {
                 pass.set_pipeline(&self.shadow_pipe);

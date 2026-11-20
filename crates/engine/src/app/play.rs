@@ -403,14 +403,16 @@ impl App {
         self.entity_fx();
         self.tick_particles();
         self.equip_tick();
-        self.send_horse_jump();
-        if self.game.vehicle.is_some() {
-            self.send_riding(input);
-        } else if !self.game.player_removed() {
-            self.send_state();
-            // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
-            if self.game.camera.is_none() {
-                self.send_movement();
+        if !self.game.player_removed() {
+            self.send_horse_jump();
+            if self.game.vehicle.is_some() {
+                self.send_riding(input);
+            } else {
+                self.send_state();
+                // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
+                if self.game.camera.is_none() {
+                    self.send_movement();
+                }
             }
         }
         self.sound_tick();

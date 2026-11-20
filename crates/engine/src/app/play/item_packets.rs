@@ -143,3 +143,20 @@ fn join_sends_client_settings_before_the_brand() {
     assert_eq!(sent.iter().filter(|&&i| i == PLUGIN_MESSAGE).count(), 1);
     assert!(at(CLIENT_SETTINGS) < at(PLUGIN_MESSAGE), "{sent:?}");
 }
+
+/// Issue #715: vanilla 1.8.9 sends C15 on join, settings save and language change, not on a resource pack reload
+/// (`refreshResources` -> `apply_settings`).
+#[test]
+fn apply_settings_sends_no_client_settings_but_save_and_language_send_one() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    ids(&mut app, &rx);
+    app.apply_settings();
+    let reload = ids(&mut app, &rx);
+    assert!(!reload.contains(&CLIENT_SETTINGS), "{reload:?}");
+    for effect in [gui::screens::Effect::SettingsSaved, gui::screens::Effect::LanguageChanged] {
+        app.run_effects(vec![effect]);
+        let sent = ids(&mut app, &rx);
+        assert_eq!(sent.iter().filter(|&&i| i == CLIENT_SETTINGS).count(), 1, "{sent:?}");
+    }
+}

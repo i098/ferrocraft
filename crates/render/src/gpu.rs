@@ -192,6 +192,8 @@ pub struct Renderer {
     /// `LayerWitherAura`: `blendFunc(ONE, ONE)`, depth tested, no depth write.
     aura_pipe: wgpu::RenderPipeline,
     selection_pipe: wgpu::RenderPipeline,
+    /// Entity models: opaque like `opaque_pipe`, but with no culling, as `RendererLivingEntity.doRender` calls `disableCull`.
+    entity_pipe: wgpu::RenderPipeline,
     border_pipe: wgpu::RenderPipeline,
     /// The world border to draw, if any.
     border: Option<crate::Border>,
@@ -461,7 +463,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe, entity_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view, axes_pipe);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -526,6 +528,7 @@ impl Renderer {
             portal_add_pipe,
             aura_pipe,
             selection_pipe,
+            entity_pipe,
             border_pipe,
             border: None,
             hand_glint_pipe,
@@ -2045,8 +2048,10 @@ impl Renderer {
                 .filter_map(|m| m.opaque.as_ref())
                 .for_each(|m| draw_mesh(&mut pass, m));
             if let Some(m) = &self.entity_mesh {
+                pass.set_pipeline(&self.entity_pipe);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
+                pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             if let Some(g) = &self.ghost_mesh {
@@ -2427,7 +2432,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 23] {
+) -> [wgpu::RenderPipeline; 24] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2542,6 +2547,16 @@ fn build_pipelines(
         true,
         true,
         true,
+    );
+    let entity_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        None,
+        true,
+        true,
+        false,
     );
     let water_pipe = pipe(
         "vs_world",
@@ -2821,6 +2836,7 @@ fn build_pipelines(
         portal_add_pipe,
         aura_pipe,
         selection_pipe,
+        entity_pipe,
     ]
 }
 

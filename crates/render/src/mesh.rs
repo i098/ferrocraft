@@ -529,7 +529,11 @@ impl Mesher<'_> {
         ];
         let own = self.light_at(at, [0; 3]);
         // `BlockFluidRenderer.renderFluid`: a rendered top is lowered by `f8`, and the sides follow it.
-        let drop = if same(self.st(at, DIRS[UP])) { 0.0 } else { LIQUID_EDGE };
+        let drop = if same(self.st(at, DIRS[UP])) {
+            0.0
+        } else {
+            LIQUID_EDGE
+        };
         let h = h.map(|r| r.map(|y| y - drop));
         let gap = self.liquid_gap_above(at, &same);
         let flow = self.flow_angle(at, state, &same);
@@ -552,13 +556,13 @@ impl Mesher<'_> {
         }
     }
 
-    /// Light of one liquid face: the top reads its own cell and the one above, the bottom the cell below, and a side
-    /// `BlockLiquid.getMixedBrightnessForBlock` of the neighbour: the brighter of it and the cell above it.
+    /// `BlockLiquid.getMixedBrightnessForBlock` of the cell a face looks at: the brighter of it and the cell above it
+    /// (the top reads its own cell, the bottom the cell below).
     fn liquid_light(&self, at: [i32; 3], f: usize, own: [f32; 2]) -> [f32; 2] {
         let brighter = |a: [f32; 2], b: [f32; 2]| [a[0].max(b[0]), a[1].max(b[1])];
         match f {
             UP => brighter(own, self.light_at(at, [0, 1, 0])),
-            DOWN => self.flat_light(at, DIRS[f]),
+            DOWN => brighter(self.light_at(at, DIRS[f]), own),
             _ => {
                 let d = DIRS[f];
                 brighter(self.light_at(at, d), self.light_at(at, [d[0], 1, d[2]]))
@@ -948,9 +952,14 @@ mod tests {
         let lone_corner = 60.0 + 1.0 - (1.0 / 9.0 * 11.0 + 3.0) / 14.0 - 0.001;
         let tops: Vec<_> = quads
             .iter()
-            .filter(|q| q.iter().all(|v| v.pos[1] > 60.5 && near(v.pos[1], q[0].pos[1])))
+            .filter(|q| {
+                q.iter()
+                    .all(|v| v.pos[1] > 60.5 && near(v.pos[1], q[0].pos[1]))
+            })
             .collect();
-        assert!(tops.iter().any(|q| q.iter().any(|v| near(v.pos[1], lone_corner))));
+        assert!(tops
+            .iter()
+            .any(|q| q.iter().any(|v| near(v.pos[1], lone_corner))));
         let sides: Vec<_> = quads
             .iter()
             .filter(|q| {
@@ -962,7 +971,11 @@ mod tests {
             .collect();
         assert_eq!(sides.len(), 8, "four sides, each drawn from both sides");
         for q in sides {
-            let axis = if q.iter().all(|v| v.pos[0] == q[0].pos[0]) { 0 } else { 2 };
+            let axis = if q.iter().all(|v| v.pos[0] == q[0].pos[0]) {
+                0
+            } else {
+                2
+            };
             let edge = q[0].pos[axis] - 4.0;
             assert!(near(edge, 0.001) || near(edge, 0.999), "{edge}");
             assert!(q.iter().all(|v| near(v.pos[axis], q[0].pos[axis])));

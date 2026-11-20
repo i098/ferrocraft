@@ -41,6 +41,8 @@ const MAX_PENDING_MESHES: usize = 100;
 /// `RenderGlobal.END_SKY_TEXTURES`, relative to `assets/minecraft`.
 const END_SKY_TEXTURE: &str = "textures/environment/end_sky.png";
 
+/// Chunks whose translucent quads are sorted again each time the camera moves a block (`RenderGlobal`).
+const RESORTED_CHUNKS: usize = 15;
 const UPLOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(2);
 
 #[repr(C)]
@@ -68,6 +70,8 @@ struct GpuMesh {
 struct ChunkMesh {
     opaque: Option<GpuMesh>,
     water: Option<GpuMesh>,
+    /// Quad order of `water`, resorted as the camera moves.
+    order: Option<crate::sort::QuadOrder>,
     light: Option<crate::light::Light>,
     vis: [u64; 16],
 }
@@ -251,6 +255,8 @@ pub struct Renderer {
     meshes: HashMap<(i32, i32), ChunkMesh>,
     /// Meshes uploaded since the last [`Renderer::take_chunk_updates`], `RenderChunk.renderChunksUpdated`.
     chunk_updates: u32,
+    /// Where the translucent quads were last sorted, `RenderGlobal.prevRenderSortX`.
+    sort_pos: [f64; 3],
     gpu: crate::gpu_info::GpuInfo,
     mesher: Mesher,
     /// Chunks to remesh on the workers.
@@ -578,6 +584,7 @@ impl Renderer {
             biomes: HashMap::new(),
             meshes: HashMap::new(),
             chunk_updates: 0,
+            sort_pos: [0.0; 3],
             gpu: Default::default(),
             dirty: HashSet::new(),
             smooth_lighting: true,
@@ -942,7 +949,7 @@ impl Renderer {
                 let job = self.mesh_job(key);
                 self.pending.insert(key, job.generation);
                 let done = job.run(&self.atlas);
-                self.finish_mesh(done);
+                self.finish_mesh(done, cam.pos);
             }
         }
         let near = (
@@ -970,27 +977,58 @@ impl Renderer {
                 return;
             };
             uploaded = true;
-            self.finish_mesh(done);
+            self.finish_mesh(done, cam.pos);
         }
     }
 
     /// Upload a finished mesh unless its chunk was removed or queued again since.
-    fn finish_mesh(&mut self, done: Done) {
+    fn finish_mesh(&mut self, done: Done, cam: [f64; 3]) {
         if self.pending.get(&done.key) != Some(&done.generation) {
             return;
         }
         self.pending.remove(&done.key);
         let (cx, cz) = done.key;
-        let m = done.meshes;
+        let mut m = done.meshes;
         let origin = [cx as f32 * 16.0, 0.0, cz as f32 * 16.0];
+        let order = (!m.water.is_empty()).then(|| crate::sort::QuadOrder::new(&m.water));
+        if let Some(order) = &order {
+            m.water.indices = order.far_to_near(chunk_relative(cam, origin));
+        }
         let mesh = ChunkMesh {
             opaque: self.upload_mesh(m.opaque, origin),
             water: self.upload_mesh(m.water, origin),
+            order,
             light: m.light,
             vis: m.vis,
         };
         self.meshes.insert(done.key, mesh);
         self.chunk_updates += 1;
+    }
+
+    /// `RenderGlobal.renderBlockLayer`: once the camera moved a block since the last sort, the translucent quads of
+    /// the 15 nearest chunks are sorted again (`updateTransparencyLater`).
+    fn resort_water(&mut self, cam: [f64; 3]) {
+        let moved: f64 = (0..3).map(|i| (cam[i] - self.sort_pos[i]).powi(2)).sum();
+        if moved <= 1.0 {
+            return;
+        }
+        self.sort_pos = cam;
+        let mut keys: Vec<_> = self
+            .meshes
+            .iter()
+            .filter(|(_, m)| m.order.is_some())
+            .map(|(k, _)| *k)
+            .collect();
+        keys.sort_unstable_by(|a, b| chunk_distance(cam, *a).total_cmp(&chunk_distance(cam, *b)));
+        for key in keys.into_iter().take(RESORTED_CHUNKS) {
+            let m = &self.meshes[&key];
+            if let (Some(order), Some(gpu)) = (&m.order, &m.water) {
+                let origin = [key.0 as f32 * 16.0, 0.0, key.1 as f32 * 16.0];
+                let sorted = order.far_to_near(chunk_relative(cam, origin));
+                self.queue
+                    .write_buffer(&gpu.indices, 0, bytemuck::cast_slice(&sorted));
+            }
+        }
     }
 
     fn upload_mesh(&self, mut data: MeshData, origin: [f32; 3]) -> Option<GpuMesh> {
@@ -1017,7 +1055,7 @@ impl Renderer {
             ),
             indices: buf(
                 bytemuck::cast_slice(&data.indices),
-                wgpu::BufferUsages::INDEX,
+                wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             ),
             count: data.indices.len() as u32,
         })
@@ -1918,6 +1956,7 @@ impl Renderer {
     }
 
     fn draw(&mut self, view: &wgpu::TextureView, cam: &Camera, overlay: &[Quad]) {
+        self.resort_water(cam.pos);
         let (w, h) = self.size();
         let mut env = self.environment;
         env.fog_light = self.fog_light_now(cam, &env);
@@ -2146,10 +2185,14 @@ impl Renderer {
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             pass.set_pipeline(&self.translucent_pipe);
-            self.meshes
-                .values()
-                .filter_map(|m| m.water.as_ref())
-                .for_each(|m| draw_mesh(&mut pass, m));
+            // `RenderContainer.renderChunkLayer`: the translucent layer walks the chunks far to near.
+            let mut water: Vec<_> = self
+                .meshes
+                .iter()
+                .filter_map(|(k, m)| m.water.as_ref().map(|g| (chunk_distance(cam.pos, *k), g)))
+                .collect();
+            water.sort_by(|a, b| b.0.total_cmp(&a.0));
+            water.into_iter().for_each(|(_, m)| draw_mesh(&mut pass, m));
             // `renderWorldBorder`: additive, no depth write, no culling, polygon offset (the `fs_crack` pipeline).
             if let Some(m) = &border_mesh {
                 pass.set_pipeline(&self.border_pipe);
@@ -2907,6 +2950,20 @@ mod axes;
 mod block_entities;
 mod outline;
 mod shadow;
+
+/// The camera in the coordinates of the chunk at `origin`.
+fn chunk_relative(cam: [f64; 3], origin: [f32; 3]) -> [f32; 3] {
+    [0, 1, 2].map(|i| (cam[i] - f64::from(origin[i])) as f32)
+}
+
+/// Squared horizontal distance from the camera to the centre of chunk `key`.
+fn chunk_distance(cam: [f64; 3], key: (i32, i32)) -> f64 {
+    let (dx, dz) = (
+        f64::from(key.0 * 16 + 8) - cam[0],
+        f64::from(key.1 * 16 + 8) - cam[2],
+    );
+    dx * dx + dz * dz
+}
 
 fn draw_mesh<'a>(pass: &mut wgpu::RenderPass<'a>, m: &'a GpuMesh) {
     pass.set_vertex_buffer(0, m.vertices.slice(..));

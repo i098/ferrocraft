@@ -421,7 +421,7 @@ impl App {
     fn tick_particles(&mut self) {
         Self::projectile_fx(&self.game, &mut self.particles);
         if let Some(p) = &self.game.player {
-            self.particles.set_viewer(p.pos);
+            self.particles.set_viewer(p.pos, p.vel[1]);
         }
         self.particles
             .tick(|x, y, z| self.game.store.get_block(x, y, z));

@@ -94,10 +94,10 @@ fn eye(target: [f64; 3]) -> V3 {
     } else {
         1.0
     };
-    // `Vec3d.normalize` returns the zero vector under 1e-4. The guardian looks along +z, and its
-    // direction turned a quarter round about y is -x, so the dot product is minus the viewer's x share.
+    // `Vec3d.normalize` returns the zero vector under 1e-4. The guardian looks along +z and the offset from
+    // the viewer to it, turned a quarter round about y (`rotateYaw`: (x, z) to (z, -x)), has z = viewer x.
     let len = target[0].hypot(target[2]);
-    let dot = if len < 1.0e-4 { 0.0 } else { -target[0] / len };
+    let dot = if len < 1.0e-4 { 0.0 } else { target[0] / len };
     let x = if dot == 0.0 {
         0.0
     } else {
@@ -208,9 +208,9 @@ mod tests {
 
     #[test]
     fn eye_follows_the_viewers_side_and_height() {
-        // Viewer along +x: the pupil moves to x -2; below the guardian's eye the pupil drops to y 1.
-        assert_eq!(eye([10.0, 70.0, 0.0]), [-2.0, 0.0, -8.25]);
-        assert_eq!(eye([-4.0, 0.5, 0.0]), [2.0, 1.0, -8.25]);
+        // Viewer along +x: the pupil moves to x +2, like a yaw-0 mob guardian; below the guardian's eye it drops to y 1.
+        assert_eq!(eye([10.0, 70.0, 0.0]), [2.0, 0.0, -8.25]);
+        assert_eq!(eye([-4.0, 0.5, 0.0]), [-2.0, 1.0, -8.25]);
         // Straight ahead (or at the origin) the eye stays centered.
         assert_eq!(eye([0.0, 70.0, 5.0])[0], 0.0);
         assert_eq!(eye([0.0, 70.0, 0.0])[0], 0.0);

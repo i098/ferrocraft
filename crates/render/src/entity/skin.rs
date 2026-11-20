@@ -16,7 +16,7 @@ const MAX_SIDE: u32 = 8192;
 
 /// Texture slots in atlas order; the path is relative to `assets/minecraft/textures/`. The twelve
 /// armor layers (see [`Skin::armor`]) come before the elder guardian.
-const SKINS: [&str; 95] = [
+const SKINS: [&str; 96] = [
     "entity/steve.png",
     "entity/alex.png",
     "entity/zombie/zombie.png",
@@ -115,6 +115,7 @@ const SKINS: [&str; 95] = [
     "entity/skeleton/wither_skeleton.png",
     "entity/zombie/zombie_villager.png",
     "entity/experience_orb.png",
+    "entity/pig/pig_saddle.png",
 ];
 /// Index of the first mob texture after the elder guardian; these are copied as plain sprites.
 const MOBS_FIRST: usize = 28;
@@ -124,7 +125,7 @@ const EYES: [usize; 3] = [43, 44, 88];
 /// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
-const SLIME_SLOT_SKINS: [Option<Skin>; 49] = [
+const SLIME_SLOT_SKINS: [Option<Skin>; 50] = [
     Some(Skin::Slime),
     Some(Skin::MagmaCube),
     Some(Skin::Blaze),
@@ -176,6 +177,7 @@ const SLIME_SLOT_SKINS: [Option<Skin>; 49] = [
     Some(Skin::WitherSkeleton),
     Some(Skin::ZombieVillager),
     Some(Skin::XpOrb),
+    Some(Skin::PigSaddle),
 ];
 const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
@@ -286,6 +288,8 @@ pub enum Skin {
     ZombieVillager,
     /// `textures/entity/experience_orb.png` (64x64, 16 px cells), `RenderXPOrb`.
     XpOrb,
+    /// `textures/entity/pig/pig_saddle.png`, the `LayerSaddle` pass over a saddled pig.
+    PigSaddle,
     /// `textures/entity/armorstand/wood.png` (64x64).
     ArmorStand,
     /// A horse texture (128x128), by index into [`horse`]'s table.

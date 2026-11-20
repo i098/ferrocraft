@@ -86,8 +86,14 @@ impl App {
     }
 
     /// `ItemInHandRenderer.renderScreenEffects`: the block the eye is inside, then the water
-    /// overlay. Drawn under the HUD, in first person only.
-    pub(super) fn draw_screen_effects(&self, g: &mut gui::Gui, size: (u32, u32), frac: f32) {
+    /// overlay. Drawn under the HUD, in first person only. `eye_light` is `Entity.getBrightness`.
+    pub(super) fn draw_screen_effects(
+        &self,
+        g: &mut gui::Gui,
+        size: (u32, u32),
+        frac: f32,
+        eye_light: f32,
+    ) {
         let Some(p) = &self.game.player else { return };
         if self.perspective != 0 || self.game.gamemode == 3 || !self.in_world() {
             return;
@@ -124,7 +130,8 @@ impl App {
                 2.0 - 2.0 * hx + du,
                 2.0 + 2.0 * hy + dv,
             ];
-            // shortcut: brightness 1, as `Frame::brightness`; vanilla scales by the light at the eye.
+            // `renderWaterOverlay`: `color(f, f, f, 0.5)` with f the light at the eye.
+            let f = (eye_light.clamp(0.0, 1.0) * 255.0) as u32;
             g.blit_tinted(
                 "textures/misc/underwater.png",
                 0.0,
@@ -132,7 +139,7 @@ impl App {
                 w,
                 h,
                 uv,
-                0x80FF_FFFF,
+                0x8000_0000 | f << 16 | f << 8 | f,
             );
         }
     }

@@ -1314,7 +1314,12 @@ impl App {
             .wrapping_add(1_013_904_223);
         let mut g = gui::Gui::new(scale, r.font(), self.font_seed);
         g.set_bidi(self.ui.bidirectional());
-        self.draw_screen_effects(&mut g, (w, h), frac as f32);
+        let eye_light = self.game.player.as_ref().map_or(1.0, |p| {
+            let mut eye = p.pos;
+            eye[1] += eye_height(self.input.sneaking());
+            r.eye_brightness(eye)
+        });
+        self.draw_screen_effects(&mut g, (w, h), frac as f32, eye_light);
         let m = Fm(g.metrics());
         let screen_open = self.modal();
         let in_world = self.in_world();

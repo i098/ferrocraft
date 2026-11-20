@@ -67,9 +67,32 @@ const CLOCK: &str = "textures/items/clock.png";
 
 const GLINT: &str = "textures/misc/enchanted_item_glint.png";
 const GLINT_COLOR: u32 = 0xFF80_40CC;
-/// Glint texture coordinates span a sprite's share of the 1.8.9 item atlas.
-/// Vanilla 1.8.9 stitches a 512 px wide atlas (`render::entity::ITEM_UV_SCALE`).
-const ATLAS_SHARE: f32 = 16.0 / 512.0;
+/// Glint texture coordinates are atlas coordinates: a sprite starts at its stitched position in the
+/// 512 px wide 1.8.9 block and item atlas (`atlas_sprites.tsv`, dumped from the vanilla client).
+const ATLAS_PX: f32 = 512.0;
+const SPRITE_PX: f32 = 16.0;
+
+/// Top-left pixel of the sprite `tex` (`textures/items/x.png`) in the vanilla atlas.
+fn sprite_origin(tex: &str) -> [f32; 2] {
+    static TABLE: std::sync::LazyLock<HashMap<&'static str, [f32; 2]>> =
+        std::sync::LazyLock::new(|| {
+            include_str!("atlas_sprites.tsv")
+                .lines()
+                .filter_map(|l| {
+                    let mut f = l.split('\t');
+                    Some((
+                        f.next()?,
+                        [f.next()?.parse().ok()?, f.next()?.parse().ok()?],
+                    ))
+                })
+                .collect()
+        });
+    let name = tex.strip_prefix("textures/").unwrap_or(tex);
+    TABLE
+        .get(name.strip_suffix(".png").unwrap_or(name))
+        .copied()
+        .unwrap_or([0.0; 2])
+}
 
 fn texture_path(name: &str) -> String {
     format!("textures/{name}.png")
@@ -97,16 +120,6 @@ impl Mask {
             h: img.height,
             opaque,
         }
-    }
-
-    /// Texels either mask draws; a mask of another size adds nothing.
-    fn union(mut self, o: &Mask) -> Mask {
-        if (self.w, self.h) == (o.w, o.h) {
-            for (a, b) in self.opaque.iter_mut().zip(&o.opaque) {
-                *a |= b;
-            }
-        }
-        self
     }
 
     fn at(&self, x: usize, y: usize) -> bool {
@@ -729,25 +742,14 @@ impl Icons {
                 }
                 if glint {
                     let pts = [[x, y], [x + 16.0, y], [x + 16.0, y + 16.0], [x, y + 16.0]];
-                    let k = layers.first().map_or(1.0, |t| self.frame_scale(t));
-                    let v = layers
-                        .first()
-                        .map_or(0.0, |t| self.dial_frame(t, k) as f32 * k);
-                    let muv = [[0.0, v], [1.0, v], [1.0, v + k], [0.0, v + k]];
-                    let mask = layers.iter().filter_map(|t| self.masks.get(t)).fold(
-                        None,
-                        |acc: Option<Mask>, m| match acc {
-                            Some(a) => Some(a.union(m)),
-                            None => Some(m.clone()),
-                        },
-                    );
-                    self.glint_masked(
-                        c,
-                        pts,
-                        muv,
-                        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                        mask.as_ref(),
-                    );
+                    // Each layer is its own sprite and quad: its glint covers its own texels.
+                    for tex in layers {
+                        let k = self.frame_scale(tex);
+                        let v = self.dial_frame(tex, k) as f32 * k;
+                        let muv = [[0.0, v], [1.0, v], [1.0, v + k], [0.0, v + k]];
+                        let guv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+                        self.glint_masked(c, pts, muv, guv, self.masks.get(tex), tex);
+                    }
                 }
             }
             Model::Solid { faces, gui } => {
@@ -774,7 +776,7 @@ impl Icons {
                     let uv = [0, 3, 2, 1].map(|i| [f.uv[i][0], f.uv[i][1] * k]);
                     c.quad(&f.tex, *pts, uv, [*color; 4]);
                     if glint {
-                        self.glint_masked(c, *pts, uv, uv, self.masks.get(&f.tex));
+                        self.glint_masked(c, *pts, uv, uv, self.masks.get(&f.tex), &f.tex);
                     }
                 }
             }
@@ -782,7 +784,7 @@ impl Icons {
     }
 
     /// The glint over the texels `mask` draws; `muv` are the quad's texture coordinates in the
-    /// model texture, `guv` the ones the glint turns. No mask: the whole quad.
+    /// model texture `tex`, `guv` the ones in the sprite that the glint turns. No mask: the whole quad.
     fn glint_masked(
         &self,
         c: &mut dyn Canvas,
@@ -790,27 +792,33 @@ impl Icons {
         muv: [[f32; 2]; 4],
         guv: [[f32; 2]; 4],
         mask: Option<&Mask>,
+        tex: &str,
     ) {
+        let origin = sprite_origin(tex);
         match mask {
             Some(m) => {
                 for (p, g) in cut(pts, muv, guv, m) {
-                    self.glint(c, p, g);
+                    self.glint(c, p, g, origin);
                 }
             }
-            None => self.glint(c, pts, guv),
+            None => self.glint(c, pts, guv, origin),
         }
     }
 
     /// `RenderItem.renderEffect`: two additive passes of the glint texture, each scaled by 8,
-    /// scrolled by the clock and turned by -50 and 10 degrees.
-    fn glint(&self, c: &mut dyn Canvas, pts: [[f32; 2]; 4], uv: [[f32; 2]; 4]) {
+    /// scrolled by the clock and turned by -50 and 10 degrees. `uv` is local to the sprite at `origin`.
+    fn glint(&self, c: &mut dyn Canvas, pts: [[f32; 2]; 4], uv: [[f32; 2]; 4], origin: [f32; 2]) {
         let passes = [
             ((self.now_ms % 3000) as f32 / 3000.0 / 8.0, -50.0_f32),
             (-((self.now_ms % 4873) as f32) / 4873.0 / 8.0, 10.0),
         ];
         for (shift, angle) in passes {
             let uv = uv.map(|[u, v]| {
-                let r = rot_z(angle, [u * ATLAS_SHARE, v * ATLAS_SHARE, 0.0]);
+                let at = [
+                    (origin[0] + u * SPRITE_PX) / ATLAS_PX,
+                    (origin[1] + v * SPRITE_PX) / ATLAS_PX,
+                ];
+                let r = rot_z(angle, [at[0], at[1], 0.0]);
                 [8.0 * (r[0] + shift), 8.0 * r[1]]
             });
             c.quad_add(GLINT, pts, uv, GLINT_COLOR);
@@ -866,6 +874,17 @@ impl Icons {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sprite origins in the vanilla 1.8.9 atlas, as dumped from the client; unknown names start at 0.
+    #[test]
+    fn sprite_origin_follows_the_vanilla_atlas() {
+        assert_eq!(sprite_origin("textures/items/shears.png"), [32.0, 288.0]);
+        assert_eq!(
+            sprite_origin("textures/blocks/wool_colored_black.png"),
+            [352.0, 160.0]
+        );
+        assert_eq!(sprite_origin("textures/items/no_such_sprite.png"), [0.0; 2]);
+    }
 
     /// The glint covers the opaque texels only: two of the four texels of a unit quad.
     #[test]

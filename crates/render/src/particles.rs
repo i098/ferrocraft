@@ -254,6 +254,8 @@ pub struct Particles {
     sounds: Vec<FireworkSound>,
     /// Position of the camera entity, for the far firework sounds.
     viewer: Option<[f64; 3]>,
+    /// Vertical motion of the camera entity, for the `Cloud` pull.
+    viewer_vy: f64,
 }
 
 /// Quads split by texture: `block` samples the block atlas, `sheet` samples `particles.png`,
@@ -280,6 +282,7 @@ impl Particles {
             born: Vec::new(),
             sounds: Vec::new(),
             viewer: None,
+            viewer_vy: 0.0,
         }
     }
 
@@ -845,8 +848,9 @@ impl Particles {
     }
 
     /// Sets where the camera entity is (`getRenderViewEntity`), for the far sounds.
-    pub fn set_viewer(&mut self, pos: [f64; 3]) {
+    pub fn set_viewer(&mut self, pos: [f64; 3], vy: f64) {
         self.viewer = Some(pos);
+        self.viewer_vy = vy;
     }
 
     /// The firework sounds made since the last call.
@@ -1447,6 +1451,16 @@ impl Particles {
         }
     }
 
+    /// `EntityCloudFX.onUpdate`: within 2 blocks of the player, a cloud above his feet is pulled down to them
+    /// and takes on his vertical motion (`getClosestPlayerToEntity(this, 2.0)`).
+    fn cloud_pull(&self, p: &mut Particle) {
+        let Some(v) = self.viewer else { return };
+        if (0..3).map(|i| (v[i] - p.pos[i]).powi(2)).sum::<f64>() < 4.0 && p.pos[1] > v[1] {
+            p.pos[1] += (v[1] - p.pos[1]) * 0.2;
+            p.vel[1] += (self.viewer_vy - p.vel[1]) * 0.2;
+        }
+    }
+
     /// Ticks one particle; false removes it. `spawned` collects what the particle emits.
     fn tick_one(
         &mut self,
@@ -1463,6 +1477,9 @@ impl Particles {
         }
         p.age += 1;
         move_generic(p, &|x, y, z| crate::is_solid(block(x, y, z)));
+        if p.behavior == Behavior::Cloud {
+            self.cloud_pull(p);
+        }
         if p.on_ground {
             p.vel[0] *= f64::from(0.7_f32);
             p.vel[2] *= f64::from(0.7_f32);
@@ -2100,7 +2117,7 @@ mod tests {
         let mut ps = Particles::new();
         let all = [explosion(0), explosion(0), explosion(0)];
         ps.firework([0.0, 64.0, 0.0], [0.0; 3], all.to_vec());
-        ps.set_viewer([1.0, 64.0, 0.0]);
+        ps.set_viewer([1.0, 64.0, 0.0], 0.0);
         ps.tick(|_, _, _| 0);
         assert_eq!(ps.take_sounds()[0].name, "fireworks.largeBlast");
         assert_eq!(
@@ -2117,7 +2134,7 @@ mod tests {
         assert!(ps.starters.is_empty());
         let mut far = Particles::new();
         far.firework([100.0, 64.0, 0.0], [0.0; 3], vec![explosion(0)]);
-        far.set_viewer([0.0, 64.0, 0.0]);
+        far.set_viewer([0.0, 64.0, 0.0], 0.0);
         far.tick(|_, _, _| 0);
         assert_eq!(far.take_sounds()[0].name, "fireworks.blast_far");
     }
@@ -2130,7 +2147,7 @@ mod tests {
             ..explosion(0)
         };
         ps.firework([0.0, 64.0, 0.0], [0.0; 3], vec![flicker]);
-        ps.set_viewer([0.0, 64.0, 0.0]);
+        ps.set_viewer([0.0, 64.0, 0.0], 0.0);
         ps.tick(|_, _, _| 0);
         ps.take_sounds();
         // Lifetime 1 * 2 - 1 + 15 = 16, so the starter ends on the 17th tick.
@@ -2319,6 +2336,18 @@ mod tests {
         assert!(large > 0 && large <= 48);
         ps.tick(|_, _, _| 0);
         assert!(ps.list.iter().all(|p| p.behavior != Behavior::HugeEmitter));
+    }
+
+    #[test]
+    fn cloud_near_the_player_sinks_to_his_feet_but_a_far_one_does_not() {
+        let mut ps = Particles::new();
+        ps.set_viewer([0.0, 64.0, 0.0], 0.0);
+        ps.spawn(Kind::Cloud, [0.0, 65.0, 0.0], [0.0; 3], 0);
+        ps.spawn(Kind::Cloud, [5.0, 65.0, 0.0], [0.0; 3], 0);
+        ps.list.iter_mut().for_each(|p| p.vel = [0.0; 3]);
+        ps.tick(|_, _, _| 0);
+        assert!((ps.list[0].pos[1] - 64.8).abs() < 1e-9);
+        assert_eq!(ps.list[1].pos[1], 65.0);
     }
 
     #[test]
@@ -2522,6 +2551,26 @@ mod tests {
             lava.tick(floor);
         }
         assert!(lava.list.iter().all(|p| p.behavior == Behavior::DripLava));
+    }
+
+    #[test]
+    fn lava_drip_colour_follows_the_1_8_9_age_formula() {
+        // Oracle: javap of 1.8.9 EntityDropParticleFX: (1, 16/(age+16), 4/(age+8)).
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 100.0, 0.5], [0.0; 3], 0);
+        for _ in 0..=40 {
+            let age = ps.list[0].age as f32;
+            ps.tick(|_, _, _| 0);
+            let want = match age as u32 {
+                0 => [1.0, 1.0, 0.5],
+                20 => [1.0, 0.4444, 0.1429],
+                40 => [1.0, 0.2857, 0.0833],
+                _ => continue,
+            };
+            for (got, want) in ps.list[0].color.iter().zip(want) {
+                assert!((got - want).abs() < 1e-3, "age {age}: {got} vs {want}");
+            }
+        }
     }
 
     fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {

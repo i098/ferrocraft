@@ -80,7 +80,10 @@ fn sprite_origin(tex: &str) -> [f32; 2] {
                 .lines()
                 .filter_map(|l| {
                     let mut f = l.split('\t');
-                    Some((f.next()?, [f.next()?.parse().ok()?, f.next()?.parse().ok()?]))
+                    Some((
+                        f.next()?,
+                        [f.next()?.parse().ok()?, f.next()?.parse().ok()?],
+                    ))
                 })
                 .collect()
         });
@@ -871,6 +874,17 @@ impl Icons {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sprite origins in the vanilla 1.8.9 atlas, as dumped from the client; unknown names start at 0.
+    #[test]
+    fn sprite_origin_follows_the_vanilla_atlas() {
+        assert_eq!(sprite_origin("textures/items/shears.png"), [32.0, 288.0]);
+        assert_eq!(
+            sprite_origin("textures/blocks/wool_colored_black.png"),
+            [352.0, 160.0]
+        );
+        assert_eq!(sprite_origin("textures/items/no_such_sprite.png"), [0.0; 2]);
+    }
 
     /// The glint covers the opaque texels only: two of the four texels of a unit quad.
     #[test]

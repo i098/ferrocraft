@@ -1,7 +1,7 @@
 //! Menu screens: owns the `gui` screen stack, its settings and texts, and runs each call with a `Ctx`.
 
 use gui::inventory::icons::Icons;
-use gui::screens::{Canvas, Metrics};
+use gui::screens::{Canvas, Death, Metrics};
 use gui::screens::{Ctx, Effect, Event, PlayerStats, Screen, Screens, Settings, Texts};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -17,6 +17,8 @@ pub struct Ui {
     pub width: i32,
     pub height: i32,
     pub in_world: bool,
+    /// `thePlayer.getHealth() <= 0`, with `getScore`: the player is dead.
+    pub dead: Option<i32>,
     pub difficulty: Option<u8>,
     pub hardcore: bool,
     /// `S37PacketStatistics` values of this server session.
@@ -38,6 +40,7 @@ impl Ui {
             width: 0,
             height: 0,
             in_world: false,
+            dead: None,
             difficulty: None,
             hardcore: false,
             stats: PlayerStats::default(),
@@ -109,6 +112,16 @@ impl Ui {
         };
         let before = ctx.clipboard.clone();
         let r = f(&mut self.screens, &mut ctx);
+        // `Minecraft.displayGuiScreen`: closing to the game while `thePlayer.getHealth() <= 0` opens
+        // `GuiGameOver` instead. The respawn button builds a new player first.
+        if ctx.effects.iter().any(|e| matches!(e, Effect::Respawn)) {
+            self.dead = None;
+        } else if let Some(score) = self
+            .dead
+            .filter(|_| ctx.in_world && !self.screens.is_open())
+        {
+            self.screens.open(Box::new(Death::new(score)), &mut ctx);
+        }
         let changed = *ctx.clipboard != before;
         let (w, h, effects) = (ctx.width, ctx.height, ctx.effects);
         (self.width, self.height) = (w, h);

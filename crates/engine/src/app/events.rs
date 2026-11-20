@@ -190,6 +190,7 @@ impl App {
     fn change_language(&mut self) {
         self.load_texts();
         self.apply_settings();
+        self.send_client_settings();
         self.resize_screens();
     }
 

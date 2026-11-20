@@ -1066,9 +1066,7 @@ impl Renderer {
         for key in draws.iter().filter_map(|d| d.skin) {
             self.entity_skins.touch(key);
         }
-        let mut mesh = entity::build(draws, &self.entity_skins, self.skylight_subtracted(), |p| {
-            self.light_at(p)
-        });
+        let mut mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
         self.ghost_mesh = self.upload_mesh(entity::take_ghosts(&mut mesh), [0.0; 3]);
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);

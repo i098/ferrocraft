@@ -606,7 +606,7 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
 
     let sky_rot = |v: [f32; 3]| add(rot(rot(v, s.angle * 360.0, 0), -90.0, 1), eye);
     if s.star_alpha > 0.0 {
-        stars(&mut blend, s.star_alpha, sky_rot);
+        stars(&mut additive, s.star_alpha, sky_rot);
     }
 
     // Sun and moon, additive like vanilla's `SRC_ALPHA, ONE`.
@@ -676,7 +676,8 @@ pub fn build_end_sky(eye: [f64; 3]) -> SkyGeometry {
 fn stars(g: &mut SkyGeometry, alpha: f32, place: impl Fn([f32; 3]) -> [f32; 3]) {
     let mut rng = JavaRandom::new(10842);
     let uv = white_uv();
-    let color = [1.0, 1.0, 1.0, alpha];
+    // `color(f, f, f, f)` under `blendFunc(SRC_ALPHA, ONE)`: the sun and moon's additive blend still applies.
+    let color = [alpha; 4];
     for _ in 0..1500 {
         let mut d0 = (rng.next_float() * 2.0 - 1.0) as f64;
         let mut d1 = (rng.next_float() * 2.0 - 1.0) as f64;

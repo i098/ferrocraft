@@ -295,6 +295,8 @@ pub struct Entity {
     pub explosions: Vec<FireworkExplosion>,
     /// Slimes and magma cubes: the jump squish.
     pub squish: crate::squish::Squish,
+    /// Chickens: the wing flap.
+    pub flap: crate::chicken::Flap,
     /// Squids: the tentacle, roll and body turn animation.
     pub squid: crate::squid::Squid,
     /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
@@ -466,6 +468,7 @@ impl Entity {
             title: String::new(),
             owner: 0,
             squish: crate::squish::Squish::default(),
+            flap: crate::chicken::Flap::default(),
             squid: crate::squid::Squid::new(id, yaw),
             dragon: (kind == Kind::Mob(63)).then(Box::default),
             proj: Default::default(),
@@ -725,6 +728,9 @@ impl Entity {
             }
         } else {
             self.swing_ticks = 0;
+        }
+        if self.kind == Kind::Mob(93) {
+            self.flap.tick(self.on_ground);
         }
         if let Kind::Mob(id @ (55 | 62)) = self.kind {
             self.squish.tick(self.on_ground, id == 62);

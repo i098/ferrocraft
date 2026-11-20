@@ -30,6 +30,7 @@ pub mod projectile;
 pub mod shape;
 pub mod squid;
 pub mod squish;
+pub mod chicken;
 pub mod tool;
 pub mod vehicle;
 

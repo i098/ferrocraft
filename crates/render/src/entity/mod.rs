@@ -187,6 +187,8 @@ pub struct Look {
     pub squid: world::squid::Pose,
     /// Slimes and magma cubes: `prevSquishFactor` eased to `squishFactor` by the partial tick.
     pub squish: f32,
+    /// Chicken: `RenderChicken.handleRotationFloat`, the wing angle in radians.
+    pub chicken_flap: f32,
     /// Sheep: `sheepTimer`, the ticks left of the grass-eating head animation.
     pub eat_timer: i32,
     /// Iron golem: `attackTimer` and `holdRoseTick`, the arm swing and rose pose.
@@ -255,6 +257,7 @@ impl Default for Look {
             jump: 0.0,
             squid: world::squid::Pose::default(),
             squish: 0.0,
+            chicken_flap: 0.0,
             eat_timer: 0,
             golem_attack: 0,
             golem_rose: 0,

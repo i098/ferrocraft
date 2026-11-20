@@ -676,7 +676,10 @@ mod tests {
         for c in colors {
             let m = c[0].max(c[1]).max(c[2]);
             assert!(m <= 0.76, "side face too bright: {m}");
-            assert!(c[0].min(c[1]).min(c[2]) >= 0.39, "side face too dark: {c:?}");
+            assert!(
+                c[0].min(c[1]).min(c[2]) >= 0.39,
+                "side face too dark: {c:?}"
+            );
         }
     }
 }

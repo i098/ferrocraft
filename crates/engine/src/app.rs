@@ -981,7 +981,7 @@ impl App {
             let dye = s.nbt.as_ref().and_then(|n| n.dye());
             (
                 s.id,
-                self.held_variant(s.id, s.damage),
+                s.damage,
                 world::inventory::glint(s),
                 dye,
             )
@@ -996,6 +996,12 @@ impl App {
         let lowered = 1.0 - (self.equip.1 + (self.equip.0 - self.equip.1) * frac as f32);
         let swing = self.game.swing.progress(frac as f32);
         let using = self.using(frac as f32);
+        // The shown stack keeps its own damage; the draw stage of a bow or a cast rod is picked here (`renderItemInHand`).
+        let hand_item = self
+            .equip
+            .2
+            .or(held)
+            .map(|(id, damage, glint, dye)| (id, self.held_variant(id, damage), glint, dye));
         let fluid = self.fluid_at(cam.pos);
         let axes = self.debug_axes();
         let Some(r) = &mut self.renderer else { return };
@@ -1049,7 +1055,6 @@ impl App {
                 phase_ms: (now % 3000) as u32,
             }
         }));
-        let hand_item = self.equip.2.or(held);
         r.set_hand(
             (!self.hide_hud
                 && self.perspective == 0
@@ -1326,8 +1331,11 @@ impl App {
         let show_hud =
             in_world && !(self.hide_hud && !screen_open && self.input.chat_input().is_none());
         let tag_flags = [in_world, self.mod_drawn.labels_owned, show_hud];
+        // Name tags go to their own quad list: the world pass draws them before the fire, so the fire covers them.
+        let mut tags = gui::Gui::new(scale, r.font(), self.font_seed);
+        tags.set_bidi(self.ui.bidirectional());
         mod_world::draw_tags(
-            &mut g,
+            &mut tags,
             &self.game,
             cam,
             draws,
@@ -1440,9 +1448,11 @@ impl App {
         }
         textures.extend(mod_textures);
         let (entities, quads) = (g.take_entities(), g.into_quads());
+        let tags = tags.into_quads();
         let Some(r) = &mut self.renderer else {
             return (quads, textures, effects);
         };
+        r.set_tag_quads(tags);
         (with_entities(r, entities, quads), textures, effects)
     }
 

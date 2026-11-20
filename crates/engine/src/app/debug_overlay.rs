@@ -201,8 +201,7 @@ fn process_memory() -> (u64, u64, u64) {
         limit("/sys/fs/cgroup/memory.max").as_deref(),
         limit("/sys/fs/cgroup/memory/memory.limit_in_bytes").as_deref(),
         kb(&meminfo, "MemTotal:"),
-    )
-    .max(total);
+    );
     (max, total, used)
 }
 

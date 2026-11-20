@@ -15,9 +15,83 @@ pub enum Fluid {
     Lava,
 }
 
+/// The `Dimension` (`WorldProvider`) of the world, from the `dimension` of Join Game and Respawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dimension {
+    #[default]
+    Overworld,
+    Nether,
+    End,
+}
+
+impl Dimension {
+    /// `Dimension.fromId`; the server sends only -1, 0 and 1.
+    pub fn from_id(id: i32) -> Dimension {
+        match id {
+            -1 => Dimension::Nether,
+            1 => Dimension::End,
+            _ => Dimension::Overworld,
+        }
+    }
+
+    /// `Dimension.getTimeOfDay`: the Nether is always at 0.5 and the End at 0, whatever the world time.
+    pub fn celestial_angle(self, time: i64, partial: f32) -> f32 {
+        match self {
+            Dimension::Overworld => celestial_angle(time, partial),
+            Dimension::Nether => 0.5,
+            Dimension::End => 0.0,
+        }
+    }
+
+    /// `Dimension.isNatural`: only the overworld has a sky dome, a sun, a moon and clouds.
+    pub fn is_natural(self) -> bool {
+        self == Dimension::Overworld
+    }
+
+    /// `Dimension.isFogThick`: true in the Nether and the End.
+    pub fn is_fog_thick(self) -> bool {
+        !self.is_natural()
+    }
+
+    /// `Dimension.initBrightnessTable`: the lowest value of the light table, 0.1 in the Nether.
+    pub fn light_floor(self) -> f32 {
+        if self == Dimension::Nether {
+            0.1
+        } else {
+            0.0
+        }
+    }
+
+    /// `Dimension.getBrightnessTable` at a light level `0..=15`.
+    pub fn light_brightness(self, level: u8) -> f32 {
+        let f1 = 1.0 - f32::from(level.min(15)) / 15.0;
+        let floor = self.light_floor();
+        (1.0 - f1) / (f1 * 3.0 + 1.0) * (1.0 - floor) + floor
+    }
+
+    /// `Dimension.getFogColor` before the render distance and weather terms; `day` is the overworld day factor.
+    fn fog_color(self, day: f32) -> [f32; 3] {
+        match self {
+            Dimension::Overworld => [
+                0.752_941_2 * (day * 0.94 + 0.06),
+                0.847_058_83 * (day * 0.94 + 0.06),
+                day * 0.91 + 0.09,
+            ],
+            Dimension::Nether => [0.2, 0.03, 0.03],
+            // 10518688 = 0xA08CA0 scaled by `f * 0.0 + 0.15`.
+            Dimension::End => [
+                160.0 / 255.0 * 0.15,
+                128.0 / 255.0 * 0.15,
+                160.0 / 255.0 * 0.15,
+            ],
+        }
+    }
+}
+
 /// What the world tells the renderer about time and weather.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Environment {
+    pub dimension: Dimension,
     /// Time of day in ticks (Time Update packet, `world_time % 24000` is used).
     pub world_time: i64,
     /// Ticks since the world loaded, for cloud drift.
@@ -57,6 +131,7 @@ impl Default for Environment {
     /// Noon, clear weather, 8 chunks.
     fn default() -> Self {
         Environment {
+            dimension: Dimension::Overworld,
             world_time: 6000,
             ticks: 0,
             partial: 0.0,
@@ -178,7 +253,9 @@ impl Environment {
     /// Sky, fog and light for this frame; `temperature` is the biome temperature at the camera
     /// and `look` the camera look vector (`Entity.getLook`).
     pub fn sky_state(&self, temperature: f32, look: [f32; 3]) -> SkyState {
-        let angle = celestial_angle(self.world_time, self.partial);
+        let angle = self
+            .dimension
+            .celestial_angle(self.world_time, self.partial);
         let day = ((angle * PI * 2.0).cos() * 2.0 + 0.5).clamp(0.0, 1.0);
 
         // `BiomeGenBase.getSkyColorByTemp`.
@@ -199,11 +276,7 @@ impl Environment {
             ];
         }
 
-        let mut fog = [
-            0.752_941_2 * (day * 0.94 + 0.06),
-            0.847_058_83 * (day * 0.94 + 0.06),
-            day * 0.91 + 0.09,
-        ];
+        let mut fog = self.dimension.fog_color(day);
         if self.render_distance_chunks >= 4 {
             fog = glow_fog(fog, angle, look[0]);
         }
@@ -279,6 +352,10 @@ impl Environment {
             Some(ticks) => {
                 let (start, end) = blind_fog(far, ticks);
                 (fog, start, end, None)
+            }
+            // `setupFog`: a thick-fog dimension closes the fog in.
+            None if self.dimension.is_fog_thick() => {
+                (fog, far * 0.05, far.min(192.0) * 0.5, density)
             }
             None => (fog, far * 0.75, far, density),
         }
@@ -429,6 +506,7 @@ fn horizon(env: &Environment) -> f64 {
 /// Sky plane, sunrise glow, stars, sun, moon and the dark discs, with the camera at `eye`.
 /// `solid` (the sky plane) and `dark` are drawn in the world fog, `dark` last; `blend` is alpha
 /// blended and `additive` adds, both unfogged.
+#[derive(Default)]
 pub struct SkyLayers {
     pub solid: SkyGeometry,
     pub blend: SkyGeometry,
@@ -447,6 +525,10 @@ fn sky_plane(g: &mut SkyGeometry, y: f32, eye: [f64; 3], color: [f32; 4]) {
 }
 
 pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
+    // `renderSky`: the End has its own cube ([`build_end_sky`]) and the Nether has no sky.
+    if !env.dimension.is_natural() {
+        return SkyLayers::default();
+    }
     let mut solid = SkyGeometry::default();
     let mut blend = SkyGeometry::default();
     let mut additive = SkyGeometry::default();
@@ -561,6 +643,33 @@ pub fn build_sky(env: &Environment, s: &SkyState, eye: [f64; 3]) -> SkyLayers {
         additive,
         dark,
     }
+}
+
+/// `RenderGlobal.renderEndSky`: six faces of a 100-block cube, the `end_sky` texture tiled 16 times on each, in
+/// gray 40/255. Drawn alpha blended and unfogged around `eye`.
+pub fn build_end_sky(eye: [f64; 3]) -> SkyGeometry {
+    let mut g = SkyGeometry::default();
+    let c = 40.0 / 255.0;
+    let color = [c, c, c, 1.0];
+    // (rotation in degrees, axis) of each face, as the `glRotatef` before it.
+    let faces = [
+        None,
+        Some((90.0, 0)),
+        Some((-90.0, 0)),
+        Some((180.0, 0)),
+        Some((90.0, 2)),
+        Some((-90.0, 2)),
+    ];
+    for face in faces {
+        let place = |v: [f32; 3]| add(face.map_or(v, |(deg, axis)| rot(v, deg, axis)), eye);
+        g.quad([
+            (place([-100.0, -100.0, -100.0]), [0.0, 0.0], color),
+            (place([-100.0, -100.0, 100.0]), [0.0, 16.0], color),
+            (place([100.0, -100.0, 100.0]), [16.0, 16.0], color),
+            (place([100.0, -100.0, -100.0]), [16.0, 0.0], color),
+        ]);
+    }
+    g
 }
 
 /// `RenderGlobal.renderStars`: 1500 quads on a sphere of radius 100, seeded 10842.
@@ -949,5 +1058,70 @@ mod tests {
         };
         assert_eq!(horizon(&flat), 0.0);
         assert_eq!(horizon(&Environment::default()), 63.0);
+    }
+
+    fn in_dimension(dimension: Dimension, render_distance_chunks: u32) -> SkyState {
+        Environment {
+            dimension,
+            render_distance_chunks,
+            view_y: 64.0,
+            ..Environment::default()
+        }
+        .sky_state(0.8, [0.0; 3])
+    }
+
+    /// `NetherDimension.getFogColor` and `getTimeOfDay`: the fog is dark red and the sky black, at any world time.
+    #[test]
+    fn nether_fog_is_dark_red_and_the_sky_black() {
+        let s = in_dimension(Dimension::Nether, 16);
+        assert_eq!(s.angle, 0.5);
+        assert_eq!(s.sky, [0.0; 3]);
+        // The fog moves toward the black sky by `1 - (0.25 + 0.75 * 16 / 32) ^ 0.25`.
+        let keep = (0.25f32 + 0.75 * 16.0 / 32.0).powf(0.25);
+        assert!((s.fog[0] - 0.2 * keep).abs() < 1e-6);
+        assert!((s.fog[1] - 0.03 * keep).abs() < 1e-6);
+        assert_eq!((s.fog_start, s.fog_end), (16.0 * 16.0 * 0.05, 96.0));
+    }
+
+    /// `TheEndDimension.getFogColor`: 0xA08CA0 times 0.15, then the render distance blend toward the day sky colour.
+    #[test]
+    fn end_fog_is_dark_purple_with_thick_fog_distances() {
+        let s = in_dimension(Dimension::End, 8);
+        assert_eq!(s.angle, 0.0);
+        let base = Dimension::End.fog_color(1.0);
+        assert!((base[0] - 0.094_117_65).abs() < 1e-6);
+        assert!((base[1] - 0.075_294_12).abs() < 1e-6);
+        let f = 1.0 - (0.25f32 + 0.75 * 8.0 / 32.0).powf(0.25);
+        assert!((s.fog[0] - (base[0] + (s.sky[0] - base[0]) * f)).abs() < 1e-6);
+        assert_eq!((s.fog_start, s.fog_end), (128.0 * 0.05, 64.0));
+    }
+
+    #[test]
+    fn only_the_overworld_draws_a_sky_and_clouds() {
+        for d in [Dimension::Nether, Dimension::End] {
+            let env = Environment {
+                dimension: d,
+                ..Environment::default()
+            };
+            let layers = build_sky(&env, &env.sky_state(0.8, [0.0; 3]), [0.0; 3]);
+            assert!(layers.solid.vertices.is_empty() && layers.additive.vertices.is_empty());
+            assert!(layers.blend.vertices.is_empty() && layers.dark.vertices.is_empty());
+        }
+        let day = Environment::default();
+        let layers = build_sky(&day, &day.sky_state(0.8, [0.0; 3]), [0.0; 3]);
+        assert!(!layers.solid.vertices.is_empty());
+    }
+
+    /// `renderEndSky`: six faces at +-100 around the eye, textured 0..16 in gray 40.
+    #[test]
+    fn end_sky_is_a_tiled_cube_around_the_eye() {
+        let g = build_end_sky([10.0, 20.0, 30.0]);
+        assert_eq!(g.vertices.len(), 24);
+        for v in &g.vertices {
+            let d = [v.pos[0] - 10.0, v.pos[1] - 20.0, v.pos[2] - 30.0];
+            assert!(d.iter().all(|c| (c.abs() - 100.0).abs() < 1e-3));
+            assert!(v.uv.iter().all(|t| *t == 0.0 || *t == 16.0));
+            assert_eq!(v.color, [40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0, 1.0]);
+        }
     }
 }

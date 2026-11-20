@@ -12,7 +12,8 @@ use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks};
 use crate::particles::Quads;
 use crate::post::Post;
 use crate::sky::{
-    build_clouds, build_sky, EnvTexture, Environment, SkyGeometry, SkyState, ENV_H, ENV_W,
+    build_clouds, build_end_sky, build_sky, Dimension, EnvTexture, Environment, SkyGeometry,
+    SkyState, ENV_H, ENV_W,
 };
 use crate::weather::{build_precipitation, precipitation_height, rain_radius};
 use crate::{Camera, ChunkBlocks, Quad};
@@ -37,6 +38,9 @@ const FOOTPRINT_SHEET: &str = "textures/particle/footprint.png";
 /// Outstanding mesh tasks (queued, running or waiting for upload); `ChunkRenderDispatcher.pendingTasks` holds 100.
 const MAX_PENDING_MESHES: usize = 100;
 /// Time per frame for uploading finished meshes, at least one; vanilla `runTasksUntil` stops at the frame's finish time.
+/// `RenderGlobal.END_SKY_TEXTURES`, relative to `assets/minecraft`.
+const END_SKY_TEXTURE: &str = "textures/environment/end_sky.png";
+
 const UPLOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(2);
 
 #[repr(C)]
@@ -50,6 +54,8 @@ struct Globals {
     screen: [f32; 4],
     /// The tint a hit entity is mixed with: red, green, blue, strength.
     hurt: [f32; 4],
+    /// The dimension's light: lowest light table value, 1 in the End (`updateLightMap` replaces the colour there).
+    dim: [f32; 4],
 }
 
 struct GpuMesh {
@@ -1785,6 +1791,7 @@ impl Renderer {
             fog: [1.0e6, 2.0e6, sun_brightness, 1.5],
             screen: world.screen,
             hurt: world.hurt,
+            dim: world.dim,
         };
         self.queue
             .write_buffer(&self.hand_globals, 0, bytemuck::bytes_of(&globals));
@@ -1911,7 +1918,13 @@ impl Renderer {
         let sky_blend = self.upload_geometry(&layers.blend);
         let sky_add = self.upload_geometry(&layers.additive);
         let sky_dark = self.upload_geometry(&layers.dark);
-        let clouds = (self.env_tex.has_clouds && env.fluid.is_none())
+        let end_sky = (env.dimension == Dimension::End)
+            .then(|| self.upload_geometry(&build_end_sky(cam.pos)))
+            .flatten();
+        if end_sky.is_some() {
+            self.load_texture(END_SKY_TEXTURE);
+        }
+        let clouds = (env.dimension.is_natural() && self.env_tex.has_clouds && env.fluid.is_none())
             .then(|| build_clouds(&env, &sky, cam.pos, &self.env_tex.clouds))
             .and_then(|g| self.upload_geometry(&g));
 
@@ -2014,6 +2027,12 @@ impl Renderer {
             sky_add.iter().for_each(|m| draw_mesh(&mut pass, m));
             pass.set_pipeline(&self.sky_fog_pipe);
             sky_dark.iter().for_each(|m| draw_mesh(&mut pass, m));
+            if let Some(m) = &end_sky {
+                pass.set_bind_group(0, &self.textures[END_SKY_TEXTURE], &[]);
+                pass.set_pipeline(&self.sky_pipe);
+                draw_mesh(&mut pass, m);
+                pass.set_bind_group(0, &self.env_group, &[]);
+            }
             // `renderWorldPass`: below y 128 the clouds draw before the terrain, so near
             // geometry and particles are never covered by a cloud behind them.
             if let (Some(m), true) = (&clouds, below_clouds) {
@@ -2168,6 +2187,12 @@ impl Renderer {
             },
             screen: [w as f32, h as f32, env.night_vision, env.sky_darkness],
             hurt: mod_probe::VANILLA_HURT,
+            dim: [
+                env.dimension.light_floor(),
+                f32::from(env.dimension == Dimension::End),
+                0.0,
+                0.0,
+            ],
         }
     }
 

@@ -217,6 +217,8 @@ pub struct Game {
     pub reduced_debug: bool,
     /// Level type `flat` from `JoinGame`/`Respawn`: `Dimension.getFogSize` is 1 instead of 1/32.
     pub flat_world: bool,
+    /// Dimension id from `JoinGame`/`Respawn`: -1 Nether, 0 Overworld, 1 End.
+    pub dimension: i32,
     /// Client ticks since the world loaded (`EntityRenderer.rendererUpdateCount`).
     pub ticks: u64,
     pub inv: Inventory,
@@ -326,6 +328,7 @@ impl Game {
             spawn: [0; 3],
             reduced_debug: false,
             flat_world: false,
+            dimension: 0,
             ticks: 0,
             inv: Inventory::default(),
             broken: Vec::new(),
@@ -591,6 +594,7 @@ impl Game {
             NetEvent::Respawn { dimension_changed } => {
                 return Some(self.respawn(dimension_changed))
             }
+            NetEvent::Dimension(id) => self.dimension = id,
             NetEvent::LevelType { flat } => self.flat_world = flat,
             NetEvent::Chunk(c) => {
                 let at = (c.x, c.z);
@@ -1441,6 +1445,14 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn dimension_event_sets_the_dimension() {
+        let mut g = Game::new();
+        assert_eq!(g.dimension, 0);
+        g.apply(NetEvent::Dimension(-1));
+        assert_eq!(g.dimension, -1);
     }
 
     #[test]

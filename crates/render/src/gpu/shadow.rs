@@ -45,7 +45,7 @@ impl Renderer {
         let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
         self.fog_light.advance(
             env.ticks,
-            crate::sky::fog_light::light_brightness(level as u8),
+            env.dimension.light_brightness(level as u8),
             env.render_distance_chunks,
         );
         self.fog_light.at(env.partial)
@@ -60,7 +60,7 @@ impl Renderer {
     /// `World.skylightSubtracted` of this frame.
     pub(super) fn skylight_subtracted(&self) -> i32 {
         let env = self.environment;
-        entity::shadow::skylight_subtracted(env.world_time, env.rain, env.thunder)
+        entity::shadow::skylight_subtracted(env.dimension, env.world_time, env.rain, env.thunder)
     }
 
     /// `Entity.getBrightness`: the light table value `0..=1` of the block at the eye `eye`, with the sky light reduced by

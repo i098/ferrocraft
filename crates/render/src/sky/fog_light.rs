@@ -4,12 +4,6 @@
 
 use super::Fluid;
 
-/// `WorldProvider.generateLightBrightnessTable` for the overworld, indexed by light level `0..=15`.
-pub fn light_brightness(level: u8) -> f32 {
-    let f1 = 1.0 - f32::from(level.min(15)) / 15.0;
-    (1.0 - f1) / (f1 * 3.0 + 1.0)
-}
-
 /// `GameRenderer.updateRenderer`: the target is the block light brightness, pulled toward 1 as the render distance grows.
 fn target(brightness: f32, render_distance_chunks: u32) -> f32 {
     let far = (render_distance_chunks as f32 / 32.0).clamp(0.0, 1.0);
@@ -113,14 +107,19 @@ pub(super) fn fluid_fog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sky::Environment;
+    use crate::sky::{Dimension, Environment};
 
     #[test]
     fn brightness_table_runs_from_dark_to_full() {
-        assert_eq!(light_brightness(0), 0.0);
-        assert_eq!(light_brightness(15), 1.0);
+        let table = |d: Dimension, l| d.light_brightness(l);
+        assert_eq!(table(Dimension::Overworld, 0), 0.0);
+        assert_eq!(table(Dimension::Overworld, 15), 1.0);
         let want = (1.0 - 8.0 / 15.0) / (8.0 / 15.0 * 3.0 + 1.0);
-        assert!((light_brightness(7) - want).abs() < 1e-7);
+        assert!((table(Dimension::Overworld, 7) - want).abs() < 1e-7);
+        // `NetherDimension.initBrightnessTable`: `(1 - f1) / (f1 * 3 + 1) * (1 - 0.1) + 0.1`.
+        assert_eq!(table(Dimension::Nether, 0), 0.1);
+        assert!((table(Dimension::Nether, 7) - (want * 0.9 + 0.1)).abs() < 1e-7);
+        assert_eq!(table(Dimension::Nether, 15), 1.0);
     }
 
     #[test]

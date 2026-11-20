@@ -37,7 +37,7 @@ mod weather;
 pub use hand::{
     compass_target, dial_frame, ArmSkin, DialTurns, Hand, HandLook, HeldKind, UseAction, Using,
 };
-pub use sky::{celestial_angle, Environment, Fluid};
+pub use sky::{celestial_angle, Dimension, Environment, Fluid};
 
 pub use ambient::{random_display_ticks, Effect as AmbientEffect};
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};

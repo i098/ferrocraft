@@ -78,6 +78,8 @@ pub enum NetEvent {
     Respawn {
         dimension_changed: bool,
     },
+    /// Dimension id of `JoinGame`/`Respawn`: -1 Nether, 0 Overworld, 1 End.
+    Dimension(i32),
     /// Level type of `JoinGame`/`Respawn`; `flat` is superflat (case-insensitive like `WorldType.parseWorldType`).
     LevelType {
         flat: bool,

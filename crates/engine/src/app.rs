@@ -1026,6 +1026,7 @@ impl App {
             respiration: self.game.respiration(),
             water_breathing: self.game.water_breathing(),
             flat_world: self.game.flat_world,
+            dimension: render::Dimension::from_id(self.game.dimension),
             sky_darkness: self.sky_darkness.at(frac as f32),
             ..Environment::default()
         });

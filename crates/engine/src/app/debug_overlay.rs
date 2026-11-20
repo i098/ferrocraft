@@ -107,27 +107,7 @@ impl App {
             .entities
             .iter()
             .zip(draws)
-            .filter(|(_, d)| {
-                let (w, h) = (f64::from(d.size.0), f64::from(d.size.1));
-                let reach = (2.0 * w + h) / 3.0 * 64.0;
-                let dist: f64 = (0..3).map(|a| (d.pos[a] - eye[a]).powi(2)).sum();
-                let min = [
-                    d.pos[0] - w / 2.0 - 0.5,
-                    d.pos[1] - 0.5,
-                    d.pos[2] - w / 2.0 - 0.5,
-                ];
-                let max = [
-                    d.pos[0] + w / 2.0 + 0.5,
-                    d.pos[1] + h + 0.5,
-                    d.pos[2] + w / 2.0 + 0.5,
-                ];
-                let section = (
-                    (d.pos[0].floor() as i32) >> 4,
-                    ((d.pos[1].floor() as i32) >> 4).clamp(0, 15),
-                    (d.pos[2].floor() as i32) >> 4,
-                );
-                dist < reach * reach && sections.contains(&section) && frustum.contains(min, max)
-            })
+            .filter(|(_, d)| entity_in_view(d, eye, &sections, &frustum))
             .count();
         (sections, rendered)
     }
@@ -228,4 +208,32 @@ fn process_memory() -> (u64, u64, u64) {
     let at = |i: usize| pages.get(i).copied().unwrap_or(0) * PAGE;
     let used = at(1);
     (max, at(5).max(used).min(max.max(used)), used)
+}
+
+/// `RenderManager.shouldRender` for one entity: in range, in a visible section and inside the frustum.
+fn entity_in_view(
+    d: &EntityDraw,
+    eye: [f64; 3],
+    sections: &HashSet<(i32, i32, i32)>,
+    frustum: &Frustum,
+) -> bool {
+    let (w, h) = (f64::from(d.size.0), f64::from(d.size.1));
+    let reach = (2.0 * w + h) / 3.0 * 64.0;
+    let dist: f64 = (0..3).map(|a| (d.pos[a] - eye[a]).powi(2)).sum();
+    let min = [
+        d.pos[0] - w / 2.0 - 0.5,
+        d.pos[1] - 0.5,
+        d.pos[2] - w / 2.0 - 0.5,
+    ];
+    let max = [
+        d.pos[0] + w / 2.0 + 0.5,
+        d.pos[1] + h + 0.5,
+        d.pos[2] + w / 2.0 + 0.5,
+    ];
+    let section = (
+        (d.pos[0].floor() as i32) >> 4,
+        ((d.pos[1].floor() as i32) >> 4).clamp(0, 15),
+        (d.pos[2].floor() as i32) >> 4,
+    );
+    dist < reach * reach && sections.contains(&section) && frustum.contains(min, max)
 }

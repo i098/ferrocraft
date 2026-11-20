@@ -90,6 +90,31 @@ const IDENTITY: [[f32; 4]; 4] = [
 /// Each line of `base` projected by the column-major `m`, then twice: GL covers the pixels whose centres lie within
 /// 1 px of the line across its minor axis, so the second copy sits one pixel toward the nearer side. Lines behind the
 /// camera are collapsed to a point.
+/// One edge's clip-space ends as NDC positions, and the same ends moved one pixel across the minor axis.
+fn widen_edge(ends: [[f32; 4]; 2], (w, h): (f32, f32)) -> ([[f32; 3]; 2], [[f32; 3]; 2]) {
+    let ndc = |c: [f32; 4]| [c[0] / c[3], c[1] / c[3], c[2] / c[3]];
+    let [na, nb] = ends.map(ndc);
+    let x_major = ((nb[0] - na[0]) * w).abs() >= ((nb[1] - na[1]) * h).abs();
+    let centre = if x_major {
+        (na[1] + nb[1]) * h
+    } else {
+        (na[0] + nb[0]) * w
+    } / 4.0;
+    let sign = if centre - centre.floor() <= 0.5 {
+        -1.0
+    } else {
+        1.0
+    };
+    let shift = |n: [f32; 3]| {
+        if x_major {
+            [n[0], n[1] + sign * 2.0 / h, n[2]]
+        } else {
+            [n[0] + sign * 2.0 / w, n[1], n[2]]
+        }
+    };
+    ([na, nb], [shift(na), shift(nb)])
+}
+
 fn widen(base: &[Vertex], m: &[[f32; 4]; 4], (w, h): (u32, u32)) -> Vec<Vertex> {
     let (w, h) = (w as f32, h as f32);
     let clip = |v: &Vertex| {
@@ -109,28 +134,9 @@ fn widen(base: &[Vertex], m: &[[f32; 4]; 4], (w, h): (u32, u32)) -> Vec<Vertex> 
             shifted.extend([behind; 2]);
             continue;
         }
-        let ndc = |c: [f32; 4]| [c[0] / c[3], c[1] / c[3], c[2] / c[3]];
-        let (na, nb) = (ndc(a), ndc(b));
-        let x_major = ((nb[0] - na[0]) * w).abs() >= ((nb[1] - na[1]) * h).abs();
-        let centre = if x_major {
-            (na[1] + nb[1]) * h
-        } else {
-            (na[0] + nb[0]) * w
-        } / 4.0;
-        let sign = if centre - centre.floor() <= 0.5 {
-            -1.0
-        } else {
-            1.0
-        };
-        for (v, n) in pair.iter().zip([na, nb]) {
-            out.push(Vertex { pos: n, ..*v });
-            let pos = if x_major {
-                [n[0], n[1] + sign * 2.0 / h, n[2]]
-            } else {
-                [n[0] + sign * 2.0 / w, n[1], n[2]]
-            };
-            shifted.push(Vertex { pos, ..*v });
-        }
+        let ([na, nb], [sa, sb]) = widen_edge([a, b], (w, h));
+        out.extend([Vertex { pos: na, ..pair[0] }, Vertex { pos: nb, ..pair[1] }]);
+        shifted.extend([Vertex { pos: sa, ..pair[0] }, Vertex { pos: sb, ..pair[1] }]);
     }
     out.append(&mut shifted);
     out

@@ -57,18 +57,8 @@ fn flood(opaque: &mut [bool; 4096], start: usize) -> u8 {
 /// `VisGraph.computeVisibility` as `SetVisibility` bits: bit `from + to * 6` is set when a face `from` sees face `to`.
 /// `opaque(x, y, z)` takes section-local coordinates.
 pub fn section_visibility(opaque: impl Fn(usize, usize, usize) -> bool) -> u64 {
-    let mut cells = [false; 4096];
-    let mut solid = 0;
-    for y in 0..16 {
-        for z in 0..16 {
-            for x in 0..16 {
-                if opaque(x, y, z) {
-                    cells[cell(x, y, z)] = true;
-                    solid += 1;
-                }
-            }
-        }
-    }
+    let mut cells = opaque_cells(opaque);
+    let solid = cells.iter().filter(|&&c| c).count();
     if solid < 256 {
         return (1 << 36) - 1;
     }
@@ -77,31 +67,37 @@ pub fn section_visibility(opaque: impl Fn(usize, usize, usize) -> bool) -> u64 {
     }
     let mut bits = 0u64;
     for i in 0..4096 {
-        let (x, y, z) = (i & 15, i >> 8 & 15, i >> 4 & 15);
-        let edge = [x, y, z].iter().any(|&c| c == 0 || c == 15);
-        if edge && !cells[i] {
-            let set = flood(&mut cells, i);
-            for a in (0..6).filter(|a| set >> a & 1 == 1) {
-                for b in (0..6).filter(|b| set >> b & 1 == 1) {
-                    bits |= 1 << (a + b * 6) | 1 << (b + a * 6);
-                }
-            }
+        if !on_edge(i) || cells[i] {
+            continue;
+        }
+        let set = flood(&mut cells, i);
+        let open = || (0..6).filter(move |a| set >> a & 1 == 1);
+        for (a, b) in open().flat_map(|a| open().map(move |b| (a, b))) {
+            bits |= 1 << (a + b * 6);
         }
     }
     bits
 }
 
+/// The opacity of the 4096 cells of a section, indexed by [`cell`].
+fn opaque_cells(opaque: impl Fn(usize, usize, usize) -> bool) -> [bool; 4096] {
+    let mut cells = [false; 4096];
+    for (i, c) in cells.iter_mut().enumerate() {
+        *c = opaque(i & 15, i >> 8 & 15, i >> 4 & 15);
+    }
+    cells
+}
+
+/// Whether the cell lies on a face of the section.
+fn on_edge(i: usize) -> bool {
+    [i & 15, i >> 8 & 15, i >> 4 & 15]
+        .iter()
+        .any(|&c| c == 0 || c == 15)
+}
+
 /// `VisGraph.getVisibleFacings`: the facings of the section reached from the block `(x, y, z)` (section-local).
 pub fn visible_facings(opaque: impl Fn(usize, usize, usize) -> bool, at: [usize; 3]) -> u8 {
-    let mut cells = [false; 4096];
-    for y in 0..16 {
-        for z in 0..16 {
-            for x in 0..16 {
-                cells[cell(x, y, z)] = opaque(x, y, z);
-            }
-        }
-    }
-    flood(&mut cells, cell(at[0], at[1], at[2]))
+    flood(&mut opaque_cells(opaque), cell(at[0], at[1], at[2]))
 }
 
 /// The view frustum: six inward planes `a x + b y + c z + d`, normalised.
@@ -145,6 +141,19 @@ impl Frustum {
     }
 }
 
+/// A section `(chunk x, section y, chunk z)`.
+type Key = (i32, i32, i32);
+
+fn section_in_frustum(frustum: &Frustum, (x, y, z): Key) -> bool {
+    let min = [x * 16, y * 16, z * 16].map(f64::from);
+    frustum.contains(min, min.map(|v| v + 16.0))
+}
+
+/// Inside the render distance around the feet chunk and the 16 section rows.
+fn in_grid((x, y, z): Key, feet: (i32, i32), distance: i32) -> bool {
+    (x - feet.0).abs() <= distance && (0..16).contains(&y) && (z - feet.1).abs() <= distance
+}
+
 /// `RenderGlobal.setupTerrain`: the sections `(cx, sy, cz)` that survive frustum and cave culling.
 /// `eye` is the camera, `feet_chunk` the chunk of the view entity's feet, `facings` what
 /// [`visible_facings`] returned for the eye block; `vis(cx, sy, cz)` is a compiled section's
@@ -157,56 +166,28 @@ pub fn visible_sections(
     facings: impl FnOnce(i32, i32, i32) -> u8,
     vis: impl Fn(i32, i32, i32) -> Option<u64>,
 ) -> HashSet<(i32, i32, i32)> {
-    type Key = (i32, i32, i32);
-    let section_box = |(x, y, z): Key| {
-        let min = [x * 16, y * 16, z * 16].map(f64::from);
-        (min, min.map(|v| v + 16.0))
-    };
-    let in_frustum = |k: Key| {
-        let (min, max) = section_box(k);
-        frustum.contains(min, max)
-    };
-    let in_grid = |(x, y, z): Key| {
-        (x - feet_chunk.0).abs() <= distance
-            && (0..16).contains(&y)
-            && (z - feet_chunk.1).abs() <= distance
-    };
+    let in_frustum = |k: Key| section_in_frustum(frustum, k);
+    let in_grid = |k: Key| in_grid(k, feet_chunk, distance);
     let eye = cam.pos.map(|v| (v.floor() as i32).div_euclid(16));
+    let eye_key = (eye[0], eye[1], eye[2]);
     let mut found = HashSet::new();
     let mut seen: HashSet<Key> = HashSet::new();
     // (section, facing it was entered through, facings travelled)
     let mut queue: VecDeque<(Key, Option<usize>, u8)> = VecDeque::new();
-    let eye_key = (eye[0], eye[1], eye[2]);
+    let mut start = |k: Key| {
+        seen.insert(k);
+        queue.push_back((k, None, 0));
+    };
     if !in_grid(eye_key) || !(0..16).contains(&eye[1]) {
         let y = if cam.pos[1] > 0.0 { 15 } else { 0 };
-        for x in -distance..=distance {
-            for z in -distance..=distance {
-                let k = (feet_chunk.0 + x, y, feet_chunk.1 + z);
-                if in_frustum(k) {
-                    seen.insert(k);
-                    queue.push_back((k, None, 0));
-                }
-            }
-        }
+        let around = (-distance..=distance).flat_map(|x| {
+            (-distance..=distance).map(move |z| (feet_chunk.0 + x, y, feet_chunk.1 + z))
+        });
+        around.filter(|&k| in_frustum(k)).for_each(&mut start);
+    } else if eye_exits(facings(eye[0], eye[1], eye[2]), cam) == 0 {
+        found.insert(eye_key);
     } else {
-        let mut set = facings(eye[0], eye[1], eye[2]);
-        if set.count_ones() == 1 {
-            let look = look(cam);
-            let mut best = (f64::MIN, NORTH);
-            for (f, s) in STEP.iter().enumerate() {
-                let d: f64 = (0..3).map(|a| look[a] * f64::from(s[a])).sum();
-                if d > best.0 {
-                    best = (d, f);
-                }
-            }
-            set &= !(1 << (best.1 ^ 1));
-        }
-        if set == 0 {
-            found.insert(eye_key);
-        } else {
-            seen.insert(eye_key);
-            queue.push_back((eye_key, None, 0));
-        }
+        start(eye_key);
     }
     while let Some((k, from, travelled)) = queue.pop_front() {
         found.insert(k);
@@ -214,17 +195,37 @@ pub fn visible_sections(
         for (f, s) in STEP.iter().enumerate() {
             let n = (k.0 + s[0], k.1 + s[1], k.2 + s[2]);
             let back = travelled >> (f ^ 1) & 1 == 1;
-            let open = match (from, own) {
-                (Some(from), Some(bits)) => bits >> ((from ^ 1) + f * 6) & 1 == 1,
-                _ => true,
-            };
-            if !back && open && in_grid(n) && !seen.contains(&n) && in_frustum(n) {
+            if !back && passes(from, own, f) && in_grid(n) && !seen.contains(&n) && in_frustum(n) {
                 seen.insert(n);
                 queue.push_back((n, Some(f), travelled | 1 << f));
             }
         }
     }
     found
+}
+
+/// The facings the view can leave the eye's section by: one open facing is narrowed to what the look direction allows.
+fn eye_exits(mut set: u8, cam: &Camera) -> u8 {
+    if set.count_ones() == 1 {
+        set &= !(1 << (facing_along(&look(cam)) ^ 1));
+    }
+    set
+}
+
+/// The facing whose step has the largest dot product with `look`.
+fn facing_along(look: &[f64; 3]) -> usize {
+    let dot = |s: &[i32; 3]| (0..3).map(|a| look[a] * f64::from(s[a])).sum::<f64>();
+    (0..6)
+        .reduce(|b, f| if dot(&STEP[f]) > dot(&STEP[b]) { f } else { b })
+        .unwrap_or(NORTH)
+}
+
+/// Whether a section entered through `from` lets the view out through `to` (`SetVisibility.isVisible`).
+fn passes(from: Option<usize>, vis: Option<u64>, to: usize) -> bool {
+    match (from, vis) {
+        (Some(from), Some(bits)) => bits >> ((from ^ 1) + to * 6) & 1 == 1,
+        _ => true,
+    }
 }
 
 /// `RenderGlobal.getViewVector`.

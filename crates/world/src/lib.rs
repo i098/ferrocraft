@@ -12,6 +12,7 @@
 pub mod body;
 pub mod border;
 pub mod camera;
+pub mod chicken;
 pub mod chunk;
 pub mod dig;
 pub mod door;
@@ -30,7 +31,6 @@ pub mod projectile;
 pub mod shape;
 pub mod squid;
 pub mod squish;
-pub mod chicken;
 pub mod tool;
 pub mod vehicle;
 

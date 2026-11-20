@@ -95,7 +95,11 @@ fn chicken_draws_legs_and_flapped_wings() {
     r.set_entities(&[chicken(-0.8, 0.0), chicken(0.8, 1.2)]);
     let img = r.render_to_rgba(&cam, &[]).2;
     let (mut left, mut right) = (0usize, 0usize);
-    for (i, (a, b)) in standing.chunks_exact(4).zip(img.chunks_exact(4)).enumerate() {
+    for (i, (a, b)) in standing
+        .chunks_exact(4)
+        .zip(img.chunks_exact(4))
+        .enumerate()
+    {
         if a != b {
             if i % 1280 < 640 {
                 left += 1;
@@ -105,8 +109,9 @@ fn chicken_draws_legs_and_flapped_wings() {
         }
     }
     // Only the flapping chicken may change, and its spread wings must move pixels.
-    assert!(left.min(right) == 0, "standing chicken changed: {left} vs {right}");
-    assert!(left.max(right) > 50, "wings stayed folded: {left} {right}");
+    // Camera looks down +z, so x=+0.8 (the flapping chicken) lands in the left half.
+    assert!(right == 0, "standing chicken changed: {right}");
+    assert!(left > 50, "wings stayed folded: {left}");
     if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
         encode_png(
             &std::path::PathBuf::from(dir).join("chicken.png"),

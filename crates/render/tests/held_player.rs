@@ -97,11 +97,11 @@ fn held_flat_items_and_chest_draw_at_the_hand() {
     }
     let all: Vec<EntityDraw> = rows.concat();
     r.set_entities(&all);
-    let frame = r.render_to_rgba(&cam, &[]).2;
+    let held_all = r.render_to_rgba(&cam, &[]).2;
     if let Some(dir) = std::env::var_os("HELD_PROOF_DIR") {
         let name = std::env::var("HELD_PROOF_NAME").unwrap_or_else(|_| "after".into());
         let path = std::path::PathBuf::from(dir).join(format!("{name}.png"));
-        encode_png(&path, 1280, 720, &frame).unwrap();
+        encode_png(&path, 1280, 720, &held_all).unwrap();
     }
     if let Some(dir) = std::env::var_os("HELD_PROOF_DIR") {
         // F5 front view: the camera at the eye height, level, looking at one row from the front.
@@ -156,8 +156,8 @@ fn held_flat_items_and_chest_draw_at_the_hand() {
     let mut apple = player(0.0, 4.0, 180.0, 260);
     apple.pos[1] = 66.0;
     r.set_entities(&[apple]);
-    let frame = r.render_to_rgba(&under, &[]).2;
-    let red = frame
+    let apple_below = r.render_to_rgba(&under, &[]).2;
+    let red = apple_below
         .chunks(4)
         .filter(|p| p[0] > 120 && p[1] < 50 && p[2] < 50)
         .count();
@@ -175,5 +175,19 @@ fn held_flat_items_and_chest_draw_at_the_hand() {
     r.set_entities(&bare);
     let none = r.render_to_rgba(&cam, &[]).2;
     assert!(differs(&none, &empty) > 2000, "the players must draw");
-    assert!(differs(&none, &frame) > 500, "the held items must draw");
+    assert!(differs(&none, &held_all) > 500, "the held items must draw");
+    let chest = player(0.0, 4.0, 150.0, 54);
+    let mut bare_chest = chest.clone();
+    bare_chest.held = 0;
+    r.set_entities(&[bare_chest]);
+    let without = r.render_to_rgba(&cam, &[]).2;
+    r.set_entities(&[chest]);
+    let with = r.render_to_rgba(&cam, &[]).2;
+    let wood = |f: &[u8]| {
+        f.chunks(4)
+            .filter(|p| p[0] > 110 && p[0] > p[1] + 30 && p[1] > 70 && p[2] < 60)
+            .count()
+    };
+    let (a, b) = (wood(&with), wood(&without));
+    assert!(a > b + 100, "the held chest must draw wood pixels: {a} vs {b}");
 }

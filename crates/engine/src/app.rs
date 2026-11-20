@@ -1779,6 +1779,7 @@ fn entity_draw(
             jump: e.anim.jump_completion(p),
             squid: e.squid.pose(p),
             squish: e.squish.factor(p),
+            chicken_flap: e.flap.angle(p, f32::sin),
             guardian_spikes: e.anim.guardian.spikes_extension(p),
             guardian_tail: e.anim.guardian.tail_angle(p),
             dragon: e

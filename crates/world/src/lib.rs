@@ -12,6 +12,7 @@
 pub mod body;
 pub mod border;
 pub mod camera;
+pub mod chicken;
 pub mod chunk;
 pub mod dig;
 pub mod door;

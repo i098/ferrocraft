@@ -3,7 +3,7 @@
 //! `ModelSpider` and `ModelEnderman` (box layout, texture offsets and `setRotationAngles`), plus the
 //! sheep wool and the spider and enderman eye layers.
 //!
-//! Not ported: the chicken flap (the draw has no on-ground state) and villager head shake.
+//! Not ported: villager head shake.
 
 use super::{cos, quad_legs, wrap, EntityDraw, Model, Part, Skin};
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -240,12 +240,12 @@ fn silverfish(d: &EntityDraw) -> Model {
     model(Skin::Silverfish, parts)
 }
 
-/// `ModelChicken`: the wings hang unflapped, as an on-ground chicken holds them.
+/// `ModelChicken`: the wing angle is `RenderChicken.handleRotationFloat`, the `ageInTicks` of `setRotationAngles`.
 fn chicken(d: &EntityDraw) -> Model {
     let hr = head_rot(d);
     let (f, f1) = (d.limb_swing, d.limb_swing_amount);
     let head = [0.0, 15.0, -4.0];
-    let wing = 0.0;
+    let wing = d.look.chicken_flap;
     let parts = vec![
         Part::new(head, [-2.0, -6.0, -2.0], [4.0, 6.0, 3.0], (0.0, 0.0)).rot(hr),
         Part::new(head, [-2.0, -4.0, -4.0], [4.0, 2.0, 2.0], (14.0, 0.0)).rot(hr),

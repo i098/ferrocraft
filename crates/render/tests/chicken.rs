@@ -75,10 +75,9 @@ fn chicken(x: f64, flap: f32) -> EntityDraw {
 }
 
 #[test]
-#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
 fn chicken_draws_legs_and_flapped_wings() {
-    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
-    let mut r = Renderer::new_offscreen(1280, 720, Some(std::path::Path::new(&jar)));
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
+    let mut r = Renderer::new_offscreen(1280, 720, jar.as_deref());
     let cam = Camera {
         pos: [0.0, 64.62, 0.0],
         fov_deg: 70.0,
@@ -91,8 +90,23 @@ fn chicken_draws_legs_and_flapped_wings() {
     }
     // The first frame uploads the light the entities read.
     let _ = r.render_to_rgba(&cam, &[]);
+    r.set_entities(&[chicken(-0.8, 0.0), chicken(0.8, 0.0)]);
+    let standing = r.render_to_rgba(&cam, &[]).2;
     r.set_entities(&[chicken(-0.8, 0.0), chicken(0.8, 1.2)]);
     let img = r.render_to_rgba(&cam, &[]).2;
+    let (mut left, mut right) = (0usize, 0usize);
+    for (i, (a, b)) in standing.chunks_exact(4).zip(img.chunks_exact(4)).enumerate() {
+        if a != b {
+            if i % 1280 < 640 {
+                left += 1;
+            } else {
+                right += 1;
+            }
+        }
+    }
+    // Only the flapping chicken may change, and its spread wings must move pixels.
+    assert!(left.min(right) == 0, "standing chicken changed: {left} vs {right}");
+    assert!(left.max(right) > 50, "wings stayed folded: {left} {right}");
     if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
         encode_png(
             &std::path::PathBuf::from(dir).join("chicken.png"),

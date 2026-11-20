@@ -649,7 +649,7 @@ impl App {
         };
         let store = &self.game.store;
         let top = precipitation_top(store);
-        let (rain, _) = self.game.weather.strengths(1.0);
+        let (rain, _) = self.game.weather.strengths();
         let settings = &self.ui.settings;
         let clock = render::RainClock {
             ticks: self.game.ticks,
@@ -684,7 +684,7 @@ impl App {
             return;
         };
         let store = &self.game.store;
-        let raining = raining_at(store, self.game.weather.strengths(1.0).0);
+        let raining = raining_at(store, self.game.weather.strengths().0);
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |t| t.as_nanos() as i64);

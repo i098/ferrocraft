@@ -1,65 +1,35 @@
-//! Client-side weather: `World.updateWeatherBody` and `NetHandlerPlayClient.handleChangeGameState` of 1.8.9.
-
-const STEP: f32 = 0.01;
+//! Client-side weather: `NetHandlerPlayClient.handleChangeGameState` of 1.8.9.
+//!
+//! The vanilla client never runs `World.updateWeatherBody`: it returns at once when `World.isRemote`
+//! (checked with `javap`). The strengths change only by Change Game State packets, so a thunder strength
+//! the server sent stays until the next packet; the server sends one on every change.
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Weather {
-    /// `WorldInfo.raining`, set only by Change Game State reasons 1 and 2.
-    raining: bool,
     rain: f32,
-    prev_rain: f32,
     thunder: f32,
-    prev_thunder: f32,
 }
 
 impl Weather {
     /// Change Game State: 1 begin rain, 2 end rain, 7 rain strength, 8 thunder strength; other reasons are not weather.
     pub fn apply(&mut self, reason: u8, value: f32) {
         match reason {
-            1 => {
-                self.raining = true;
-                self.set_rain(0.0);
-            }
-            2 => {
-                self.raining = false;
-                self.set_rain(1.0);
-            }
-            7 => self.set_rain(value),
-            8 => {
-                self.prev_thunder = value;
-                self.thunder = value;
-            }
+            1 => self.rain = 0.0,
+            2 => self.rain = 1.0,
+            7 => self.rain = value,
+            8 => self.thunder = value,
             _ => {}
         }
     }
 
-    /// A new `WorldClient` starts dry: rain 0, thunder 0, not raining (`World` field defaults).
+    /// A new `WorldClient` starts dry: rain 0, thunder 0 (`World` field defaults).
     pub fn reset(&mut self) {
         *self = Weather::default();
     }
 
-    /// `World.setRainStrength`: the previous value follows at once, so there is no fade.
-    fn set_rain(&mut self, v: f32) {
-        self.prev_rain = v;
-        self.rain = v;
-    }
-
-    /// One 20 TPS step. The client never learns `WorldInfo.thundering`, so thunder only decays between server updates.
-    pub fn tick(&mut self) {
-        self.prev_thunder = self.thunder;
-        self.thunder = (self.thunder - STEP).clamp(0.0, 1.0);
-        self.prev_rain = self.rain;
-        let dir = if self.raining { STEP } else { -STEP };
-        self.rain = (self.rain + dir).clamp(0.0, 1.0);
-    }
-
-    /// `World.getRainStrength(partial)` and `getThunderStrength(partial)`.
-    pub fn strengths(&self, partial: f32) -> (f32, f32) {
-        let lerp = |prev: f32, now: f32| prev + (now - prev) * partial;
-        (
-            lerp(self.prev_rain, self.rain),
-            lerp(self.prev_thunder, self.thunder),
-        )
+    /// `World.getRainStrength` and `getThunderStrength`.
+    pub fn strengths(&self) -> (f32, f32) {
+        (self.rain, self.thunder)
     }
 }
 
@@ -97,43 +67,42 @@ pub(crate) fn raining_at(
 mod tests {
     use super::*;
 
+    /// Oracle: vanilla 1.8.9 `World.getCloudColor` at noon (day scale 1) with rain 1, thunder 0:
+    /// each channel is 1*(1-0.95) + 0.6*0.95 = 0.62, a faint grey, never navy.
     #[test]
-    fn rain_ramps_up_after_begin_and_down_after_end() {
+    fn snow_packets_give_vanilla_grey_clouds() {
         let mut w = Weather::default();
         w.apply(1, 0.0);
-        for _ in 0..50 {
-            w.tick();
+        w.apply(7, 1.0);
+        w.apply(8, 0.0);
+        let (rain, thunder) = w.strengths();
+        let env = render::Environment {
+            rain,
+            thunder,
+            ..Default::default()
+        };
+        let cloud = env.sky_state(0.0, [0.0, 0.0, 1.0]).cloud;
+        for c in cloud {
+            assert!((c - 0.62).abs() < 1e-3, "{cloud:?}");
         }
-        assert!((w.strengths(1.0).0 - 0.5).abs() < 1e-4);
-        w.apply(2, 0.0);
-        assert_eq!(w.strengths(1.0).0, 1.0);
-        w.tick();
-        assert!((w.strengths(1.0).0 - 0.99).abs() < 1e-4);
-        w.apply(7, 0.25);
-        for _ in 0..100 {
-            w.tick();
-        }
-        assert_eq!(w.strengths(1.0).0, 0.0);
     }
 
+    /// Oracle: vanilla 1.8.9 getCloudColor; the server thunder strength is used as sent,
+    /// so thunder 1 at noon gives 0.62*0.05 + 0.62*0.2*0.95 per channel.
     #[test]
-    fn strength_interpolates_between_ticks() {
+    fn thunder_packet_gives_vanilla_cloud_colour() {
         let mut w = Weather::default();
+        w.apply(7, 1.0);
         w.apply(8, 1.0);
-        w.tick();
-        assert!((w.strengths(0.5).1 - 0.995).abs() < 1e-4);
-    }
-
-    #[test]
-    fn strength_changes_show_at_once_without_interpolating_from_the_old_value() {
-        let mut w = Weather::default();
-        w.apply(1, 0.0);
-        for _ in 0..50 {
-            w.tick();
+        let (rain, thunder) = w.strengths();
+        let env = render::Environment {
+            rain,
+            thunder,
+            ..Default::default()
+        };
+        let expected = 0.62 * 0.05 + 0.62 * 0.2 * 0.95;
+        for c in env.sky_state(0.0, [0.0, 0.0, 1.0]).cloud {
+            assert!((c - expected).abs() < 1e-3, "{c}");
         }
-        w.apply(2, 0.0);
-        assert_eq!(w.strengths(0.0).0, 1.0);
-        w.apply(8, 0.75);
-        assert_eq!(w.strengths(0.0).1, 0.75);
     }
 }

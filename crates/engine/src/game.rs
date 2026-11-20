@@ -813,7 +813,6 @@ impl Game {
         if self.daylight_cycle {
             self.world_time += 1;
         }
-        self.weather.tick();
         self.bolts.tick();
         self.swing.tick(self.effects.arm_swing_duration());
         if let Some(p) = &self.player {
@@ -829,7 +828,7 @@ impl Game {
             (self.death_ticks + 1).min(20)
         };
         let store = &self.store;
-        let rained_on = raining_at(store, self.weather.strengths(1.0).0);
+        let rained_on = raining_at(store, self.weather.strengths().0);
         self.entities
             .update_wet(|x, y, z| store.get_block(x, y, z), rained_on);
         if self.player.is_some() && self.gamemode != SPECTATOR {

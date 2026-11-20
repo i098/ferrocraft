@@ -1322,7 +1322,7 @@ mod tests {
     #[test]
     fn dimension_respawn_ends_rain_thunder_particles_and_container() {
         let app = respawned(true);
-        assert_eq!(app.game.weather.strengths(1.0), (0.0, 0.0));
+        assert_eq!(app.game.weather.strengths(), (0.0, 0.0));
         assert!(app.particles.is_empty());
         assert!(app.container.is_none());
     }
@@ -1340,7 +1340,7 @@ mod tests {
         assert!(!app.ui.is_open());
         assert!(!app.awaiting_terrain);
         assert!(app.container.is_none());
-        assert_eq!(app.game.weather.strengths(1.0).0, 1.0);
+        assert_eq!(app.game.weather.strengths().0, 1.0);
     }
 
     #[test]

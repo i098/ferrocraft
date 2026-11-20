@@ -979,12 +979,7 @@ impl App {
         self.run_effects(effects);
         let held = self.game.inv.held_stack().as_ref().map(|s| {
             let dye = s.nbt.as_ref().and_then(|n| n.dye());
-            (
-                s.id,
-                s.damage,
-                world::inventory::glint(s),
-                dye,
-            )
+            (s.id, s.damage, world::inventory::glint(s), dye)
         });
         let [arm_pitch, arm_yaw] = self.game.arm_look.at(frac as f32);
         let look = render::HandLook {

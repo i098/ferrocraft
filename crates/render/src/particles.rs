@@ -2553,6 +2553,26 @@ mod tests {
         assert!(lava.list.iter().all(|p| p.behavior == Behavior::DripLava));
     }
 
+    #[test]
+    fn lava_drip_colour_follows_the_1_8_9_age_formula() {
+        // Oracle: javap of 1.8.9 EntityDropParticleFX: (1, 16/(age+16), 4/(age+8)).
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 100.0, 0.5], [0.0; 3], 0);
+        for _ in 0..=40 {
+            let age = ps.list[0].age as f32;
+            ps.tick(|_, _, _| 0);
+            let want = match age as u32 {
+                0 => [1.0, 1.0, 0.5],
+                20 => [1.0, 0.4444, 0.1429],
+                40 => [1.0, 0.2857, 0.0833],
+                _ => continue,
+            };
+            for (got, want) in ps.list[0].color.iter().zip(want) {
+                assert!((got - want).abs() < 1e-3, "age {age}: {got} vs {want}");
+            }
+        }
+    }
+
     fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {
         move |x, y, z| if [x, y, z] == cell { state } else { 0 }
     }

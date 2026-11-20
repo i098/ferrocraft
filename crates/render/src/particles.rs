@@ -2322,6 +2322,18 @@ mod tests {
     }
 
     #[test]
+    fn cloud_near_the_player_sinks_to_his_feet_but_a_far_one_does_not() {
+        let mut ps = Particles::new();
+        ps.set_viewer([0.0, 64.0, 0.0], 0.0);
+        ps.spawn(Kind::Cloud, [0.0, 65.0, 0.0], [0.0; 3], 0);
+        ps.spawn(Kind::Cloud, [5.0, 65.0, 0.0], [0.0; 3], 0);
+        ps.list.iter_mut().for_each(|p| p.vel = [0.0; 3]);
+        ps.tick(|_, _, _| 0);
+        assert!((ps.list[0].pos[1] - 64.8).abs() < 1e-9);
+        assert_eq!(ps.list[1].pos[1], 65.0);
+    }
+
+    #[test]
     fn mob_spell_takes_its_colour_from_the_motion_and_ambient_ones_are_faint() {
         let mut ps = Particles::new();
         ps.spawn_packet(15, [0.0; 3], [0.25, 0.5, 0.75], 1.0, 0, &[]);

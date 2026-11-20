@@ -470,9 +470,39 @@ fn is_chest(id: i16) -> bool {
     matches!(id, 54 | 130 | 146)
 }
 
-/// Torches, `BlockTorch.getRenderType() == 2`: `ItemInHandLayer` tilts them as held blocks.
-fn is_torch(id: i16) -> bool {
-    matches!(id, 50 | 75 | 76)
+/// Blocks of `getRenderType() == 2`, the torches and the chests: `ItemInHandLayer` tilts them as held blocks.
+fn is_tilted_block(id: i16) -> bool {
+    matches!(id, 50 | 75 | 76) || is_chest(id)
+}
+
+/// The chest a player or mob holds: its block id and the frame `RenderItem.renderItem` leaves
+/// before `TileEntityItemStackRenderer` draws it: the hand, `scale(2)` of a 3D model, `scale(0.5)`
+/// and `translate(-0.5)`. The frame maps block units to the world, relative to `d.pos`.
+pub(crate) fn held_chest(d: &EntityDraw) -> Option<(u16, Mat)> {
+    if !(holds(d) && is_chest(d.held)) {
+        return None;
+    }
+    let mat = chain(&[
+        hand_matrix(d)?,
+        scale(2.0),
+        scale(0.5),
+        translate(-0.5, -0.5, -0.5),
+    ]);
+    let mut xf = Xf::new(d, false);
+    xf.pos = [0.0; 3];
+    let at = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
+    let origin = at([0.0; 3]);
+    let axis = |e: V3| {
+        let a = at(e);
+        [a[0] - origin[0], a[1] - origin[1], a[2] - origin[2], 0.0]
+    };
+    let frame = [
+        axis([1.0, 0.0, 0.0]),
+        axis([0.0, 1.0, 0.0]),
+        axis([0.0, 0.0, 1.0]),
+        [origin[0], origin[1], origin[2], 1.0],
+    ];
+    Some((d.held as u16, frame))
 }
 
 /// Where the hand puts the item, before the display transform: the witch's nose layer, else the
@@ -503,7 +533,7 @@ fn hand_matrix(d: &EntityDraw) -> Option<Mat> {
         rotate(arm.rot[0].to_degrees(), 0),
         translate(-0.0625, 0.4375, 0.0625),
     ]);
-    if is_torch(d.held) {
+    if is_tilted_block(d.held) {
         mat = chain(&[
             mat,
             translate(0.0, 0.1875, -0.3125),
@@ -534,7 +564,7 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         [-x, -y, z]
     };
     let glint = d.held_glint.then_some(d.age * 50.0);
-    out.piece(m, &to_world, &normal, level, false, glint);
+    out.piece(m, &to_world, &normal, level, true, glint);
 }
 
 /// `ItemEntityRenderer.render`: bob, spin and one to five copies by stack size.

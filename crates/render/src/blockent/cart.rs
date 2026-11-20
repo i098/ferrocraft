@@ -1,26 +1,34 @@
-//! The chest a minecart carries. `MinecartRenderer.renderBlockInMinecart` draws a block of render
-//! type 2 through `TileEntityRendererChestHelper.renderByItem`, which runs the chest renderer for no
-//! tile: a single chest facing the default way with its lid shut (the ender chest and the trapped
-//! chest take their own texture). The block frame is that of any carried block, `vehicle::block_frame`.
+//! The chest a minecart carries or a player holds. `MinecartRenderer.renderBlockInMinecart` and
+//! `RenderItem.renderItem` draw a block of render type 2 through
+//! `TileEntityRendererChestHelper.renderByItem`, which runs the chest renderer for no tile: a single
+//! chest facing the default way with its lid shut (the ender chest and the trapped chest take their
+//! own texture). The cart's frame is that of any carried block, `vehicle::block_frame`; the hand's
+//! is `entity::item::held_chest`.
 
 use super::{emit_chest, Batches, Mat, Tex};
+use crate::entity::item::held_chest;
 use crate::entity::{vehicle, EntityDraw};
 use crate::hand;
 use crate::mesh::MeshData;
 
-/// The chest model of every cart in `draws` that carries a chest, ender chest or trapped chest.
-pub fn build_cart_chests(
+/// The chest model of every cart in `draws` that carries a chest, ender chest or trapped chest, and
+/// of every holder of one.
+pub fn build_carried_chests(
     draws: &[EntityDraw],
     light: impl Fn([f64; 3]) -> [f32; 2],
 ) -> Vec<(Tex, MeshData)> {
     let mut out = Batches::default();
     for d in draws {
-        let Some(id) = vehicle::carried_chest(d) else {
+        let (id, frame) = if let Some(id) = vehicle::carried_chest(d) {
+            // `block_frame` maps a model centred on the origin; the chest model is in block
+            // coordinates, with the corner at the origin.
+            let frame = hand::chain(&[vehicle::block_frame(d), hand::translate(-0.5, -0.5, -0.5)]);
+            (id, frame)
+        } else if let Some((id, frame)) = held_chest(d) {
+            (id, frame)
+        } else {
             continue;
         };
-        // `block_frame` maps a model centred on the origin; the chest model is in block
-        // coordinates, with the corner at the origin.
-        let frame = hand::chain(&[vehicle::block_frame(d), hand::translate(-0.5, -0.5, -0.5)]);
         let mark = out.mark();
         let m = from_hand(&frame, d.pos)
             .translate([0.0, 1.0, 1.0])
@@ -61,10 +69,10 @@ mod tests {
     #[test]
     fn only_a_cart_with_a_chest_draws_the_chest_model() {
         let light = |_: [f64; 3]| [1.0, 0.0];
-        let batches = build_cart_chests(&[cart(10, ENDER_CHEST << 4)], light);
+        let batches = build_carried_chests(&[cart(10, ENDER_CHEST << 4)], light);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].1.vertices.len(), 3 * 24);
-        assert!(build_cart_chests(&[cart(10, 46 << 4), cart(50, CHEST << 4)], light).is_empty());
+        assert!(build_carried_chests(&[cart(10, 46 << 4), cart(50, CHEST << 4)], light).is_empty());
     }
 
     /// Vanilla `renderByItem` flips the model (translate(0,1,1), scale(1,-1,-1)): the shut lid sits
@@ -72,7 +80,7 @@ mod tests {
     /// flip the body spans 0..0.625 and the lid ends at 0.875, times the cart's 0.75 block scale.
     #[test]
     fn carried_chest_stands_upright_with_lid_on_top() {
-        let batches = build_cart_chests(&[cart(10, CHEST << 4)], |_| [1.0, 0.0]);
+        let batches = build_carried_chests(&[cart(10, CHEST << 4)], |_| [1.0, 0.0]);
         let v = &batches[0].1.vertices;
         let ys = || v.iter().map(|p| p.pos[1]);
         let min = ys().fold(f32::MAX, f32::min);
@@ -96,7 +104,7 @@ mod tests {
     /// The latch (block z 15/16..1) lands on the -x side, outside the body's +-0.328 footprint.
     #[test]
     fn carried_chest_latch_faces_minus_x_at_yaw_zero() {
-        let batches = build_cart_chests(&[cart(10, CHEST << 4)], |_| [1.0, 0.0]);
+        let batches = build_carried_chests(&[cart(10, CHEST << 4)], |_| [1.0, 0.0]);
         let xs = || batches[0].1.vertices.iter().map(|p| p.pos[0] - 10.0);
         let (min, max) = (xs().fold(f32::MAX, f32::min), xs().fold(f32::MIN, f32::max));
         assert!((min + 0.375).abs() < 5e-3, "latch side {min}");
@@ -106,7 +114,7 @@ mod tests {
     #[test]
     fn carried_chest_uses_its_own_texture() {
         let tex = |id: u16| {
-            build_cart_chests(&[cart(10, id << 4)], |_| [1.0, 0.0])[0]
+            build_carried_chests(&[cart(10, id << 4)], |_| [1.0, 0.0])[0]
                 .0
                 .clone()
         };

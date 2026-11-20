@@ -4,7 +4,7 @@
 //! is placed by [`block_frame`] and meshed by `block::build`; the rail snap is
 //! `world::vehicle::on_rail`, applied to the draw by the caller.
 //! A cart carrying a chest, ender chest or trapped chest shows the chest model of
-//! `blockent::build_cart_chests`, not `block::build`.
+//! `blockent::build_carried_chests`, not `block::build`.
 
 use super::{add_box, rotate, skin_dims, Class, EntityDraw, Skin, Skins, V3};
 use crate::hand::{chain, point, scale3, translate, Mat};
@@ -116,7 +116,7 @@ pub fn block_frame(d: &EntityDraw) -> Mat {
     ])
 }
 
-/// The id of the chest, ender chest or trapped chest a cart carries: `blockent::build_cart_chests`
+/// The id of the chest, ender chest or trapped chest a cart carries: `blockent::build_carried_chests`
 /// draws it, not `block::build`.
 pub fn carried_chest(d: &EntityDraw) -> Option<u16> {
     let id = d.look.vehicle.block >> 4;

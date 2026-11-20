@@ -430,7 +430,6 @@ impl App {
             r.set_mipmap_levels(mipmap_levels);
             r.set_entity_shadows(entity_shadows);
         }
-        self.send_client_settings();
     }
 
     /// `GameSettings.sendSettingsToServer`: C15 with the locale, view distance, chat and skin parts.

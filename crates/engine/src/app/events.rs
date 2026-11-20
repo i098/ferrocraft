@@ -66,7 +66,10 @@ impl App {
             }
             UiEffect::SignText { pos, lines } => self.send_sign(pos, &lines),
             UiEffect::Quit => self.quit = true,
-            UiEffect::SettingsSaved => self.apply_settings(),
+            UiEffect::SettingsSaved => {
+                self.apply_settings();
+                self.send_client_settings();
+            }
             UiEffect::LanguageChanged => self.change_language(),
             UiEffect::OpenUrl(url) => open_url(&url),
             UiEffect::SuperSecret => self.super_secret(),
@@ -187,6 +190,7 @@ impl App {
     fn change_language(&mut self) {
         self.load_texts();
         self.apply_settings();
+        self.send_client_settings();
         self.resize_screens();
     }
 

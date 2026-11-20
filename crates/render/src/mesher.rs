@@ -18,6 +18,11 @@ pub type SharedBiomes = Arc<[u8; 256]>;
 /// Server light of one chunk, `sky << 4 | block` per block (see `light::expand_server`).
 pub type SharedLight = Arc<Vec<u8>>;
 
+/// Light the server sent for `chunk`, or `None` when the chunk carries none.
+pub fn server_light(chunk: &impl crate::ChunkBlocks, blocks: &[u16]) -> Option<SharedLight> {
+    crate::light::expand_server(chunk, blocks).map(Arc::new)
+}
+
 /// A snapshot of the chunk and its eight neighbours, ordered as `Neighborhood::neighbors`.
 pub struct Job {
     pub key: (i32, i32),

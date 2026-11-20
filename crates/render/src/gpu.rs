@@ -842,8 +842,8 @@ impl Renderer {
         let key = (chunk.chunk_x(), chunk.chunk_z());
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
-        match crate::light::expand_server(chunk, &data) {
-            Some(l) => self.lights.insert(key, Arc::new(l)),
+        match crate::mesher::server_light(chunk, &data) {
+            Some(l) => self.lights.insert(key, l),
             None => self.lights.remove(&key),
         };
         self.blocks.insert(key, Arc::new(data));

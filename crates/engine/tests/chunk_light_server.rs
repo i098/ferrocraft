@@ -39,7 +39,7 @@ fn chunk_payload() -> Vec<u8> {
         for i in 0..4096usize {
             blocks.extend_from_slice(&block(s * 16 + (i >> 8)).to_le_bytes());
         }
-        block_light.extend(std::iter::repeat(0u8).take(2048));
+        block_light.extend(std::iter::repeat_n(0u8, 2048));
         for i in 0..2048usize {
             let v = sky(s * 16 + ((i * 2) >> 8));
             sky_light.push(v | v << 4);
@@ -48,7 +48,7 @@ fn chunk_payload() -> Vec<u8> {
     let mut d = blocks;
     d.extend(block_light);
     d.extend(sky_light);
-    d.extend(std::iter::repeat(1u8).take(256));
+    d.extend(std::iter::repeat_n(1u8, 256));
     d
 }
 

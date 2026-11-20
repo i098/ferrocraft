@@ -802,6 +802,12 @@ impl Game {
 
     /// One 20 TPS step. The player stays frozen until the chunk under it has arrived, so
     /// it does not fall through the void while the world loads.
+    /// `onDeathUpdate` calls `setDead()` at `deathTime == 20`; `World.updateEntities`
+    /// then skips the player, so no C03-C06 or C0B goes out until the respawn.
+    pub fn player_removed(&self) -> bool {
+        self.health <= 0.0 && self.death_ticks >= 20
+    }
+
     pub fn tick(&mut self, input: Input) {
         self.ticks += 1;
         if self.daylight_cycle {
@@ -1500,6 +1506,10 @@ mod tests {
             g.tick(IDLE);
         }
         assert_eq!(g.death_ticks, 20);
+        assert!(g.player_removed());
+        g.apply(hp(20.0));
+        g.tick(IDLE);
+        assert!(!g.player_removed());
     }
 
     #[test]

@@ -406,7 +406,7 @@ impl App {
         self.send_horse_jump();
         if self.game.vehicle.is_some() {
             self.send_riding(input);
-        } else {
+        } else if !self.game.player_removed() {
             self.send_state();
             // `onUpdateWalkingPlayer`: no C03-C06 unless `isCurrentViewEntity()`.
             if self.game.camera.is_none() {

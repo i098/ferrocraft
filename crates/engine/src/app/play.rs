@@ -462,6 +462,15 @@ impl App {
                 } => self.particles.firework(pos, vel, explosions),
             }
         }
+        // `EntityBlaze` (mob 61) smokes every client tick while alive.
+        for e in self
+            .game
+            .entities
+            .iter()
+            .filter(|e| e.kind == Kind::Mob(61) && !e.is_dead())
+        {
+            self.particles.blaze_smoke(e.pos, e.size());
+        }
         let g = &self.game;
         let block = |x, y, z| g.store.get_block(x, y, z);
         let mut dust = Vec::new();

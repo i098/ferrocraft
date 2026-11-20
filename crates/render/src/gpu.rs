@@ -8,7 +8,7 @@ use crate::crack;
 use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
-use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks};
+use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks, SharedLight};
 use crate::particles::Quads;
 use crate::post::Post;
 use crate::sky::{
@@ -252,6 +252,8 @@ pub struct Renderer {
     blocks: HashMap<(i32, i32), SharedBlocks>,
     /// Biome ids per chunk column, `z << 4 | x`.
     biomes: HashMap<(i32, i32), SharedBiomes>,
+    /// Light the server sent per chunk; a chunk leaves it when one of its blocks changes.
+    lights: HashMap<(i32, i32), SharedLight>,
     meshes: HashMap<(i32, i32), ChunkMesh>,
     /// Meshes uploaded since the last [`Renderer::take_chunk_updates`], `RenderChunk.renderChunksUpdated`.
     chunk_updates: u32,
@@ -582,6 +584,7 @@ impl Renderer {
             outline: outline::Slot::Idle,
             blocks: HashMap::new(),
             biomes: HashMap::new(),
+            lights: HashMap::new(),
             meshes: HashMap::new(),
             chunk_updates: 0,
             sort_pos: [0.0; 3],
@@ -839,6 +842,10 @@ impl Renderer {
         let key = (chunk.chunk_x(), chunk.chunk_z());
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
+        match crate::mesher::server_light(chunk, &data) {
+            Some(l) => self.lights.insert(key, l),
+            None => self.lights.remove(&key),
+        };
         self.blocks.insert(key, Arc::new(data));
         self.biomes.insert(
             key,
@@ -851,6 +858,7 @@ impl Renderer {
         self.blocks.remove(&(x, z));
         self.block_entities.remove_chunk(x, z);
         self.biomes.remove(&(x, z));
+        self.lights.remove(&(x, z));
         self.meshes.remove(&(x, z));
         self.pending.remove(&(x, z));
         self.mark_neighbors((x, z));
@@ -865,6 +873,7 @@ impl Renderer {
     pub fn drop_chunk_meshes(&mut self) {
         self.blocks.clear();
         self.biomes.clear();
+        self.lights.clear();
         self.meshes.clear();
         self.dirty.clear();
         self.urgent.clear();
@@ -883,6 +892,8 @@ impl Renderer {
         let (lx, lz) = (x.rem_euclid(16), z.rem_euclid(16));
         // Copies only while a mesh job still reads the old data.
         Arc::make_mut(data)[index(lx as usize, y as usize, lz as usize)] = state;
+        // World.checkLight: the changed column is relit from its blocks from now on.
+        self.lights.remove(&key);
         self.block_entities.set_state([x, y, z], state);
         self.mark_around(key);
         // The edited chunk, and a neighbour when the block touches its edge, show the change this frame.
@@ -934,6 +945,10 @@ impl Renderer {
             biomes: std::array::from_fn(|i| {
                 let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
                 self.biomes.get(&(cx + dx, cz + dz)).cloned()
+            }),
+            lights: std::array::from_fn(|i| {
+                let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
+                self.lights.get(&(cx + dx, cz + dz)).cloned()
             }),
             smooth: self.smooth_lighting,
             fancy: self.fancy_graphics,

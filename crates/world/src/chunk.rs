@@ -21,6 +21,28 @@ pub struct Chunk {
     pub z: i32,
     sections: [Option<Box<Section>>; 16],
     biomes: [u8; BIOME_BYTES],
+    light: ServerLight,
+}
+
+/// Packed 4-bit light of one section, two cells per byte, low nibble first, indexed like a block.
+pub type LightNibbles = [u8; LIGHT_BYTES];
+
+/// The sky and block light the server sent with the chunk (`ExtendedBlockStorage` light arrays).
+/// Vanilla keeps it and relights only when a block changes.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ServerLight {
+    /// Whether the packet carried sky light (false in dimensions without sky).
+    pub has_sky: bool,
+    sky: [Option<Box<LightNibbles>>; 16],
+    block: [Option<Box<LightNibbles>>; 16],
+}
+
+impl ServerLight {
+    /// Light arrays of section `s`; `None` when the packet had no such section.
+    pub fn section(&self, s: usize, sky: bool) -> Option<&LightNibbles> {
+        let list = if sky { &self.sky } else { &self.block };
+        list.get(s)?.as_deref()
+    }
 }
 
 /// The payload ended before every announced section was read.
@@ -53,7 +75,13 @@ impl Chunk {
             z,
             sections: Default::default(),
             biomes: [PLAINS; BIOME_BYTES],
+            light: ServerLight::default(),
         }
+    }
+
+    /// The light the server sent; empty for a chunk built locally.
+    pub fn light(&self) -> &ServerLight {
+        &self.light
     }
 
     /// Biome id at chunk-local `x`, `z` (0..16); plains until a ground-up payload sets it.
@@ -96,7 +124,7 @@ impl Chunk {
     ///
     /// `bitmask` tells which sections are present; `sky_light` tells whether sky light arrays
     /// follow the block light arrays; `ground_up` adds the 256 biome bytes at the end.
-    /// Returns the chunk and the number of bytes used. Light is read past, not kept.
+    /// Returns the chunk and the number of bytes used. The light arrays are kept in [`Chunk::light`].
     pub fn decode(
         x: i32,
         z: i32,
@@ -124,6 +152,23 @@ impl Chunk {
                 *dst = u16::from_le_bytes(*b);
             }
             chunk.sections[s] = Some(sec);
+        }
+        let light_at = |base: usize, n: usize| -> Box<LightNibbles> {
+            let from = base + n * LIGHT_BYTES;
+            Box::new(
+                data[from..from + LIGHT_BYTES]
+                    .try_into()
+                    .expect("light length"),
+            )
+        };
+        let blocks_end = count * BLOCK_BYTES;
+        chunk.light.has_sky = sky_light;
+        let sky_base = blocks_end + count * LIGHT_BYTES;
+        for (n, s) in (0..16).filter(|i| bitmask >> i & 1 == 1).enumerate() {
+            chunk.light.block[s] = Some(light_at(blocks_end, n));
+            if sky_light {
+                chunk.light.sky[s] = Some(light_at(sky_base, n));
+            }
         }
         if ground_up {
             chunk
@@ -230,6 +275,9 @@ mod tests {
         assert_eq!(c.block(1, 5 * 16 + 2, 3), 4 << 4 | 3);
         assert_eq!(c.block(0, 0, 0), 0);
         assert!(c.section(1).is_none());
+        // Every light byte in the test payload is 0xFF.
+        assert_eq!(c.light().section(5, true).unwrap()[7], 0xFF);
+        assert!(c.light().section(1, false).is_none());
         // Biome bytes are indexed `z << 4 | x`.
         assert_eq!((c.biome(0, 0), c.biome(3, 2)), (0, 35));
     }

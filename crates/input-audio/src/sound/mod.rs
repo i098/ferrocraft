@@ -35,6 +35,11 @@ fn pan_gains(eye: [f64; 3], look: [f64; 3], src: [f64; 3]) -> [f32; 2] {
     ]
 }
 
+/// `ItemRecord.recordName` for item ids 2256.., the `records.<name>` sound events.
+const RECORDS: [&str; 12] = [
+    "13", "cat", "blocks", "chirp", "far", "mall", "mellohi", "stal", "strad", "ward", "11", "wait",
+];
+
 /// Vanilla caps concurrent non-stream sounds at 28.
 const MAX_SOUNDS: usize = 28;
 
@@ -43,6 +48,8 @@ pub struct Sound {
     sink: MixerDeviceSink,
     players: Vec<Player>,
     music: Option<Player>,
+    /// Jukebox records by block position, with their category-free gain base (`volume * variant`).
+    records: HashMap<[i32; 3], (Player, f32)>,
     ticker: MusicTicker,
     volumes: HashMap<Category, f32>,
     listener: [f64; 3],
@@ -70,6 +77,7 @@ impl Sound {
             sink,
             players: Vec::new(),
             music: None,
+            records: HashMap::new(),
             ticker: MusicTicker::new(seed),
             volumes: Category::ALL.iter().map(|c| (*c, 1.0)).collect(),
             listener: [0.0; 3],
@@ -236,6 +244,43 @@ impl Sound {
         }
     }
 
+    /// `RenderGlobal.playRecord`: stops the record at `pos`, then starts `item`'s record there
+    /// (volume 4, so linear falloff over 64 blocks). `item` is the `Effect` 1005 data: an item id.
+    pub fn play_record(&mut self, pos: [i32; 3], item: i32) {
+        if let Some((p, _)) = self.records.remove(&pos) {
+            p.stop();
+        }
+        let Some(name) = RECORDS.get((item - 2256) as usize) else {
+            return;
+        };
+        let roll = self.rand();
+        let Some(ev) = self.index.event(&format!("records.{name}")) else {
+            return;
+        };
+        let Some(v) = ev.pick(roll) else { return };
+        let Some(file) = v.file.read() else {
+            return;
+        };
+        let Ok(dec) = Decoder::try_from(file) else {
+            return;
+        };
+        let player = Player::connect_new(self.sink.mixer());
+        player.append(dec);
+        self.records.insert(pos, (player, v.volume));
+        self.update_records();
+    }
+
+    /// OpenAL re-evaluates a playing source's distance gain every frame; do the same for records.
+    fn update_records(&mut self) {
+        self.records.retain(|_, (p, _)| !p.empty());
+        let gain = self.gain(Category::Record);
+        for (pos, (p, base)) in &self.records {
+            let at = pos.map(f64::from);
+            let falloff = (1.0 - distance(self.listener, at) / 64.0).max(0.0) as f32;
+            p.set_volume(base.min(1.0) * gain * falloff);
+        }
+    }
+
     /// `SoundManager.stopAllSounds`, called by `Minecraft.loadWorld`: world sounds and music end.
     pub fn stop_all(&mut self) {
         for p in self.players.drain(..) {
@@ -244,15 +289,16 @@ impl Sound {
         if let Some(p) = self.music.take() {
             p.stop();
         }
+        for (p, _) in self.records.drain().map(|(_, r)| r) {
+            p.stop();
+        }
     }
 
     /// Call once per game tick (20 Hz).
     pub fn tick(&mut self, in_world: bool) {
+        self.update_records();
         if self.music.as_ref().is_some_and(Player::empty) {
             self.music = None;
-        }
-        if self.gain(Category::Music) <= 0.0 {
-            return;
         }
         let roll = self.rand();
         let tick = self.ticker.tick(in_world, self.music.is_some(), roll);
@@ -264,6 +310,10 @@ impl Sound {
         let Some(event) = tick.start else {
             return;
         };
+        // `SoundManager.playSound` skips a zero-volume sound; the ticker has already rearmed its gap.
+        if self.gain(Category::Music) <= 0.0 {
+            return;
+        }
         let pick = self.rand();
         let Some(v) = self.index.event(event).and_then(|e| e.pick(pick)) else {
             return;

@@ -166,7 +166,7 @@ fn geometry(
     Some(vec![Layer {
         tex: ItemTex::Atlas,
         mesh: hand::held_mesh(state, atlas, false),
-        normals: None,
+        normals: (damage == super::mooshroom::BLOCK_FORM).then(|| super::mooshroom::FACES.to_vec()),
         flat: hand::held_mesh(state, atlas, true)
             .vertices
             .iter()
@@ -221,6 +221,8 @@ pub struct Items {
     pub flash: MeshData,
     /// `display.color` of the leather armor the next sprite pieces show.
     dye: Option<i32>,
+    /// The pieces take `LayerMooshroomMushroom`'s GL light instead of the box face shade.
+    gl_lit: bool,
 }
 
 pub(super) use crate::hand::point;
@@ -321,7 +323,12 @@ impl Items {
                 let rgb = world::inventory::items::tint(model.id, model.damage, self.dye, i);
                 let tint = [16, 8, 0].map(|s| ((rgb >> s) & 0xFF) as f32 / 255.0);
                 for (quad, n) in vertices.chunks_mut(4).zip(normals) {
-                    let s = shade(normal_to_world(*n));
+                    let n = normal_to_world(*n);
+                    let s = if self.gl_lit && !super::UNSHADED.get() {
+                        super::mooshroom::gl_light(n)
+                    } else {
+                        shade(n)
+                    };
                     for v in quad {
                         v.color = [s * tint[0], s * tint[1], s * tint[2], 1.0];
                     }
@@ -404,10 +411,18 @@ fn mushrooms(out: &mut Items, d: &EntityDraw, models: &Models, level: [f32; 2]) 
         return;
     };
     let xf = Xf::new(d, false);
+    out.gl_lit = true;
     for mat in super::mooshroom::frames(d) {
         let to_world = |p: V3| xf.world(point(&mat, p).map(|c| c * 16.0));
-        out.piece(m, &to_world, &|n| n, level, false, None);
+        let origin = to_world([0.0; 3]);
+        // The face normal turned like the block: through the frame, the body and its yaw.
+        let normal = |n: V3| {
+            let t = to_world(n);
+            [t[0] - origin[0], t[1] - origin[1], t[2] - origin[2]]
+        };
+        out.piece(m, &to_world, &normal, level, false, None);
     }
+    out.gl_lit = false;
 }
 
 /// `WornSkullLayer` for a block helmet (and `LayerSnowmanHead`, which drops it 0.34375 instead): from the head's pivot and rotation (`ModelPart.transform`),

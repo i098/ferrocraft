@@ -174,6 +174,10 @@ enum Pass {
     Blend,
 }
 
+pub fn view_opaque(state: u16, fancy: bool) -> bool {
+    is_opaque_cube(state) || (!fancy && is_leaves(state))
+}
+
 fn is_leaves(state: u16) -> bool {
     matches!(state >> 4, 18 | 161)
 }
@@ -375,7 +379,7 @@ impl Mesher<'_> {
 
     /// `Block.isOpaqueCube`: leaves are opaque on Fast (`BlockLeaves.isOpaqueCube` is `!fancyGraphics`).
     fn opaque(&self, state: u16) -> bool {
-        is_opaque_cube(state) || (!self.fancy && is_leaves(state))
+        view_opaque(state, self.fancy)
     }
 
     /// Leaves drawn as solid blocks: the world shader skips its alpha test for vertex alpha 2.

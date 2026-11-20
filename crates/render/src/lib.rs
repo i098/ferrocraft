@@ -26,6 +26,7 @@ pub use lightning::Bolts;
 mod glsl;
 mod light;
 mod mesh;
+pub use mesh::view_opaque;
 mod mesher;
 mod mip;
 mod models;

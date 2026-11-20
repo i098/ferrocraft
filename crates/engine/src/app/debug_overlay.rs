@@ -84,14 +84,14 @@ impl App {
         let far = f64::from(d) * 16.0 * std::f64::consts::SQRT_2;
         let frustum = Frustum::new(cam, w as f32 / h.max(1) as f32, far);
         let store = &self.game.store;
+        let fancy = self.ui.settings.fancy_graphics;
         let facings = |cx: i32, sy: i32, cz: i32| {
             let at = cam.pos.map(|v| v.floor() as i32);
             let opaque = |x: usize, y: usize, z: usize| {
-                world::dig::opaque_cube(store.get_block(
-                    cx * 16 + x as i32,
-                    sy * 16 + y as i32,
-                    cz * 16 + z as i32,
-                ))
+                render::view_opaque(
+                    store.get_block(cx * 16 + x as i32, sy * 16 + y as i32, cz * 16 + z as i32),
+                    fancy,
+                )
             };
             cull::visible_facings(
                 opaque,
@@ -102,12 +102,9 @@ impl App {
             r.section_visibility(cx, sy, cz)
         });
         let eye = cam.pos;
-        let rendered = self
-            .game
-            .entities
+        let rendered = draws
             .iter()
-            .zip(draws)
-            .filter(|(_, d)| entity_in_view(d, eye, &sections, &frustum))
+            .filter(|d| entity_in_view(d, eye, &sections, &frustum))
             .count();
         (sections, rendered)
     }

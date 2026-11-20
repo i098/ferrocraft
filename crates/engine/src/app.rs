@@ -973,9 +973,10 @@ impl App {
                 ids.remove(i);
             }
         }
+        let entity_draws = draws.len();
         draws.extend(self.pickup_draws(frac));
         self.tab_heads();
-        let (quads, textures, effects) = self.overlay(frac, &cam, &draws);
+        let (quads, textures, effects) = self.overlay(frac, &cam, &draws, entity_draws);
         self.run_effects(effects);
         let held = self.game.inv.held_stack().as_ref().map(|s| {
             let dye = s.nbt.as_ref().and_then(|n| n.dye());
@@ -1285,7 +1286,13 @@ impl App {
 
     /// The HUD, the open container and the menu screens as quads, plus the textures they
     /// registered and the effects they raised.
-    fn overlay(&mut self, frac: f64, cam: &Camera, draws: &[EntityDraw]) -> Overlay {
+    fn overlay(
+        &mut self,
+        frac: f64,
+        cam: &Camera,
+        draws: &[EntityDraw],
+        entity_draws: usize,
+    ) -> Overlay {
         let Some(r) = &self.renderer else {
             return (Vec::new(), Vec::new(), Vec::new());
         };
@@ -1327,7 +1334,7 @@ impl App {
         Self::tick_glint_clock(&mut self.icons);
         if show_hud {
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
-            let debug = self.debug_lines(frac, cam, draws);
+            let debug = self.debug_lines(frac, cam, &draws[..entity_draws]);
             let in_water = self.game.player.as_ref().is_some_and(|p| {
                 let get = |x, y, z| self.game.store.get_block(x, y, z);
                 screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))

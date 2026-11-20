@@ -55,9 +55,28 @@ pub fn name(s: &ItemStack) -> (String, bool) {
     {
         return (n.clone(), true);
     }
+    if let Some(owner) = skull_owner(s) {
+        return (format!("{owner}'s Head"), false);
+    }
     let base = items::variant(s.id, s.damage)
         .map_or_else(|| items::item(s.id).key.to_string(), |v| v.name.to_string());
     (base, false)
+}
+
+/// `ItemSkull.getItemStackDisplayName`: a player head (damage 3) with a `SkullOwner` name reads "<name>'s Head".
+fn skull_owner(s: &ItemStack) -> Option<&str> {
+    if s.id != 397 || s.damage != 3 {
+        return None;
+    }
+    let t = tag(s)?;
+    match get(t, "SkullOwner")? {
+        Tag::String(n) if !n.is_empty() => Some(n),
+        Tag::Compound(c) => match get(c, "Name") {
+            Some(Tag::String(n)) => Some(n),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// `(id, level)` pairs of an enchantment list tag.
@@ -268,6 +287,16 @@ pub fn draw(c: &mut dyn Canvas, lines: &[String], x: i32, y: i32, width: i32, he
 mod tests {
     use super::*;
     use world::inventory::{Nbt, Tag};
+
+    #[test]
+    fn player_head_is_named_after_its_owner() {
+        let s = |t| stack(397, 3, Some(vec![("SkullOwner".into(), t)]));
+        let named = |t| name(&s(t)).0;
+        assert_eq!(named(Tag::String("Notch".into())), "Notch's Head");
+        let c = Tag::Compound(vec![("Name".into(), Tag::String("Notch".into()))]);
+        assert_eq!(named(c), "Notch's Head");
+        assert_eq!(named(Tag::String(String::new())), "Head");
+    }
 
     fn stack(id: i16, damage: i16, nbt: Option<Compound>) -> ItemStack {
         ItemStack {

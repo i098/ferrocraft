@@ -203,6 +203,7 @@ impl App {
         self.container = None;
         self.particles.clear();
         self.ui.in_world = false;
+        self.ui.dead = None;
         self.ui.stats.clear();
         self.ui.difficulty = None;
         self.awaiting_terrain = false;
@@ -339,8 +340,12 @@ impl App {
             Ok(()) => return,
             Err(ev) => ev,
         };
+        let health = matches!(ev, NetEvent::Health { .. });
         if let Some(e) = self.game.apply(ev) {
             self.game_effect(e, dirty);
+        }
+        if health {
+            self.ui.dead = (self.game.health <= 0.0).then_some(self.game.score);
         }
     }
 
@@ -418,6 +423,7 @@ impl App {
     /// `GuiGameOver`; the new player has no open container.
     fn respawn_screens(&mut self, dimension_changed: bool) {
         self.reset_sent_state();
+        self.ui.dead = None;
         self.container = None;
         self.game.inv.close_window();
         let m = metrics!(self);
@@ -1346,6 +1352,32 @@ mod tests {
         let mut app = respawned(true);
         app.finish_terrain_wait();
         assert!(app.ui.is_open() && app.awaiting_terrain);
+    }
+
+    /// A portal tick closes non-pausing screens (`EntityPlayerSP.onLivingUpdate`); `displayGuiScreen(null)`
+    /// then opens `GuiGameOver` again for a dead player.
+    #[test]
+    fn death_screen_survives_a_close_and_ends_with_respawn() {
+        let mut app = respawned(false);
+        let health = NetEvent::Health {
+            health: 0.0,
+            food: 20,
+            saturation: 5.0,
+        };
+        app.on_event(health, &mut Dirty::new());
+        assert!(app.ui.is_game_over());
+        app.close_screens();
+        assert!(
+            app.ui.is_game_over(),
+            "a dead player must not stay in the world"
+        );
+        app.on_event(
+            NetEvent::Respawn {
+                dimension_changed: false,
+            },
+            &mut Dirty::new(),
+        );
+        assert!(!app.ui.is_open());
     }
 
     fn chat_app() -> App {

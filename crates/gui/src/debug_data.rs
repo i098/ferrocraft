@@ -177,9 +177,9 @@ pub struct RightInfo {
     pub version: String,
 }
 
-/// Java's `% 2d` prints a space before a non-negative number.
+/// Java's `% 2d`: width 2, a space before a one digit number.
 fn spaced(v: u64) -> String {
-    format!(" {v}")
+    format!("{v:>2}")
 }
 
 /// `getDebugInfoRight` without the block state lines.
@@ -290,7 +290,7 @@ mod tests {
             [
                 "Java: Rust 64bit",
                 "Mem:  5% 205/4096MB",
-                "Allocated:  12% 512MB",
+                "Allocated: 12% 512MB",
                 "",
                 "CPU: 8x CPU",
                 "",

@@ -151,7 +151,7 @@ impl App {
         let gpu = self.renderer.as_ref().map(|r| r.gpu_info().clone());
         let gpu = gpu.unwrap_or_default();
         right_lines(&RightInfo {
-            java: "Ferrocraft (Rust)".to_owned(),
+            java: env!("CARGO_PKG_VERSION").to_owned(),
             bits: usize::BITS,
             max,
             total,
@@ -182,10 +182,9 @@ static CPU: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     }
 });
 
-/// `(maxMemory, totalMemory, used)` in bytes: the machine memory, the process data size and its resident size.
-/// Zero where `/proc` is missing. shortcut: 4 KiB pages assumed, read the page size when a platform needs it.
+/// `(maxMemory, totalMemory, used)` in bytes for this process: the resident size now, its peak resident
+/// size, and the resident size plus the memory the machine can still give. Zero where `/proc` is missing.
 fn process_memory() -> (u64, u64, u64) {
-    const PAGE: u64 = 4096;
     let kb = |text: &str, key: &str| {
         text.lines()
             .find_map(|l| l.strip_prefix(key))
@@ -193,18 +192,12 @@ fn process_memory() -> (u64, u64, u64) {
             .unwrap_or(0)
             * 1024
     };
-    let max = kb(
-        &std::fs::read_to_string("/proc/meminfo").unwrap_or_default(),
-        "MemTotal:",
-    );
-    let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    let pages: Vec<u64> = statm
-        .split_whitespace()
-        .filter_map(|v| v.parse().ok())
-        .collect();
-    let at = |i: usize| pages.get(i).copied().unwrap_or(0) * PAGE;
-    let used = at(1);
-    (max, at(5).max(used).min(max.max(used)), used)
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let used = kb(&status, "VmRSS:");
+    let total = kb(&status, "VmHWM:").max(used);
+    let max = (used + kb(&meminfo, "MemAvailable:")).max(total);
+    (max, total, used)
 }
 
 /// `RenderManager.shouldRender` for one entity: in range, in a visible section and inside the frustum.

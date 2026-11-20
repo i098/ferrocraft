@@ -847,7 +847,11 @@ impl App {
     pub(super) fn world_effect(&mut self, id: i32, pos: [i32; 3], data: i32) {
         let at = pos.map(|v| f64::from(v) + 0.5);
         if let Some(s) = &mut self.sound {
-            s.play_effect(id, data, at);
+            if id == 1005 {
+                s.play_record(pos, data);
+            } else {
+                s.play_effect(id, data, at);
+            }
         }
         match id {
             2001 => {

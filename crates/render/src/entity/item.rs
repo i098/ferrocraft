@@ -651,4 +651,32 @@ mod tests {
             }
         }
     }
+
+    /// Oracle: vanilla `LayerMooshroomMushroom` draws the block under `enableStandardItemLighting`:
+    /// 0.4 + 0.6·N·L per light, L = (0.2,1,-0.7) and (-0.2,1,0.7). A vertical face (y = 0) gets at most
+    /// 0.4 + 0.6·0.728/1.2207 = 0.758 and at least 0.4, never the full 1.0 of an unshaded quad.
+    #[test]
+    fn mooshroom_mushroom_sides_take_the_gl_light() {
+        let mut d = super::super::tests::steve();
+        d.class = Class::Mob(96);
+        let model = resolve(
+            &mut |_| None,
+            &textured(),
+            40,
+            super::super::mooshroom::BLOCK_FORM,
+            &DialTurns::default(),
+        )
+        .unwrap();
+        let mut models = Models::new();
+        models.insert(super::super::mooshroom::RED_MUSHROOM, Some(model));
+        let mut out = Items::default();
+        mushrooms(&mut out, &d, &models, [1.0, 1.0]);
+        let colors: Vec<[f32; 4]> = out.atlas.vertices.iter().map(|v| v.color).collect();
+        assert!(colors.len() >= 12 * 4, "three mushrooms of four quads");
+        for c in colors {
+            let m = c[0].max(c[1]).max(c[2]);
+            assert!(m <= 0.76, "side face too bright: {m}");
+            assert!(c[0].min(c[1]).min(c[2]) >= 0.39, "side face too dark: {c:?}");
+        }
+    }
 }

@@ -391,6 +391,9 @@ const STEPS: u32 = 3;
 const DEATH_TICKS: i32 = 20;
 /// Mob id of the squid.
 const SQUID: u8 = 94;
+/// `EntityWither`: its mob id and `getMaxHealth`.
+const WITHER: u8 = 64;
+const WITHER_HEALTH: f32 = 300.0;
 /// Mob id of the ender dragon, whose body follows its own ring buffer.
 const DRAGON: u8 = 63;
 
@@ -778,6 +781,14 @@ impl Entity {
         self.anim.begging = self.meta.begging == Some(1);
         self.anim.tick();
         self.anim.horse.tick(self.meta.horse_flags.unwrap_or(0));
+        if self.kind == Kind::Mob(WITHER) {
+            fx = Some(Fx::Wither {
+                pos: self.pos,
+                body_yaw: self.body_yaw,
+                half: self.health.is_some_and(|h| h <= WITHER_HEALTH / 2.0),
+                invul: self.meta.wither_invul.unwrap_or(0) > 0,
+            });
+        }
         fx
     }
 
@@ -1164,6 +1175,13 @@ pub enum Fx {
     },
     /// `EntityWitch.handleStatusUpdate(15)`: witch magic specks around the head; `size` is `(width, height)`.
     Witch { pos: [f64; 3], size: (f32, f32) },
+    /// `EntityWither.onLivingUpdate`: smoke around each head, spell swirls at half health and during the spawn charge.
+    Wither {
+        pos: [f64; 3],
+        body_yaw: f32,
+        half: bool,
+        invul: bool,
+    },
     /// `ArrowEntity.tick`: `random.bowhit` at an arrow that `takeDamage` accepted, with this pitch.
     BowHit { pos: [f64; 3], pitch: f32 },
     /// `EntityFireworkRocket.handleStatusUpdate(17)`: the `Starter` at the rocket, moving as it did.

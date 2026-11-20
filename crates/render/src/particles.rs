@@ -165,6 +165,7 @@ enum Sprite {
 enum Behavior {
     Generic,
     Smoke,
+    Cloud,
     Explosion,
     RedDust,
     Crit,
@@ -533,9 +534,14 @@ impl Particles {
             Kind::Bubble => p = self.bubble(pos, motion),
             Kind::Wake => p = self.wake(pos, motion),
             Kind::Cloud => {
-                p = self.base(pos, motion, sheet(0, true));
-                p.color = [1.0; 3];
-                p.max_age = (8.0 / (self.rand() * 0.8 + 0.3)) as u32;
+                // `CloudParticle`: a smoke-like start (motion * 0.1 plus the packet's), size and lifetime times 2.5.
+                p = self.damped(pos, sheet(0, true), 1.0, motion);
+                let g = 1.0 - (self.rand() * f64::from(0.3_f32)) as f32;
+                p.color = [g; 3];
+                p.scale *= 2.5;
+                p.init_scale = p.scale;
+                p.max_age = ((8.0 / (self.rand() * 0.8 + 0.3)) as u32 as f32 * 2.5) as u32;
+                p.behavior = Behavior::Cloud;
             }
             Kind::RedDust => {
                 // `RedstoneParticle`: the packet motion carries the colour; a zero red channel means 1.
@@ -1287,6 +1293,51 @@ impl Particles {
         }
     }
 
+    /// `EntityWither.onLivingUpdate`: smoke around each of the three heads, a spell swirl at a head one tick in four
+    /// at half health, and three swirls around the body while the spawn charge runs. `World.addParticle` drops
+    /// what is more than 16 blocks from the camera.
+    pub fn wither(&mut self, pos: [f64; 3], body_yaw: f32, half: bool, invul: bool) {
+        for head in 0..3 {
+            let at = if head == 0 {
+                [pos[0], pos[1] + 3.0, pos[2]]
+            } else {
+                let f = (body_yaw + (180 * (head - 1)) as f32) / 180.0 * std::f32::consts::PI;
+                [
+                    pos[0] + f64::from(f.cos()) * 1.3,
+                    pos[1] + 2.2,
+                    pos[2] + f64::from(f.sin()) * 1.3,
+                ]
+            };
+            let around = |s: &mut Self| at.map(|v| v + s.gaussian() * f64::from(0.3_f32));
+            let p = around(self);
+            self.spawn_near(Kind::Smoke, p, [0.0; 3]);
+            if half && (self.rand() * 4.0) as u32 == 0 {
+                let p = around(self);
+                self.spawn_near(Kind::MobSpell, p, [f64::from(0.7_f32), f64::from(0.7_f32), 0.5]);
+            }
+        }
+        if invul {
+            for _ in 0..3 {
+                let p = [
+                    pos[0] + self.gaussian(),
+                    pos[1] + f64::from((self.rand() as f32) * 3.3),
+                    pos[2] + self.gaussian(),
+                ];
+                self.spawn_near(Kind::MobSpell, p, [f64::from(0.7_f32), f64::from(0.7_f32), f64::from(0.9_f32)]);
+            }
+        }
+    }
+
+    /// `spawn` unless the camera is more than 16 blocks away (`WorldRenderer.tryAddParticle`).
+    fn spawn_near(&mut self, kind: Kind, pos: [f64; 3], motion: [f64; 3]) {
+        let far = self
+            .viewer
+            .is_some_and(|v| (0..3).map(|i| (pos[i] - v[i]).powi(2)).sum::<f64>() > 256.0);
+        if !far {
+            self.spawn(kind, pos, motion, 0);
+        }
+    }
+
     /// `Entity.doSprintingEffect`: one shard of the block `state` under a sprinting entity,
     /// thrown against its motion `vel`.
     pub fn sprint_dust(&mut self, pos: [f64; 3], vel: [f64; 3], width: f32, state: u16) {
@@ -1634,7 +1685,12 @@ fn hidden_flicker(p: &Particle) -> bool {
 fn render_scale(p: &Particle, partial: f32) -> f32 {
     let t = (p.age as f32 + partial) / p.max_age.max(1) as f32;
     match p.behavior {
-        Behavior::Smoke | Behavior::RedDust | Behavior::Crit | Behavior::Snow | Behavior::Drift => {
+        Behavior::Smoke
+        | Behavior::Cloud
+        | Behavior::RedDust
+        | Behavior::Crit
+        | Behavior::Snow
+        | Behavior::Drift => {
             p.init_scale * (t * 32.0).clamp(0.0, 1.0)
         }
         Behavior::Flame => p.init_scale * (1.0 - t * t * 0.5),
@@ -1770,7 +1826,10 @@ fn push_quad(
     light: [f32; 2],
 ) {
     let half = 0.1 * scale;
-    let color = [p.color[0], p.color[1], p.color[2], p.alpha];
+    // `BufferBuilder.color(float..)` casts each channel to an int and stores its low byte, so a channel
+    // outside 0..1 wraps (a tiny negative one becomes almost 255) instead of clamping.
+    let wrap = |c: f32| f32::from((c * 255.0) as i32 as u8) / 255.0;
+    let color = [wrap(p.color[0]), wrap(p.color[1]), wrap(p.color[2]), wrap(p.alpha)];
     for (dx, dy, u, v) in [
         (-1.0, -1.0, 0, 1),
         (1.0, -1.0, 1, 1),
@@ -1800,6 +1859,10 @@ fn move_generic(p: &mut Particle, solid: &impl Fn(i32, i32, i32) -> bool) {
                 0.9_f32
             };
             p.vel = p.vel.map(|v| v * f64::from(drag));
+        }
+        Behavior::Cloud => {
+            step(p, solid);
+            p.vel = p.vel.map(|v| v * f64::from(0.96_f32));
         }
         Behavior::RedDust => {
             step(p, solid);

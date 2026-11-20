@@ -1002,6 +1002,7 @@ mod tests {
             center: &c,
             neighbors: [None; 8],
             biomes: [None; 9],
+            lights: [None; 9],
         };
         let m = mesh_chunk(&hood, &Atlas::flat(), true, true);
         let west: Vec<_> = m

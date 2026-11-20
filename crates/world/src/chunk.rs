@@ -155,7 +155,11 @@ impl Chunk {
         }
         let light_at = |base: usize, n: usize| -> Box<LightNibbles> {
             let from = base + n * LIGHT_BYTES;
-            Box::new(data[from..from + LIGHT_BYTES].try_into().expect("light length"))
+            Box::new(
+                data[from..from + LIGHT_BYTES]
+                    .try_into()
+                    .expect("light length"),
+            )
         };
         let blocks_end = count * BLOCK_BYTES;
         chunk.light.has_sky = sky_light;

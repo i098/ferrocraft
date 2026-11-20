@@ -248,6 +248,7 @@ pub fn held_mesh(state: u16, atlas: &Atlas, flat: bool) -> MeshData {
         center: &blocks,
         neighbors: [None; 8],
         biomes: [None; 9],
+        lights: [None; 9],
     };
     let m = if flat {
         mesh_chunk_flat(&hood, atlas, true, true)

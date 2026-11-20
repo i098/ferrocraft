@@ -157,4 +157,9 @@ pub trait ChunkBlocks {
     fn biome(&self, _x: usize, _z: usize) -> u8 {
         1
     }
+    /// Packed light the server sent for section `s` (2048 bytes, two cells per byte, low nibble first, indexed like a
+    /// block); `None` when the source has none, then the renderer floods the light from the blocks.
+    fn light_section(&self, _s: usize, _sky: bool) -> Option<&[u8; 2048]> {
+        None
+    }
 }

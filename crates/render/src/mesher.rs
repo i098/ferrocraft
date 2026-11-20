@@ -15,6 +15,9 @@ pub type SharedBlocks = Arc<Vec<u16>>;
 /// Biome ids of one chunk, index `z * 16 + x`.
 pub type SharedBiomes = Arc<[u8; 256]>;
 
+/// Server light of one chunk, `sky << 4 | block` per block (see `light::expand_server`).
+pub type SharedLight = Arc<Vec<u8>>;
+
 /// A snapshot of the chunk and its eight neighbours, ordered as `Neighborhood::neighbors`.
 pub struct Job {
     pub key: (i32, i32),
@@ -24,6 +27,8 @@ pub struct Job {
     pub neighbors: [Option<SharedBlocks>; 8],
     /// Biomes of the chunk and its neighbours, as `Neighborhood::biomes`.
     pub biomes: [Option<SharedBiomes>; 9],
+    /// Server light of the chunk and its neighbours, as `Neighborhood::lights`.
+    pub lights: [Option<SharedLight>; 9],
     /// Smooth lighting on (`GameSettings.ambientOcclusion != 0`).
     pub smooth: bool,
     /// Fancy graphics on (`GameSettings.fancyGraphics`).
@@ -44,6 +49,7 @@ impl Job {
             center: &self.center,
             neighbors: std::array::from_fn(|i| self.neighbors[i].as_deref().map(Vec::as_slice)),
             biomes: std::array::from_fn(|i| self.biomes[i].as_deref()),
+            lights: std::array::from_fn(|i| self.lights[i].as_deref().map(Vec::as_slice)),
         };
         Done {
             key: self.key,

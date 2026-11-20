@@ -4,7 +4,8 @@
 //! reach the border lies inside that 48 x 48 block window.
 
 use crate::blocks::{emission, light_opacity};
-use crate::mesh::{Neighborhood, HEIGHT};
+use crate::mesh::{index, Neighborhood, HEIGHT};
+use crate::ChunkBlocks;
 use std::collections::VecDeque;
 use std::sync::LazyLock;
 
@@ -44,6 +45,9 @@ impl Light {
             .max()
             .map_or(0, |i| i / 256 + 1);
         let height = (top + 15).min(HEIGHT);
+        if let Some(cells) = server_cells(hood, height) {
+            return Light { cells, height };
+        }
         let n = height * W * W;
         let mut opacity = vec![0u8; n];
         let mut sky = vec![0u8; n];
@@ -107,6 +111,74 @@ impl Light {
         let c = self.cells[ring_idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
         (c >> 4, c & 15)
     }
+}
+
+/// The light the server sent, as `Chunk.getLightFor`, for every ring cell; `None` unless the chunk and every loaded
+/// neighbour kept it (a changed chunk is flooded again).
+fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
+    let mut slots = [None; 9];
+    for (slot, light) in hood.lights.iter().enumerate() {
+        let (dx, dz) = (slot as i32 % 3 - 1, slot as i32 / 3 - 1);
+        match light {
+            Some(l) => slots[slot] = Some(*l),
+            None if hood.loaded(dx, dz) => return None,
+            None => {}
+        }
+    }
+    slots[4]?;
+    let mut cells = vec![0u8; height * 18 * 18];
+    for y in 0..height {
+        for z in -1..=16i32 {
+            for x in -1..=16i32 {
+                let slot = (z.div_euclid(16) + 1) * 3 + x.div_euclid(16) + 1;
+                // An unloaded neighbour copies the edge of the chunk, as the flooded light does.
+                let (slot, x, z) = match slots[slot as usize] {
+                    Some(_) => (slot as usize, x, z),
+                    None => (4, x.clamp(0, 15), z.clamp(0, 15)),
+                };
+                let at = index(x.rem_euclid(16) as usize, y, z.rem_euclid(16) as usize);
+                cells[ring_idx(x, y, z)] = slots[slot]?[at];
+            }
+        }
+    }
+    Some(cells)
+}
+
+/// The light the server sent for a chunk as `sky << 4 | block` per block, or `None` when it sent none.
+/// Sections the packet lacks are dark, except that the sky reaches every cell at or above the column's highest
+/// light-blocking block (`Chunk.getLightFor` with `canSeeSky`).
+pub fn expand_server(chunk: &impl ChunkBlocks, blocks: &[u16]) -> Option<Vec<u8>> {
+    let any = |sky| (0..16).any(|s| chunk.light_section(s, sky).is_some());
+    if !any(false) {
+        return None;
+    }
+    let has_sky = any(true);
+    let mut out = vec![0u8; blocks.len()];
+    for z in 0..16 {
+        for x in 0..16 {
+            // Chunk.generateHeightMap: one above the highest block that blocks any light.
+            let sky_from = (0..HEIGHT)
+                .rev()
+                .find(|&y| PROPS[blocks[index(x, y, z)] as usize & 4095].0 > 0)
+                .map_or(0, |y| y + 1);
+            for y in 0..HEIGHT {
+                let i = index(x, y, z);
+                let nibble = |sky| {
+                    chunk
+                        .light_section(y >> 4, sky)
+                        .map(|a| a[(i & 4095) >> 1] >> ((i & 1) * 4) & 15)
+                };
+                let block = nibble(false).unwrap_or(0);
+                let sky = match nibble(true) {
+                    Some(v) => v,
+                    None if has_sky && y >= sky_from => 15,
+                    None => 0,
+                };
+                out[i] = sky << 4 | block;
+            }
+        }
+    }
+    Some(out)
 }
 
 fn darker_edges(sky: &[u8], height: usize) -> VecDeque<usize> {
@@ -175,6 +247,7 @@ mod tests {
             center: blocks,
             neighbors: [None; 8],
             biomes: [None; 9],
+            lights: [None; 9],
         }
     }
 
@@ -237,6 +310,7 @@ mod tests {
             center: &center,
             neighbors: [None, None, None, None, Some(&east), None, None, None],
             biomes: [None; 9],
+            lights: [None; 9],
         };
         let l = Light::compute(&hood);
         assert_eq!(l.get(16, 40, 8).1, 13);
@@ -265,6 +339,7 @@ mod tests {
                 Some(&corner),
             ],
             biomes: [None; 9],
+            lights: [None; 9],
         };
         // Two blocks across x and z plus nothing in y: 14 - 4 = 10.
         assert_eq!(Light::compute(&hood).get(15, 40, 15).1, 10);
@@ -282,5 +357,55 @@ mod tests {
         assert_eq!(l.get(5, 79, 5).0, 13);
         assert_eq!(l.get(5, 70, 5).0, 4);
         assert_eq!(l.get(5, 60, 5).0, 0);
+    }
+
+    #[test]
+    fn server_light_is_used_instead_of_flooding() {
+        // Stone floor, open air above, but the server says the cell at (5, 70, 5) is sky 3 block 9.
+        let c = chunk(|_, y, _| if y < 60 { 1 << 4 } else { 0 });
+        let mut light = vec![15u8 << 4; c.len()];
+        light[index(5, 70, 5)] = 3 << 4 | 9;
+        let mut hood = hood_of(&c);
+        hood.lights[4] = Some(&light);
+        let l = Light::compute(&hood);
+        assert_eq!(l.get(5, 70, 5), (3, 9));
+        assert_eq!(l.get(6, 70, 5), (15, 0));
+        // A missing neighbour copy makes the whole hood flood again.
+        let east = c.clone();
+        hood.neighbors[4] = Some(&east);
+        assert_eq!(Light::compute(&hood).get(5, 70, 5), (15, 0));
+    }
+
+    struct Sent(Vec<Option<[u8; 2048]>>);
+    impl ChunkBlocks for Sent {
+        fn chunk_x(&self) -> i32 {
+            0
+        }
+        fn chunk_z(&self) -> i32 {
+            0
+        }
+        fn block(&self, _: usize, _: usize, _: usize) -> u16 {
+            0
+        }
+        fn light_section(&self, s: usize, sky: bool) -> Option<&[u8; 2048]> {
+            self.0.get(s * 2 + usize::from(sky))?.as_ref()
+        }
+    }
+
+    #[test]
+    fn expand_server_reads_nibbles_and_fills_missing_sky_above_the_ground() {
+        let c = chunk(|_, y, _| if y < 20 { 1 << 4 } else { 0 });
+        let mut block = [0u8; 2048];
+        // Section 0, cell (x=1, y=2, z=0): index 513, high nibble of byte 256.
+        block[256] = 0x70;
+        let mut sent = vec![None; 32];
+        sent[0] = Some(block);
+        sent[1] = Some([0; 2048]);
+        let out = expand_server(&Sent(sent), &c).unwrap();
+        assert_eq!(out[index(1, 2, 0)], 7);
+        // Section 1 is missing: dark below the ground (y < 20), full sky above it.
+        assert_eq!(out[index(0, 18, 0)], 0);
+        assert_eq!(out[index(0, 25, 0)], 15 << 4);
+        assert!(expand_server(&Sent(vec![None; 32]), &c).is_none());
     }
 }

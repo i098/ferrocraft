@@ -77,6 +77,10 @@ pub struct Neighborhood<'a> {
     /// Biome ids of the columns (index `z * 16 + x`) of the chunk and its neighbours, row by row over
     /// `dz` then `dx` in `-1..=1`; a missing column counts as plains.
     pub biomes: [Option<&'a [u8; 256]>; 9],
+    /// Server light of the chunk and its neighbours (`sky << 4 | block` per block, indexed like blocks), ordered like
+    /// `biomes`. When every loaded chunk has it, the light is read from it, as vanilla keeps the server light and
+    /// relights only after a block change; otherwise it is flooded from the blocks.
+    pub lights: [Option<&'a [u8]>; 9],
 }
 
 /// Chunk offsets `(dx, dz)` of `Neighborhood::neighbors`.
@@ -814,6 +818,7 @@ mod tests {
                 center: c,
                 neighbors,
                 biomes: [None; 9],
+                lights: [None; 9],
             },
             &Atlas::flat(),
             smooth,
@@ -860,6 +865,7 @@ mod tests {
                 center: &c,
                 neighbors: [None; 8],
                 biomes: [None; 9],
+                lights: [None; 9],
             };
             mesh_chunk(&hood, &Atlas::flat(), true, fancy)
                 .opaque

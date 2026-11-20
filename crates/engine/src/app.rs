@@ -1823,6 +1823,9 @@ impl ChunkBlocks for View<'_> {
     fn biome(&self, x: usize, z: usize) -> u8 {
         self.0.biome(x, z)
     }
+    fn light_section(&self, s: usize, sky: bool) -> Option<&[u8; 2048]> {
+        self.0.light().section(s, sky)
+    }
 }
 
 /// Builds a screen with no arguments, for effects that open one.

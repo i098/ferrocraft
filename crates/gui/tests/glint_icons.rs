@@ -48,7 +48,12 @@ fn enchanted_icons_are_drawn_with_glint() {
         enchanted(311, 0),
         enchanted(301, 0),
         enchanted(1, 0),
-        ItemStack { id: 322, count: 1, damage: 1, nbt: None },
+        ItemStack {
+            id: 322,
+            count: 1,
+            damage: 1,
+            nbt: None,
+        },
     ];
     let draw = |r: &mut Renderer, glint: bool| {
         let mut g = Gui::new(GuiScale::new(854, 480, 0, false), r.font(), 0);
@@ -71,11 +76,22 @@ fn enchanted_icons_are_drawn_with_glint() {
     };
     let plain = draw(&mut r, false);
     let glowing = draw(&mut r, true);
-    let n = plain.2.chunks(4).zip(glowing.2.chunks(4)).filter(|(a, b)| a != b).count();
+    let n = plain
+        .2
+        .chunks(4)
+        .zip(glowing.2.chunks(4))
+        .filter(|(a, b)| a != b)
+        .count();
     assert!(n > 300, "only {n} pixels changed with glint");
     if let Some(dir) = std::env::var_os("GLINT_PROOF_DIR") {
         let dir = std::path::Path::new(&dir);
-        encode_png(&dir.join("glint_icons.png"), glowing.0, glowing.1, &glowing.2).unwrap();
+        encode_png(
+            &dir.join("glint_icons.png"),
+            glowing.0,
+            glowing.1,
+            &glowing.2,
+        )
+        .unwrap();
         encode_png(&dir.join("plain_icons.png"), plain.0, plain.1, &plain.2).unwrap();
     }
 }

@@ -637,7 +637,7 @@ impl App {
             return (dx, dy);
         };
         let frac = self.tick_frac();
-        let (rain, thunder) = self.game.weather.strengths(frac as f32);
+        let (rain, thunder) = self.game.weather.strengths();
         let state = ferrocraft_modhost::WorldState {
             partial: frac as f32,
             yaw: p.yaw,
@@ -1009,7 +1009,7 @@ impl App {
             self.chunk_updates = (0, self.chunk_updates.0);
         }
         let (rain, thunder) = self.mod_view.weather.unwrap_or_else(|| {
-            let (rain, thunder) = self.game.weather.strengths(frac as f32);
+            let (rain, thunder) = self.game.weather.strengths();
             (rain, thunder * rain)
         });
         r.set_environment(Environment {

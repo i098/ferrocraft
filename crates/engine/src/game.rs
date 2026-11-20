@@ -801,7 +801,7 @@ impl Game {
     }
 
     /// `onDeathUpdate` calls `setDead()` at `deathTime == 20`; `World.updateEntities`
-    /// then skips the player, so no C03-C06 or C0B goes out until the respawn.
+    /// then skips the player, so no C03-C06, C0B or C0C goes out until the respawn.
     pub fn player_removed(&self) -> bool {
         self.health <= 0.0 && self.death_ticks >= 20
     }

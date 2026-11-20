@@ -312,7 +312,7 @@ mod tests {
     }
 
     fn count(d: EntityDraw) -> usize {
-        build_all(&[d], &Skins::flat(), 0, |_| [1.0, 1.0])
+        build_all(&[d], &Skins::flat(), |_| [1.0, 1.0])
             .vertices
             .len()
     }

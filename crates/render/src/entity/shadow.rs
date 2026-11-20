@@ -4,7 +4,6 @@
 use super::{Class, EntityDraw};
 use crate::blocks::{look, Kind};
 use crate::mesh::{MeshData, Vertex};
-use crate::sky::Dimension;
 
 pub const TEXTURE: &str = "textures/misc/shadow.png";
 
@@ -63,16 +62,6 @@ pub fn caster(d: &EntityDraw) -> Option<Caster> {
     })
 }
 
-/// `World.calculateSkylightSubtracted(1.0)`: how many sky levels the time of day and the weather remove.
-pub fn skylight_subtracted(dimension: Dimension, world_time: i64, rain: f32, thunder: f32) -> i32 {
-    let angle = dimension.celestial_angle(world_time, 1.0);
-    let mut f = (1.0 - ((angle * std::f32::consts::TAU).cos() * 2.0 + 0.5)).clamp(0.0, 1.0);
-    f = 1.0 - f;
-    f *= 1.0 - rain * 5.0 / 16.0;
-    f *= 1.0 - thunder * 5.0 / 16.0;
-    ((1.0 - f) * 11.0) as i32
-}
-
 /// `OverworldProvider.lightBrightnessTable` at a light level `0..=15`.
 fn brightness(level: i32) -> f64 {
     f64::from(light_brightness(level))
@@ -84,9 +73,10 @@ pub(crate) fn light_brightness(level: i32) -> f32 {
     (1.0 - f) / (f * 3.0 + 1.0)
 }
 
-/// `Entity.getBrightness`: the table value of `[sky, block]` light with the sky reduced by `subtracted`.
-pub(crate) fn eye_light_brightness([sky, block]: [i32; 2], subtracted: i32) -> f32 {
-    light_brightness((sky - subtracted).max(block))
+/// `Entity.getBrightness`: the table value of `[sky, block]` light. The client world's `skylightSubtracted` is
+/// computed once in the `WorldClient` constructor, so the sky level is never reduced.
+pub(crate) fn eye_light_brightness([sky, block]: [i32; 2]) -> f32 {
+    light_brightness(sky.max(block))
 }
 
 /// The alpha of the shadow on the top face of the block at height `block_y`, or `None` below zero:
@@ -103,14 +93,12 @@ fn full_cube(state: u16) -> bool {
 }
 
 /// Meshes the shadows of `casters` in world space. `view` is the view entity's feet position, which sets the
-/// distance fade; `block(x, y, z)` is a block state; `light(x, y, z)` is `[sky, block]` light `0..=15`
-/// without the time-of-day subtraction; `subtracted` is [`skylight_subtracted`].
+/// distance fade; `block(x, y, z)` is a block state; `light(x, y, z)` is `[sky, block]` light `0..=15`.
 pub fn build(
     casters: &[Caster],
     view: [f64; 3],
     block: impl Fn(i32, i32, i32) -> u16,
     light: impl Fn(i32, i32, i32) -> [i32; 2],
-    subtracted: i32,
 ) -> MeshData {
     let mut mesh = MeshData::default();
     for c in casters {
@@ -118,7 +106,7 @@ pub fn build(
         let dist: f64 = (0..3).map(|i| (view[i] - c.pos[i]).powi(2)).sum();
         let shadow_alpha = ((1.0 - dist / 256.0) * f64::from(c.opaque)) as f32;
         if shadow_alpha > 0.0 {
-            cast(&mut mesh, c, shadow_alpha, &block, &light, subtracted);
+            cast(&mut mesh, c, shadow_alpha, &block, &light);
         }
     }
     mesh
@@ -131,7 +119,6 @@ fn cast(
     shadow_alpha: f32,
     block: &impl Fn(i32, i32, i32) -> u16,
     light: &impl Fn(i32, i32, i32) -> [i32; 2],
-    subtracted: i32,
 ) {
     let [x, y, z] = c.pos;
     let s = f64::from(c.size);
@@ -142,8 +129,8 @@ fn cast(
         for bz in z0..=z1 {
             for bx in x0..=x1 {
                 let [sky, lit] = light(bx, by, bz);
-                let level = (sky - subtracted).max(lit);
-                // Both the light gate and the brightness table use the darkened sky light.
+                let level = sky.max(lit);
+                // The light gate and the brightness table use the same level.
                 if level <= 3 || !full_cube(block(bx, by - 1, bz)) {
                     continue;
                 }
@@ -183,25 +170,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eye_brightness_follows_vanilla_table_at_night() {
-        let night = skylight_subtracted(Dimension::Overworld, 18000, 0.0, 0.0);
-        assert_eq!(night, 11);
-        // Sky 15 minus 11 = level 4 in the open at night: 4/15 / (11/15 * 3 + 1).
-        let want = (4.0 / 15.0) / ((11.0 / 15.0) * 3.0 + 1.0);
-        assert!((eye_light_brightness([15, 0], night) - want).abs() < 1e-6);
-        // A dark spot is 0, a torch-lit one is not reduced by the night, and noon sky is full.
-        assert_eq!(eye_light_brightness([0, 0], night), 0.0);
-        assert_eq!(eye_light_brightness([0, 15], night), 1.0);
-        assert_eq!(
-            eye_light_brightness(
-                [15, 0],
-                skylight_subtracted(Dimension::Overworld, 6000, 0.0, 0.0)
-            ),
-            1.0
-        );
-    }
-
-    #[test]
     fn alpha_fades_with_height_and_light() {
         // Standing on the block: (1 - 0) * 0.5 * 1 in full light.
         assert!((alpha(1.0, 64.0, 64, 15).unwrap() - 0.5).abs() < 1e-6);
@@ -227,7 +195,7 @@ mod tests {
             size: 0.5,
             opaque: 1.0,
         };
-        let lit = build(&[player], [0.5, 64.0, 0.5], floor, light, 0);
+        let lit = build(&[player], [0.5, 64.0, 0.5], floor, light);
         // A size-0.5 player covers blocks 0 and 1 on both axes.
         assert_eq!(lit.indices.len(), 4 * 6);
         assert!(lit.vertices.iter().all(|v| v.pos[1] == 64.015625));
@@ -235,11 +203,11 @@ mod tests {
         assert!(lit.vertices.iter().any(|v| v.uv == [0.0, 0.0]));
         // Light 3 is too dark for a shadow, and so is a block that is not a full cube.
         let dark = |_: i32, _: i32, _: i32| [3, 0];
-        assert!(build(&[player], [0.5, 64.0, 0.5], floor, dark, 0).is_empty());
+        assert!(build(&[player], [0.5, 64.0, 0.5], floor, dark).is_empty());
         let air = |_: i32, _: i32, _: i32| 0;
-        assert!(build(&[player], [0.5, 64.0, 0.5], air, light, 0).is_empty());
+        assert!(build(&[player], [0.5, 64.0, 0.5], air, light).is_empty());
         // Past 16 blocks the distance fade removes it.
-        assert!(build(&[player], [0.5, 64.0, 17.0], floor, light, 0).is_empty());
+        assert!(build(&[player], [0.5, 64.0, 17.0], floor, light).is_empty());
     }
 
     #[test]
@@ -264,16 +232,9 @@ mod tests {
     }
 
     #[test]
-    fn midnight_subtracts_eleven_sky_levels() {
-        assert_eq!(skylight_subtracted(Dimension::Overworld, 6000, 0.0, 0.0), 0);
-        assert_eq!(
-            skylight_subtracted(Dimension::Overworld, 18000, 0.0, 0.0),
-            11
-        );
-        assert!(skylight_subtracted(Dimension::Overworld, 6000, 1.0, 0.0) > 0);
-        assert!(
-            skylight_subtracted(Dimension::Overworld, 6000, 1.0, 1.0)
-                > skylight_subtracted(Dimension::Overworld, 6000, 0.0, 1.0)
-        );
+    fn open_sky_is_full_brightness_at_any_time() {
+        // The client world computes `skylightSubtracted` once when it is created, so time and weather never dim it.
+        assert_eq!(eye_light_brightness([15, 0]), 1.0);
+        assert_eq!(eye_light_brightness([0, 0]), 0.0);
     }
 }

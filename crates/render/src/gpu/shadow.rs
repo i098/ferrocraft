@@ -42,7 +42,8 @@ impl Renderer {
         } else {
             [15, 0]
         };
-        let level = (sky - self.skylight_subtracted()).max(block).clamp(0, 15);
+        // `WorldClient` computes `skylightSubtracted` once at creation, so the sky level is never reduced.
+        let level = sky.max(block).clamp(0, 15);
         self.fog_light.advance(
             env.ticks,
             env.dimension.light_brightness(level as u8),
@@ -57,21 +58,15 @@ impl Renderer {
             .map(|l| (l * 15.0).round() as i32)
     }
 
-    /// `World.skylightSubtracted` of this frame.
-    pub(super) fn skylight_subtracted(&self) -> i32 {
-        let env = self.environment;
-        entity::shadow::skylight_subtracted(env.dimension, env.world_time, env.rain, env.thunder)
-    }
-
-    /// `Entity.getBrightness`: the light table value `0..=1` of the block at the eye `eye`, with the sky light reduced by
-    /// the time of day. 0 light in unloaded chunks, like vanilla.
+    /// `Entity.getBrightness`: the light table value `0..=1` of the block at the eye `eye`. The client world never
+    /// subtracts time or weather from the sky light. 0 light in unloaded chunks, like vanilla.
     pub fn eye_brightness(&self, eye: [f64; 3]) -> f32 {
         let light = self.light_levels(
             eye[0].floor() as i32,
             eye[1].floor() as i32,
             eye[2].floor() as i32,
         );
-        entity::shadow::eye_light_brightness(light, self.skylight_subtracted())
+        entity::shadow::eye_light_brightness(light)
     }
 
     /// The shadow blobs of this frame's entities (`Render.renderShadow`); `None` when off or none are cast.
@@ -80,14 +75,12 @@ impl Renderer {
             return None;
         }
         self.load_texture(entity::shadow::TEXTURE);
-        let subtracted = self.skylight_subtracted();
         let view = self.view_feet(cam);
         let mesh = entity::shadow::build(
             &self.shadows,
             view,
             |x, y, z| self.block_state(x, y, z),
             |x, y, z| self.light_levels(x, y, z),
-            subtracted,
         );
         self.upload_mesh(mesh, [0.0; 3])
     }

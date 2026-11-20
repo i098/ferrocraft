@@ -89,6 +89,8 @@ fn chicken_draws_legs_and_flapped_wings() {
             r.upload_chunk(&Flat(cx, cz));
         }
     }
+    // The first frame uploads the light the entities read.
+    let _ = r.render_to_rgba(&cam, &[]);
     r.set_entities(&[chicken(-0.8, 0.0), chicken(0.8, 1.2)]);
     let img = r.render_to_rgba(&cam, &[]).2;
     if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {

@@ -1335,7 +1335,8 @@ impl App {
     /// `RenderGlobal.loadRenderers`: rebuild every chunk mesh.
     pub(super) fn reload_chunks(&mut self) {
         let Some(r) = &mut self.renderer else { return };
-        r.clear_chunks();
+        // The server sends skull, sign and banner data once: keep it.
+        r.drop_chunk_meshes();
         let at: Vec<_> = self.game.store.positions().collect();
         for (x, z) in at {
             if let Some(c) = self.game.store.get(x, z) {

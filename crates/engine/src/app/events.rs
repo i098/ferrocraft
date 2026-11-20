@@ -288,18 +288,14 @@ impl App {
             self.run_effects(q);
         }
         let events = self.link.session().map(|s| s.poll()).unwrap_or_default();
-        let mut clear = false;
         let mut dirty = Dirty::new();
         for ev in events {
-            self.on_event(ev, &mut clear, &mut dirty);
+            self.on_event(ev, &mut dirty);
         }
         if std::mem::take(&mut self.game.teleported) {
             self.send_teleport_echo();
         }
         if let Some(r) = &mut self.renderer {
-            if clear {
-                r.clear_chunks();
-            }
             upload(r, &self.game, dirty);
         }
         self.finish_terrain_wait();
@@ -311,7 +307,7 @@ impl App {
         }
     }
 
-    fn on_event(&mut self, ev: NetEvent, clear: &mut bool, dirty: &mut Dirty) {
+    fn on_event(&mut self, ev: NetEvent, dirty: &mut Dirty) {
         self.mod_net_event(&ev);
         self.note_session_state(&ev);
         self.entity_sound(&ev);
@@ -340,7 +336,7 @@ impl App {
             Err(ev) => ev,
         };
         if let Some(e) = self.game.apply(ev) {
-            self.game_effect(e, clear, dirty);
+            self.game_effect(e, dirty);
         }
     }
 
@@ -708,10 +704,13 @@ impl App {
         }
     }
 
-    fn game_effect(&mut self, e: Effect, clear: &mut bool, dirty: &mut Dirty) {
+    fn game_effect(&mut self, e: Effect, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {
-                *clear = true;
+                // At once: block entity data that follows in the same poll must survive.
+                if let Some(r) = &mut self.renderer {
+                    r.clear_chunks();
+                }
                 dirty.clear();
             }
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {
@@ -1092,7 +1091,7 @@ mod tests {
                     app.ui.close(&m);
                     assert!(!app.ui.is_open());
                 }
-                app.on_event(ev, &mut false, &mut Dirty::new());
+                app.on_event(ev, &mut Dirty::new());
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -1174,14 +1173,12 @@ mod tests {
         });
         app.on_event(
             NetEvent::Statistics(vec![("achievement.mineWood".into(), 1)]),
-            &mut false,
             &mut Dirty::new(),
         );
         assert_eq!(app.ui.stats.read("achievement.mineWood"), 1);
         app.leave_world();
         app.on_event(
             NetEvent::Statistics(vec![("achievement.openInventory".into(), 1)]),
-            &mut false,
             &mut Dirty::new(),
         );
         assert_eq!(app.ui.stats.read("achievement.openInventory"), 1);
@@ -1279,11 +1276,7 @@ mod tests {
         let m = metrics!(app);
         app.ui.open(&m, boxed(Death::new(0)));
         assert!(app.ui.is_game_over());
-        app.on_event(
-            NetEvent::Respawn { dimension_changed },
-            &mut false,
-            &mut Dirty::new(),
-        );
+        app.on_event(NetEvent::Respawn { dimension_changed }, &mut Dirty::new());
         app
     }
 
@@ -1346,7 +1339,7 @@ mod tests {
     #[test]
     fn s2e_closes_chat_and_s2d_shows_the_container_without_chat() {
         let mut app = chat_app();
-        app.on_event(NetEvent::CloseWindow, &mut false, &mut Dirty::new());
+        app.on_event(NetEvent::CloseWindow, &mut Dirty::new());
         assert!(app.input.chat_input().is_none());
 
         let mut app = chat_app();
@@ -1358,7 +1351,6 @@ mod tests {
                 slots: 27,
                 horse: None,
             },
-            &mut false,
             &mut Dirty::new(),
         );
         assert!(app.input.chat_input().is_none());
@@ -1373,7 +1365,7 @@ mod tests {
         let own = app.game.entity_id;
         let attach =
             |vehicle| NetEvent::Entity(world::entities::EntityEvent::Attach { id: own, vehicle });
-        app.on_event(attach(99), &mut false, &mut Dirty::new());
+        app.on_event(attach(99), &mut Dirty::new());
         assert_eq!(app.game.vehicle, None);
         assert_eq!(app.hud.action_bar(), None);
         app.game
@@ -1391,7 +1383,7 @@ mod tests {
                 health: None,
                 size: Default::default(),
             });
-        app.on_event(attach(99), &mut false, &mut Dirty::new());
+        app.on_event(attach(99), &mut Dirty::new());
         assert_eq!(app.game.vehicle, Some(99));
         assert_eq!(
             app.hud.action_bar().map(|a| a.0),

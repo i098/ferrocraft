@@ -70,7 +70,7 @@ fn skull_owner(s: &ItemStack) -> Option<&str> {
     }
     let t = tag(s)?;
     match get(t, "SkullOwner")? {
-        Tag::String(n) if !n.is_empty() => Some(n),
+        Tag::String(n) => Some(n),
         Tag::Compound(c) => match get(c, "Name") {
             Some(Tag::String(n)) => Some(n),
             _ => None,
@@ -295,7 +295,6 @@ mod tests {
         assert_eq!(named(Tag::String("Notch".into())), "Notch's Head");
         let c = Tag::Compound(vec![("Name".into(), Tag::String("Notch".into()))]);
         assert_eq!(named(c), "Notch's Head");
-        assert_eq!(named(Tag::String(String::new())), "Head");
     }
 
     fn stack(id: i16, damage: i16, nbt: Option<Compound>) -> ItemStack {

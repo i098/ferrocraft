@@ -6,7 +6,7 @@ use crate::assets::Atlas;
 use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
     cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light, Kind, Look, Tint,
-    DOWN, NORTH, UP,
+    DOWN, NORTH, UP, WEST,
 };
 use crate::light::Light;
 use crate::models::Quad;
@@ -140,6 +140,8 @@ pub(crate) const DIRS: [[i32; 3]; 6] = [
     [-1, 0, 0],
     [1, 0, 0],
 ];
+/// `BlockFluidRenderer.f8`: how far a liquid top is lowered and its sides are moved inside the block.
+const LIQUID_EDGE: f32 = 0.001;
 /// Vanilla per-face brightness.
 const SHADE: [f32; 6] = [1.0, 0.5, 0.8, 0.8, 0.6, 0.6];
 /// Corners of each face, counter-clockwise seen from outside.
@@ -526,6 +528,13 @@ impl Mesher<'_> {
             ],
         ];
         let own = self.light_at(at, [0; 3]);
+        // `BlockFluidRenderer.renderFluid`: a rendered top is lowered by `f8`, and the sides follow it.
+        let drop = if same(self.st(at, DIRS[UP])) {
+            0.0
+        } else {
+            LIQUID_EDGE
+        };
+        let h = h.map(|r| r.map(|y| y - drop));
         let gap = self.liquid_gap_above(at, &same);
         let flow = self.flow_angle(at, state, &same);
         for (f, &dir) in DIRS.iter().enumerate() {
@@ -534,12 +543,7 @@ impl Mesher<'_> {
             if same(n) || (f != UP && self.opaque(n)) {
                 continue;
             }
-            let mut light = if f == UP {
-                let up = self.light_at(at, [0, 1, 0]);
-                [own[0].max(up[0]), own[1].max(up[1])]
-            } else {
-                self.flat_light(at, dir)
-            };
+            let mut light = self.liquid_light(at, f, own);
             if lava {
                 light[1] = 1.0;
             }
@@ -548,6 +552,20 @@ impl Mesher<'_> {
             if f >= NORTH || (f == UP && gap) {
                 verts.reverse();
                 self.push_quad(pass, verts, false);
+            }
+        }
+    }
+
+    /// `BlockLiquid.getMixedBrightnessForBlock` of the cell a face looks at: the brighter of it and the cell above it
+    /// (the top reads its own cell, the bottom the cell below).
+    fn liquid_light(&self, at: [i32; 3], f: usize, own: [f32; 2]) -> [f32; 2] {
+        let brighter = |a: [f32; 2], b: [f32; 2]| [a[0].max(b[0]), a[1].max(b[1])];
+        match f {
+            UP => brighter(own, self.light_at(at, [0, 1, 0])),
+            DOWN => brighter(self.light_at(at, DIRS[f]), own),
+            _ => {
+                let d = DIRS[f];
+                brighter(self.light_at(at, d), self.light_at(at, [d[0], 1, d[2]]))
             }
         }
     }
@@ -585,11 +603,21 @@ impl Mesher<'_> {
                 0.0
             };
             let p = [c[0], y, c[2]];
+            // The side quads sit `f8` inside the block, so they never fight the neighbour's faces.
+            let mut q = p;
+            if f >= NORTH {
+                let axis = if f < WEST { 2 } else { 0 };
+                q[axis] = if DIRS[f][axis] < 0 {
+                    LIQUID_EDGE
+                } else {
+                    1.0 - LIQUID_EDGE
+                };
+            }
             Vertex {
                 pos: [
-                    at[0] as f32 + p[0],
-                    at[1] as f32 + p[1],
-                    at[2] as f32 + p[2],
+                    at[0] as f32 + q[0],
+                    at[1] as f32 + q[1],
+                    at[2] as f32 + q[2],
                 ],
                 uv: self.atlas.uv(
                     tex,
@@ -912,6 +940,78 @@ mod tests {
         // Corners average with the empty neighbours, so a lone source block is lower than 8/9.
         assert!(m.water.vertices.iter().all(|v| v.pos[1] < 60.89));
         assert!(m.water.vertices.iter().any(|v| v.pos[1] > 60.6));
+    }
+
+    #[test]
+    fn water_top_is_lowered_and_sides_sit_inside_the_block() {
+        // `BlockFluidRenderer.f8` = 0.001: the top drops by it, the side quads follow the top and move inward.
+        let c = flat(|x, y, z| if (x, y, z) == (4, 60, 4) { 9 << 4 } else { 0 });
+        let m = mesh(&c, [None; 8]);
+        let quads: Vec<_> = m.water.vertices.chunks(4).collect();
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        let lone_corner = 60.0 + 1.0 - (1.0 / 9.0 * 11.0 + 3.0) / 14.0 - 0.001;
+        let tops: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.iter()
+                    .all(|v| v.pos[1] > 60.5 && near(v.pos[1], q[0].pos[1]))
+            })
+            .collect();
+        assert!(tops
+            .iter()
+            .any(|q| q.iter().any(|v| near(v.pos[1], lone_corner))));
+        let sides: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.iter().any(|v| v.pos[1] > 60.5)
+                    && q.iter().any(|v| v.pos[1] == 60.0)
+                    && (q.iter().all(|v| v.pos[0] == q[0].pos[0])
+                        || q.iter().all(|v| v.pos[2] == q[0].pos[2]))
+            })
+            .collect();
+        assert_eq!(sides.len(), 8, "four sides, each drawn from both sides");
+        for q in sides {
+            let axis = if q.iter().all(|v| v.pos[0] == q[0].pos[0]) {
+                0
+            } else {
+                2
+            };
+            let edge = q[0].pos[axis] - 4.0;
+            assert!(near(edge, 0.001) || near(edge, 0.999), "{edge}");
+            assert!(q.iter().all(|v| near(v.pos[axis], q[0].pos[axis])));
+            assert!(q.iter().all(|v| v.pos[1] == 60.0 || v.pos[1] < 60.7));
+        }
+    }
+
+    #[test]
+    fn water_side_light_is_the_brighter_of_the_neighbour_and_the_cell_above_it() {
+        // `BlockLiquid.getMixedBrightnessForBlock`: a side face reads the neighbour and the cell over it, not its own cell.
+        let c = flat(|x, y, z| match (x, y, z) {
+            (4, 60, 4) => 9 << 4,
+            (3, 61, 4) => 89 << 4,
+            _ => 0,
+        });
+        let hood = Neighborhood {
+            origin: (0, 0),
+            center: &c,
+            neighbors: [None; 8],
+            biomes: [None; 9],
+        };
+        let m = mesh_chunk(&hood, &Atlas::flat(), true, true);
+        let west: Vec<_> = m
+            .water
+            .vertices
+            .chunks(4)
+            .filter(|q| q.iter().all(|v| (v.pos[0] - 4.001).abs() < 1e-4))
+            .collect();
+        assert!(!west.is_empty());
+        let light = Light::compute(&hood);
+        let (side, above) = (light.get(3, 60, 4), light.get(3, 61, 4));
+        let want = [
+            f32::from(side.0.max(above.0)) / 15.0,
+            f32::from(side.1.max(above.1)) / 15.0,
+        ];
+        assert!(west.iter().all(|q| q.iter().all(|v| v.light == want)));
     }
 
     #[test]

@@ -1317,6 +1317,10 @@ impl App {
             factor as f32,
             tag_flags,
         );
+        if let Some(icons) = self.icons.as_mut() {
+            // `Minecraft.getSystemTime()`: the clock that scrolls the item glint.
+            icons.now_ms = crate::game::now_ms() as u64;
+        }
         if show_hud {
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac, draws.len());

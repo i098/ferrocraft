@@ -68,8 +68,8 @@ const CLOCK: &str = "textures/items/clock.png";
 const GLINT: &str = "textures/misc/enchanted_item_glint.png";
 const GLINT_COLOR: u32 = 0xFF80_40CC;
 /// Glint texture coordinates span a sprite's share of the 1.8.9 item atlas.
-/// shortcut: assumes a 1024 px wide atlas, upgrade if the atlas size is tracked.
-const ATLAS_SHARE: f32 = 16.0 / 1024.0;
+/// Vanilla 1.8.9 stitches a 512 px wide atlas (`render::entity::ITEM_UV_SCALE`).
+const ATLAS_SHARE: f32 = 16.0 / 512.0;
 
 fn texture_path(name: &str) -> String {
     format!("textures/{name}.png")

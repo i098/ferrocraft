@@ -11,11 +11,11 @@ const fn sheet(base: u32) -> Sprite {
 }
 
 /// `EntityNoteFX` colour for the packet motion x (`note / 24`): `sin((x + k / 3) * 2 pi) * 0.65 + 0.35`
-/// per channel. GL clamps what is out of range.
+/// per channel. A channel below 0 stays negative: `push_quad` wraps it to a byte like `BufferBuilder.color`.
 pub(super) fn note_color(x: f64) -> [f32; 3] {
     [0.0, 0.333_333_34, 0.666_666_7].map(|k| {
         let angle = (x as f32 + k) * std::f32::consts::PI * 2.0;
-        (world::sin(angle) * 0.65 + 0.35).clamp(0.0, 1.0)
+        world::sin(angle) * 0.65 + 0.35
     })
 }
 

@@ -396,3 +396,21 @@ fn packets_are_sent_over_an_unloaded_chunk() {
     app.game.player.as_mut().unwrap().yaw = 30.0;
     assert_eq!(ids(&mut app), [LOOK]);
 }
+
+/// `onDeathUpdate` calls `setDead()` at `deathTime == 20` and `World.updateEntities` skips the player
+/// from then on, so a dead rider sends no look, steer or horse jump either.
+#[test]
+fn dead_rider_sends_nothing_after_twenty_death_ticks() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.vehicle = Some(OTHER_ID);
+    app.game.health = 0.0;
+    for _ in 0..20 {
+        app.tick_once();
+    }
+    sent_so_far(&mut app, &rx);
+    app.game.horse_boost = Some(50);
+    assert!(app.game.player_removed());
+    let (ids, _) = tick(&mut app, &rx);
+    assert_eq!(ids, Vec::<u8>::new());
+}

@@ -10,12 +10,10 @@ pub enum DebugCombo {
     Hitboxes,
     /// F3+D: clear chat.
     ClearChat,
-    /// F3+H: advanced item tooltips.
+    /// F3+H: advanced item tooltips; no chat line.
     AdvancedTooltips,
     /// F3+P: pause when the window loses focus.
     PauseOnLostFocus,
-    /// F3+Q: list the combos in chat.
-    Help,
     /// F3+S and F3+T: `Minecraft.reloadResources` (offsets 875 and 963 of `processKeyF3`); no chat line.
     ReloadResources,
     /// F3+F: `GameOptions.set(RENDER_DISTANCE, ±1)`. 1.8.9 `set` has no branch for that option and only

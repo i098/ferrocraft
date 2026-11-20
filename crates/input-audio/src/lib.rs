@@ -111,7 +111,6 @@ fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
         KeyCode::KeyD => DebugCombo::ClearChat,
         KeyCode::KeyH => DebugCombo::AdvancedTooltips,
         KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
-        KeyCode::KeyQ => DebugCombo::Help,
         KeyCode::KeyS | KeyCode::KeyT => DebugCombo::ReloadResources,
         KeyCode::KeyF => DebugCombo::RenderDistance,
         _ => return None,

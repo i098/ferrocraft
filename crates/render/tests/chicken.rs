@@ -96,8 +96,10 @@ fn chicken_draws_legs_and_flapped_wings() {
     let img = r.render_to_rgba(&cam, &[]).2;
     let (mut left, mut right) = (0usize, 0usize);
     for (i, (a, b)) in standing
-        .chunks_exact(4)
-        .zip(img.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(img.as_chunks::<4>().0.iter())
         .enumerate()
     {
         if a != b {

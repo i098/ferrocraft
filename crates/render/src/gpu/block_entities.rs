@@ -22,6 +22,11 @@ impl Renderer {
         self.block_entities.set_skull(pos, skull);
     }
 
+    /// The skull data held at `pos`.
+    pub fn skull(&self, pos: [i32; 3]) -> Option<Skull> {
+        self.block_entities.skull(pos)
+    }
+
     /// `Base` and `Patterns` of a banner (`S35` action 6).
     pub fn set_banner(&mut self, pos: [i32; 3], banner: Banner) {
         self.block_entities.set_banner(pos, banner);

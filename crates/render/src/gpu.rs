@@ -846,8 +846,13 @@ impl Renderer {
     }
 
     pub fn clear_chunks(&mut self) {
-        self.blocks.clear();
         self.block_entities.clear();
+        self.drop_chunk_meshes();
+    }
+
+    /// Drops the chunk data and meshes but keeps the block entity data, for a re-upload of every chunk.
+    pub fn drop_chunk_meshes(&mut self) {
+        self.blocks.clear();
         self.biomes.clear();
         self.meshes.clear();
         self.dirty.clear();

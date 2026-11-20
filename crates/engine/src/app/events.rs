@@ -704,13 +704,17 @@ impl App {
         }
     }
 
+    /// At once: block entity data that follows in the same poll must survive.
+    fn clear_chunks(&mut self) {
+        if let Some(r) = &mut self.renderer {
+            r.clear_chunks();
+        }
+    }
+
     fn game_effect(&mut self, e: Effect, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {
-                // At once: block entity data that follows in the same poll must survive.
-                if let Some(r) = &mut self.renderer {
-                    r.clear_chunks();
-                }
+                self.clear_chunks();
                 dirty.clear();
             }
             e @ (Effect::Upload(x, z) | Effect::Remove(x, z)) => {

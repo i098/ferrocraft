@@ -539,19 +539,7 @@ impl Mesher<'_> {
             if same(n) || (f != UP && self.opaque(n)) {
                 continue;
             }
-            let mut light = if f == UP {
-                let up = self.light_at(at, [0, 1, 0]);
-                [own[0].max(up[0]), own[1].max(up[1])]
-            } else if f == DOWN {
-                self.flat_light(at, dir)
-            } else {
-                // `BlockLiquid.getMixedBrightnessForBlock` of the neighbour: the brighter of it and the cell above it.
-                let (side, above) = (
-                    self.light_at(at, dir),
-                    self.light_at(at, [dir[0], 1, dir[2]]),
-                );
-                [side[0].max(above[0]), side[1].max(above[1])]
-            };
+            let mut light = self.liquid_light(at, f, own);
             if lava {
                 light[1] = 1.0;
             }
@@ -560,6 +548,20 @@ impl Mesher<'_> {
             if f >= NORTH || (f == UP && gap) {
                 verts.reverse();
                 self.push_quad(pass, verts, false);
+            }
+        }
+    }
+
+    /// Light of one liquid face: the top reads its own cell and the one above, the bottom the cell below, and a side
+    /// `BlockLiquid.getMixedBrightnessForBlock` of the neighbour: the brighter of it and the cell above it.
+    fn liquid_light(&self, at: [i32; 3], f: usize, own: [f32; 2]) -> [f32; 2] {
+        let brighter = |a: [f32; 2], b: [f32; 2]| [a[0].max(b[0]), a[1].max(b[1])];
+        match f {
+            UP => brighter(own, self.light_at(at, [0, 1, 0])),
+            DOWN => self.flat_light(at, DIRS[f]),
+            _ => {
+                let d = DIRS[f];
+                brighter(self.light_at(at, d), self.light_at(at, [d[0], 1, d[2]]))
             }
         }
     }

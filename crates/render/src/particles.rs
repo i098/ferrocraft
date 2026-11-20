@@ -1313,7 +1313,11 @@ impl Particles {
             self.spawn_near(Kind::Smoke, p, [0.0; 3]);
             if half && (self.rand() * 4.0) as u32 == 0 {
                 let p = around(self);
-                self.spawn_near(Kind::MobSpell, p, [f64::from(0.7_f32), f64::from(0.7_f32), 0.5]);
+                self.spawn_near(
+                    Kind::MobSpell,
+                    p,
+                    [f64::from(0.7_f32), f64::from(0.7_f32), 0.5],
+                );
             }
         }
         if invul {
@@ -1323,7 +1327,11 @@ impl Particles {
                     pos[1] + f64::from((self.rand() as f32) * 3.3),
                     pos[2] + self.gaussian(),
                 ];
-                self.spawn_near(Kind::MobSpell, p, [f64::from(0.7_f32), f64::from(0.7_f32), f64::from(0.9_f32)]);
+                self.spawn_near(
+                    Kind::MobSpell,
+                    p,
+                    [f64::from(0.7_f32), f64::from(0.7_f32), f64::from(0.9_f32)],
+                );
             }
         }
     }
@@ -1690,9 +1698,7 @@ fn render_scale(p: &Particle, partial: f32) -> f32 {
         | Behavior::RedDust
         | Behavior::Crit
         | Behavior::Snow
-        | Behavior::Drift => {
-            p.init_scale * (t * 32.0).clamp(0.0, 1.0)
-        }
+        | Behavior::Drift => p.init_scale * (t * 32.0).clamp(0.0, 1.0),
         Behavior::Flame => p.init_scale * (1.0 - t * t * 0.5),
         Behavior::Lava => p.init_scale * (1.0 - t * t),
         Behavior::Portal => p.init_scale * (1.0 - (1.0 - t) * (1.0 - t)),
@@ -1829,7 +1835,12 @@ fn push_quad(
     // `BufferBuilder.color(float..)` casts each channel to an int and stores its low byte, so a channel
     // outside 0..1 wraps (a tiny negative one becomes almost 255) instead of clamping.
     let wrap = |c: f32| f32::from((c * 255.0) as i32 as u8) / 255.0;
-    let color = [wrap(p.color[0]), wrap(p.color[1]), wrap(p.color[2]), wrap(p.alpha)];
+    let color = [
+        wrap(p.color[0]),
+        wrap(p.color[1]),
+        wrap(p.color[2]),
+        wrap(p.alpha),
+    ];
     for (dx, dy, u, v) in [
         (-1.0, -1.0, 0, 1),
         (1.0, -1.0, 1, 1),

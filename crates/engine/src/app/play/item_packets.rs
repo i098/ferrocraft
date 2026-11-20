@@ -154,9 +154,16 @@ fn apply_settings_sends_no_client_settings_but_save_and_language_send_one() {
     app.apply_settings();
     let reload = ids(&mut app, &rx);
     assert!(!reload.contains(&CLIENT_SETTINGS), "{reload:?}");
-    for effect in [gui::screens::Effect::SettingsSaved, gui::screens::Effect::LanguageChanged] {
+    for effect in [
+        gui::screens::Effect::SettingsSaved,
+        gui::screens::Effect::LanguageChanged,
+    ] {
         app.run_effects(vec![effect]);
         let sent = ids(&mut app, &rx);
-        assert_eq!(sent.iter().filter(|&&i| i == CLIENT_SETTINGS).count(), 1, "{sent:?}");
+        assert_eq!(
+            sent.iter().filter(|&&i| i == CLIENT_SETTINGS).count(),
+            1,
+            "{sent:?}"
+        );
     }
 }

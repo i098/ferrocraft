@@ -1281,6 +1281,18 @@ impl Particles {
         }
     }
 
+    /// `EntityBlaze.onLivingUpdate` (client): two black large smoke puffs a tick inside the hitbox, in water too.
+    pub fn blaze_smoke(&mut self, pos: [f64; 3], (w, h): (f32, f32)) {
+        for _ in 0..2 {
+            let at = [
+                pos[0] + (self.rand() - 0.5) * f64::from(w),
+                pos[1] + self.rand() * f64::from(h),
+                pos[2] + (self.rand() - 0.5) * f64::from(w),
+            ];
+            self.spawn(Kind::LargeSmoke, at, [0.0; 3], 0);
+        }
+    }
+
     /// `EntityWitch.handleStatusUpdate(15)`: 10 to 44 witch specks, gaussian 0.13 around a point half a block above the head.
     pub fn witch_magic(&mut self, pos: [f64; 3], (_, h): (f32, f32)) {
         for _ in 0..(self.rand() * 35.0) as u32 + 10 {
@@ -2168,6 +2180,16 @@ mod tests {
             ps.tick(|_, y, _| if y < 5 { 16 } else { 0 });
         }
         assert!(ps.is_empty());
+    }
+    #[test]
+    fn blaze_smoke_is_two_large_puffs_inside_the_hitbox() {
+        let mut ps = Particles::new();
+        ps.blaze_smoke([10.0, 64.0, -5.0], (0.6, 1.8));
+        assert_eq!(ps.len(), 2);
+        for p in &ps.list {
+            assert!((p.pos[0] - 10.0).abs() <= 0.3 && (p.pos[2] + 5.0).abs() <= 0.3);
+            assert!((64.0..=65.8).contains(&p.pos[1]));
+        }
     }
 
     #[test]

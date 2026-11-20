@@ -462,6 +462,15 @@ impl App {
                 } => self.particles.firework(pos, vel, explosions),
             }
         }
+        // `EntityBlaze.onLivingUpdate` smokes every client tick, including during the death animation.
+        for e in self
+            .game
+            .entities
+            .iter()
+            .filter(|e| e.kind == Kind::Mob(61))
+        {
+            self.particles.blaze_smoke(e.pos, e.size());
+        }
         let g = &self.game;
         let block = |x, y, z| g.store.get_block(x, y, z);
         let mut dust = Vec::new();

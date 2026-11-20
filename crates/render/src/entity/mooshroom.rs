@@ -18,6 +18,34 @@ pub(super) const BLOCK_FORM: i16 = -1;
 pub(super) const RED_MUSHROOM: (i16, i16) = (40, BLOCK_FORM);
 const MOOSHROOM: u8 = 96;
 
+/// The face of each quad of the red mushroom model, as `BakedQuad.getFace` gives it to
+/// `renderModelBrightnessColorQuads`: the planes of `cross.json` turn 45 degrees, and the axis
+/// their face keeps the larger part of wins, so the first plane is north and south, the second
+/// west and east. The mesh holds the quads in that order.
+pub(super) const FACES: [V3; 4] = [
+    [0.0, 0.0, -1.0],
+    [0.0, 0.0, 1.0],
+    [-1.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0],
+];
+
+/// What the two lights of `RenderHelper.enableStandardItemLighting` leave of a block drawn at
+/// brightness 1 under a world-space normal `n`: ambient 0.4 plus 0.6 per light, each along
+/// `(0.2, 1, -0.7)` and `(-0.2, 1, 0.7)`.
+pub(super) fn gl_light(n: V3) -> f32 {
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
+    let n = n.map(|c| c / len);
+    let lights = [[0.2_f32, 1.0, -0.7], [-0.2, 1.0, 0.7]];
+    let lit: f32 = lights
+        .iter()
+        .map(|l| {
+            let ll = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
+            ((n[0] * l[0] + n[1] * l[1] + n[2] * l[2]) / ll).max(0.0)
+        })
+        .sum();
+    (0.4 + 0.6 * lit).min(1.0)
+}
+
 fn shows(d: &EntityDraw) -> bool {
     d.class == Class::Mob(MOOSHROOM) && !d.child && !d.invisible
 }
@@ -83,6 +111,14 @@ mod tests {
         near(point(&second, [0.0; 3]), [-0.1272, -0.35, -0.0127]);
         // From the head pivot (0, 0.25, -0.5), the flipped frame puts the block 0.7 lower and 0.2 forward.
         near(point(&head, [0.0; 3]), [0.0, 0.25 - 0.7, -0.5 - 0.2]);
+    }
+
+    #[test]
+    fn the_gl_light_shades_the_faces_like_vanilla() {
+        assert!((gl_light([0.0, 1.0, 0.0]) - 1.0).abs() < 1e-6);
+        assert!((gl_light([0.0, 0.0, -1.0]) - 0.7395).abs() < 1e-3);
+        assert!((gl_light([1.0, 0.0, 0.0]) - 0.4969).abs() < 1e-3);
+        assert!((gl_light([0.0, -1.0, 0.0]) - 0.4).abs() < 1e-6);
     }
 
     #[test]

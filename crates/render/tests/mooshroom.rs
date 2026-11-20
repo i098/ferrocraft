@@ -91,6 +91,13 @@ fn mooshroom_draws_the_cow_model_with_its_skin_and_mushrooms() {
     let empty = r.render_to_rgba(&cam, &[]).2;
     let red = |f: &[u8]| {
         f.chunks(4)
+            .filter(|p| {
+                p[0] > 60 && p[0] as u16 > p[1] as u16 + 40 && p[0] as u16 > p[2] as u16 + 40
+            })
+            .count()
+    };
+    let bright_red = |f: &[u8]| {
+        f.chunks(4)
             .filter(|p| p[0] > 140 && p[1] < 80 && p[2] < 80)
             .count()
     };
@@ -109,10 +116,23 @@ fn mooshroom_draws_the_cow_model_with_its_skin_and_mushrooms() {
         red(&back),
         red(&cow)
     );
+    let close = Camera {
+        pos: [0.0, 64.6, 2.5],
+        fov_deg: 22.0,
+        ..Camera::default()
+    };
+    r.set_entities(&[mob(96, 0.0, 7.0, 0.0, false)]);
+    let closeup = r.render_to_rgba(&close, &[]).2;
+    // Vanilla 1.8.9 shades the back mushrooms dark (issue #737); unshaded they measured 17199 bright-red pixels, shaded 1494.
+    assert!(
+        bright_red(&closeup) < 6000,
+        "the back mushrooms must be lit like vanilla, not bright: {}",
+        bright_red(&closeup)
+    );
     let baby = alone(&mut r, mob(96, 0.0, 7.0, 0.0, true));
     let baby_cow = alone(&mut r, mob(92, 0.0, 7.0, 0.0, true));
     assert!(
-        red(&baby) < 3 * red(&baby_cow) + 200,
+        bright_red(&baby) < 3 * bright_red(&baby_cow) + 200,
         "a baby mooshroom has no mushrooms"
     );
     r.set_entities(&scene);

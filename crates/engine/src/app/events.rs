@@ -1284,6 +1284,27 @@ mod tests {
         app
     }
 
+    /// The server sends skull data right after the respawn: the clear must not eat it.
+    #[test]
+    #[ignore = "needs a GPU or software adapter"]
+    fn respawn_clear_keeps_skull_data_of_the_same_poll_and_drops_the_old() {
+        let mut app = respawned(true);
+        app.renderer = Some(Renderer::new_offscreen(16, 16, None));
+        let skull = |pos, kind| TileEvent::Skull {
+            pos,
+            kind,
+            rotation: 0,
+            owner: None,
+        };
+        let mut dirty = Dirty::new();
+        app.game_effect(Effect::Tile(skull([0, 64, 0], 1)), &mut dirty);
+        app.game_effect(Effect::Clear, &mut dirty);
+        app.game_effect(Effect::Tile(skull([5, 64, 5], 3)), &mut dirty);
+        let r = app.renderer.as_ref().unwrap();
+        assert_eq!(r.skull([0, 64, 0]), None);
+        assert_eq!(r.skull([5, 64, 5]).map(|s| s.kind), Some(3));
+    }
+
     #[test]
     fn dimension_respawn_ends_rain_thunder_particles_and_container() {
         let app = respawned(true);

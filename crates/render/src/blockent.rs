@@ -255,6 +255,10 @@ impl BlockEntities {
         self.skulls.insert(pos, skull);
     }
 
+    pub fn skull(&self, pos: [i32; 3]) -> Option<Skull> {
+        self.skulls.get(&pos).copied()
+    }
+
     pub fn set_banner(&mut self, pos: [i32; 3], banner: Banner) {
         self.banners.insert(pos, banner);
     }

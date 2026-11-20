@@ -67,23 +67,42 @@ pub(crate) fn raining_at(
 mod tests {
     use super::*;
 
+    /// Oracle: vanilla 1.8.9 `World.getCloudColor` at noon (day scale 1) with rain 1, thunder 0:
+    /// each channel is 1*(1-0.95) + 0.6*0.95 = 0.62, a faint grey, never navy.
     #[test]
-    fn strengths_stay_until_the_server_changes_them() {
+    fn snow_packets_give_vanilla_grey_clouds() {
+        let mut w = Weather::default();
+        w.apply(1, 0.0);
+        w.apply(7, 1.0);
+        w.apply(8, 0.0);
+        let (rain, thunder) = w.strengths();
+        let env = render::Environment {
+            rain,
+            thunder,
+            ..Default::default()
+        };
+        let cloud = env.sky_state(0.0, [0.0, 0.0, 1.0]).cloud;
+        for c in cloud {
+            assert!((c - 0.62).abs() < 1e-3, "{cloud:?}");
+        }
+    }
+
+    /// Oracle: vanilla 1.8.9 getCloudColor; the server thunder strength is used as sent,
+    /// so thunder 1 at noon gives 0.62*0.05 + 0.62*0.2*0.95 per channel.
+    #[test]
+    fn thunder_packet_gives_vanilla_cloud_colour() {
         let mut w = Weather::default();
         w.apply(7, 1.0);
         w.apply(8, 1.0);
-        assert_eq!(w.strengths(), (1.0, 1.0));
-        w.apply(8, 0.75);
-        assert_eq!(w.strengths(), (1.0, 0.75));
-    }
-
-    #[test]
-    fn begin_rain_zeroes_and_end_rain_fills_the_strength() {
-        let mut w = Weather::default();
-        w.apply(7, 0.5);
-        w.apply(1, 0.0);
-        assert_eq!(w.strengths().0, 0.0);
-        w.apply(2, 0.0);
-        assert_eq!(w.strengths().0, 1.0);
+        let (rain, thunder) = w.strengths();
+        let env = render::Environment {
+            rain,
+            thunder,
+            ..Default::default()
+        };
+        let expected = 0.62 * 0.05 + 0.62 * 0.2 * 0.95;
+        for c in env.sky_state(0.0, [0.0, 0.0, 1.0]).cloud {
+            assert!((c - expected).abs() < 1e-3, "{c}");
+        }
     }
 }

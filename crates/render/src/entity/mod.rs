@@ -2220,9 +2220,7 @@ pub(crate) mod tests {
         let count = |armor: [i16; 4]| {
             let mut d = steve();
             d.armor = armor;
-            build(&[d], &Skins::flat(), |_| [1.0, 1.0])
-                .vertices
-                .len()
+            build(&[d], &Skins::flat(), |_| [1.0, 1.0]).vertices.len()
         };
         let bare = count([0; 4]);
         // boots 2 boxes, leggings 3, chestplate 3, helmet 1; a box has 24 vertices.

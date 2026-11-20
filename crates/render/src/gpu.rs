@@ -69,6 +69,7 @@ struct ChunkMesh {
     opaque: Option<GpuMesh>,
     water: Option<GpuMesh>,
     light: Option<crate::light::Light>,
+    vis: [u64; 16],
 }
 
 /// What a held compass or clock needs to pick another strip frame.
@@ -983,6 +984,7 @@ impl Renderer {
             opaque: self.upload_mesh(m.opaque, origin),
             water: self.upload_mesh(m.water, origin),
             light: m.light,
+            vis: m.vis,
         };
         self.meshes.insert(done.key, mesh);
         self.chunk_updates += 1;
@@ -1272,6 +1274,11 @@ impl Renderer {
     /// Whether the skin of player `key` is stored; a replaced one has to be sent again.
     pub fn has_player_skin(&self, key: u128) -> bool {
         self.entity_skins.player(key).is_some()
+    }
+
+    /// The `SetVisibility` of the section `(cx, sy, cz)`, `None` while its chunk has no mesh (vanilla's `CompiledChunk.DUMMY`).
+    pub fn section_visibility(&self, cx: i32, sy: i32, cz: i32) -> Option<u64> {
+        self.meshes.get(&(cx, cz)).map(|m| m.vis[sy as usize])
     }
 
     /// `Entity.getBrightnessForRender`: `[sky, block]` light (`0..=1`) in the block at `p`, 0 when its chunk is not loaded.
@@ -1919,7 +1926,7 @@ impl Renderer {
         globals.hurt = self.mod_look.hurt_tint();
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
-        self.axes.write(&self.queue, cam, w as f32 / h as f32);
+        self.axes.write(&self.queue, cam, (w, h));
 
         let layers = build_sky(&env, &sky, cam.pos);
         let sky_solid = self.upload_geometry(&layers.solid);

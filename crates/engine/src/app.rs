@@ -1327,7 +1327,7 @@ impl App {
         Self::tick_glint_clock(&mut self.icons);
         if show_hud {
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
-            let debug = self.debug_lines(frac, draws.len());
+            let debug = self.debug_lines(frac, cam, draws);
             let in_water = self.game.player.as_ref().is_some_and(|p| {
                 let get = |x, y, z| self.game.store.get_block(x, y, z);
                 screen::submerged_in_water(&get, p.pos, eye_height(self.input.sneaking()))

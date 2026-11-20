@@ -6,6 +6,8 @@ use gui::debug_data::{
     biome_name, entities_line, fps_line, light_line, local_difficulty_line, renders_line,
     right_lines, FpsInfo, RightInfo,
 };
+use render::{cull, cull::Frustum, Camera, EntityDraw};
+use std::collections::HashSet;
 
 /// Mesh workers of the renderer, vanilla's free chunk builders (`aB`).
 const MESH_WORKERS: usize = 2;
@@ -14,17 +16,23 @@ const MESH_WORKERS: usize = 2;
 pub(super) type Columns = (Vec<String>, Vec<String>);
 
 impl App {
-    /// The F3 columns, `None` while F3 is off or there is no player. `rendered` is the entity draw count.
-    pub(super) fn debug_lines(&self, frac: f64, rendered: usize) -> Option<Columns> {
+    /// The F3 columns, `None` while F3 is off or there is no player. `draws` are the entity draws of the frame.
+    pub(super) fn debug_lines(
+        &self,
+        frac: f64,
+        cam: &Camera,
+        draws: &[EntityDraw],
+    ) -> Option<Columns> {
         if !self.show_debug {
             return None;
         }
         let p = self.game.player.as_ref()?;
         let [x, y, z] = p.pos.map(|v| v.floor() as i32);
         let total = self.game.entities.len() + 1;
+        let (sections, rendered) = self.visible_view(cam, (x >> 4, z >> 4), draws);
         let left = left_lines(&DebugInfo {
             fps_line: self.debug_fps(),
-            renders: self.debug_renders((x >> 4, z >> 4)),
+            renders: self.debug_renders(&sections),
             entities: entities_line(rendered.min(total), total, 0),
             particles: format!("P: {}. T: All: {total}", self.particles.len()),
             provider: format!(
@@ -60,15 +68,82 @@ impl App {
         Some(hit.pos)
     }
 
-    /// `getDebugInfoRenders`: the sections with blocks inside the render distance over all sections of the view.
-    /// Frustum and cave culling are not applied.
-    fn debug_renders(&self, at: (i32, i32)) -> String {
+    /// `setupTerrain` and `renderEntities`: the sections that survive frustum and cave culling, and how many
+    /// entities `RenderManager.shouldRender` accepts inside them.
+    fn visible_view(
+        &self,
+        cam: &Camera,
+        feet: (i32, i32),
+        draws: &[EntityDraw],
+    ) -> (HashSet<(i32, i32, i32)>, usize) {
+        let Some(r) = self.renderer.as_ref() else {
+            return (HashSet::new(), 0);
+        };
         let d = self.ui.settings.render_distance;
-        let rendered = (at.0 - d..=at.0 + d)
-            .flat_map(|cx| (at.1 - d..=at.1 + d).map(move |cz| (cx, cz)))
-            .filter_map(|(cx, cz)| self.game.store.get(cx, cz))
-            .map(|c| (0..16).filter(|&i| c.section(i).is_some()).count())
-            .sum();
+        let (w, h) = r.size();
+        let far = f64::from(d) * 16.0 * std::f64::consts::SQRT_2;
+        let frustum = Frustum::new(cam, w as f32 / h.max(1) as f32, far);
+        let store = &self.game.store;
+        let facings = |cx: i32, sy: i32, cz: i32| {
+            let at = cam.pos.map(|v| v.floor() as i32);
+            let opaque = |x: usize, y: usize, z: usize| {
+                world::dig::opaque_cube(store.get_block(
+                    cx * 16 + x as i32,
+                    sy * 16 + y as i32,
+                    cz * 16 + z as i32,
+                ))
+            };
+            cull::visible_facings(
+                opaque,
+                [at[0] & 15, at[1] & 15, at[2] & 15].map(|v| v as usize),
+            )
+        };
+        let sections = cull::visible_sections(cam, &frustum, feet, d, facings, |cx, sy, cz| {
+            r.section_visibility(cx, sy, cz)
+        });
+        let eye = cam.pos;
+        let rendered = self
+            .game
+            .entities
+            .iter()
+            .zip(draws)
+            .filter(|(_, d)| {
+                let (w, h) = (f64::from(d.size.0), f64::from(d.size.1));
+                let reach = (2.0 * w + h) / 3.0 * 64.0;
+                let dist: f64 = (0..3).map(|a| (d.pos[a] - eye[a]).powi(2)).sum();
+                let min = [
+                    d.pos[0] - w / 2.0 - 0.5,
+                    d.pos[1] - 0.5,
+                    d.pos[2] - w / 2.0 - 0.5,
+                ];
+                let max = [
+                    d.pos[0] + w / 2.0 + 0.5,
+                    d.pos[1] + h + 0.5,
+                    d.pos[2] + w / 2.0 + 0.5,
+                ];
+                let section = (
+                    (d.pos[0].floor() as i32) >> 4,
+                    ((d.pos[1].floor() as i32) >> 4).clamp(0, 15),
+                    (d.pos[2].floor() as i32) >> 4,
+                );
+                dist < reach * reach && sections.contains(&section) && frustum.contains(min, max)
+            })
+            .count();
+        (sections, rendered)
+    }
+
+    /// `getDebugInfoRenders`: the visible sections that hold blocks over all sections of the view.
+    fn debug_renders(&self, visible: &HashSet<(i32, i32, i32)>) -> String {
+        let d = self.ui.settings.render_distance;
+        let rendered = visible
+            .iter()
+            .filter(|&&(cx, sy, cz)| {
+                self.game
+                    .store
+                    .get(cx, cz)
+                    .is_some_and(|c| c.section(sy as usize).is_some())
+            })
+            .count();
         let side = (2 * d + 1) as usize;
         renders_line(rendered, side * side * 16, d, MESH_WORKERS)
     }

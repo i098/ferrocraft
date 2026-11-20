@@ -64,6 +64,8 @@ pub struct Meshes {
     pub water: MeshData,
     /// Light of the chunk, `x` and `z` in `-1..=16`.
     pub light: Option<Light>,
+    /// `SetVisibility` of each section, bottom first (see `cull::section_visibility`).
+    pub vis: [u64; 16],
 }
 
 /// The chunk to mesh plus its eight neighbours (when loaded), row by row over `dz` then `dx` in `-1..=1`, skipping the chunk itself.
@@ -238,6 +240,12 @@ fn mesh(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool, flat: boo
             }
         }
     }
+    let vis = std::array::from_fn(|sy| {
+        crate::cull::section_visibility(|x, y, z| {
+            m.opaque(hood.block(x as i32, (sy * 16 + y) as i32, z as i32))
+        })
+    });
+    m.out.vis = vis;
     m.out.light = Some(m.light);
     m.out
 }

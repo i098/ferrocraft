@@ -179,6 +179,8 @@ mod tests {
         // Water bottle, splash healing II, poison, speed II.
         assert_eq!(color_and_instant(0), (3_694_022, false));
         assert_eq!(color_and_instant(16_453), (16_262_179, true));
+        // Splash healing II (damage 16421): the jar's variant table gives f82423 too.
+        assert_eq!(color_and_instant(16_421), (0xF8_2423, true));
         assert_eq!(color_and_instant(8_196), (5_149_489, false));
         assert_eq!(color_and_instant(16_418), (8_171_462, false));
         // Instant damage mixes no other effect.

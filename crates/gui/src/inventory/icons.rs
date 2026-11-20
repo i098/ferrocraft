@@ -742,13 +742,16 @@ impl Icons {
                 }
                 if glint {
                     let pts = [[x, y], [x + 16.0, y], [x + 16.0, y + 16.0], [x, y + 16.0]];
-                    // Each layer is its own sprite and quad: its glint covers its own texels.
+                    // The layer quads share one depth, so each layer's glint (`GL_EQUAL`) covers the texels
+                    // of every layer: where one layer is opaque, the glint is drawn once per layer.
+                    let union = self.union_mask(layers);
                     for tex in layers {
                         let k = self.frame_scale(tex);
                         let v = self.dial_frame(tex, k) as f32 * k;
                         let muv = [[0.0, v], [1.0, v], [1.0, v + k], [0.0, v + k]];
                         let guv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-                        self.glint_masked(c, pts, muv, guv, self.masks.get(tex), tex);
+                        let mask = union.as_ref().or_else(|| self.masks.get(tex));
+                        self.glint_masked(c, pts, muv, guv, mask, tex);
                     }
                 }
             }
@@ -781,6 +784,24 @@ impl Icons {
                 }
             }
         }
+    }
+
+    /// The texels any of two or more equal-size `layers` draws; `None` for one layer or layers of other sizes.
+    fn union_mask(&self, layers: &[String]) -> Option<Mask> {
+        let first = self.masks.get(layers.first()?)?;
+        let mut union = first.clone();
+        for tex in layers.get(1..).filter(|l| !l.is_empty())? {
+            let m = self.masks.get(tex)?;
+            if (m.w, m.h) != (union.w, union.h) {
+                return None;
+            }
+            union
+                .opaque
+                .iter_mut()
+                .zip(&m.opaque)
+                .for_each(|(a, b)| *a |= b);
+        }
+        Some(union)
     }
 
     /// The glint over the texels `mask` draws; `muv` are the quad's texture coordinates in the
@@ -874,6 +895,7 @@ impl Icons {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screens::Metrics;
 
     /// Sprite origins in the vanilla 1.8.9 atlas, as dumped from the client; unknown names start at 0.
     #[test]
@@ -884,6 +906,66 @@ mod tests {
             [352.0, 160.0]
         );
         assert_eq!(sprite_origin("textures/items/no_such_sprite.png"), [0.0; 2]);
+    }
+
+    #[derive(Default)]
+    struct Recorder(Vec<[[f32; 2]; 4]>);
+
+    impl Metrics for Recorder {
+        fn width(&self, _: &str) -> i32 {
+            0
+        }
+    }
+
+    impl Canvas for Recorder {
+        fn fill(&mut self, _: i32, _: i32, _: i32, _: i32, _: u32) {}
+        fn gradient(&mut self, _: i32, _: i32, _: i32, _: i32, _: u32, _: u32) {}
+        fn blit(&mut self, _: &str, _: f32, _: f32, _: f32, _: f32, _: [f32; 4], _: u32) {}
+        fn quad(&mut self, _: &str, _: [[f32; 2]; 4], _: [[f32; 2]; 4], _: [u32; 4]) {}
+        fn quad_add(&mut self, _: &str, pts: [[f32; 2]; 4], _: [[f32; 2]; 4], _: u32) {
+            self.0.push(pts);
+        }
+        fn text(&mut self, _: &str, _: f32, _: f32, _: u32, _: bool) {}
+        fn set_bidi(&mut self, _: bool) {}
+        fn texture(&mut self, _: &str, _: &[u8]) {}
+        fn push(&mut self, _: [f32; 2], _: f32, _: f32) {}
+        fn pop(&mut self) {}
+    }
+
+    /// Layers of one item share a depth, so vanilla's `GL_EQUAL` glint of each layer pass covers the
+    /// texels of every layer (splash potion 16421): both layers' texels get two glint passes per layer.
+    #[test]
+    fn glint_covers_the_texels_of_all_layers() {
+        let mut icons = Icons::new(|_| None);
+        let mask = |opaque: [bool; 4]| Mask {
+            w: 2,
+            h: 2,
+            opaque: opaque.to_vec(),
+        };
+        icons
+            .masks
+            .insert("a".into(), mask([true, false, false, false]));
+        icons
+            .masks
+            .insert("b".into(), mask([false, false, true, false]));
+        let stack = ItemStack {
+            id: 373,
+            count: 1,
+            damage: 16421,
+            nbt: None,
+        };
+        assert!(tooltip::glint(&stack));
+        let name = items::model(stack.id, stack.damage).unwrap();
+        icons
+            .models
+            .insert(name, Model::Flat(vec!["a".into(), "b".into()]));
+        let mut rec = Recorder::default();
+        icons.draw(&mut rec, &stack, 0, 0);
+        let top_left = [[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]];
+        let bottom_left = [[0.0, 8.0], [8.0, 8.0], [8.0, 16.0], [0.0, 16.0]];
+        assert_eq!(rec.0.iter().filter(|p| **p == top_left).count(), 4);
+        assert_eq!(rec.0.iter().filter(|p| **p == bottom_left).count(), 4);
+        assert_eq!(rec.0.len(), 8);
     }
 
     /// The glint covers the opaque texels only: two of the four texels of a unit quad.

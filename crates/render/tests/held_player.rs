@@ -189,5 +189,8 @@ fn held_flat_items_and_chest_draw_at_the_hand() {
             .count()
     };
     let (a, b) = (wood(&with), wood(&without));
-    assert!(a > b + 100, "the held chest must draw wood pixels: {a} vs {b}");
+    assert!(
+        a > b + 100,
+        "the held chest must draw wood pixels: {a} vs {b}"
+    );
 }

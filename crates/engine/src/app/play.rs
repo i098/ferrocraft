@@ -462,12 +462,12 @@ impl App {
                 } => self.particles.firework(pos, vel, explosions),
             }
         }
-        // `EntityBlaze` (mob 61) smokes every client tick while alive.
+        // `EntityBlaze.onLivingUpdate` smokes every client tick, including during the death animation.
         for e in self
             .game
             .entities
             .iter()
-            .filter(|e| e.kind == Kind::Mob(61) && !e.is_dead())
+            .filter(|e| e.kind == Kind::Mob(61))
         {
             self.particles.blaze_smoke(e.pos, e.size());
         }

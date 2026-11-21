@@ -631,7 +631,7 @@ impl Achievements {
                     damage: a.icon.1,
                     nbt: None,
                 };
-                icons.draw(c, &stack, x + 3, y + 3);
+                icons.draw_ambient(c, &stack, x + 3, y + 3);
             }
             if Self::frame_contains(x, y, mx, my) {
                 hover = Some(a);

@@ -720,6 +720,17 @@ impl Icons {
 
     /// `renderItemAndEffectIntoGUI` at GUI position `(x, y)` (the slot's top-left).
     pub fn draw(&self, c: &mut dyn Canvas, s: &ItemStack, x: i32, y: i32) {
+        self.draw_shaded(c, s, x, y, light);
+    }
+
+    /// `renderItemAndEffectIntoGUI` where `GuiAchievements` turns on `GL_LIGHTING` but no
+    /// `RenderHelper` call: the hotbar's `disableStandardItemLighting` left both lights off, so only
+    /// the 0.4 light-model ambient shades block faces.
+    pub fn draw_ambient(&self, c: &mut dyn Canvas, s: &ItemStack, x: i32, y: i32) {
+        self.draw_shaded(c, s, x, y, |_| 0.4);
+    }
+
+    fn draw_shaded(&self, c: &mut dyn Canvas, s: &ItemStack, x: i32, y: i32, light: fn(V3) -> f32) {
         let Some(model) = items::model(s.id, s.damage).and_then(|n| self.models.get(n)) else {
             return;
         };

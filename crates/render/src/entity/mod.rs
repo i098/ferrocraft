@@ -2685,4 +2685,36 @@ pub(crate) mod tests {
         d.invisible = true;
         assert!(build_charge(&[d]).is_empty());
     }
+
+    #[test]
+    fn creeper_shell_is_inflated_scrolled_and_dim() {
+        let mut d = EntityDraw {
+            class: Class::Mob(CREEPER),
+            ..steve()
+        };
+        d.look.powered = true;
+        d.age = 10.0;
+        let a = build_charge(std::slice::from_ref(&d));
+        d.age = 30.0;
+        let b = build_charge(std::slice::from_ref(&d));
+        for (va, vb) in a.vertices.iter().zip(&b.vertices) {
+            assert_eq!(va.color, [0.5, 0.5, 0.5, 1.0]);
+            assert_eq!(va.light, [1.0, 1.0]);
+            assert_eq!(va.pos, vb.pos);
+            assert!((vb.uv[0] - va.uv[0] - 0.2).abs() < 1e-5);
+            assert!((vb.uv[1] - va.uv[1] - 0.2).abs() < 1e-5);
+        }
+        let xf = Xf::new(&d, false);
+        let mut plain = MeshData::default();
+        for part in creeper_parts(&d) {
+            emit_part(&mut plain, &xf, &part, 0.0, [1.0; 3], 0.0);
+        }
+        let width = |m: &MeshData| {
+            let xs = m.vertices.iter().map(|v| v.pos[0]);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        // 2 model px of inflation per side is 4/16 block of extra width at yaw 0.
+        let grown = width(&b) - width(&plain);
+        assert!((grown - 0.25).abs() < 1e-4, "grown by {grown}");
+    }
 }

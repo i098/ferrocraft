@@ -127,6 +127,13 @@ fn explosions(nbt: &Nbt) -> Vec<FireworkExplosion> {
         .collect()
 }
 
+fn short(meta: &Metadata, index: u8) -> Option<i16> {
+    match find(meta, index) {
+        Some(MetaValue::Short(s)) => Some(*s),
+        _ => None,
+    }
+}
+
 fn size_meta(meta: &Metadata) -> SizeMeta {
     let byte = |index| match find(meta, index) {
         Some(MetaValue::Byte(b)) => Some(*b as u8),
@@ -168,6 +175,8 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         cat: byte(18),
         vehicle: vehicle_meta(meta),
         begging: byte(19),
+        carried: short(meta, 16),
+        screaming: byte(18),
         wither_invul: match find(meta, 20) {
             Some(MetaValue::Int(i)) => Some(*i),
             _ => None,

@@ -1799,8 +1799,31 @@ fn entity_draw(
             horse: horse_look(e, p),
             wither_invul: e.meta.wither_invul.unwrap_or(0),
             powered: e.meta.powered == Some(1),
+            carried: e.meta.carried.map_or(0, carried_block),
+            screaming: e.meta.screaming.unwrap_or(0) != 0,
             ..Look::default()
         },
+    }
+}
+
+/// Enderman metadata short 16 is a block state id, `id | meta << 12` (`getHeldBlockState`); the
+/// result is `id << 4 | meta`.
+fn carried_block(state: i16) -> u16 {
+    let s = state as u16;
+    (s & 4095) << 4 | s >> 12
+}
+
+#[cfg(test)]
+mod carried_block_tests {
+    use super::carried_block;
+
+    #[test]
+    fn state_id_splits_into_id_and_meta() {
+        // Real 1.8.9 server: `summon Enderman {carried:38,carriedData:1}` sent 4134.
+        assert_eq!(carried_block(4134), 38 << 4 | 1);
+        assert_eq!(carried_block(46), 46 << 4);
+        assert_eq!(carried_block((15u16 << 12 | 35) as i16), 35 << 4 | 15);
+        assert_eq!(carried_block(0), 0);
     }
 }
 

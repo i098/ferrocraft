@@ -126,7 +126,7 @@ pub struct Atlas {
     pub height: u32,
     pub tile: u32,
     pub rgba: Vec<u8>,
-    cells: HashMap<String, u32>,
+    pub(crate) cells: HashMap<String, u32>,
     /// Animated cells (`.png.mcmeta`), stepped by [`crate::animation::Animator`].
     pub(crate) animations: Vec<Animation>,
     /// Grass and foliage color maps of the biome tints.

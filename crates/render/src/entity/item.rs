@@ -126,47 +126,50 @@ fn geometry(
     turns: &DialTurns,
     dial: &mut Option<(usize, usize)>,
 ) -> Option<Vec<Layer>> {
-    let sprites = name
-        .filter(|_| damage != super::mooshroom::BLOCK_FORM)
-        .and_then(|name| {
-            let (textures, _) = hand::flat_model(read, name)?;
-            let layers: Vec<Layer> = textures
-                .into_iter()
-                .filter_map(|texture| {
-                    let image = decode_png(&read(&texture)?)?;
-                    let frames = hand::strip_frames(&image);
-                    let frame = turns.frame(id, frames);
-                    if frames > 1 && DialTurns::is_dial(id) {
-                        *dial = Some((frames, frame));
-                    }
-                    let flat = hand::Flat::new(&image, ident(), frame);
-                    let mut mesh = flat.mesh;
-                    // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
-                    for v in &mut mesh.vertices {
-                        v.pos = v.pos.map(|c| c - 0.5);
-                    }
-                    Some(Layer {
-                        tex: ItemTex::Sprite(texture),
-                        mesh,
-                        normals: Some(flat.normals),
-                        flat: Vec::new(),
-                        mask: Some(Mask::of(&image)),
-                    })
+    let sprites = name.filter(|_| damage >= 0).and_then(|name| {
+        let (textures, _) = hand::flat_model(read, name)?;
+        let layers: Vec<Layer> = textures
+            .into_iter()
+            .filter_map(|texture| {
+                let image = decode_png(&read(&texture)?)?;
+                let frames = hand::strip_frames(&image);
+                let frame = turns.frame(id, frames);
+                if frames > 1 && DialTurns::is_dial(id) {
+                    *dial = Some((frames, frame));
+                }
+                let flat = hand::Flat::new(&image, ident(), frame);
+                let mut mesh = flat.mesh;
+                // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
+                for v in &mut mesh.vertices {
+                    v.pos = v.pos.map(|c| c - 0.5);
+                }
+                Some(Layer {
+                    tex: ItemTex::Sprite(texture),
+                    mesh,
+                    normals: Some(flat.normals),
+                    flat: Vec::new(),
+                    mask: Some(Mask::of(&image)),
                 })
-                .collect();
-            (!layers.is_empty()).then_some(layers)
-        });
+            })
+            .collect();
+        (!layers.is_empty()).then_some(layers)
+    });
     if sprites.is_some() {
         return sprites;
     }
     if !(1..256).contains(&id) {
         return None;
     }
-    let state = ((id as u16) << 4) | (damage.max(0) as u16 & 15);
+    let meta = if damage < 0 {
+        super::mooshroom::BLOCK_FORM - damage
+    } else {
+        damage
+    };
+    let state = ((id as u16) << 4) | (meta as u16 & 15);
     Some(vec![Layer {
         tex: ItemTex::Atlas,
         mesh: hand::held_mesh(state, atlas, false),
-        normals: (damage == super::mooshroom::BLOCK_FORM).then(|| super::mooshroom::FACES.to_vec()),
+        normals: (damage < 0).then(|| super::mooshroom::FACES.to_vec()),
         flat: hand::held_mesh(state, atlas, true)
             .vertices
             .iter()
@@ -222,7 +225,7 @@ pub struct Items {
     /// `display.color` of the leather armor the next sprite pieces show.
     dye: Option<i32>,
     /// The pieces take `LayerMooshroomMushroom`'s GL light instead of the box face shade.
-    gl_lit: bool,
+    pub(super) gl_lit: bool,
 }
 
 pub(super) use crate::hand::point;

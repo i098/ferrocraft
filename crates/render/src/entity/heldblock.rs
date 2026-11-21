@@ -9,12 +9,17 @@ fn shows(d: &EntityDraw) -> bool {
     d.class == Class::Mob(super::mobs::ENDERMAN) && !d.invisible && d.look.carried != 0
 }
 
-/// The block model `build` needs: the carried state, as `id << 4 | meta`.
+/// The block model `build` needs: the carried state, as `id << 4 | meta`. Plants have a flat item
+/// model, so they ask for the block form.
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let c = d.look.carried;
-    shows(d)
-        .then_some(((c >> 4) as i16, (c & 15) as i16))
-        .into_iter()
+    let id = (c >> 4) as i16;
+    let meta = if (37..=40).contains(&id) {
+        super::mooshroom::BLOCK_FORM - (c & 15) as i16
+    } else {
+        (c & 15) as i16
+    };
+    shows(d).then_some((id, meta)).into_iter()
 }
 
 fn piece(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {

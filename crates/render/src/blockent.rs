@@ -4,8 +4,9 @@
 //! (`TileEntityBannerRenderer`). The renderer keeps the position of every such block and the data
 //! the server sends for it, and meshes all of them again each frame.
 //!
-//! Text takes the item lighting of its fixed normal. Not ported: the obfuscated, underlined and struck-through text styles of sign lines, glyphs
-//! outside `ascii.png`, the destroy-stage overlay, and the sounds.
+//! Sign text takes the item lighting of its fixed normal. Not ported: the obfuscated, underlined
+//! and struck-through text styles of sign lines, glyphs outside `ascii.png`, the destroy-stage
+//! overlay, and the sounds.
 
 use crate::assets::{Font, Image};
 use crate::entity::mooshroom::gl_light;
@@ -1312,7 +1313,14 @@ mod tests {
         font.ascii[usize::from(b'f')] = 6;
         let lines = [line.to_owned(), String::new(), String::new(), String::new()];
         let mut out = Batches::default();
-        sign(&mut out, true, meta, Mat::at([0.0; 3]), Some(&lines), Some(&font));
+        sign(
+            &mut out,
+            true,
+            meta,
+            Mat::at([0.0; 3]),
+            Some(&lines),
+            Some(&font),
+        );
         let i = out
             .0
             .iter()
@@ -1334,20 +1342,26 @@ mod tests {
         let px = 0.015_625 * SIGN_SCALE;
         // Three bold glyphs advance 7 instead of 6 pixels: the line is 3 pixels wider.
         let widened = x_extent(&bold) - x_extent(&plain);
-        assert!((widened - 3.0 * px).abs() < 0.1 * px, "widened by {widened}");
+        assert!(
+            (widened - 3.0 * px).abs() < 0.1 * px,
+            "widened by {widened}"
+        );
     }
 
     #[test]
     fn sign_text_takes_item_lighting_of_its_normal() {
         // Vanilla `glNormal3f(0, 0, -1)` under the two item lights: 0.4 + 0.6 * 0.7 / |(0.2, 1, 0.7)|.
-        let expected = 0.4 + 0.6 * 0.7 / (0.04_f32 + 1.0 + 0.49).sqrt();
         // A sign turned a quarter has its text normal along x: 0.4 + 0.6 * 0.2 / |(0.2, 1, 0.7)|.
         for (meta, expected) in [
             (0, 0.4 + 0.6 * 0.7 / (0.04_f32 + 1.0 + 0.49).sqrt()),
             (4, 0.4 + 0.6 * 0.2 / (0.04_f32 + 1.0 + 0.49).sqrt()),
         ] {
             for v in &sign_text_mesh("§fW", meta).vertices {
-                assert!((v.color[0] - expected).abs() < 0.01, "meta {meta}: {}", v.color[0]);
+                assert!(
+                    (v.color[0] - expected).abs() < 0.01,
+                    "meta {meta}: {}",
+                    v.color[0]
+                );
             }
         }
     }

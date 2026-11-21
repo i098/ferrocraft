@@ -158,6 +158,8 @@ pub struct SizeMeta {
     pub begging: Option<u8>,
     /// Wither: metadata int 20, `getInvulTime`, the ticks left of the spawn charge.
     pub wither_invul: Option<i32>,
+    /// Creeper: metadata byte 17, 1 while charged (`getPowered`).
+    pub powered: Option<u8>,
 }
 
 impl SizeMeta {
@@ -184,6 +186,7 @@ impl SizeMeta {
         self.vehicle.merge(new.vehicle);
         self.begging = new.begging.or(self.begging);
         self.wither_invul = new.wither_invul.or(self.wither_invul);
+        self.powered = new.powered.or(self.powered);
     }
 }
 

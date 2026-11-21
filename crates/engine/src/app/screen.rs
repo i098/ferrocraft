@@ -194,6 +194,8 @@ mod tests {
         };
         let stone = at(1 << 4).expect("stone blocks the view");
         assert_eq!(render::block_texture(stone), "textures/blocks/stone.png");
+        let grass = at(2 << 4).expect("grass blocks the view");
+        assert_eq!(render::block_texture(grass), "textures/blocks/dirt.png");
         assert_eq!(at(0), None);
         assert_eq!(at(20 << 4), None, "glass is transparent");
         assert_eq!(at(9 << 4), None, "water is a liquid");

@@ -1793,7 +1793,7 @@ fn particle_light(p: &Particle, partial: f32, light: &impl Fn([f64; 3]) -> [f32;
 fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32; 2]; 2])> {
     Some(match p.sprite {
         Sprite::Block { state, jitter, .. } => {
-            let name = crate::blocks::look(state).tex[crate::blocks::NORTH];
+            let name = crate::blocks::particle_tex(state);
             let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
             let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
             (Layer::Block, [a, b])
@@ -2123,6 +2123,27 @@ mod tests {
             .iter()
             .filter(|p| p.behavior == Behavior::Spark)
             .count()
+    }
+
+    #[test]
+    fn grass_block_dust_samples_the_dirt_texture() {
+        // Vanilla `grass_normal` model: `"particle": "blocks/dirt"`, not the grass side.
+        let mut atlas = Atlas::flat();
+        atlas.textured = true;
+        atlas.width = 16 * atlas.tile;
+        atlas.height = 16 * atlas.tile;
+        atlas.cells.insert("dirt".into(), 1);
+        atlas.cells.insert("grass_side".into(), 2);
+        let mut ps = Particles::new();
+        ps.sprint_dust([0.0; 3], [1.0, 0.0, 0.0], 0.6, 2 << 4);
+        let mut p = ps.list[0];
+        let Sprite::Block { jitter, .. } = &mut p.sprite else {
+            unreachable!()
+        };
+        *jitter = [1.0, 2.0];
+        let (_, [a, _]) = sprite_uv(&p, &atlas, 0.0).unwrap();
+        assert_eq!(a, atlas.uv("dirt", [0.25, 0.5]));
+        assert_ne!(a, atlas.uv("grass_side", [0.25, 0.5]));
     }
 
     #[test]

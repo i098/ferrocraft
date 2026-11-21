@@ -2912,6 +2912,8 @@ fn build_pipelines(
         true,
         true,
     );
+    // `LayerCreeperCharge` and `LayerWitherAura` run additive with `depthMask(!invisible)` and the
+    // default back-face culling: only the nearest front face of the shell adds light.
     let aura_pipe = pipe(
         "vs_world",
         "fs_sky",
@@ -2925,9 +2927,9 @@ fn build_pipelines(
             },
             alpha: wgpu::BlendComponent::OVER,
         }),
-        false,
         true,
-        false,
+        true,
+        true,
     );
     // `drawSelectionBoundingBox`: `glLineWidth(2.0)`; wgpu lines are 1 px, so each edge is a
     // 2 px wide quad (`vs_thick`) with the same blend and depth test as the 1 px lines.

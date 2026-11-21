@@ -2162,7 +2162,10 @@ impl Renderer {
                 pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
-            for (m, p) in [(&self.ghost_mesh, &self.entity_ghost_pipe), (&self.gel_mesh, &self.entity_blend_pipe)] {
+            for (m, p) in [
+                (&self.ghost_mesh, &self.entity_ghost_pipe),
+                (&self.gel_mesh, &self.entity_blend_pipe),
+            ] {
                 let Some(g) = m else { continue };
                 pass.set_pipeline(p);
                 pass.set_bind_group(0, &self.entity_group, &[]);

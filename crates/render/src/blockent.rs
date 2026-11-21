@@ -1307,6 +1307,51 @@ mod tests {
         );
     }
 
+    fn sign_text_mesh(line: &str, meta: i32) -> MeshData {
+        let mut font = six_wide_font();
+        font.ascii[usize::from(b'f')] = 6;
+        let lines = [line.to_owned(), String::new(), String::new(), String::new()];
+        let mut out = Batches::default();
+        sign(&mut out, true, meta, Mat::at([0.0; 3]), Some(&lines), Some(&font));
+        let i = out
+            .0
+            .iter()
+            .position(|(t, _)| *t == Tex::Named(FONT_TEXTURE.into()))
+            .expect("text batch");
+        out.0.swap_remove(i).1
+    }
+
+    fn x_extent(m: &MeshData) -> f32 {
+        let xs = m.vertices.iter().map(|v| v.pos[0]);
+        xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+    }
+
+    #[test]
+    fn bold_sign_line_draws_double_strikes_one_pixel_wider_per_glyph() {
+        let plain = sign_text_mesh("§fWWW", 0);
+        let bold = sign_text_mesh("§f§lWWW", 0);
+        assert_eq!(bold.vertices.len(), 2 * plain.vertices.len());
+        let px = 0.015_625 * SIGN_SCALE;
+        // Three bold glyphs advance 7 instead of 6 pixels: the line is 3 pixels wider.
+        let widened = x_extent(&bold) - x_extent(&plain);
+        assert!((widened - 3.0 * px).abs() < 0.1 * px, "widened by {widened}");
+    }
+
+    #[test]
+    fn sign_text_takes_item_lighting_of_its_normal() {
+        // Vanilla `glNormal3f(0, 0, -1)` under the two item lights: 0.4 + 0.6 * 0.7 / |(0.2, 1, 0.7)|.
+        let expected = 0.4 + 0.6 * 0.7 / (0.04_f32 + 1.0 + 0.49).sqrt();
+        // A sign turned a quarter has its text normal along x: 0.4 + 0.6 * 0.2 / |(0.2, 1, 0.7)|.
+        for (meta, expected) in [
+            (0, 0.4 + 0.6 * 0.7 / (0.04_f32 + 1.0 + 0.49).sqrt()),
+            (4, 0.4 + 0.6 * 0.2 / (0.04_f32 + 1.0 + 0.49).sqrt()),
+        ] {
+            for v in &sign_text_mesh("§fW", meta).vertices {
+                assert!((v.color[0] - expected).abs() < 0.01, "meta {meta}: {}", v.color[0]);
+            }
+        }
+    }
+
     fn tick_n(lid: &mut BlockEntities, n: usize) {
         for _ in 0..n {
             lid.tick(&[]);

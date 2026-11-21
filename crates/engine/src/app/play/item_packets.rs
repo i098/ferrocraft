@@ -167,3 +167,25 @@ fn apply_settings_sends_no_client_settings_but_save_and_language_send_one() {
         );
     }
 }
+
+/// Issue #721: F3+H, F3+F and F3+P end in `saveOptions`, which sends C15.
+#[test]
+fn f3_option_combos_send_client_settings() {
+    use input_audio::DebugCombo;
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    ids(&mut app, &rx);
+    for combo in [
+        DebugCombo::AdvancedTooltips,
+        DebugCombo::RenderDistance,
+        DebugCombo::PauseOnLostFocus,
+    ] {
+        app.debug_combo(combo);
+        let sent = ids(&mut app, &rx);
+        assert_eq!(
+            sent.iter().filter(|&&i| i == CLIENT_SETTINGS).count(),
+            1,
+            "{combo:?} {sent:?}"
+        );
+    }
+}

@@ -126,36 +126,34 @@ fn geometry(
     turns: &DialTurns,
     dial: &mut Option<(usize, usize)>,
 ) -> Option<Vec<Layer>> {
-    let sprites = name
-        .filter(|_| damage >= 0)
-        .and_then(|name| {
-            let (textures, _) = hand::flat_model(read, name)?;
-            let layers: Vec<Layer> = textures
-                .into_iter()
-                .filter_map(|texture| {
-                    let image = decode_png(&read(&texture)?)?;
-                    let frames = hand::strip_frames(&image);
-                    let frame = turns.frame(id, frames);
-                    if frames > 1 && DialTurns::is_dial(id) {
-                        *dial = Some((frames, frame));
-                    }
-                    let flat = hand::Flat::new(&image, ident(), frame);
-                    let mut mesh = flat.mesh;
-                    // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
-                    for v in &mut mesh.vertices {
-                        v.pos = v.pos.map(|c| c - 0.5);
-                    }
-                    Some(Layer {
-                        tex: ItemTex::Sprite(texture),
-                        mesh,
-                        normals: Some(flat.normals),
-                        flat: Vec::new(),
-                        mask: Some(Mask::of(&image)),
-                    })
+    let sprites = name.filter(|_| damage >= 0).and_then(|name| {
+        let (textures, _) = hand::flat_model(read, name)?;
+        let layers: Vec<Layer> = textures
+            .into_iter()
+            .filter_map(|texture| {
+                let image = decode_png(&read(&texture)?)?;
+                let frames = hand::strip_frames(&image);
+                let frame = turns.frame(id, frames);
+                if frames > 1 && DialTurns::is_dial(id) {
+                    *dial = Some((frames, frame));
+                }
+                let flat = hand::Flat::new(&image, ident(), frame);
+                let mut mesh = flat.mesh;
+                // `RenderItem.renderItem` translates the sprite by -0.5 after scaling it.
+                for v in &mut mesh.vertices {
+                    v.pos = v.pos.map(|c| c - 0.5);
+                }
+                Some(Layer {
+                    tex: ItemTex::Sprite(texture),
+                    mesh,
+                    normals: Some(flat.normals),
+                    flat: Vec::new(),
+                    mask: Some(Mask::of(&image)),
                 })
-                .collect();
-            (!layers.is_empty()).then_some(layers)
-        });
+            })
+            .collect();
+        (!layers.is_empty()).then_some(layers)
+    });
     if sprites.is_some() {
         return sprites;
     }
@@ -734,8 +732,8 @@ mod tests {
         for meta in [0u16, 1] {
             d.look.carried = 38 << 4 | meta;
             let key = super::super::heldblock::wanted(&d).next().unwrap();
-            let model = resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default())
-                .unwrap();
+            let model =
+                resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default()).unwrap();
             assert_eq!(model.layers[0].normals.as_ref().unwrap().len(), 4);
             let want = hand::held_mesh(38 << 4 | meta, &atlas, false);
             assert_eq!(model.layers[0].mesh.vertices, want.vertices);

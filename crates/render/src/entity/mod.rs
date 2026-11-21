@@ -159,7 +159,7 @@ pub struct Look {
     /// 16 left pants, 32 right pants, 64 hat. A player with no byte shows every part.
     pub skin_parts: u8,
     /// Villager: profession (metadata 16), 0 farmer to 4 butcher. Sheep: metadata 16, dye in the low
-    /// four bits and 16 when sheared. Wolf and ocelot: metadata 16, 1 sitting, 2 angry, 4 tamed.
+    /// four bits and 16 when sheared. Pig: metadata 16, 1 when saddled. Wolf and ocelot: metadata 16, 1 sitting, 2 angry, 4 tamed.
     pub variant: u8,
     /// Enderman: id of the carried block (metadata 16), 0 for none.
     pub carried: u16,

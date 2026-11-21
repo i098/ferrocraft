@@ -1651,7 +1651,7 @@ fn remote_using(e: &Entity) -> Option<UseAction> {
 /// The per-kind variant byte the models read (see `render::entity::Look::variant`).
 fn look_variant(e: &Entity) -> u8 {
     match e.kind {
-        Kind::Mob(91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
+        Kind::Mob(90 | 91 | 55 | 62 | 56 | 65 | 95 | 98) => e.meta.slime.unwrap_or(0),
         Kind::Mob(120 | 68) => e.meta.guardian.map_or(0, |p| p as u8),
         // A skeleton's type (1 is the wither skeleton) and a zombie's `isVillager`, both metadata byte 13.
         Kind::Mob(51 | 54) => e.meta.skeleton.unwrap_or(0),

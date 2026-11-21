@@ -13,6 +13,7 @@ pub(super) const IRON_GOLEM: u8 = 99;
 pub(super) const SILVERFISH: u8 = 60;
 pub(super) const CHICKEN: u8 = 93;
 pub(super) const SHEEP: u8 = 91;
+const PIG: u8 = 90;
 pub(super) const SPIDER: u8 = 52;
 pub(super) const CAVE_SPIDER: u8 = 59;
 pub(super) const ENDERMAN: u8 = 58;
@@ -512,10 +513,47 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
     };
     match id {
         SHEEP if d.look.variant & 16 == 0 && !d.invisible => vec![sheep_wool(d)],
+        // `LayerSaddle`: `ModelPig(0.5F)` over the pig, so every box grows by 0.5.
+        PIG if d.look.variant & 1 != 0 && !d.invisible => vec![Layer {
+            skin: Skin::PigSaddle,
+            tint: [1.0; 3],
+            parts: m
+                .parts
+                .iter()
+                .cloned()
+                .map(|mut p| {
+                    p.inflate = 0.5;
+                    p
+                })
+                .collect(),
+            bright: false,
+            colors_when_damaged: true,
+        }],
         SPIDER | CAVE_SPIDER => vec![eyes(Skin::SpiderEyes)],
         ENDERMAN => vec![eyes(Skin::EndermanEyes)],
         super::horse::HORSE => super::horse::layers(d, m),
         super::dragon::DRAGON => vec![eyes(Skin::DragonEyes)],
         _ => super::mobs2::layers(d),
+    }
+}
+
+#[cfg(test)]
+mod saddle_tests {
+    use super::super::tests::steve;
+    use super::super::Class;
+    use super::*;
+
+    #[test]
+    fn only_a_visible_saddled_pig_gets_the_saddle_layer_grown_by_half_a_pixel() {
+        let mut d = steve();
+        d.class = Class::Mob(PIG);
+        let m = super::super::pig(&d);
+        assert!(layers(&d, &m).is_empty());
+        d.look.variant = 1;
+        let l = layers(&d, &m);
+        assert_eq!(l[0].skin, Skin::PigSaddle);
+        assert!(l[0].parts.iter().all(|p| p.inflate == 0.5));
+        d.invisible = true;
+        assert!(layers(&d, &m).is_empty());
     }
 }

@@ -258,6 +258,15 @@ fn cross(color: u32, name: &'static str, tint: Tint) -> Look {
     }
 }
 
+/// The particle icon texture of `state` (`BlockModelShapes.getTexture`); the `grass_normal` model names `blocks/dirt`.
+pub fn particle_tex(state: u16) -> &'static str {
+    if state >> 4 == 2 {
+        "dirt"
+    } else {
+        look(state).tex[NORTH]
+    }
+}
+
 /// Ids drawn by `shapes.rs` or as crosses (kept in sync with `look`).
 pub fn look(state: u16) -> Look {
     let (id, meta) = (state >> 4, state & 15);

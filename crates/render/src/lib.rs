@@ -77,10 +77,7 @@ pub fn is_view_blocking(state: u16) -> bool {
 /// The texture file of the block `state` that fills the screen when the camera is inside it
 /// (`BlockModelShapes.getTexture`, the particle icon).
 pub fn block_texture(state: u16) -> String {
-    format!(
-        "textures/blocks/{}.png",
-        blocks::look(state).tex[blocks::NORTH]
-    )
+    format!("textures/blocks/{}.png", blocks::particle_tex(state))
 }
 
 /// Camera at the eye position; yaw and pitch are vanilla degrees (yaw 0 looks toward +z, pitch > 0 looks down).

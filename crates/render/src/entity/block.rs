@@ -122,6 +122,9 @@ mod tests {
                 dye: None,
             });
             let key = wanted(&d).next().unwrap();
+            // The plain (id, damage) key is the flat item model; vanilla draws the block form.
+            assert_ne!(key, (38, damage));
+            assert_eq!(key.0, 38);
             let model =
                 resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default()).unwrap();
             let mut models = Models::new();
@@ -132,6 +135,20 @@ mod tests {
             meshes.push(out.atlas.vertices);
         }
         assert_ne!(meshes[0], meshes[1]);
+    }
+
+    /// Oracle: sapling, flowers and mushrooms (ids 37..=40) are drawn from the block form, not the
+    /// flat item model keyed by plain (id, damage); other blocks keep their plain key.
+    #[test]
+    fn falling_plants_ask_for_the_block_form() {
+        for (id, plant) in [(37, true), (38, true), (39, true), (40, true), (1, false)] {
+            let mut d = crate::entity::tests::steve();
+            d.class = Class::Object(70);
+            d.stack = Some(Stack { id, damage: 0, count: 1, glint: false, dye: None });
+            let key = wanted(&d).next().unwrap();
+            assert_eq!(key.0, id);
+            assert_eq!(key != (id, 0), plant, "id {id}");
+        }
     }
 
     /// Values of `PrimedTntRenderer.render` for `x = fuseTimer - partial + 1`.

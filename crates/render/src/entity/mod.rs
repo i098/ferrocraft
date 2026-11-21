@@ -953,8 +953,8 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
 }
 
 pub(crate) type V3 = [f32; 3];
-/// Corners in model space, texel corners, outward normal, shade.
-type Face = ([V3; 4], [[f32; 2]; 4], V3, f32);
+/// Corners in model space, texel corners, outward normal.
+type Face = ([V3; 4], [[f32; 2]; 4], V3);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.
 pub(crate) fn rotate(p: V3, rot: V3) -> V3 {
@@ -1784,7 +1784,7 @@ pub(crate) fn add_box(
     let [w, h, d] = layout;
     let at = Skins::uv_offset(v_off);
     let uv = |u: f32, v: f32| [u / tex[0] + at[0], v / tex[1] + at[1]];
-    // (corners in model space, texel corners, outward model-space normal, shade)
+    // (corners in model space, texel corners, outward model-space normal)
     let mut faces: [Face; 6] = [
         // +x: u grows with z
         (
@@ -1796,7 +1796,6 @@ pub(crate) fn add_box(
                 uv(u0 + d + w, v0 + d + h),
             ],
             [1.0, 0.0, 0.0],
-            0.6,
         ),
         // -x: u grows as z falls
         (
@@ -1808,7 +1807,6 @@ pub(crate) fn add_box(
                 uv(u0, v0 + d + h),
             ],
             [-1.0, 0.0, 0.0],
-            0.6,
         ),
         // top (y1)
         (
@@ -1820,7 +1818,6 @@ pub(crate) fn add_box(
                 uv(u0 + d, v0 + d),
             ],
             [0.0, -1.0, 0.0],
-            1.0,
         ),
         // bottom (y2)
         (
@@ -1832,7 +1829,6 @@ pub(crate) fn add_box(
                 uv(u0 + d + w, v0 + d),
             ],
             [0.0, 1.0, 0.0],
-            0.5,
         ),
         // front (z1): u grows with x
         (
@@ -1844,7 +1840,6 @@ pub(crate) fn add_box(
                 uv(u0 + d, v0 + d + h),
             ],
             [0.0, 0.0, -1.0],
-            0.8,
         ),
         // back (z2): u grows as x falls
         (
@@ -1856,7 +1851,6 @@ pub(crate) fn add_box(
                 uv(u0 + 2.0 * d + w, v0 + d + h),
             ],
             [0.0, 0.0, 1.0],
-            0.8,
         ),
     ];
     if mirror {
@@ -1867,8 +1861,18 @@ pub(crate) fn add_box(
             f.1.swap(2, 3);
         }
     }
-    for (corners, uvs, normal, shade) in faces {
-        let shade = if UNSHADED.get() { 1.0 } else { shade };
+    for (corners, uvs, normal) in faces {
+        // GL lights the face by its normal turned through the model view, so the shade follows
+        // the world direction the face ends up facing.
+        let shade = if UNSHADED.get() {
+            1.0
+        } else {
+            let (a, b) = (
+                tf(corners[0]),
+                tf(std::array::from_fn(|i| corners[0][i] + normal[i])),
+            );
+            mooshroom::gl_light(sub(b, a))
+        };
         let mut order = [0usize, 1, 2, 3];
         let e1 = sub(corners[1], corners[0]);
         let e2 = sub(corners[2], corners[0]);
@@ -2027,6 +2031,33 @@ const BELOW_NAME_LIFT: f64 = 9.0 * 1.15 * 0.026_666_67;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn box_faces_take_the_gl_light_of_their_world_direction() {
+        let mut out = MeshData::default();
+        // Model y points down: flip it so the world sees the box right way up.
+        let up = |p: V3| [p[0], -p[1], p[2]];
+        let (zero, two) = ([0.0; 3], [2.0; 3]);
+        add_box(
+            &mut out,
+            &up,
+            zero,
+            two,
+            two,
+            (0.0, 0.0),
+            false,
+            0.0,
+            [1.0; 3],
+            [64.0; 2],
+        );
+        let mut shades: Vec<f32> = out.vertices.chunks(4).map(|q| q[0].color[0]).collect();
+        shades.sort_by(f32::total_cmp);
+        let (x, z) = (0.4 + 0.6 * 0.2 / 1.2369, 0.4 + 0.6 * 0.7 / 1.2369);
+        // bottom, the two x faces, the two z faces, top
+        for (got, want) in shades.iter().zip([0.4, x, x, z, z, 1.0]) {
+            assert!((got - want).abs() < 1e-3, "{shades:?}");
+        }
+    }
 
     pub(crate) fn steve() -> EntityDraw {
         EntityDraw {

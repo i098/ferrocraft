@@ -953,7 +953,7 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
 }
 
 pub(crate) type V3 = [f32; 3];
-/// Corners in model space, texel corners, outward normal\.
+/// Corners in model space, texel corners, outward normal.
 type Face = ([V3; 4], [[f32; 2]; 4], V3);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.

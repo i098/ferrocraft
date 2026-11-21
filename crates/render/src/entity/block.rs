@@ -21,7 +21,11 @@ const TNT: i16 = 46;
 pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
     let key = match d.class {
         Class::Object(50) => Some((TNT, 0)),
-        Class::Object(70) => d.stack.map(|s| (s.id, s.damage)),
+        // Plants have a flat item model, so they ask for the block form, keeping the metadata.
+        Class::Object(70) => d.stack.map(|s| match s.id {
+            37..=40 => (s.id, super::mooshroom::BLOCK_FORM - s.damage),
+            _ => (s.id, s.damage),
+        }),
         Class::Object(id) if super::vehicle::is_cart(id) => super::vehicle::block_model(d),
         _ => None,
     };
@@ -94,6 +98,41 @@ pub fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::Atlas;
+    use crate::entity::item::{resolve, Stack};
+    use crate::hand::DialTurns;
+
+    /// Oracle: `RenderFallingBlock` draws the block model; a flower (id 38) is the crossed planes
+    /// (4 quads), and each metadata is its own model.
+    #[test]
+    fn falling_flowers_are_crossed_planes_keeping_meta() {
+        let mut atlas = Atlas::flat();
+        atlas.textured = true;
+        atlas.cells.insert("flower_rose".to_owned(), 1);
+        atlas.cells.insert("flower_blue_orchid".to_owned(), 2);
+        let mut meshes = Vec::new();
+        for damage in [0, 1] {
+            let mut d = crate::entity::tests::steve();
+            d.class = Class::Object(70);
+            d.stack = Some(Stack {
+                id: 38,
+                damage,
+                count: 1,
+                glint: false,
+                dye: None,
+            });
+            let key = wanted(&d).next().unwrap();
+            let model =
+                resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default()).unwrap();
+            let mut models = Models::new();
+            models.insert(key, Some(model));
+            let mut out = Items::default();
+            build(&mut out, &[d], &models, |_| [1.0, 1.0]);
+            assert_eq!(out.atlas.vertices.len(), 16);
+            meshes.push(out.atlas.vertices);
+        }
+        assert_ne!(meshes[0], meshes[1]);
+    }
 
     /// Values of `PrimedTntRenderer.render` for `x = fuseTimer - partial + 1`.
     #[test]

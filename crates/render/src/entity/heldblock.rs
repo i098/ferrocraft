@@ -56,3 +56,41 @@ pub fn build(
         piece(out, d, m, light_level(d, &light, false));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assets::Atlas;
+    use crate::entity::item::resolve;
+    use crate::entity::mobs;
+    use crate::hand::DialTurns;
+
+    /// Oracle: vanilla enderman carries the block model of its state; a plant (`red_flower`, id 38)
+    /// is the crossed planes (4 quads), and each metadata is a different model, never the poppy's.
+    #[test]
+    fn carried_plants_keep_their_variant_as_block_models() {
+        let mut d = crate::entity::tests::steve();
+        d.class = Class::Mob(mobs::ENDERMAN);
+        let mut atlas = Atlas::flat();
+        atlas.textured = true;
+        atlas.cells.insert("flower_rose".to_owned(), 1);
+        atlas.cells.insert("flower_blue_orchid".to_owned(), 2);
+        let mut keys = Vec::new();
+        let mut meshes = Vec::new();
+        for meta in [0u16, 1] {
+            d.look.carried = 38 << 4 | meta;
+            let key = wanted(&d).next().unwrap();
+            let model =
+                resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default()).unwrap();
+            keys.push(key);
+            let mut models = Models::new();
+            models.insert(key, Some(model));
+            let mut out = Items::default();
+            build(&mut out, &[d.clone()], &models, |_| [1.0, 1.0]);
+            assert_eq!(out.atlas.vertices.len(), 16);
+            meshes.push(out.atlas.vertices);
+        }
+        assert_ne!(keys[0], keys[1]);
+        assert_ne!(meshes[0], meshes[1], "variants must differ");
+    }
+}

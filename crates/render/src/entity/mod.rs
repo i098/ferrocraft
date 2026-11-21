@@ -1105,10 +1105,27 @@ pub(crate) fn build_unshaded(draws: &[EntityDraw], skins: &Skins) -> MeshData {
     mesh
 }
 
+/// Every item mesh of `draws`: held, worn, dropped and carried stacks and blocks.
+pub(crate) fn build_items(
+    draws: &[EntityDraw],
+    models: &item::Models,
+    light: impl Fn([f64; 3]) -> [f32; 2],
+) -> item::Items {
+    let mut items = item::build(draws, models, &light);
+    heldblock::build(&mut items, draws, models, &light);
+    items
+}
+
+/// The item models `build_items` needs for `d`.
+pub(crate) fn wanted_items(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
+    item::wanted(d).chain(heldblock::wanted(d))
+}
+
 /// [`item::build`] at full light and without the per-face shade, for the GUI.
 pub(crate) fn build_items_unshaded(d: &EntityDraw, models: &item::Models) -> item::Items {
     UNSHADED.set(true);
-    let items = item::build(std::slice::from_ref(d), models, |_| [1.0, 1.0]);
+    let mut items = item::build(std::slice::from_ref(d), models, |_| [1.0, 1.0]);
+    heldblock::build(&mut items, std::slice::from_ref(d), models, |_| [1.0, 1.0]);
     UNSHADED.set(false);
     items
 }

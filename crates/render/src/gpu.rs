@@ -1156,7 +1156,7 @@ impl Renderer {
         if !self.map_icons.is_empty() {
             self.load_texture(hand::ICONS_TEXTURE);
         }
-        let mut items = entity::item::build(draws, &self.item_models, |p| self.light_at(p));
+        let mut items = entity::build_items(draws, &self.item_models, |p| self.light_at(p));
         entity::hanging::build(
             &mut items,
             draws,
@@ -1260,7 +1260,7 @@ impl Renderer {
     pub(crate) fn resolve_items(&mut self, draws: &[EntityDraw]) {
         for key in draws
             .iter()
-            .flat_map(|d| entity::item::wanted(d).chain(entity::hanging::wanted(d)))
+            .flat_map(|d| entity::wanted_items(d).chain(entity::hanging::wanted(d)))
         {
             let fresh = self
                 .item_models

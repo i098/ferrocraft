@@ -187,7 +187,6 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
         .chain(dropped(d).map(|s| (s.id, s.damage)))
         .chain(super::block::wanted(d))
         .chain(super::mooshroom::wanted(d))
-        .chain(super::heldblock::wanted(d))
 }
 
 fn holds(d: &EntityDraw) -> bool {
@@ -403,7 +402,6 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
     }
     out.dye = None;
     super::block::build(&mut out, draws, models, &light);
-    super::heldblock::build(&mut out, draws, models, &light);
     for d in draws {
         mushrooms(&mut out, d, models, light_level(d, &light, false));
     }
@@ -716,36 +714,5 @@ mod tests {
                 "side face too dark: {c:?}"
             );
         }
-    }
-
-    /// Oracle: vanilla enderman carries the block model of its state; a plant (`red_flower`, id 38)
-    /// is the crossed planes (4 quads), and each metadata is a different model, never the poppy's.
-    #[test]
-    fn carried_plants_keep_their_variant_as_block_models() {
-        let mut d = super::super::tests::steve();
-        d.class = Class::Mob(super::super::mobs::ENDERMAN);
-        let mut atlas = textured();
-        atlas.cells.insert("flower_rose".to_owned(), 1);
-        atlas.cells.insert("flower_blue_orchid".to_owned(), 2);
-        let mut keys = Vec::new();
-        let mut meshes = Vec::new();
-        for meta in [0u16, 1] {
-            d.look.carried = 38 << 4 | meta;
-            let key = super::super::heldblock::wanted(&d).next().unwrap();
-            let model =
-                resolve(&mut |_| None, &atlas, key.0, key.1, &DialTurns::default()).unwrap();
-            assert_eq!(model.layers[0].normals.as_ref().unwrap().len(), 4);
-            let want = hand::held_mesh(38 << 4 | meta, &atlas, false);
-            assert_eq!(model.layers[0].mesh.vertices, want.vertices);
-            meshes.push(want.vertices);
-            keys.push(key);
-            let mut models = Models::new();
-            models.insert(key, Some(model));
-            let mut out = Items::default();
-            super::super::heldblock::build(&mut out, &[d.clone()], &models, |_| [1.0, 1.0]);
-            assert_eq!(out.atlas.vertices.len(), 16);
-        }
-        assert_ne!(keys[0], keys[1]);
-        assert_ne!(meshes[0], meshes[1], "variants must differ");
     }
 }

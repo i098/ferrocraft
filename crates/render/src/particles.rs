@@ -1881,10 +1881,17 @@ fn push_quad(
     // `BufferBuilder.color(float..)` casts each channel to an int and stores its low byte, so a channel
     // outside 0..1 wraps (a tiny negative one becomes almost 255) instead of clamping.
     let wrap = |c: f32| f32::from((c * 255.0) as i32 as u8) / 255.0;
+    // Lava drips ask the light map for block light 257 (> 255). The light map texture is `GL_CLAMP` with a black
+    // border and linear filtering, so that coordinate blends the lit edge texel half-and-half with black.
+    let dim = if p.behavior == Behavior::DripLava {
+        0.5
+    } else {
+        1.0
+    };
     let color = [
-        wrap(p.color[0]),
-        wrap(p.color[1]),
-        wrap(p.color[2]),
+        wrap(p.color[0]) * dim,
+        wrap(p.color[1]) * dim,
+        wrap(p.color[2]) * dim,
         wrap(p.alpha),
     ];
     for (dx, dy, u, v) in [
@@ -2599,6 +2606,20 @@ mod tests {
                 assert!((got - want).abs() < 1e-3, "age {age}: {got} vs {want}");
             }
         }
+    }
+
+    #[test]
+    fn lava_drip_is_drawn_at_half_brightness_like_the_clamped_light_map() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 100.0, 0.5], [0.0; 3], 0);
+        ps.tick(|_, _, _| 0);
+        let atlas = crate::assets::Atlas::flat();
+        let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, |_| [0.0, 1.0]);
+        // Age 0 colour is (1, 1, 0.5).
+        let c = q.sheet[0].color;
+        assert!(
+            (c[0] - 0.5).abs() < 1e-3 && (c[1] - 0.5).abs() < 1e-3 && (c[2] - 0.25).abs() < 1e-2
+        );
     }
 
     fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {

@@ -151,7 +151,7 @@ impl App {
         let gpu = self.renderer.as_ref().map(|r| r.gpu_info().clone());
         let gpu = gpu.unwrap_or_default();
         right_lines(&RightInfo {
-            java: env!("CARGO_PKG_VERSION").to_owned(),
+            rust: env!("FC_RUSTC_VERSION").to_owned(),
             bits: usize::BITS,
             max,
             total,

@@ -104,6 +104,10 @@ impl Chunk {
             return;
         }
         let (s, i) = index(x, y, z);
+        if self.block(x, y, z) != state {
+            // World.checkLight: the sent light is stale after a change; the renderer floods this chunk from its blocks.
+            self.light = ServerLight::default();
+        }
         match &mut self.sections[s] {
             Some(sec) => sec[i] = state,
             None if state != 0 => {
@@ -298,5 +302,16 @@ mod tests {
         assert_eq!(s.get(-1, -1).unwrap().block(15, 70, 0), 2 << 4);
         assert_eq!(s.get_block(-1, 300, -16), 0);
         assert_eq!(s.get_block(40, 70, 40), 0);
+    }
+
+    /// A block change makes the sent light stale (`World.checkLight`); a write of the same state does not.
+    #[test]
+    fn changing_a_block_drops_the_sent_light() {
+        let (mask, data) = payload(&[(0, 1 << 4)], true, true);
+        let (mut c, _) = Chunk::decode(0, 0, mask, &data, true, true).unwrap();
+        c.set_block(1, 2, 3, 1 << 4);
+        assert!(c.light().section(0, true).is_some());
+        c.set_block(1, 2, 3, 0);
+        assert!(c.light().section(0, true).is_none() && c.light().section(0, false).is_none());
     }
 }

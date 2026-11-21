@@ -61,6 +61,8 @@ pub struct Icons {
     pub now_ms: u64,
     /// The needles of the compass and clock sprites; the engine ticks them.
     pub dials: Dials,
+    /// Head owners whose downloaded skin the renderer holds as the GUI texture `head_texture`.
+    pub heads: std::collections::HashSet<u128>,
 }
 const COMPASS: &str = "textures/items/compass.png";
 const CLOCK: &str = "textures/items/clock.png";
@@ -506,6 +508,55 @@ fn skull(kind: i16) -> Vec<Face> {
     f
 }
 
+const STEVE: &str = "textures/entity/steve.png";
+
+/// The GUI texture name of the downloaded skin of a player head owner.
+pub fn head_texture(uuid: u128) -> String {
+    format!("skin/{uuid:032x}")
+}
+
+/// The owner of a player head: `EntityPlayer.getUUID` of its `SkullOwner` profile, and the
+/// `textures` property that the server resolved (`TileEntitySkull.updateGameprofile`).
+pub fn skull_profile(s: &ItemStack) -> Option<(u128, Option<&str>)> {
+    use world::inventory::Tag;
+    if s.id != 397 || s.damage != 3 {
+        return None;
+    }
+    let root = &s.nbt.as_ref()?.root;
+    let offline = |n: &str| {
+        let mut b = md5::compute(format!("OfflinePlayer:{n}")).0;
+        b[6] = b[6] & 0x0f | 0x30;
+        b[8] = b[8] & 0x3f | 0x80;
+        u128::from_be_bytes(b)
+    };
+    match tooltip::get(root, "SkullOwner")? {
+        Tag::String(n) if !n.is_empty() => Some((offline(n), None)),
+        Tag::Compound(c) => {
+            let text = |k| match tooltip::get(c, k) {
+                Some(Tag::String(v)) if !v.is_empty() => Some(v.as_str()),
+                _ => None,
+            };
+            let id = text("Id").and_then(|i| {
+                u128::from_str_radix(&i.chars().filter(|&c| c != '-').collect::<String>(), 16).ok()
+            });
+            let uuid = id.or_else(|| text("Name").map(offline))?;
+            let value = tooltip::compound(c, "Properties")
+                .map(|p| tooltip::list(p, "textures"))
+                .and_then(|l| {
+                    l.iter().find_map(|t| match t {
+                        Tag::Compound(t) => match tooltip::get(t, "Value") {
+                            Some(Tag::String(v)) => Some(v.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                });
+            Some((uuid, value))
+        }
+        _ => None,
+    }
+}
+
 /// The `gui` display transform of the nearest model in the chain that has one.
 fn gui_display(chain: &[(String, Value)]) -> Display {
     chain
@@ -649,6 +700,7 @@ impl Icons {
             masks: HashMap::new(),
             now_ms: 0,
             dials: Dials::default(),
+            heads: Default::default(),
         };
         for name in items::model_names() {
             if let Some(m) = icons.load(&mut read, name) {
@@ -767,6 +819,13 @@ impl Icons {
                 }
             }
             Model::Solid { faces, gui } => {
+                let owner_skin = skull_profile(s).map(|(u, _)| {
+                    if self.heads.contains(&u) {
+                        head_texture(u)
+                    } else {
+                        crate::tablist::default_skin(u).to_string()
+                    }
+                });
                 let mut shown: Vec<(f32, [[f32; 2]; 4], &Face, u32)> = Vec::new();
                 for f in faces {
                     let n = normalize(cross(sub(f.pts[1], f.pts[0]), sub(f.pts[2], f.pts[0])));
@@ -788,7 +847,11 @@ impl Icons {
                 for (_, pts, f, color) in &shown {
                     let k = self.frame_scale(&f.tex);
                     let uv = [0, 3, 2, 1].map(|i| [f.uv[i][0], f.uv[i][1] * k]);
-                    c.quad(&f.tex, *pts, uv, [*color; 4]);
+                    let tex = owner_skin
+                        .as_deref()
+                        .filter(|_| f.tex == STEVE)
+                        .unwrap_or(&f.tex);
+                    c.quad(tex, *pts, uv, [*color; 4]);
                     if glint {
                         self.glint_masked(c, *pts, uv, uv, self.masks.get(&f.tex), &f.tex);
                     }
@@ -1059,5 +1122,40 @@ mod tests {
         };
         assert_eq!(front(&latch, 1.0), Some(false));
         assert_eq!(front(&turn_builtin(latch), 0.0), Some(true));
+    }
+
+    /// A resolved owner carries its uuid and skin property; a bare name has the offline uuid.
+    #[test]
+    fn player_head_profile_reads_the_owner() {
+        use world::inventory::{Nbt, Tag};
+        let head = |owner: Tag| ItemStack {
+            id: 397,
+            count: 1,
+            damage: 3,
+            nbt: Some(Nbt {
+                name: String::new(),
+                root: vec![("SkullOwner".into(), owner)],
+            }),
+        };
+        let s = |v: &str| Tag::String(v.into());
+        let resolved = Tag::Compound(vec![
+            ("Id".into(), s("069a79f4-44e9-4726-a5be-fca90e38aaf5")),
+            ("Name".into(), s("Notch")),
+            (
+                "Properties".into(),
+                Tag::Compound(vec![(
+                    "textures".into(),
+                    Tag::List(vec![Tag::Compound(vec![("Value".into(), s("e30="))])]),
+                )]),
+            ),
+        ]);
+        assert_eq!(
+            skull_profile(&head(resolved)),
+            Some((0x069a79f4_44e9_4726_a5be_fca90e38aaf5, Some("e30=")))
+        );
+        let named = head(s("Notch"));
+        let (uuid, textures) = skull_profile(&named).unwrap();
+        assert_eq!((uuid >> 76 & 0xf, textures), (3, None));
+        assert_eq!(skull_profile(&head(s(""))), None);
     }
 }

@@ -975,6 +975,7 @@ impl App {
         let entity_draws = draws.len();
         draws.extend(self.pickup_draws(frac));
         self.tab_heads();
+        self.head_skins();
         let (quads, textures, effects) = self.overlay(frac, &cam, &draws, entity_draws);
         self.run_effects(effects);
         let held = self.game.inv.held_stack().as_ref().map(|s| {
@@ -1280,6 +1281,31 @@ impl App {
                 upside_down: parts.is_some_and(|p| p & 1 != 0)
                     && matches!(e.name.as_str(), "Dinnerbone" | "Grumm"),
             };
+        }
+    }
+
+    /// Player heads in the open window: downloads each owner's skin once and hands it to the item
+    /// icons as the GUI texture of the tab list head; until then they draw the default skin.
+    fn head_skins(&mut self) {
+        let (Some(r), Some(icons)) = (self.renderer.as_mut(), self.icons.as_mut()) else {
+            return;
+        };
+        for i in 0..self.game.inv.slot_count() {
+            let Some((uuid, Some(textures))) = self
+                .game
+                .inv
+                .slot(i)
+                .as_ref()
+                .and_then(gui::inventory::icons::skull_profile)
+            else {
+                continue;
+            };
+            if let Some(img) = self.skins.tab_head(uuid, Some(textures)) {
+                r.register_image(&crate::skins::tab_texture(uuid), &img);
+            }
+            if self.skins.has_tab(uuid) {
+                icons.heads.insert(uuid);
+            }
         }
     }
 

@@ -1220,6 +1220,7 @@ name = "gui"
 version = "0.1.0"
 dependencies = [
  "ferrocraft-net-client",
+ "md5",
  "oracle",
  "render",
  "serde_json",

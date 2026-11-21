@@ -40,14 +40,14 @@ pub fn build(out: &mut MeshData, id: i8, d: &EntityDraw, skins: &Skins) {
     // (sprite, width in blocks, rise above the feet)
     let (skin, size, rise) = match id {
         ARROW => return arrow(out, d, skins),
-        SNOWBALL => (Skin::Snowball, 0.25, 0.0),
-        EGG => (Skin::Egg, 0.25, 0.0),
-        ENDER_PEARL => (Skin::EnderPearl, 0.25, 0.0),
-        ENDER_EYE => (Skin::EnderEye, 0.25, 0.0),
-        POTION => (Skin::SplashPotion, 0.25, 0.0),
-        XP_BOTTLE => (Skin::XpBottle, 0.25, 0.0),
-        // `RenderSnowball` with `Items.fireworks`.
-        FIREWORK => (Skin::Firework, 0.25, 0.0),
+        SNOWBALL => (Skin::Snowball, 0.5, 0.0),
+        EGG => (Skin::Egg, 0.5, 0.0),
+        ENDER_PEARL => (Skin::EnderPearl, 0.5, 0.0),
+        ENDER_EYE => (Skin::EnderEye, 0.5, 0.0),
+        POTION => (Skin::SplashPotion, 0.5, 0.0),
+        XP_BOTTLE => (Skin::XpBottle, 0.5, 0.0),
+        // `RenderSnowball` with `Items.fireworks`: scale 0.5 of a 1-block item sprite (the models set no ground transform).
+        FIREWORK => (Skin::Firework, 0.5, 0.0),
         // `ProjectileRenderer`: a 1x1 sprite scaled by 2 (large) or 0.5 (small), raised a quarter.
         FIREBALL => (Skin::FireCharge, 2.0, 0.5),
         SMALL_FIREBALL => (Skin::FireCharge, 0.5, 0.125),

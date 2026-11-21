@@ -490,6 +490,7 @@ pub fn composite(layers: &[(Image, u32)]) -> Option<Image> {
 impl Flat {
     /// `ItemModelGenerator`: front and back faces 1/16 apart plus a side face on every opaque
     /// pixel edge that borders a transparent pixel, in `0..1` model units. Animated strips show `frame`.
+    /// Every quad winds counter-clockwise seen from outside, as the culling entity pipeline needs.
     pub fn new(img: &Image, display: Mat, frame: usize) -> Flat {
         let (w, th) = (img.width, img.height);
         let h = w.min(th);
@@ -517,10 +518,20 @@ impl Flat {
             normals.push(normal);
         };
         let full = [[0.0, vmin], [1.0, vmin], [1.0, vmax], [0.0, vmax]];
-        for (z, n) in [(z1, 1.0), (z0, -1.0)] {
-            let c = [[0.0, 1.0, z], [1.0, 1.0, z], [1.0, 0.0, z], [0.0, 0.0, z]];
-            quad(c, full, [0.0, 0.0, n]);
-        }
+        let front = [
+            [0.0, 0.0, z1],
+            [1.0, 0.0, z1],
+            [1.0, 1.0, z1],
+            [0.0, 1.0, z1],
+        ];
+        let back = [
+            [0.0, 1.0, z0],
+            [1.0, 1.0, z0],
+            [1.0, 0.0, z0],
+            [0.0, 0.0, z0],
+        ];
+        quad(front, full, [0.0, 0.0, 1.0]);
+        quad(back, full, [0.0, 0.0, -1.0]);
         let (fw, fh) = (w as f32, h as f32);
         for y in 0..h as isize {
             for x in 0..w as isize {
@@ -538,11 +549,11 @@ impl Flat {
                     quad(c, uv, [-1.0, 0.0, 0.0]);
                 }
                 if !opaque(x + 1, y) {
-                    let c = [[x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0]];
+                    let c = [[x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [x1, y0, z0]];
                     quad(c, uv, [1.0, 0.0, 0.0]);
                 }
                 if !opaque(x, y - 1) {
-                    let c = [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+                    let c = [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]];
                     quad(c, uv, [0.0, 1.0, 0.0]);
                 }
                 if !opaque(x, y + 1) {

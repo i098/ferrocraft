@@ -302,16 +302,10 @@ impl Items {
         to_world: &dyn Fn(V3) -> V3,
         normal_to_world: &dyn Fn(V3) -> V3,
         level: [f32; 2],
-        direct: bool,
         glint: Option<f32>,
     ) {
         for (i, layer) in model.layers.iter().enumerate() {
             let mut vertices = layer.mesh.vertices.clone();
-            // The front quad of a sprite (the first) winds clockwise, for the hand's model space;
-            // placed straight into the world it needs the reverse order to face outward.
-            if direct && layer.normals.is_some() {
-                vertices[..4].reverse();
-            }
             for (j, v) in vertices.iter_mut().enumerate() {
                 v.pos = to_world(v.pos);
                 v.light = level;
@@ -420,7 +414,7 @@ fn mushrooms(out: &mut Items, d: &EntityDraw, models: &Models, level: [f32; 2]) 
             let t = to_world(n);
             [t[0] - origin[0], t[1] - origin[1], t[2] - origin[2]]
         };
-        out.piece(m, &to_world, &normal, level, false, None);
+        out.piece(m, &to_world, &normal, level, None);
     }
     out.gl_lit = false;
 }
@@ -462,7 +456,7 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         let [x, y, z] = dir(&mat, n);
         [-x, -y, z]
     };
-    out.piece(m, &to_world, &normal, level, false, None);
+    out.piece(m, &to_world, &normal, level, None);
 }
 
 /// `LayerHeldItemWitch`: the block pose is for chests (`isRenderTypeChest`): chest, ender chest, trapped chest.
@@ -564,7 +558,7 @@ fn held(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         [-x, -y, z]
     };
     let glint = d.held_glint.then_some(d.age * 50.0);
-    out.piece(m, &to_world, &normal, level, true, glint);
+    out.piece(m, &to_world, &normal, level, glint);
 }
 
 /// `ItemEntityRenderer.render`: bob, spin and one to five copies by stack size.
@@ -594,7 +588,7 @@ fn draw_drop(out: &mut Items, d: &EntityDraw, stack: Stack, m: &ItemModel, level
                 (d.pos[2] + f64::from(z)) as f32,
             ]
         };
-        out.piece(m, &to_world, &|n| dir(&mat, n), level, true, glint);
+        out.piece(m, &to_world, &|n| dir(&mat, n), level, glint);
     }
 }
 
@@ -710,6 +704,62 @@ mod tests {
                 c[0].min(c[1]).min(c[2]) >= 0.39,
                 "side face too dark: {c:?}"
             );
+        }
+    }
+
+    /// Held sprites are drawn with back-face culling: every quad, sides included, must wind the same
+    /// way about its outward normal, or an edge-on blade shows only the inside of its far faces.
+    #[test]
+    fn held_sprite_quads_all_wind_outward() {
+        let mut d = super::super::tests::steve();
+        d.held = 276;
+        let mut rgba = vec![0u8; 3 * 3 * 4];
+        for y in 0..3 {
+            let o = (y * 3 + 1) * 4;
+            rgba[o..o + 4].copy_from_slice(&[9, 9, 9, 255]);
+        }
+        let img = crate::assets::Image {
+            width: 3,
+            height: 3,
+            rgba,
+        };
+        let flat = hand::Flat::new(&img, ident(), 0);
+        let normals = flat.normals.clone();
+        let layer = Layer {
+            tex: ItemTex::Sprite("x".into()),
+            normals: Some(flat.normals),
+            mesh: flat.mesh,
+            flat: vec![],
+            mask: None,
+        };
+        let m = ItemModel {
+            id: 276,
+            damage: 0,
+            layers: vec![layer],
+            gui3d: false,
+            third: ident(),
+            ground: ident(),
+            fixed: ident(),
+            ground_scale: [1.0; 3],
+            dial: None,
+        };
+        let mut out = Items::default();
+        held(&mut out, &d, &m, [1.0, 1.0]);
+        let mesh = out.sprites.values().next().unwrap();
+        let mean = |pts: &[Vertex]| -> V3 {
+            std::array::from_fn(|i| pts.iter().map(|v| v.pos[i]).sum::<f32>() / pts.len() as f32)
+        };
+        let centre = mean(&mesh.vertices);
+        for (q, n) in mesh.vertices.chunks(4).zip(normals.iter()) {
+            let out_of = std::array::from_fn::<f32, 3, _>(|i| mean(q)[i] - centre[i]);
+            let sub = |a: usize| std::array::from_fn::<f32, 3, _>(|i| q[a].pos[i] - q[0].pos[i]);
+            let (a, b) = (sub(1), sub(2));
+            let c = [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ];
+            assert!((0..3).map(|i| c[i] * out_of[i]).sum::<f32>() > 0.0, "{n:?}");
         }
     }
 }

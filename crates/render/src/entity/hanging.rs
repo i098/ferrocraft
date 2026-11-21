@@ -403,7 +403,6 @@ fn frame(
         &|p| world(&mat, p),
         &|n| dir(&mat, n),
         level,
-        true,
         stack.glint.then_some(d.age * 50.0),
     );
 }

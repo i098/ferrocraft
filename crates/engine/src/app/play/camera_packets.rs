@@ -179,6 +179,23 @@ pub(super) fn join_app(port: u16, out: &Sender<Vec<u8>>) -> App {
 }
 
 #[test]
+fn endermite_mob_emits_portal_particles_each_tick_and_other_mobs_do_not() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.tick_once();
+    assert_eq!(app.particles.len(), 0, "kind-100 mob makes none");
+    let mut mite = spawn_mob();
+    mite.entity_id = VarInt(OTHER_ID + 1);
+    mite.kind = 67;
+    send(&out, mite.into());
+    pump_until(&mut app, |a| a.game.entities.get(OTHER_ID + 1).is_some());
+    app.tick_once();
+    assert_eq!(app.particles.len(), 2);
+    app.tick_once();
+    assert_eq!(app.particles.len(), 4, "two more every tick");
+}
+
+#[test]
 fn camera_packet_stops_and_resumes_movement_packets() {
     let (port, rx, out) = server();
     let mut app = joined_app(port, &out, &rx);

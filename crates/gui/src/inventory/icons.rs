@@ -282,9 +282,9 @@ fn scale_rgb(argb: u32, k: f32) -> u32 {
 }
 
 fn tint_color(s: &ItemStack, pass: Option<usize>) -> u32 {
-    let rgb = pass
-        .and_then(|i| items::variant(s.id, s.damage).and_then(|v| v.tint.get(i).copied()))
-        .unwrap_or(0xFF_FFFF);
+    let rgb = pass.map_or(0xFF_FFFF, |i| {
+        items::tint(s.id, s.damage, s.nbt.as_ref().and_then(|n| n.dye()), i)
+    });
     0xFF00_0000 | rgb
 }
 
@@ -896,6 +896,26 @@ impl Icons {
 mod tests {
     use super::*;
     use crate::screens::Metrics;
+
+    /// `ItemArmor.getColorFromItemStack`: `display.color` tints layer 0 of leather armor only.
+    #[test]
+    fn dyed_leather_tints_the_icon() {
+        use world::inventory::{Nbt, Tag};
+        let dyed = ItemStack {
+            id: 299,
+            count: 1,
+            damage: 0,
+            nbt: Some(Nbt {
+                name: String::new(),
+                root: vec![(
+                    "display".into(),
+                    Tag::Compound(vec![("color".into(), Tag::Int(0x0000FF))]),
+                )],
+            }),
+        };
+        assert_eq!(tint_color(&dyed, Some(0)), 0xFF00_00FF);
+        assert_eq!(tint_color(&dyed, Some(1)), 0xFFFF_FFFF);
+    }
 
     /// Sprite origins in the vanilla 1.8.9 atlas, as dumped from the client; unknown names start at 0.
     #[test]

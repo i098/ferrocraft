@@ -240,6 +240,9 @@ pub struct Look {
 
 /// `LivingEntityRenderer.renderModel`: alpha of the body of an invisible entity the viewer can see.
 pub const GHOST_ALPHA: f32 = 0.15;
+/// Vertex alpha that sends a layer to the blended pass at full strength (`LayerSlimeGel`:
+/// `enableBlend`, `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`); the texture alpha does the blending.
+pub const BLEND_ALPHA: f32 = 0.999;
 
 impl Default for Look {
     fn default() -> Look {
@@ -1150,25 +1153,29 @@ pub fn build(
     out
 }
 
-/// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]) out of `mesh`, which the opaque
-/// entity pass draws, into a mesh for the blended pass.
-pub fn take_ghosts(mesh: &mut MeshData) -> MeshData {
-    let mut ghosts = MeshData::default();
+/// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]) and slime gel (alpha
+/// [`BLEND_ALPHA`]) out of `mesh`, which the opaque entity pass draws, into `[ghosts, gel]` meshes
+/// for the blended pass.
+pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 2] {
+    let mut out = [MeshData::default(), MeshData::default()];
     let vertices = &mesh.vertices;
-    let (ghost, solid): (Vec<[u32; 3]>, Vec<[u32; 3]>) = mesh
-        .indices
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .copied()
-        .partition(|t| vertices[t[0] as usize].color[3] == GHOST_ALPHA);
-    for t in ghost {
-        let base = ghosts.vertices.len() as u32;
-        ghosts.vertices.extend(t.map(|i| vertices[i as usize]));
-        ghosts.indices.extend([base, base + 1, base + 2]);
+    let mut solid: Vec<[u32; 3]> = Vec::new();
+    for t in mesh.indices.as_chunks::<3>().0 {
+        let alpha = vertices[t[0] as usize].color[3];
+        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA]
+            .iter()
+            .position(|a| *a == alpha)
+            .map(|i| &mut out[i])
+        else {
+            solid.push(*t);
+            continue;
+        };
+        let base = dst.vertices.len() as u32;
+        dst.vertices.extend(t.map(|i| vertices[i as usize]));
+        dst.indices.extend([base, base + 1, base + 2]);
     }
     mesh.indices = solid.into_flattened();
-    ghosts
+    out
 }
 
 /// `[sky, block]` light of one entity; `flash` adds the hurt flag of a flashing body.
@@ -1626,6 +1633,11 @@ fn emit_layers(
         let from = out.vertices.len();
         for part in &layer.parts {
             emit_part(out, xf, part, part.inflate, layer.tint, v_off);
+        }
+        if layer.skin == Skin::Slime {
+            out.vertices[from..]
+                .iter_mut()
+                .for_each(|v| v.color[3] = BLEND_ALPHA);
         }
         if !layer.colors_when_damaged {
             plain.push(from..out.vertices.len());

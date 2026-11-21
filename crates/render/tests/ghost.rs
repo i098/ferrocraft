@@ -98,12 +98,13 @@ fn invisible_player_is_translucent_only_for_a_viewer_who_sees_it() {
         differs(&ghost, &empty) > 2000,
         "the translucent body must draw"
     );
+    // Vanilla draws with culling off, so back faces and overlapping limbs stack: 1 - 0.85^4 = 48% of 255 is at most 123.
     let strong = ghost
         .chunks(4)
         .zip(empty.chunks(4))
-        .filter(|(g, e)| (0..3).any(|c| g[c].abs_diff(e[c]) > 60))
+        .filter(|(g, e)| (0..3).any(|c| g[c].abs_diff(e[c]) > 125))
         .count();
-    assert_eq!(strong, 0, "the body blends at 15%, not opaque");
+    assert_eq!(strong, 0, "the body blends at 15% per layer, not opaque");
     if let Some(dir) = std::env::var_os("GHOST_PROOF_DIR") {
         let dir = std::path::PathBuf::from(dir);
         encode_png(&dir.join("hidden.png"), 800, 450, &hidden).unwrap();

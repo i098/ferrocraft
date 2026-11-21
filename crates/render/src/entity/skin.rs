@@ -121,8 +121,7 @@ const SKINS: [&str; 96] = [
 const MOBS_FIRST: usize = 28;
 /// Slots of the eye layer textures; their black counts as transparent (additive blending).
 const EYES: [usize; 3] = [43, 44, 88];
-/// Slot of `slime.png` and the size of its outer gel region (top left, texels): the entity pass has
-/// no blending, so [`Skins::screen_door`] punches every other texel of the gel, which is 78% opaque.
+/// Slot of `slime.png`.
 const SLIME_SLOT: usize = 46;
 /// Skins of the slots from [`SLIME_SLOT`] on, in order.
 const SLIME_SLOT_SKINS: [Option<Skin>; 50] = [
@@ -179,7 +178,6 @@ const SLIME_SLOT_SKINS: [Option<Skin>; 50] = [
     Some(Skin::XpOrb),
     Some(Skin::PigSaddle),
 ];
-const SLIME_GEL: (usize, usize) = (32, 16);
 /// Index of the first armor layer in `SKINS`.
 const ARMOR_FIRST: u8 = 15;
 /// Slot of `guardian_elder.png`, the last one before the mob textures.
@@ -525,9 +523,6 @@ impl Skins {
                 if EYES.contains(&i) {
                     s.clear_black(i as u32, img.height);
                 }
-                if i == SLIME_SLOT {
-                    s.screen_door(i as u32, SLIME_GEL);
-                }
             } else {
                 s.blit(i as u32, &img);
             }
@@ -548,17 +543,6 @@ impl Skins {
             let n = img.width.min(w);
             let dst = ((base + y) * w) * 4;
             self.rgba[dst..dst + n * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..n * 4]);
-        }
-    }
-
-    /// Makes every other texel of the top left `w` by `h` region of a slot transparent, in a checkerboard,
-    /// so a translucent layer drawn without blending lets what lies behind it show.
-    fn screen_door(&mut self, slot: u32, (w, h): (usize, usize)) {
-        let base = (slot * SLOT) as usize;
-        for y in 0..h {
-            for x in (y % 2..w).step_by(2) {
-                self.rgba[((base + y) * WIDTH as usize + x) * 4 + 3] = 0;
-            }
         }
     }
 

@@ -144,7 +144,13 @@ mod tests {
         for (id, plant) in [(37, true), (38, true), (39, true), (40, true), (1, false)] {
             let mut d = crate::entity::tests::steve();
             d.class = Class::Object(70);
-            d.stack = Some(Stack { id, damage: 0, count: 1, glint: false, dye: None });
+            d.stack = Some(Stack {
+                id,
+                damage: 0,
+                count: 1,
+                glint: false,
+                dye: None,
+            });
             let key = wanted(&d).next().unwrap();
             assert_eq!(key.0, id);
             assert_eq!(key != (id, 0), plant, "id {id}");

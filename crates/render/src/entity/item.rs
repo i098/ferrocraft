@@ -463,7 +463,7 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
 }
 
 /// `LayerHeldItemWitch`: the block pose is for chests (`isRenderTypeChest`): chest, ender chest, trapped chest.
-fn is_chest(id: i16) -> bool {
+pub(crate) fn is_chest(id: i16) -> bool {
     matches!(id, 54 | 130 | 146)
 }
 

@@ -6,7 +6,7 @@ use super::{Class, EntityDraw};
 use crate::blockent::WornHead;
 
 /// `Items.skull`.
-const SKULL: i16 = 397;
+pub(crate) const SKULL: i16 = 397;
 
 /// Renderers that add the layer: `RenderPlayer`, `RenderZombie`, `RenderPigZombie`,
 /// `RenderSkeleton` (all `RenderBiped`) and `RenderArmorStand`.

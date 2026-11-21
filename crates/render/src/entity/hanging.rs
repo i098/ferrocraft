@@ -31,6 +31,38 @@ pub fn is_frame(d: &EntityDraw) -> bool {
     d.class == Class::Object(71)
 }
 
+/// A chest or skull in a frame: `RenderItem.renderItem` hands `builtin/entity` models to
+/// `TileEntityItemStackRenderer`, which draws the block entity. Returns the stack and the frame
+/// mapping block units to the world relative to the block centre `origin`; a chest turns 180
+/// degrees about y to show its latch, a skull also takes the `translate(-0.5, 0, -0.5)` and
+/// `scale(2)` of its renderer.
+/// shortcut: a player head shows the default skin, a stack carries no owner; give it one when
+/// frames hold named heads.
+pub fn framed_block_entity(d: &EntityDraw) -> Option<(Stack, Mat, [f64; 3])> {
+    let s = d
+        .stack
+        .filter(|s| is_frame(d) && (super::item::is_chest(s.id) || s.id == super::helmet::SKULL))?;
+    let turn = rotate(180.0 - f32::from(d.hang.facing) * 90.0, 1);
+    let turn_chest = if super::item::is_chest(s.id) {
+        180.0
+    } else {
+        0.0
+    };
+    let mut m = chain(&[
+        turn,
+        translate(0.0, 0.0, 0.4375),
+        rotate(f32::from(d.hang.rotation) * 360.0 / 8.0, 2),
+        scale(0.5),
+        scale(0.5),
+        rotate(turn_chest, 1),
+        translate(-0.5, -0.5, -0.5),
+    ]);
+    if s.id == super::helmet::SKULL {
+        m = chain(&[m, translate(-0.5, 0.0, -0.5), scale(2.0)]);
+    }
+    Some((s, m, d.pos.map(|c| c.floor() + 0.5)))
+}
+
 /// The map texture key of a stack, `None` when it is not a filled map.
 pub fn map_key(s: &Stack) -> Option<String> {
     (s.id == FILLED_MAP).then(|| format!("map/{}", s.damage))

@@ -176,7 +176,6 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
         vehicle: vehicle_meta(meta),
         begging: byte(19),
         carried: short(meta, 16),
-        carried_data: byte(17),
         screaming: byte(18),
         wither_invul: match find(meta, 20) {
             Some(MetaValue::Int(i)) => Some(*i),

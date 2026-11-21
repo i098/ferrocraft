@@ -21,7 +21,7 @@ pub struct PlayerSkins {
 
 /// Name of the GUI texture of a tab list head.
 pub fn tab_texture(uuid: u128) -> String {
-    format!("skin/{uuid:032x}")
+    gui::inventory::icons::head_texture(uuid)
 }
 
 /// The skin on a 64x64 canvas (a 64x32 skin fills the top half) with the head base opaque, as
@@ -31,6 +31,17 @@ fn tab_image(img: &Image) -> Image {
     for y in 0..img.height.min(64) {
         let w = img.width.min(64);
         rgba[y * 64 * 4..(y * 64 + w) * 4].copy_from_slice(&img.rgba[y * img.width * 4..][..w * 4]);
+    }
+    // `ImageBufferDownload.setAreaTransparent` on a 64x32 skin: an all-opaque hat area is dropped.
+    if img.height == 32 {
+        let area = |x: usize, y: usize| (y * 64 + x) * 4 + 3;
+        if (0..32).all(|y| (32..64).all(|x| rgba[area(x, y)] >= 128)) {
+            for y in 0..32 {
+                for x in 32..64 {
+                    rgba[area(x, y)] = 0;
+                }
+            }
+        }
     }
     for y in 0..16 {
         for x in 0..32 {
@@ -147,5 +158,31 @@ impl PlayerSkins {
     /// Arm model of a downloaded skin, `None` until it is ready.
     pub fn slim(&self, uuid: u128) -> Option<bool> {
         self.ready.get(&uuid).map(|r| r.1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A legacy 64x32 skin whose hat area is opaque black (Notch's) loses that area; a hat with
+    /// a transparent texel keeps it.
+    #[test]
+    fn legacy_skin_drops_an_opaque_hat_area() {
+        let alpha = |img: &Image, x: usize, y: usize| img.rgba[(y * 64 + x) * 4 + 3];
+        let mut rgba = vec![255; 64 * 32 * 4];
+        let opaque = tab_image(&Image {
+            width: 64,
+            height: 32,
+            rgba: rgba.clone(),
+        });
+        assert_eq!((alpha(&opaque, 40, 4), alpha(&opaque, 10, 4)), (0, 255));
+        rgba[(5 * 64 + 50) * 4 + 3] = 0;
+        let kept = tab_image(&Image {
+            width: 64,
+            height: 32,
+            rgba,
+        });
+        assert_eq!(alpha(&kept, 40, 4), 255);
     }
 }

@@ -298,7 +298,12 @@ impl Mesher<'_> {
         let l = *cached(state);
         match l.kind {
             Kind::Skip => {}
-            Kind::Opaque | Kind::Cutout => self.cube(at, state, &l),
+            Kind::Opaque | Kind::Cutout => {
+                self.cube(at, state, &l);
+                if state >> 4 == 165 {
+                    self.slime_core(at, &l);
+                }
+            }
             Kind::Water | Kind::Lava => self.liquid(at, state, &l),
             Kind::Cross => self.cross(at, state, &l),
             // Chests are drawn as models (`blockent.rs`); their box only serves picking and cracks.
@@ -764,6 +769,20 @@ impl Mesher<'_> {
             }
             self.push_quad(pass, verts, false);
         }
+    }
+
+    /// `slime.json` second element: a 3..13 px cube inside the shell, drawn on all six faces.
+    fn slime_core(&mut self, at: [i32; 3], l: &Look) {
+        let core = Bx {
+            min: [3.0 / 16.0; 3],
+            max: [13.0 / 16.0; 3],
+            tex: l.tex,
+            tint: Tint::None,
+            mask: 0x3f,
+            rot: 0,
+            cull: false,
+        };
+        self.boxed(at, &core, Pass::Blend, variants::Orient::default());
     }
 }
 

@@ -769,6 +769,22 @@ impl App {
                 }
             }
             Effect::Tile(t) => {
+                // `BlockNote.onBlockEventReceived`: a note particle 1.2 above the block, pitch / 24 as motion x.
+                if let TileEvent::Action {
+                    pos,
+                    block: NOTE_BLOCK,
+                    value,
+                    ..
+                } = t
+                {
+                    let at = [
+                        f64::from(pos[0]) + 0.5,
+                        f64::from(pos[1]) + 1.2,
+                        f64::from(pos[2]) + 0.5,
+                    ];
+                    let m = [f64::from(value) / 24.0, 0.0, 0.0];
+                    self.particles.spawn(render::ParticleKind::Note, at, m, 0);
+                }
                 if let Some(r) = &mut self.renderer {
                     mirror_tile(r, t, self.game.difficulty, self.game.world_time);
                 }
@@ -943,6 +959,9 @@ mod explode_pitch_tests {
         assert!((explode_pitch(0.0) - 0.7).abs() < 1e-6);
     }
 }
+
+/// Block id of the note block.
+const NOTE_BLOCK: u16 = 25;
 
 fn mirror_tile(r: &mut Renderer, tile: TileEvent, difficulty: u8, world_time: i64) {
     match tile {

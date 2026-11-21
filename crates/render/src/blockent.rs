@@ -4,10 +4,11 @@
 //! (`TileEntityBannerRenderer`). The renderer keeps the position of every such block and the data
 //! the server sends for it, and meshes all of them again each frame.
 //!
-//! Not ported: the obfuscated, underlined and struck-through text styles of sign lines, glyphs
+//! Text takes the item lighting of its fixed normal. Not ported: the obfuscated, underlined and struck-through text styles of sign lines, glyphs
 //! outside `ascii.png`, the destroy-stage overlay, and the sounds.
 
 use crate::assets::{Font, Image};
+use crate::entity::mooshroom::gl_light;
 use crate::entity::{add_box, rotate, Skin, Skins, V3};
 use crate::jrandom::JavaRandom;
 use crate::mesh::{MeshData, Vertex};
@@ -868,11 +869,14 @@ fn sign(
     let f3 = 0.015_625 * f;
     let text = m.translate([0.0, 0.5 * f, 0.07 * f]).scale([f3, -f3, f3]);
     let target = out.mesh(Tex::Named(FONT_TEXTURE.into()));
+    // The renderer sets `glNormal3f(0, 0, -1)` for the text under the item lighting.
+    let (a, b) = (text.apply([0.0; 3]), text.apply([0.0, 0.0, -1.0]));
+    let shade = gl_light([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
     for (j, line) in lines.iter().enumerate() {
         let line = first_line(font, line, SIGN_LINE_WIDTH);
         let x = -(string_width(font, &line) / 2);
         let y = j as i32 * 10 - lines.len() as i32 * 5;
-        draw_string(target, &text, font, &line, x as f32, y as f32);
+        draw_string(target, &text, shade, font, &line, x as f32, y as f32);
     }
 }
 
@@ -1193,20 +1197,26 @@ fn string_width(font: &Font, text: &str) -> i32 {
         .sum()
 }
 
-/// The first line of `text` wrapped to `width` font pixels, breaking at the last space.
+/// The first line of `text` wrapped to `width` font pixels, breaking at the last space
+/// (`FontRenderer.sizeStringToWidth`; a bold glyph is one pixel wider).
 fn first_line(font: &Font, text: &str, width: i32) -> String {
     if string_width(font, text) <= width {
         return text.to_owned();
     }
-    let (mut used, mut cut, mut last_space) = (0, 0, None);
+    let (mut used, mut cut, mut last_space, mut bold) = (0, 0, None, false);
     let mut chars = text.char_indices();
     while let Some((i, c)) = chars.next() {
         if c == '§' {
             // The code after it has no width.
-            chars.next();
+            match chars.next().map(|(_, code)| code.to_ascii_lowercase()) {
+                Some('l') => bold = true,
+                Some(code) if code == 'r' || code.is_ascii_hexdigit() => bold = false,
+                _ => {}
+            }
             continue;
         }
-        used += char_width(font, c);
+        let w = char_width(font, c);
+        used += w + i32::from(bold && w > 0);
         if c == ' ' {
             last_space = Some(i);
         }
@@ -1220,7 +1230,15 @@ fn first_line(font: &Font, text: &str, width: i32) -> String {
 
 /// `FontRenderer.renderDefaultChar` for each glyph of `text` with its top-left corner at (`x`,
 /// `y`) font pixels in the plane of `m` (y down).
-fn draw_string(out: &mut MeshData, m: &Mat, font: &Font, text: &str, mut x: f32, y: f32) {
+fn draw_string(
+    out: &mut MeshData,
+    m: &Mat,
+    shade: f32,
+    font: &Font,
+    text: &str,
+    mut x: f32,
+    y: f32,
+) {
     for g in styled(text) {
         let width = char_width(font, g.ch);
         if width == 0 {
@@ -1246,7 +1264,12 @@ fn draw_string(out: &mut MeshData, m: &Mat, font: &Font, text: &str, mut x: f32,
                 out.vertices.push(Vertex {
                     pos: m.apply([p[0], p[1], 0.0]),
                     uv,
-                    color: [g.color[0], g.color[1], g.color[2], 1.0],
+                    color: [
+                        g.color[0] * shade,
+                        g.color[1] * shade,
+                        g.color[2] * shade,
+                        1.0,
+                    ],
                     light: [1.0, 1.0],
                 });
             }
@@ -1260,6 +1283,29 @@ fn draw_string(out: &mut MeshData, m: &Mat, font: &Font, text: &str, mut x: f32,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn six_wide_font() -> Font {
+        let mut ascii = [0; 256];
+        ascii[usize::from(b'W')] = 6;
+        Font {
+            ascii,
+            unicode: Vec::new(),
+            force_unicode: false,
+        }
+    }
+
+    #[test]
+    fn bold_glyphs_count_one_pixel_wider_when_a_sign_line_wraps() {
+        let font = six_wide_font();
+        // 15 plain glyphs are 90 wide and fit; as bold they are 105 and cut after 12 (84 + 7 > 90).
+        let plain = "W".repeat(15);
+        assert_eq!(first_line(&font, &plain, 90), plain);
+        let bold = format!("§l{plain}");
+        assert_eq!(
+            first_line(&font, &bold, 90),
+            format!("§l{}", "W".repeat(12))
+        );
+    }
 
     fn tick_n(lid: &mut BlockEntities, n: usize) {
         for _ in 0..n {

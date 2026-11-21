@@ -32,7 +32,7 @@ pub(super) const FACES: [V3; 4] = [
 /// What the two lights of `RenderHelper.enableStandardItemLighting` leave of a block drawn at
 /// brightness 1 under a world-space normal `n`: ambient 0.4 plus 0.6 per light, each along
 /// `(0.2, 1, -0.7)` and `(-0.2, 1, 0.7)`.
-pub(super) fn gl_light(n: V3) -> f32 {
+pub(crate) fn gl_light(n: V3) -> f32 {
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
     let n = n.map(|c| c / len);
     let lights = [[0.2_f32, 1.0, -0.7], [-0.2, 1.0, 0.7]];

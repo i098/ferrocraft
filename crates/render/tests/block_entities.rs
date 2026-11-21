@@ -315,3 +315,24 @@ fn spawner_shows_its_mob_and_turns_it_near_a_player() {
         assert!(differs(&cage, &shown) > 300, "{name} shows in the cage");
     }
 }
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn signs_styled_lines_draw_on_standing_and_wall() {
+    let mut r = scene();
+    let lines = ["§4Red", "§0§lWWWWWWWWWWWWWWWWWW", "§9§oBlue", "§a§lGreen"].map(String::from);
+    r.set_block(0, 64, 4, 63 << 4);
+    r.set_sign_text([0, 64, 4], lines.clone());
+    r.set_block(3, 64, 4, 1 << 4);
+    r.set_block(3, 64, 5, 68 << 4 | 3);
+    r.set_sign_text([3, 64, 5], lines);
+    let cam = Camera {
+        pos: [1.5, 65.0, 7.5],
+        yaw: 180.0,
+        pitch: 10.0,
+        ..Camera::default()
+    };
+    // The first frame builds the chunk light the block entities read.
+    frame(&mut r, &cam, "signs_styled_warmup");
+    frame(&mut r, &cam, "signs_styled");
+}

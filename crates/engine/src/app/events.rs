@@ -721,6 +721,25 @@ impl App {
         }
     }
 
+    /// `BlockNote.onBlockEventReceived`: a note particle 1.2 above the block, pitch / 24 as motion x.
+    fn spawn_note_particle(&mut self, t: &TileEvent) {
+        if let &TileEvent::Action {
+            pos,
+            block: NOTE_BLOCK,
+            value,
+            ..
+        } = t
+        {
+            let at = [
+                f64::from(pos[0]) + 0.5,
+                f64::from(pos[1]) + 1.2,
+                f64::from(pos[2]) + 0.5,
+            ];
+            let m = [f64::from(value) / 24.0, 0.0, 0.0];
+            self.particles.spawn(render::ParticleKind::Note, at, m, 0);
+        }
+    }
+
     fn game_effect(&mut self, e: Effect, dirty: &mut Dirty) {
         match e {
             Effect::Clear => {
@@ -769,6 +788,7 @@ impl App {
                 }
             }
             Effect::Tile(t) => {
+                self.spawn_note_particle(&t);
                 if let Some(r) = &mut self.renderer {
                     mirror_tile(r, t, self.game.difficulty, self.game.world_time);
                 }
@@ -943,6 +963,9 @@ mod explode_pitch_tests {
         assert!((explode_pitch(0.0) - 0.7).abs() < 1e-6);
     }
 }
+
+/// Block id of the note block.
+const NOTE_BLOCK: u16 = 25;
 
 fn mirror_tile(r: &mut Renderer, tile: TileEvent, difficulty: u8, world_time: i64) {
     match tile {
@@ -1317,6 +1340,28 @@ mod tests {
         let r = app.renderer.as_ref().unwrap();
         assert_eq!(r.skull([0, 64, 0]), None);
         assert_eq!(r.skull([5, 64, 5]).map(|s| s.kind), Some(3));
+    }
+
+    /// `BlockNote.onBlockEventReceived`: only a note block action spawns a note particle, 1.2 above the block centre.
+    #[test]
+    fn note_block_action_spawns_one_note_particle_above_the_block() {
+        let mut app = respawned(true);
+        let action = |block| {
+            Effect::Tile(TileEvent::Action {
+                pos: [10, 64, -3],
+                block,
+                event: 0,
+                value: 12,
+            })
+        };
+        app.game_effect(action(54), &mut Dirty::new());
+        assert!(
+            app.particles.is_empty(),
+            "chest action must not spawn a note"
+        );
+        app.game_effect(action(25), &mut Dirty::new());
+        let at: Vec<_> = app.particles.positions().collect();
+        assert_eq!(at, vec![[10.5, 65.2, -2.5]]);
     }
 
     #[test]

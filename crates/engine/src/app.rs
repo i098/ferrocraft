@@ -682,6 +682,7 @@ impl App {
             let back = look_vector(yaw, pitch);
             return Camera {
                 pos: [0, 1, 2].map(|i| eye[i] - back[i] * FIRST_PERSON_BACK),
+                eye_offset: [0, 1, 2].map(|i| back[i] * FIRST_PERSON_BACK),
                 yaw,
                 pitch,
                 fov_deg: fov,

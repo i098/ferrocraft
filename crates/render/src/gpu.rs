@@ -1574,7 +1574,8 @@ impl Renderer {
 
     /// `World.getSkyColor` reads the temperature at the camera entity's block; plains when unloaded.
     fn sky_temperature(&self, cam: &Camera) -> f32 {
-        let [x, y, z] = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]].map(|c| c.floor() as i32);
+        let eye = cam.eye();
+        let [x, y, z] = [eye[0], eye[1] - EYE_HEIGHT, eye[2]].map(|c| c.floor() as i32);
         self.biome_at(x, z)
             .map_or(PLAINS_TEMPERATURE, |b| temperature(b, x, y, z))
     }
@@ -1790,7 +1791,8 @@ impl Renderer {
 
     /// Rain and snow meshes for this frame.
     fn rain_mesh(&self, env: &Environment, cam: &Camera) -> (Option<GpuMesh>, Option<GpuMesh>) {
-        let feet = [cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]];
+        let eye = cam.eye();
+        let feet = [eye[0], eye[1] - EYE_HEIGHT, eye[2]];
         let range = rain_radius(self.fancy_graphics);
         let (rain, snow) = build_precipitation(env, feet, |x, z| self.rain_top(x, z), range);
         (self.upload_geometry(&rain), self.upload_geometry(&snow))
@@ -1862,7 +1864,7 @@ impl Renderer {
         } else {
             Vec::new()
         };
-        let eye = cam.pos.map(|p| p.floor() as i32);
+        let eye = cam.eye().map(|p| p.floor() as i32);
         let light = self
             .meshes
             .get(&(eye[0] >> 4, eye[2] >> 4))

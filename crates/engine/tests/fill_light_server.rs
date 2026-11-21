@@ -18,11 +18,19 @@ const STONE: u16 = 1 << 4;
 const GROUND: usize = 40; // stone y 0..=39, open sky above
 
 fn block(y: usize) -> u16 {
-    if y < GROUND { STONE } else { 0 }
+    if y < GROUND {
+        STONE
+    } else {
+        0
+    }
 }
 
 fn sky(y: usize) -> u8 {
-    if y < GROUND { 0 } else { 15 }
+    if y < GROUND {
+        0
+    } else {
+        15
+    }
 }
 
 fn chunk_payload() -> Vec<u8> {
@@ -108,9 +116,11 @@ impl ChunkBlocks for Plain<'_> {
     }
 }
 
-
 fn mean(rgba: &[u8]) -> f64 {
-    rgba.chunks(4).map(|p| (p[0] as f64 + p[1] as f64 + p[2] as f64) / 3.0).sum::<f64>() / (rgba.len() / 4) as f64
+    rgba.chunks(4)
+        .map(|p| (p[0] as f64 + p[1] as f64 + p[2] as f64) / 3.0)
+        .sum::<f64>()
+        / (rgba.len() / 4) as f64
 }
 
 /// A fill that digs an open pit must not leave the sent (stale, dark) light on the chunk: the lit frame must
@@ -130,7 +140,13 @@ fn fill_does_not_darken_the_scene() {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    let cam = Camera { pos: [8.5, 37.5, 8.5], yaw: 0.0, pitch: 0.0, fov_deg: 70.0, ..Camera::default() };
+    let cam = Camera {
+        pos: [8.5, 37.5, 8.5],
+        yaw: 0.0,
+        pitch: 0.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
     let mut r = Renderer::new_offscreen(400, 300, None);
     r.upload_chunk(&Plain(&chunk, true));
     let before = r.render_to_rgba(&cam, &[]).2;
@@ -155,5 +171,8 @@ fn fill_does_not_darken_the_scene() {
         encode_png(&dir.join("fill_after.png"), 400, 300, &after).unwrap();
         encode_png(&dir.join("fill_reference.png"), 400, 300, &reference).unwrap();
     }
-    assert!(ma >= mr * 0.95, "scene went dark after fill: {ma:.2} vs reference {mr:.2}");
+    assert!(
+        ma >= mr * 0.95,
+        "scene went dark after fill: {ma:.2} vs reference {mr:.2}"
+    );
 }

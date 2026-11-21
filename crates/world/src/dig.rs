@@ -126,7 +126,7 @@ pub(crate) fn pane_joins(id: u16) -> bool {
 }
 
 /// `BlockFence.canConnectTo`: its own kind of fence, any gate or an opaque cube.
-pub(crate) fn fence_connects(id: u16, neighbour: u16) -> bool {
+pub fn fence_connects(id: u16, neighbour: u16) -> bool {
     let wood = |n| matches!(n, 85 | 188..=192);
     let same = if id == 113 {
         neighbour == 113

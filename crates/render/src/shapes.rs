@@ -35,10 +35,6 @@ fn px(min: [f32; 3], max: [f32; 3], tex: [&'static str; 6]) -> Bx {
     }
 }
 
-fn is_fence(id: u16) -> bool {
-    matches!(id, 85 | 113 | 188..=192)
-}
-
 fn is_gate(id: u16) -> bool {
     matches!(id, 107 | 183..=187)
 }
@@ -260,7 +256,7 @@ fn boxes_1(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
             out.push(px([6.0, 0.0, 6.0], [10.0, 16.0, 10.0], t));
             let joins = |dx, dz| {
                 let n = nb(dx, 0, dz);
-                is_fence(n >> 4) || is_gate(n >> 4) || full(n)
+                world::dig::fence_connects(id, n >> 4)
             };
             for (dx, dz) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
                 if !joins(dx, dz) {
@@ -891,6 +887,21 @@ fn door(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, tex: [&'static str; 6], o
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fence_skips_a_pumpkin_and_joins_stone() {
+        let arms = |n: u16| {
+            super::boxes(85 << 4, &|dx, _, dz| {
+                if (dx, dz) == (1, 0) {
+                    n << 4
+                } else {
+                    0
+                }
+            })
+            .len()
+        };
+        assert_eq!((arms(1), arms(86), arms(103)), (3, 1, 1));
+    }
+
     #[test]
     fn cauldron_box_list_has_water_only_when_filled() {
         let list = |level: u16| super::boxes(118 << 4 | level, &|_, _, _| 0);

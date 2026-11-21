@@ -25,6 +25,7 @@ pub fn eye_height(sneaking: bool) -> f64 {
 
 /// `damagedTime`: length of the hit animation in ticks.
 const HURT_TICKS: u8 = 10;
+const HURT_RESISTANT_TICKS: u8 = 20;
 const CREATIVE: u8 = 1;
 const SPECTATOR: u8 = 3;
 
@@ -238,6 +239,8 @@ pub struct Game {
     health_seen: bool,
     /// `EntityLivingBase.hurtTime`: ticks left of the hit animation.
     pub hurt_timer: u8,
+    /// `Entity.hurtResistantTime`: set to 20 by damage statuses 2, 33, 36 and 37; the heart blink needs it.
+    pub hurt_resistant: u8,
     /// `EntityLivingBase.deathTime`: ticks since health reached zero, capped at 20.
     pub death_ticks: u8,
     pub food: i32,
@@ -341,6 +344,7 @@ impl Game {
             health: 20.0,
             health_seen: false,
             hurt_timer: 0,
+            hurt_resistant: 0,
             death_ticks: 0,
             food: 20,
             saturation: 5.0,
@@ -631,7 +635,12 @@ impl Game {
             self.weather.reset();
         }
         self.camera = None;
-        (self.health_seen, self.hurt_timer, self.death_ticks) = (false, 0, 0);
+        (
+            self.health_seen,
+            self.hurt_timer,
+            self.hurt_resistant,
+            self.death_ticks,
+        ) = (false, 0, 0, 0);
         (self.death_message, self.killer_id, self.score) = (None, -1, 0);
         self.effects.clear();
         self.speed = world::effects::Speed::default();
@@ -694,9 +703,19 @@ impl Game {
                 status: s @ (22 | 23),
             }) if id == self.entity_id => self.reduced_debug = s == 22,
             // `doEvent(2)` and animation 1 (`animateDamage`) start the hit tilt.
-            NetEvent::Entity(
-                EntityEvent::Status { id, status: 2 } | EntityEvent::Animation { id, animation: 1 },
-            ) if id == self.entity_id => self.hurt_timer = HURT_TICKS,
+            NetEvent::Entity(EntityEvent::Animation { id, animation: 1 })
+                if id == self.entity_id =>
+            {
+                self.hurt_timer = HURT_TICKS;
+            }
+            NetEvent::Entity(EntityEvent::Status { id, status })
+                if id == self.entity_id && matches!(status, 2 | 33 | 36 | 37) =>
+            {
+                self.hurt_resistant = HURT_RESISTANT_TICKS;
+                if status == 2 {
+                    self.hurt_timer = HURT_TICKS;
+                }
+            }
             NetEvent::Entity(e) => self.apply_entity(e),
             NetEvent::PlayerPosLook {
                 x,
@@ -822,6 +841,7 @@ impl Game {
             *b = (*b - 1).max(0);
         }
         self.hurt_timer = self.hurt_timer.saturating_sub(1);
+        self.hurt_resistant = self.hurt_resistant.saturating_sub(1);
         self.death_ticks = if self.health > 0.0 {
             0
         } else {

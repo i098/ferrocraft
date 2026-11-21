@@ -1349,6 +1349,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn activator_rail_is_drawn_and_swaps_texture_when_powered() {
+        assert_ne!(look(157 << 4).kind, Kind::Skip);
+        assert_eq!(look(157 << 4).tex[UP], "rail_activator");
+        assert_eq!(look(157 << 4 | 8).tex[UP], "rail_activator_powered");
+        assert!(texture_names().contains(&"rail_activator_powered"));
+    }
+
+    #[test]
     fn mushroom_and_infested_blocks_pick_texture_by_meta() {
         let t = look(99 << 4 | 1).tex;
         assert_eq!(

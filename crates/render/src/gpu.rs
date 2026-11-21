@@ -200,7 +200,7 @@ pub struct Renderer {
     /// End portal star field: layer 0 alpha blended, layers 1 to 15 added; both unlit, depth tested, back faces culled.
     portal_sky_pipe: wgpu::RenderPipeline,
     portal_add_pipe: wgpu::RenderPipeline,
-    /// `LayerWitherAura`: `blendFunc(ONE, ONE)`, depth tested, no depth write.
+    /// `LayerWitherAura` and `LayerCreeperCharge`: `blendFunc(ONE, ONE)`, depth tested, depth written (`depthMask(!invisible)`), no culling.
     aura_pipe: wgpu::RenderPipeline,
     /// `MobAppearanceParticle`: `depthMask(true)`, blended, back faces culled.
     curse_pipe: wgpu::RenderPipeline,

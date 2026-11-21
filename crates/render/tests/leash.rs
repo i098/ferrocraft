@@ -5,7 +5,22 @@ use render::leash::Holder;
 use render::{encode_png, Camera, ChunkBlocks, Class, EntityDraw, Look, Renderer};
 
 /// Flat stone and grass up to y = 62 (the knot and the cow stand on it).
-struct Flat(i32, i32);
+struct Flat(i32, i32, Vec<[u8; 2048]>);
+
+/// What the server sends: `[sky, block]` per section; sky light 15 in the open (`y >= 63`), 0 in the ground.
+fn lights() -> Vec<[u8; 2048]> {
+    (0..16)
+        .flat_map(|s| {
+            let mut sky = [0u8; 2048];
+            for (i, b) in sky.iter_mut().enumerate() {
+                if s * 16 + i / 128 >= 63 {
+                    *b = 0xff;
+                }
+            }
+            [sky, [0u8; 2048]]
+        })
+        .collect()
+}
 
 impl ChunkBlocks for Flat {
     fn chunk_x(&self) -> i32 {
@@ -13,6 +28,9 @@ impl ChunkBlocks for Flat {
     }
     fn chunk_z(&self) -> i32 {
         self.1
+    }
+    fn light_section(&self, s: usize, sky: bool) -> Option<&[u8; 2048]> {
+        self.2.get(s * 2 + usize::from(!sky))
     }
     fn block(&self, _x: usize, y: usize, _z: usize) -> u16 {
         match y {
@@ -78,17 +96,22 @@ fn a_leashed_cow_draws_its_rope_and_the_knot_its_model() {
     };
     for cx in -1..=1 {
         for cz in -1..=1 {
-            r.upload_chunk(&Flat(cx, cz));
+            r.upload_chunk(&Flat(cx, cz, lights()));
         }
     }
-    let knot = [1.5, 63.5, 4.5];
+    // The spawn packet carries the block corner; the knot stands at the centre of its block.
+    let knot = [1.0, 63.0, 4.0];
+    let centre = [1.5, 63.5, 4.5];
     let cow_look = Look {
-        leash: Some(Holder::new(knot, -0.0625, [0.0; 2], [0.0; 2], 0.0, true)),
+        leash: Some(Holder::new(centre, -0.0625, [0.0; 2], [0.0; 2], 0.0, true)),
         ..Look::default()
     };
     let leashed = [
         draw(Class::Mob(92), [-1.5, 63.0, 4.5], (0.9, 1.3), cow_look),
-        draw(Class::Object(77), knot, (0.375, 0.5), Look::default()),
+        EntityDraw {
+            eye_height: -0.0625,
+            ..draw(Class::Object(77), knot, (0.375, 0.5), Look::default())
+        },
     ];
     let empty = r.render_to_rgba(&cam, &[]).2;
     let unleashed = [
@@ -105,6 +128,12 @@ fn a_leashed_cow_draws_its_rope_and_the_knot_its_model() {
     let before = r.render_to_rgba(&cam, &[]).2;
     r.set_entities(&leashed);
     let after = r.render_to_rgba(&cam, &[]).2;
+
+    if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();
+        encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
+    }
 
     // The rope is the flat brown 0.5, 0.4, 0.3 (or 0.7 of it), unlit.
     let rope = |img: &[u8]| {
@@ -133,15 +162,22 @@ fn a_leashed_cow_draws_its_rope_and_the_knot_its_model() {
         knot_px > 50,
         "the knot adds pixels to the empty scene: {knot_px}"
     );
+    // The light sample is the knot's own block, not the solid block under its corner: not a black box.
+    let lit: u32 = knot_only
+        .chunks(4)
+        .zip(empty.chunks(4))
+        .filter(|(a, b)| a != b)
+        .map(|(a, _)| u32::from(a[0]) + u32::from(a[1]) + u32::from(a[2]))
+        .sum();
+    assert!(
+        lit / 3 / knot_px as u32 > 40,
+        "the knot is lit: mean {}",
+        lit / 3 / knot_px as u32
+    );
     let differs = knot_only
         .chunks(4)
         .zip(fallback.chunks(4))
         .filter(|(a, b)| a != b)
         .count();
     assert!(differs > 50, "the knot is not the fallback box: {differs}");
-    if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
-        let dir = std::path::PathBuf::from(dir);
-        encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();
-        encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
-    }
 }

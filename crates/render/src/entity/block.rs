@@ -71,19 +71,19 @@ pub fn build(
         if let Class::Object(id) = d.class {
             if super::vehicle::is_cart(id) {
                 let mat = super::vehicle::block_frame(d);
-                out.piece(m, &to(mat), &|n| n, level, false, None);
+                out.piece(m, &to(mat), &|n| n, level, None);
                 continue;
             }
         }
         if d.class == Class::Object(70) {
-            out.piece(m, &to(translate(0.0, 0.5, 0.0)), &|n| n, level, false, None);
+            out.piece(m, &to(translate(0.0, 0.5, 0.0)), &|n| n, level, None);
             continue;
         }
         let ticks = d.age.floor();
         let timer = FUSE - ticks as i32;
         let x = timer as f32 - (d.age - ticks) + 1.0;
         let mat = chain(&[translate(0.0, 0.5, 0.0), scale(pulse(x)), rotate(90.0, 1)]);
-        out.piece(m, &to(mat), &|n| n, level, false, None);
+        out.piece(m, &to(mat), &|n| n, level, None);
         if flashing(timer) {
             let grown = chain(&[mat, scale(1.001)]);
             out.flash(m, &to(grown), 1.0);

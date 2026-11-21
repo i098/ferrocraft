@@ -38,7 +38,7 @@ fn piece(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
         [t[0] - origin[0], t[1] - origin[1], t[2] - origin[2]]
     };
     out.gl_lit = true;
-    out.piece(m, &to_world, &normal, level, false, None);
+    out.piece(m, &to_world, &normal, level, None);
     out.gl_lit = false;
 }
 

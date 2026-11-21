@@ -240,6 +240,9 @@ pub struct Look {
 
 /// `LivingEntityRenderer.renderModel`: alpha of the body of an invisible entity the viewer can see.
 pub const GHOST_ALPHA: f32 = 0.15;
+/// Vertex alpha that sends a layer to the blended pass at full strength (`LayerSlimeGel`:
+/// `enableBlend`, `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`); the texture alpha does the blending.
+pub const BLEND_ALPHA: f32 = 0.999;
 
 impl Default for Look {
     fn default() -> Look {
@@ -1161,7 +1164,7 @@ pub fn take_ghosts(mesh: &mut MeshData) -> MeshData {
         .0
         .iter()
         .copied()
-        .partition(|t| vertices[t[0] as usize].color[3] == GHOST_ALPHA);
+        .partition(|t| [GHOST_ALPHA, BLEND_ALPHA].contains(&vertices[t[0] as usize].color[3]));
     for t in ghost {
         let base = ghosts.vertices.len() as u32;
         ghosts.vertices.extend(t.map(|i| vertices[i as usize]));
@@ -1626,6 +1629,11 @@ fn emit_layers(
         let from = out.vertices.len();
         for part in &layer.parts {
             emit_part(out, xf, part, part.inflate, layer.tint, v_off);
+        }
+        if layer.skin == Skin::Slime {
+            out.vertices[from..]
+                .iter_mut()
+                .for_each(|v| v.color[3] = BLEND_ALPHA);
         }
         if !layer.colors_when_damaged {
             plain.push(from..out.vertices.len());

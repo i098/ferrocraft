@@ -1799,6 +1799,11 @@ fn entity_draw(
             horse: horse_look(e, p),
             wither_invul: e.meta.wither_invul.unwrap_or(0),
             powered: e.meta.powered == Some(1),
+            carried: e
+                .meta
+                .carried
+                .map_or(0, |b| (b as u16) << 4 | u16::from(e.meta.carried_data.unwrap_or(0) & 15)),
+            screaming: e.meta.screaming.unwrap_or(0) != 0,
             ..Look::default()
         },
     }

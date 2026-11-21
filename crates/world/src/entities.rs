@@ -160,6 +160,12 @@ pub struct SizeMeta {
     pub wither_invul: Option<i32>,
     /// Creeper: metadata byte 17, 1 while charged (`getPowered`).
     pub powered: Option<u8>,
+    /// Enderman: metadata short 16, the id of the carried block (`getHeldBlockState`).
+    pub carried: Option<i16>,
+    /// Enderman: metadata byte 17, the meta of the carried block.
+    pub carried_data: Option<u8>,
+    /// Enderman: metadata byte 18, `isScreaming`.
+    pub screaming: Option<u8>,
 }
 
 impl SizeMeta {
@@ -187,6 +193,9 @@ impl SizeMeta {
         self.begging = new.begging.or(self.begging);
         self.wither_invul = new.wither_invul.or(self.wither_invul);
         self.powered = new.powered.or(self.powered);
+        self.carried = new.carried.or(self.carried);
+        self.carried_data = new.carried_data.or(self.carried_data);
+        self.screaming = new.screaming.or(self.screaming);
     }
 }
 

@@ -222,7 +222,7 @@ pub struct Items {
     /// `display.color` of the leather armor the next sprite pieces show.
     dye: Option<i32>,
     /// The pieces take `LayerMooshroomMushroom`'s GL light instead of the box face shade.
-    gl_lit: bool,
+    pub(super) gl_lit: bool,
 }
 
 pub(super) use crate::hand::point;

@@ -161,7 +161,7 @@ pub struct Look {
     /// Villager: profession (metadata 16), 0 farmer to 4 butcher. Sheep: metadata 16, dye in the low
     /// four bits and 16 when sheared. Pig: metadata 16, 1 when saddled. Wolf and ocelot: metadata 16, 1 sitting, 2 angry, 4 tamed.
     pub variant: u8,
-    /// Enderman: id of the carried block (metadata 16), 0 for none.
+    /// Enderman: the carried block as `id << 4 | meta` (metadata 16 and 17), 0 for none.
     pub carried: u16,
     /// Enderman: metadata 18, open mouth.
     pub screaming: bool,
@@ -1452,29 +1452,6 @@ fn emit_cape(out: &mut MeshData, xf: &Xf, d: &EntityDraw, sway: CapeSway, v_off:
     );
 }
 
-/// `LayerHeldBlock`: the carried block as an 8 pixel cube of its flat color in front of the chest.
-fn emit_carried(out: &mut MeshData, xf: &Xf, block: u16, v_off: f32) {
-    let tf = |p: V3| -> V3 {
-        let q = rotate([p[0], p[1] - 1.0, p[2]], [0.0, 45f32.to_radians(), 0.0]);
-        let q = rotate(q, [20f32.to_radians(), 0.0, 0.0]);
-        xf.world([q[0], q[1] + 11.0, q[2] - 12.0])
-    };
-    let color = crate::blocks::look(block << 4).color;
-    let size = [8.0; 3];
-    add_box(
-        out,
-        &tf,
-        [-4.0; 3],
-        size,
-        size,
-        (0.0, 0.0),
-        false,
-        v_off,
-        color,
-        skin_dims(),
-    );
-}
-
 /// Meshes one entity into `out` and returns the index of the first full-bright vertex (the eye
 /// layers), or the vertex count when there are none.
 fn draw_entity(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
@@ -1580,7 +1557,6 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
         && matches!(d.class, Class::Mob(_) | Class::Object(_))
         && m.parts.len() == 1;
     let xf = Xf::new(d, generic);
-    let white = skins.v_offset(Skin::White);
     let player = matches!(d.class, Class::Player { .. });
     let shown =
         |i: usize| !player || player_part_bit(i).is_none_or(|bit| d.look.skin_parts & bit != 0);
@@ -1595,21 +1571,14 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
         emit_armor(out, &xf, &armor_model(d), d, skins);
     }
     let armor = armor_start..out.vertices.len();
-    let mut drawn = emit_layers(out, &xf, &m, d, skins, white);
+    let mut drawn = emit_layers(out, &xf, &m, d, skins);
     drawn.plain.push(armor);
     drawn
 }
 
-/// The cape, stuck arrows, the carried block and the model layers; returns where the full-bright
+/// The cape, stuck arrows and the model layers; returns where the full-bright
 /// layers start and which vertices stay free of the hurt flag.
-fn emit_layers(
-    out: &mut MeshData,
-    xf: &Xf,
-    m: &Model,
-    d: &EntityDraw,
-    skins: &Skins,
-    white: f32,
-) -> Drawn {
+fn emit_layers(out: &mut MeshData, xf: &Xf, m: &Model, d: &EntityDraw, skins: &Skins) -> Drawn {
     let first = out.vertices.len();
     if let (Some(sway), Some(cape)) = (d.look.cape, d.skin.and_then(|k| skins.cape(k))) {
         if cape_shown(d) {
@@ -1618,9 +1587,6 @@ fn emit_layers(
     }
     ears::emit(out, xf, m, d, skins);
     arrows::emit(out, xf, m, d, skins);
-    if matches!(d.class, Class::Mob(mobs::ENDERMAN)) && d.look.carried != 0 && !d.invisible {
-        emit_carried(out, xf, d.look.carried, white);
-    }
     let mut plain = Vec::new();
     plain.push(first..out.vertices.len());
     let mut bright = None;

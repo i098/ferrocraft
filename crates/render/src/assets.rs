@@ -260,10 +260,21 @@ impl Atlas {
         if !self.textured || cell == 0 {
             return [0.5 / self.width as f32, 0.5 / self.height as f32];
         }
-        let (cx, cy) = ((cell % COLUMNS) as f32, (cell / COLUMNS) as f32);
+        let (tile, cx, cy) = (
+            self.tile as f32,
+            (cell % COLUMNS) as f32,
+            (cell / COLUMNS) as f32,
+        );
+        // `TextureAtlasSprite.initSprite`: each sprite's bounds shrink by 0.01 atlas px, so a sample on a quad edge
+        // never reads the neighbouring sprite.
+        let (inset_u, inset_v) = (0.01 / f64::from(self.width), 0.01 / f64::from(self.height));
         [
-            (cx + u) * self.tile as f32 / self.width as f32,
-            (cy + v) * self.tile as f32 / self.height as f32,
+            ((f64::from(cx * tile) / f64::from(self.width) + inset_u)
+                + f64::from(u) * (f64::from(tile) / f64::from(self.width) - 2.0 * inset_u))
+                as f32,
+            ((f64::from(cy * tile) / f64::from(self.height) + inset_v)
+                + f64::from(v) * (f64::from(tile) / f64::from(self.height) - 2.0 * inset_v))
+                as f32,
         ]
     }
 }
@@ -408,8 +419,13 @@ mod tests {
             colormaps: Colormaps::plains(),
             models: Models::default(),
         };
-        assert_eq!(atlas.uv("a", [0.0, 0.0]), [1.0 / 16.0, 0.5]);
-        assert_eq!(atlas.uv("a", [1.0, 1.0]), [2.0 / 16.0, 1.0]);
+        // The cell's corners sit 0.01 atlas px inside it, as in `TextureAtlasSprite.initSprite`.
+        let (iu, iv) = (0.01 / atlas.width as f32, 0.01 / atlas.height as f32);
+        let [u0, v0] = atlas.uv("a", [0.0, 0.0]);
+        let [u1, v1] = atlas.uv("a", [1.0, 1.0]);
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        assert!(near(u0, 1.0 / 16.0 + iu) && near(v0, 0.5 + iv));
+        assert!(near(u1, 2.0 / 16.0 - iu) && near(v1, 1.0 - iv));
     }
 
     #[test]

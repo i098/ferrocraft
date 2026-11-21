@@ -898,6 +898,14 @@ fn look_15(id: u16, meta: u16) -> Look {
                 "quartz_block_side",
             ),
         },
+        157 => shape(
+            0x80705a,
+            [if meta & 8 != 0 {
+                "rail_activator_powered"
+            } else {
+                "rail_activator"
+            }; 6],
+        ),
         158 => furnace_like(
             meta,
             0x6e6e6e,

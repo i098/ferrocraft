@@ -471,6 +471,15 @@ impl App {
         {
             self.particles.blaze_smoke(e.pos, e.size());
         }
+        // `EntityEndermite.onLivingUpdate` makes portal specks every client tick.
+        for e in self
+            .game
+            .entities
+            .iter()
+            .filter(|e| e.kind == Kind::Mob(67))
+        {
+            self.particles.endermite_portal(e.pos, e.size());
+        }
         let g = &self.game;
         let block = |x, y, z| g.store.get_block(x, y, z);
         let mut dust = Vec::new();

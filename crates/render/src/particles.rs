@@ -1297,6 +1297,23 @@ impl Particles {
         }
     }
 
+    /// `EntityEndermite.onLivingUpdate` (client): two portal specks a tick inside the hitbox, each drifting `((r - 0.5) * 2, -r, (r - 0.5) * 2)`.
+    pub fn endermite_portal(&mut self, pos: [f64; 3], (w, h): (f32, f32)) {
+        for _ in 0..2 {
+            let at = [
+                pos[0] + (self.rand() - 0.5) * f64::from(w),
+                pos[1] + self.rand() * f64::from(h),
+                pos[2] + (self.rand() - 0.5) * f64::from(w),
+            ];
+            let motion = [
+                (self.rand() - 0.5) * 2.0,
+                -self.rand(),
+                (self.rand() - 0.5) * 2.0,
+            ];
+            self.spawn(Kind::Portal, at, motion, 0);
+        }
+    }
+
     /// `EntityWitch.handleStatusUpdate(15)`: 10 to 44 witch specks, gaussian 0.13 around a point half a block above the head.
     pub fn witch_magic(&mut self, pos: [f64; 3], (_, h): (f32, f32)) {
         for _ in 0..(self.rand() * 35.0) as u32 + 10 {
@@ -2206,6 +2223,17 @@ mod tests {
         for p in &ps.list {
             assert!((p.pos[0] - 10.0).abs() <= 0.3 && (p.pos[2] + 5.0).abs() <= 0.3);
             assert!((64.0..=65.8).contains(&p.pos[1]));
+        }
+    }
+
+    #[test]
+    fn endermite_portal_is_two_portal_specks_inside_the_hitbox() {
+        let mut ps = Particles::new();
+        ps.endermite_portal([10.0, 64.0, -5.0], (0.4, 0.3));
+        assert_eq!(ps.len(), 2);
+        for p in &ps.list {
+            assert!(p.behavior == Behavior::Portal);
+            assert!((p.pos[0] - 10.0).abs() <= 0.2 && (64.0..=64.3).contains(&p.pos[1]));
         }
     }
 

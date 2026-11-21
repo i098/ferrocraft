@@ -530,7 +530,8 @@ impl Flat {
             [1.0, 0.0, z0],
             [0.0, 0.0, z0],
         ];
-        quad(front, full, [0.0, 0.0, 1.0]);
+        let front_uv = [[0.0, vmax], [1.0, vmax], [1.0, vmin], [0.0, vmin]];
+        quad(front, front_uv, [0.0, 0.0, 1.0]);
         quad(back, full, [0.0, 0.0, -1.0]);
         let (fw, fh) = (w as f32, h as f32);
         for y in 0..h as isize {
@@ -875,7 +876,8 @@ mod tests {
         assert_eq!(Flat::new(&img, ident(), 0).normals.len(), 2);
         let f = Flat::new(&img, ident(), 1);
         assert_eq!(f.normals.len(), 6);
-        assert_eq!(f.mesh.vertices[0].uv[1], 0.5);
+        assert_eq!(f.mesh.vertices[3].uv[1], 0.5);
+        assert_eq!(f.mesh.vertices[0].uv[1], 1.0);
     }
 
     /// Compass frames of 1.8.9: a needle at 0 turns shows frame 0, half a turn frame 16 of 32.

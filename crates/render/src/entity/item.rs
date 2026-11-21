@@ -724,6 +724,8 @@ mod tests {
             rgba,
         };
         let flat = hand::Flat::new(&img, ident(), 0);
+        let front = &flat.mesh.vertices[..4];
+        assert!(front[3].pos[1] > front[0].pos[1] && front[3].uv[1] < front[0].uv[1]);
         let normals = flat.normals.clone();
         let layer = Layer {
             tex: ItemTex::Sprite("x".into()),

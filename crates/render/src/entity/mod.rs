@@ -21,6 +21,7 @@ pub(crate) mod guardian;
 mod guardian_body;
 pub(crate) mod gui;
 pub mod hanging;
+mod heldblock;
 pub(crate) mod helmet;
 mod horse;
 pub mod item;

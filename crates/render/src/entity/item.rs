@@ -184,6 +184,7 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
         .chain(dropped(d).map(|s| (s.id, s.damage)))
         .chain(super::block::wanted(d))
         .chain(super::mooshroom::wanted(d))
+        .chain(super::heldblock::wanted(d))
 }
 
 fn holds(d: &EntityDraw) -> bool {
@@ -399,6 +400,7 @@ pub fn build(draws: &[EntityDraw], models: &Models, light: impl Fn([f64; 3]) -> 
     }
     out.dye = None;
     super::block::build(&mut out, draws, models, &light);
+    super::heldblock::build(&mut out, draws, models, &light);
     for d in draws {
         mushrooms(&mut out, d, models, light_level(d, &light, false));
     }

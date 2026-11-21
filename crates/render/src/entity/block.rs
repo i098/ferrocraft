@@ -10,7 +10,7 @@
 //! instead of vanilla's polygon offset; the falling block takes the light at the entity.
 
 use super::item::{point, Items, Models};
-use super::{light_level, rotate as turn_px, Class, EntityDraw, Xf, V3};
+use super::{light_level, Class, EntityDraw, V3};
 use crate::hand::{chain, rotate, scale, translate, Mat};
 
 /// `PrimedTntEntity.fuseTimer` at spawn; the 1.8.9 server never sends it.
@@ -23,9 +23,6 @@ pub fn wanted(d: &EntityDraw) -> impl Iterator<Item = (i16, i16)> {
         Class::Object(50) => Some((TNT, 0)),
         Class::Object(70) => d.stack.map(|s| (s.id, s.damage)),
         Class::Object(id) if super::vehicle::is_cart(id) => super::vehicle::block_model(d),
-        Class::Mob(super::mobs::ENDERMAN) if !d.invisible && d.look.carried != 0 => {
-            Some(((d.look.carried >> 4) as i16, (d.look.carried & 15) as i16))
-        }
         _ => None,
     };
     key.into_iter()
@@ -46,27 +43,6 @@ pub fn flashing(fuse_timer: i32) -> bool {
     fuse_timer / 5 % 2 == 0
 }
 
-/// `LayerHeldBlock`: the carried block of an enderman as an 8 pixel cube in front of the chest.
-fn carried(out: &mut Items, d: &EntityDraw, m: &super::item::ItemModel, level: [f32; 2]) {
-    let xf = Xf::new(d, false);
-    let to_world = |p: V3| -> V3 {
-        let q = turn_px(
-            [-p[0] * 8.0, -p[1] * 8.0 - 1.0, p[2] * 8.0],
-            [0.0, 45f32.to_radians(), 0.0],
-        );
-        let q = turn_px(q, [20f32.to_radians(), 0.0, 0.0]);
-        xf.world([q[0], q[1] + 11.0, q[2] - 12.0])
-    };
-    let origin = to_world([0.0; 3]);
-    let normal = |n: V3| {
-        let t = to_world(n);
-        [t[0] - origin[0], t[1] - origin[1], t[2] - origin[2]]
-    };
-    out.gl_lit = true;
-    out.piece(m, &to_world, &normal, level, false, None);
-    out.gl_lit = false;
-}
-
 /// Meshes every primed TNT and falling block of `draws` into `out`.
 pub fn build(
     out: &mut Items,
@@ -82,10 +58,6 @@ pub fn build(
             continue;
         };
         let level = light_level(d, &light, false);
-        if matches!(d.class, Class::Mob(_)) {
-            carried(out, d, m, level);
-            continue;
-        }
         let to = |mat: Mat| {
             move |p: V3| {
                 let [x, y, z] = point(&mat, p);

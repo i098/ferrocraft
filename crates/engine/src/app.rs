@@ -1798,6 +1798,7 @@ fn entity_draw(
             invulnerable: skull::charged(e),
             horse: horse_look(e, p),
             wither_invul: e.meta.wither_invul.unwrap_or(0),
+            powered: e.meta.powered == Some(1),
             ..Look::default()
         },
     }

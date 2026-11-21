@@ -143,6 +143,8 @@ pub struct Renderer {
     glint_mesh: Option<GpuMesh>,
     /// The wither armor aura, drawn additively over the wither model.
     aura_mesh: Option<GpuMesh>,
+    /// The charged creeper shell, drawn additively like the wither aura.
+    charge_mesh: Option<GpuMesh>,
     /// The additive white flash of primed TNT.
     flash_mesh: Option<GpuMesh>,
     /// Item models for held and dropped items, by `(id, damage)`.
@@ -506,6 +508,7 @@ impl Renderer {
             head_meshes: Vec::new(),
             glint_mesh: None,
             aura_mesh: None,
+            charge_mesh: None,
             flash_mesh: None,
             item_models: HashMap::new(),
             dials: hand::DialTurns::default(),
@@ -1103,6 +1106,11 @@ impl Renderer {
             self.load_texture(entity::WITHER_ARMOR_TEXTURE);
         }
         self.aura_mesh = self.upload_mesh(aura, [0.0; 3]);
+        let charge = entity::build_charge(draws);
+        if !charge.is_empty() {
+            self.load_texture(entity::CREEPER_ARMOR_TEXTURE);
+        }
+        self.charge_mesh = self.upload_mesh(charge, [0.0; 3]);
         self.shadows.clear();
         self.shadows
             .extend(draws.iter().filter_map(entity::shadow::caster));
@@ -2153,6 +2161,13 @@ impl Renderer {
             if let Some(m) = &self.aura_mesh {
                 pass.set_pipeline(&self.aura_pipe);
                 pass.set_bind_group(0, &self.textures[entity::WITHER_ARMOR_TEXTURE], &[]);
+                draw_mesh(&mut pass, m);
+                pass.set_pipeline(&self.opaque_pipe);
+                pass.set_bind_group(0, &self.world_group, &[]);
+            }
+            if let Some(m) = &self.charge_mesh {
+                pass.set_pipeline(&self.aura_pipe);
+                pass.set_bind_group(0, &self.textures[entity::CREEPER_ARMOR_TEXTURE], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_pipeline(&self.opaque_pipe);
                 pass.set_bind_group(0, &self.world_group, &[]);

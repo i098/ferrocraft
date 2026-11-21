@@ -213,6 +213,8 @@ pub struct Look {
     pub invulnerable: bool,
     /// Wither: `getInvulTime` (metadata int 20), the ticks left of the spawn charge.
     pub wither_invul: i32,
+    /// Creeper: metadata byte 17, charged (`getPowered`), which draws `LayerCreeperCharge`.
+    pub powered: bool,
     /// Leashed mobs: the holder the rope runs to.
     pub leash: Option<leash::Holder>,
     /// Horses: type, coat, armor and the animation of the frame; see [`horse::HorseLook`].
@@ -270,6 +272,7 @@ impl Default for Look {
             crystal_ticks: 0,
             invulnerable: false,
             wither_invul: 0,
+            powered: false,
             leash: None,
             horse: horse::HorseLook::default(),
             guardian_spikes: 0.0,
@@ -645,7 +648,34 @@ fn quad_legs(
         .collect()
 }
 
+/// Mob id of the creeper.
+const CREEPER: u8 = 50;
+
 fn creeper(d: &EntityDraw) -> Model {
+    Model {
+        skin: Skin::Creeper,
+        tint: [1.0; 3],
+        parts: creeper_parts(d),
+    }
+}
+
+/// `LayerCreeperCharge`: `ModelCreeper(2.0)` over the scrolling lightning texture, color 0.5, light off.
+fn creeper_charge(out: &mut MeshData, d: &EntityDraw) {
+    let xf = Xf::new(d, false);
+    let start = out.vertices.len();
+    for part in creeper_parts(d) {
+        emit_part(out, &xf, &part, 2.0, [1.0; 3], 0.0);
+    }
+    // Skin-atlas uvs back to texels of the 64x32 texture; the texture matrix then translates by `0.01 t`.
+    let [sw, sh] = skin_dims();
+    let t = d.age * 0.01;
+    for v in &mut out.vertices[start..] {
+        v.uv = [v.uv[0] * sw / 64.0 + t, v.uv[1] * sh / 32.0 + t];
+        (v.color, v.light) = ([0.5, 0.5, 0.5, 1.0], [1.0; 2]);
+    }
+}
+
+fn creeper_parts(d: &EntityDraw) -> Vec<Part> {
     let head_rot = [
         d.pitch.to_radians(),
         wrap(d.head_yaw - d.yaw).to_radians(),
@@ -672,11 +702,7 @@ fn creeper(d: &EntityDraw) -> Model {
         (0.0, 16.0),
         4.0,
     ));
-    Model {
-        skin: Skin::Creeper,
-        tint: [1.0; 3],
-        parts,
-    }
+    parts
 }
 
 fn pig(d: &EntityDraw) -> Model {
@@ -847,7 +873,7 @@ fn adult_model(d: &EntityDraw) -> Model {
         Class::Mob(53 | 54) => biped(d, Skin::Zombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(57) => biped(d, Skin::PigZombie, [1.0; 3], 4.0, 4.0, true),
         Class::Mob(51) => biped(d, Skin::Skeleton, [1.0; 3], 2.0, 2.0, true),
-        Class::Mob(50) => creeper(d),
+        Class::Mob(CREEPER) => creeper(d),
         Class::Mob(90) => pig(d),
         Class::Mob(92) => cow(d),
         Class::Mob(96) => Model {
@@ -944,6 +970,20 @@ pub const WITHER_ARMOR_TEXTURE: &str = "textures/entity/wither/wither_armor.png"
 
 /// Mob id of the giant zombie.
 const GIANT: u8 = 53;
+
+/// `LayerCreeperCharge.LIGHTNING_TEXTURE`, a repeating 64x32 texture outside the skin atlas.
+pub const CREEPER_ARMOR_TEXTURE: &str = "textures/entity/creeper/creeper_armor.png";
+
+/// The charge shell of every charged creeper in `draws`, blended additively over the model.
+pub fn build_charge(draws: &[EntityDraw]) -> MeshData {
+    let mut out = MeshData::default();
+    for d in draws {
+        if d.class == Class::Mob(CREEPER) && d.look.powered && !d.invisible {
+            creeper_charge(&mut out, d);
+        }
+    }
+    out
+}
 
 /// The wither armor aura of every wither in `draws` that is below half health, blended additively over the model.
 pub fn build_aura(draws: &[EntityDraw]) -> MeshData {
@@ -2628,5 +2668,53 @@ pub(crate) mod tests {
         m[2][3] = -1.0;
         m[3][3] = 0.0;
         m
+    }
+
+    #[test]
+    fn only_a_visible_charged_creeper_gets_the_shell() {
+        let mut d = EntityDraw {
+            class: Class::Mob(CREEPER),
+            ..steve()
+        };
+        assert!(build_charge(std::slice::from_ref(&d)).is_empty());
+        d.look.powered = true;
+        assert_eq!(
+            build_charge(std::slice::from_ref(&d)).vertices.len(),
+            6 * 24
+        );
+        d.invisible = true;
+        assert!(build_charge(&[d]).is_empty());
+    }
+
+    #[test]
+    fn creeper_shell_is_inflated_scrolled_and_dim() {
+        let mut d = EntityDraw {
+            class: Class::Mob(CREEPER),
+            ..steve()
+        };
+        d.look.powered = true;
+        d.age = 10.0;
+        let a = build_charge(std::slice::from_ref(&d));
+        d.age = 30.0;
+        let b = build_charge(std::slice::from_ref(&d));
+        for (va, vb) in a.vertices.iter().zip(&b.vertices) {
+            assert_eq!(va.color, [0.5, 0.5, 0.5, 1.0]);
+            assert_eq!(va.light, [1.0, 1.0]);
+            assert_eq!(va.pos, vb.pos);
+            assert!((vb.uv[0] - va.uv[0] - 0.2).abs() < 1e-5);
+            assert!((vb.uv[1] - va.uv[1] - 0.2).abs() < 1e-5);
+        }
+        let xf = Xf::new(&d, false);
+        let mut plain = MeshData::default();
+        for part in creeper_parts(&d) {
+            emit_part(&mut plain, &xf, &part, 0.0, [1.0; 3], 0.0);
+        }
+        let width = |m: &MeshData| {
+            let xs = m.vertices.iter().map(|v| v.pos[0]);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        // 2 model px of inflation per side is 4/16 block of extra width at yaw 0.
+        let grown = width(&b) - width(&plain);
+        assert!((grown - 0.25).abs() < 1e-4, "grown by {grown}");
     }
 }

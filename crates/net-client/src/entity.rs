@@ -172,6 +172,7 @@ fn size_meta(meta: &Metadata) -> SizeMeta {
             Some(MetaValue::Int(i)) => Some(*i),
             _ => None,
         },
+        powered: byte(17),
     }
 }
 

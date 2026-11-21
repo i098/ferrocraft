@@ -1427,9 +1427,7 @@ impl App {
             }
             DebugCombo::AdvancedTooltips => {
                 self.ui.settings.advanced_item_tooltips = !self.ui.settings.advanced_item_tooltips;
-                if let Err(e) = self.ui.settings.save() {
-                    crate::log::line(&format!("Failed to save options: {e}"));
-                }
+                self.save_options();
             }
             DebugCombo::ReloadChunks => {
                 self.reload_chunks();
@@ -1437,12 +1435,21 @@ impl App {
             DebugCombo::ReloadResources => self.refresh_resources(),
             // `GameOptions.set` ends in `save` for options it does not handle.
             DebugCombo::RenderDistance => {
-                if let Err(e) = self.ui.settings.save() {
-                    crate::log::line(&format!("Failed to save options: {e}"));
-                }
+                self.save_options();
             }
-            _ => {}
+            DebugCombo::PauseOnLostFocus => {
+                self.ui.settings.pause_on_lost_focus = !self.ui.settings.pause_on_lost_focus;
+                self.save_options();
+            }
         }
+    }
+
+    /// `GameSettings.saveOptions`: write `options.txt`, then `sendSettingsToServer`.
+    fn save_options(&mut self) {
+        if let Err(e) = self.ui.settings.save() {
+            crate::log::line(&format!("Failed to save options: {e}"));
+        }
+        self.send_client_settings();
     }
 
     /// F5, `Minecraft.runTick`: first person views as the camera entity, the back view clears.

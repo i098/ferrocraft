@@ -2216,6 +2216,12 @@ impl Renderer {
                 draw_mesh(&mut pass, m);
             }
             self.draw_fire_world(&mut pass, &fire);
+            if let Some(buf) = &sel_buf {
+                pass.set_bind_group(0, &self.world_group, &[]);
+                pass.set_pipeline(&self.selection_pipe);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..SELECTION_VERTICES, 0..1);
+            }
             // `renderMiningProgress` follows the entities.
             pass.set_pipeline(&self.crack_pipe);
             for (tex, m) in &crack_meshes {
@@ -2269,12 +2275,6 @@ impl Renderer {
                 pass.set_bind_group(0, &self.textures[crate::border::TEXTURE], &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
-            }
-            if let Some(buf) = &sel_buf {
-                pass.set_bind_group(0, &self.world_group, &[]);
-                pass.set_pipeline(&self.selection_pipe);
-                pass.set_vertex_buffer(0, buf.slice(..));
-                pass.draw(0..SELECTION_VERTICES, 0..1);
             }
             if let Some(buf) = &line_buf {
                 pass.set_bind_group(0, &self.world_group, &[]);

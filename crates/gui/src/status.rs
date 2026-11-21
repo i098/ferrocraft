@@ -18,6 +18,8 @@ pub struct Status {
     pub hardcore: bool,
     pub poisoned: bool,
     pub withered: bool,
+    /// `hurtResistantTime > 0`: only then does a health change start the heart blink.
+    pub hurt_resistant: bool,
     /// Hunger effect: the food row uses the green sprites.
     pub hunger: bool,
     pub absorption: f32,
@@ -47,6 +49,7 @@ impl Default for Status {
             hardcore: false,
             poisoned: false,
             withered: false,
+            hurt_resistant: false,
             hunger: false,
             absorption: 0.0,
             regen_tick: -1,
@@ -111,7 +114,7 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
     let i = s.health.ceil() as i32;
     let flag = st.health_update_counter > update_counter
         && (st.health_update_counter - update_counter) / 3 % 2 == 1;
-    track_health(st, i, update_counter);
+    track_health(st, i, update_counter, s.hurt_resistant);
     let j = st.last_player_health;
     let mut rand = JavaRandom::new(i64::from(update_counter) * 312871);
     let i1 = w / 2 - 91;
@@ -132,12 +135,11 @@ pub fn draw_stats(gui: &mut Gui, s: &Status, st: &mut StatusState, update_counte
     }
 }
 
-fn track_health(st: &mut StatusState, i: i32, update_counter: i32) {
-    // Vanilla also needs `hurtResistantTime > 0`; a health change from the server stands in for it.
-    if i < st.player_health {
+fn track_health(st: &mut StatusState, i: i32, update_counter: i32, hurt_resistant: bool) {
+    if i < st.player_health && hurt_resistant {
         st.last_time = update_counter;
         st.health_update_counter = update_counter + 20;
-    } else if i > st.player_health && st.player_health > 0 {
+    } else if i > st.player_health && hurt_resistant {
         st.last_time = update_counter;
         st.health_update_counter = update_counter + 10;
     }
@@ -312,12 +314,23 @@ pub fn draw_jump(gui: &mut Gui, power: f32) {
 
 #[cfg(test)]
 mod tests {
-    use super::JavaRandom;
+    use super::{track_health, JavaRandom, StatusState};
 
     /// `new Random(42).nextInt(10)` is 0 and `new Random(0).nextInt(2)` is 1 in Java.
     #[test]
     fn java_random_matches() {
         assert_eq!(JavaRandom::new(42).next_int(10), 0);
         assert_eq!(JavaRandom::new(0).next_int(2), 1);
+    }
+
+    /// Vanilla blinks the hearts only when `hurtResistantTime > 0`: a plain health change does not.
+    #[test]
+    fn health_change_blinks_only_while_hurt_resistant() {
+        let mut st = StatusState::default();
+        track_health(&mut st, 20, 0, false);
+        track_health(&mut st, 18, 1, false);
+        assert_eq!(st.health_update_counter, 0);
+        track_health(&mut st, 16, 2, true);
+        assert_eq!(st.health_update_counter, 22);
     }
 }

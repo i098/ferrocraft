@@ -1518,6 +1518,7 @@ fn status_of(game: &Game, update_counter: i32, in_water: bool) -> Status {
         spectator: game.gamemode == 3,
         poisoned: game.effects.has(Fx::POISON),
         withered: game.effects.has(Fx::WITHER),
+        hurt_resistant: game.hurt_resistant > 0,
         hunger: game.effects.has(Fx::HUNGER),
         regen_tick: if game.effects.has(Fx::REGENERATION) {
             update_counter % (max_health + 5.0).ceil() as i32

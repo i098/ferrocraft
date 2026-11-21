@@ -1205,7 +1205,13 @@ pub(crate) fn light_level(
     let level = if d.burning || mobs2::glows(d) {
         [1.0, 1.0]
     } else {
-        light([d.pos[0], d.pos[1] + f64::from(d.eye_height), d.pos[2]])
+        // `EntityLeashKnot` stands at the centre of its block, the packet carries the block corner.
+        let at = if d.class == Class::Object(leash::KNOT) {
+            d.pos.map(|p| p.floor() + 0.5)
+        } else {
+            d.pos
+        };
+        light([at[0], at[1] + f64::from(d.eye_height), at[2]])
     };
     [
         level[0],
@@ -2477,6 +2483,21 @@ pub(crate) mod tests {
         d.burning = true;
         let m = build(&[d], &Skins::flat(), |_| [0.2, 0.0]);
         assert!(m.vertices.iter().all(|v| v.light == [1.0, 1.0]));
+    }
+
+    #[test]
+    fn a_leash_knot_takes_the_light_of_its_own_block_not_the_one_under_its_corner() {
+        let seen = std::cell::Cell::new([0.0; 3]);
+        let mut d = steve();
+        d.class = Class::Object(leash::KNOT);
+        d.pos = [10.0, 4.0, 77.0];
+        d.eye_height = -0.0625;
+        build(&[d], &Skins::flat(), |p| {
+            seen.set(p);
+            [1.0, 0.0]
+        });
+        let p = seen.get().map(|c| c.floor());
+        assert_eq!(p, [10.0, 4.0, 77.0]);
     }
 
     #[test]

@@ -63,6 +63,8 @@ const TICK: Duration = Duration::from_millis(50);
 const MAX_TICKS_PER_FRAME: u32 = 10;
 /// `EntityRenderer.thirdPersonDistance`.
 const THIRD_PERSON_DISTANCE: f64 = 4.0;
+/// `EntityRenderer.orientCamera`: the first-person camera sits this far behind the eye.
+const FIRST_PERSON_BACK: f64 = 0.1;
 /// `Item.getItemFromBlock(Blocks.pumpkin)`: worn on the head it draws the blur overlay.
 const PUMPKIN: i16 = 86;
 
@@ -676,8 +678,11 @@ impl App {
             .filter(|c| c.distance > 0.0)
             .map_or(THIRD_PERSON_DISTANCE, |c| f64::from(c.distance));
         if self.perspective == 0 {
+            // `EntityRenderer.orientCamera`: first person is `translate(0, 0, -0.1)` behind the eye.
+            let back = look_vector(yaw, pitch);
             return Camera {
-                pos: eye,
+                pos: [0, 1, 2].map(|i| eye[i] - back[i] * FIRST_PERSON_BACK),
+                eye_offset: [0, 1, 2].map(|i| back[i] * FIRST_PERSON_BACK),
                 yaw,
                 pitch,
                 fov_deg: fov,

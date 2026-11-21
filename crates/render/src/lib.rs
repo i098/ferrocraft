@@ -98,6 +98,15 @@ pub struct Camera {
     pub nausea: [f32; 2],
     /// Field of view of the hand: `getFOVModifier(partial, false)`, so without the option.
     pub hand_fov_deg: f32,
+    /// `eye - pos`: the first-person camera sits behind the eye (`orientCamera`), but world lookups use the eye.
+    pub eye_offset: [f64; 3],
+}
+
+impl Camera {
+    /// The camera entity's eye, which vanilla reads for fluid, light and biome lookups.
+    pub fn eye(&self) -> [f64; 3] {
+        [0, 1, 2].map(|i| self.pos[i] + self.eye_offset[i])
+    }
 }
 
 impl Default for Camera {
@@ -111,6 +120,7 @@ impl Default for Camera {
             hurt_roll: 0.0,
             nausea: [0.0, 1.0],
             hand_fov_deg: 70.0,
+            eye_offset: [0.0; 3],
         }
     }
 }

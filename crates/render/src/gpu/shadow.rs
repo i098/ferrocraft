@@ -15,8 +15,10 @@ impl Renderer {
 
     /// The view entity's feet: the engine's value, else the first-person camera below the eye.
     pub(super) fn view_feet(&self, cam: &Camera) -> [f64; 3] {
-        self.shadow_view
-            .unwrap_or([cam.pos[0], cam.pos[1] - EYE_HEIGHT, cam.pos[2]])
+        self.shadow_view.unwrap_or_else(|| {
+            let eye = cam.eye();
+            [eye[0], eye[1] - EYE_HEIGHT, eye[2]]
+        })
     }
 
     /// Block state at a world position; air outside the world and in unloaded chunks.
@@ -31,7 +33,8 @@ impl Renderer {
 
     /// The fog light of this frame: the light at the viewer's block, smoothed over ticks.
     pub(super) fn fog_light_now(&mut self, cam: &Camera, env: &Environment) -> f32 {
-        let [x, z] = [cam.pos[0], cam.pos[2]].map(|v| v.floor() as i32);
+        let eye = cam.eye();
+        let [x, z] = [eye[0], eye[2]].map(|v| v.floor() as i32);
         // Vanilla EmptyChunk light is full sky light, not 0.
         let lit = self
             .meshes

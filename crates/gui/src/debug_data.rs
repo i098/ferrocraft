@@ -164,7 +164,7 @@ pub fn entities_line(rendered: usize, total: usize, hidden: usize) -> String {
 /// What the right column reports, `GuiOverlayDebug.getDebugInfoRight`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RightInfo {
-    pub java: String,
+    pub rust: String,
     pub bits: u32,
     /// Bytes: `maxMemory`, `totalMemory`, `totalMemory - freeMemory`.
     pub max: u64,
@@ -187,7 +187,7 @@ pub fn right_lines(r: &RightInfo) -> Vec<String> {
     let mb = |b: u64| b / 1024 / 1024;
     let max = r.max.max(1);
     vec![
-        format!("Java: {} {}bit", r.java, r.bits),
+        format!("Rust: {} {}bit", r.rust, r.bits),
         format!(
             "Mem: {}% {:03}/{:03}MB",
             spaced(r.used * 100 / max),
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(biome_name(1), "Plains");
         assert_eq!(biome_name(132), "Flower Forest");
         let r = RightInfo {
-            java: "Rust".into(),
+            rust: "1.100.0".into(),
             bits: 64,
             max: 4096 << 20,
             total: 512 << 20,
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(
             right_lines(&r),
             [
-                "Java: Rust 64bit",
+                "Rust: 1.100.0 64bit",
                 "Mem:  5% 205/4096MB",
                 "Allocated:  12% 512MB",
                 "",

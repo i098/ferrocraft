@@ -297,6 +297,29 @@ mod tests {
         assert_eq!(named(c), "Notch's Head");
     }
 
+    #[test]
+    fn player_head_name_edge_cases() {
+        let owner = || ("SkullOwner".to_string(), Tag::String("Notch".into()));
+        // Skeleton skull keeps its plain name; a head without an owner reads "Head".
+        assert_eq!(
+            name(&stack(397, 0, Some(vec![owner()]))).0,
+            "Skeleton Skull"
+        );
+        assert_eq!(name(&stack(397, 3, None)).0, "Head");
+        // A custom display name wins over the owner.
+        let display = (
+            "display".to_string(),
+            Tag::Compound(vec![("Name".into(), Tag::String("X".into()))]),
+        );
+        assert_eq!(
+            name(&stack(397, 3, Some(vec![owner(), display]))),
+            ("X".to_string(), true)
+        );
+        // Vanilla 1.8.9 applies no emptiness check.
+        let empty = ("SkullOwner".to_string(), Tag::String(String::new()));
+        assert_eq!(name(&stack(397, 3, Some(vec![empty]))).0, "'s Head");
+    }
+
     fn stack(id: i16, damage: i16, nbt: Option<Compound>) -> ItemStack {
         ItemStack {
             id,

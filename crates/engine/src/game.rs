@@ -366,6 +366,14 @@ impl Game {
     }
 
     /// Spawn a lightning bolt; the seed only shapes the bolt, so any entropy will do.
+    /// Damage statuses 2, 33, 36, 37 set `hurtResistantTime`; only status 2 tilts the view.
+    fn start_damage(&mut self, status: i8) {
+        self.hurt_resistant = HURT_RESISTANT_TICKS;
+        if status == 2 {
+            self.hurt_timer = HURT_TICKS;
+        }
+    }
+
     fn strike(&mut self, pos: [f64; 3]) {
         let entropy = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -708,14 +716,10 @@ impl Game {
             {
                 self.hurt_timer = HURT_TICKS;
             }
-            NetEvent::Entity(EntityEvent::Status { id, status })
-                if id == self.entity_id && matches!(status, 2 | 33 | 36 | 37) =>
-            {
-                self.hurt_resistant = HURT_RESISTANT_TICKS;
-                if status == 2 {
-                    self.hurt_timer = HURT_TICKS;
-                }
-            }
+            NetEvent::Entity(EntityEvent::Status {
+                id,
+                status: s @ (2 | 33 | 36 | 37),
+            }) if id == self.entity_id => self.start_damage(s),
             NetEvent::Entity(e) => self.apply_entity(e),
             NetEvent::PlayerPosLook {
                 x,

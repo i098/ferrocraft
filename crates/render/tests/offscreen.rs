@@ -418,6 +418,8 @@ fn curse_and_item_particles_draw() {
         (31, [8.0, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
         (33, [6.5, 66.0, 11.0], [0.0; 3], 0.0, 0, vec![]),
         (36, [7.5, 66.0, 11.0], [0.1, 0.1, 0.0], 1.0, 8, vec![276]),
+        // Grass shards use the dirt texture (the `grass_normal` model particle).
+        (38, [8.0, 66.0, 11.0], [0.5, 0.5, 0.5], 0.3, 24, vec![2]),
     ] {
         let mut one = Particles::new();
         one.spawn_packet(id, pos, vel, speed, count, &args);

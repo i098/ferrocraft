@@ -1793,7 +1793,12 @@ fn particle_light(p: &Particle, partial: f32, light: &impl Fn([f64; 3]) -> [f32;
 fn sprite_uv(p: &Particle, atlas: &Atlas, partial: f32) -> Option<(Layer, [[f32; 2]; 2])> {
     Some(match p.sprite {
         Sprite::Block { state, jitter, .. } => {
-            let name = crate::blocks::look(state).tex[crate::blocks::NORTH];
+            // `grass_normal` model: `"particle": "blocks/dirt"`.
+            let name = if state >> 4 == 2 {
+                "dirt"
+            } else {
+                crate::blocks::look(state).tex[crate::blocks::NORTH]
+            };
             let a = atlas.uv(name, [jitter[0] / 4.0, jitter[1] / 4.0]);
             let b = atlas.uv(name, [(jitter[0] + 1.0) / 4.0, (jitter[1] + 1.0) / 4.0]);
             (Layer::Block, [a, b])

@@ -924,8 +924,8 @@ fn armor_tint(id: i16) -> Option<[f32; 3]> {
 }
 
 pub(crate) type V3 = [f32; 3];
-/// Corners in model space, texel corners, outward normal, shade.
-type Face = ([V3; 4], [[f32; 2]; 4], V3, f32);
+/// Corners in model space, texel corners, outward normal.
+type Face = ([V3; 4], [[f32; 2]; 4], V3);
 
 /// Rotation as `ModelRenderer.render` applies it: x first, then y, then z, about the pivot.
 pub(crate) fn rotate(p: V3, rot: V3) -> V3 {
@@ -1732,7 +1732,7 @@ pub(crate) fn add_box(
     let [w, h, d] = layout;
     let at = Skins::uv_offset(v_off);
     let uv = |u: f32, v: f32| [u / tex[0] + at[0], v / tex[1] + at[1]];
-    // (corners in model space, texel corners, outward model-space normal, shade)
+    // (corners in model space, texel corners, outward model-space normal)
     let mut faces: [Face; 6] = [
         // +x: u grows with z
         (
@@ -1744,7 +1744,6 @@ pub(crate) fn add_box(
                 uv(u0 + d + w, v0 + d + h),
             ],
             [1.0, 0.0, 0.0],
-            0.6,
         ),
         // -x: u grows as z falls
         (
@@ -1756,7 +1755,6 @@ pub(crate) fn add_box(
                 uv(u0, v0 + d + h),
             ],
             [-1.0, 0.0, 0.0],
-            0.6,
         ),
         // top (y1)
         (
@@ -1768,7 +1766,6 @@ pub(crate) fn add_box(
                 uv(u0 + d, v0 + d),
             ],
             [0.0, -1.0, 0.0],
-            1.0,
         ),
         // bottom (y2)
         (
@@ -1780,7 +1777,6 @@ pub(crate) fn add_box(
                 uv(u0 + d + w, v0 + d),
             ],
             [0.0, 1.0, 0.0],
-            0.5,
         ),
         // front (z1): u grows with x
         (
@@ -1792,7 +1788,6 @@ pub(crate) fn add_box(
                 uv(u0 + d, v0 + d + h),
             ],
             [0.0, 0.0, -1.0],
-            0.8,
         ),
         // back (z2): u grows as x falls
         (
@@ -1804,7 +1799,6 @@ pub(crate) fn add_box(
                 uv(u0 + 2.0 * d + w, v0 + d + h),
             ],
             [0.0, 0.0, 1.0],
-            0.8,
         ),
     ];
     if mirror {
@@ -1815,8 +1809,14 @@ pub(crate) fn add_box(
             f.1.swap(2, 3);
         }
     }
-    for (corners, uvs, normal, shade) in faces {
-        let shade = if UNSHADED.get() { 1.0 } else { shade };
+    let origin = tf([0.0; 3]);
+    for (corners, uvs, normal) in faces {
+        // `RenderHelper.enableStandardItemLighting`: the shade follows the face's world-space normal.
+        let shade = if UNSHADED.get() {
+            1.0
+        } else {
+            mooshroom::gl_light(sub(tf(normal), origin))
+        };
         let mut order = [0usize, 1, 2, 3];
         let e1 = sub(corners[1], corners[0]);
         let e2 = sub(corners[2], corners[0]);
@@ -2374,6 +2374,33 @@ pub(crate) mod tests {
         pose.swing(0.5, 0.0);
         let expected = -((0.9375f32 * PI).sin() * 1.2 + 0.7 * 0.75);
         assert!((pose.r_arm[0] - expected).abs() < 1e-5, "{}", pose.r_arm[0]);
+    }
+
+    #[test]
+    fn raised_arm_end_is_lit_by_its_world_normal() {
+        // `ModelRenderer` turns the box, and `RenderHelper.enableStandardItemLighting` lights the turned
+        // normal: a hand end that faces forward is lit like a front face, not like a bottom face.
+        let mut out = MeshData::default();
+        let tf = |p: V3| rotate(p, [-FRAC_PI_2, 0.0, 0.0]);
+        let (min, size) = ([-3.0, -2.0, -2.0], [4.0, 12.0, 4.0]);
+        add_box(
+            &mut out,
+            &tf,
+            min,
+            size,
+            size,
+            (40.0, 16.0),
+            false,
+            0.0,
+            [1.0; 3],
+            [64.0, 32.0],
+        );
+        let shades: Vec<f32> = out.vertices.iter().map(|v| v.color[0]).collect();
+        assert!(shades.iter().all(|s| (s - 0.5).abs() > 1e-3), "{shades:?}");
+        assert!(
+            shades.iter().any(|s| (s - 0.7395).abs() < 1e-3),
+            "{shades:?}"
+        );
     }
 
     #[test]

@@ -111,7 +111,6 @@ fn debug_combo(code: KeyCode) -> Option<DebugCombo> {
         KeyCode::KeyD => DebugCombo::ClearChat,
         KeyCode::KeyH => DebugCombo::AdvancedTooltips,
         KeyCode::KeyP => DebugCombo::PauseOnLostFocus,
-        KeyCode::KeyQ => DebugCombo::Help,
         KeyCode::KeyS | KeyCode::KeyT => DebugCombo::ReloadResources,
         KeyCode::KeyF => DebugCombo::RenderDistance,
         _ => return None,
@@ -1178,6 +1177,28 @@ mod tests {
                 "{key:?}"
             );
         }
+    }
+
+    /// `processKeyF3` in 1.8.9 has no Q branch (the help list arrived in 1.9) and H toggles tooltips.
+    #[test]
+    fn f3_q_is_unbound_and_f3_h_is_advanced_tooltips() {
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::F3);
+        press(&mut s, KeyCode::KeyQ);
+        assert!(!s
+            .take_actions()
+            .iter()
+            .any(|a| matches!(a, Action::Debug(_))));
+        let mut s = InputState::default();
+        press(&mut s, KeyCode::F3);
+        press(&mut s, KeyCode::KeyH);
+        assert_eq!(
+            s.take_actions(),
+            vec![
+                Action::ToggleDebug,
+                Action::Debug(DebugCombo::AdvancedTooltips)
+            ]
+        );
     }
 
     #[test]

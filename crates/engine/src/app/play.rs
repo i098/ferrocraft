@@ -1417,37 +1417,13 @@ impl App {
                 self.input.clear_chat_history();
             }
             DebugCombo::AdvancedTooltips => {
-                let on = !self.ui.settings.advanced_item_tooltips;
-                self.ui.settings.advanced_item_tooltips = on;
+                self.ui.settings.advanced_item_tooltips = !self.ui.settings.advanced_item_tooltips;
                 if let Err(e) = self.ui.settings.save() {
                     crate::log::line(&format!("Failed to save options: {e}"));
-                }
-                self.debug_chat(if on {
-                    "Advanced tooltips: shown"
-                } else {
-                    "Advanced tooltips: hidden"
-                });
-            }
-            DebugCombo::Help => {
-                self.debug_chat("Key bindings:");
-                for line in [
-                    "F3 + A = Reload chunks",
-                    "F3 + B = Show hitboxes",
-                    "F3 + D = Clear chat",
-                    "F3 + H = Advanced tooltips",
-                    "F3 + P = Pause on lost focus",
-                    "F3 + Q = Show this list",
-                ] {
-                    self.chat_line(vec![ferrocraft_net_client::Styled {
-                        format: String::new(),
-                        text: line.into(),
-                        ..Default::default()
-                    }]);
                 }
             }
             DebugCombo::ReloadChunks => {
                 self.reload_chunks();
-                self.debug_chat("Reloading all chunks");
             }
             DebugCombo::ReloadResources => self.refresh_resources(),
             // `GameOptions.set` ends in `save` for options it does not handle.
@@ -1494,21 +1470,6 @@ impl App {
     /// F3+B: `RenderManager.setDebugBoundingBox`.
     fn toggle_hitboxes(&mut self) {
         self.show_hitboxes = !self.show_hitboxes;
-        let state = ["hidden", "shown"][usize::from(self.show_hitboxes)];
-        self.debug_chat(&format!("Hitboxes: {state}"));
-    }
-
-    /// `Minecraft.debugFeedbackTranslated`: a `[Debug]:` line in the chat.
-    fn debug_chat(&mut self, text: &str) {
-        let styled = |format: &str, text: String| ferrocraft_net_client::Styled {
-            format: format.into(),
-            text,
-            ..Default::default()
-        };
-        self.chat_line(vec![
-            styled("\u{a7}e\u{a7}l", "[Debug]:".into()),
-            styled("", format!(" {text}")),
-        ]);
     }
 
     fn open_pause(&mut self) {

@@ -871,7 +871,7 @@ mod tests {
                 ("damage", damage, [0.0; 3]),
             ] {
                 assert_eq!(vertices.len(), 16, "{path} at {at:?}");
-                for quad in vertices.chunks_exact(4) {
+                for quad in vertices.as_chunks::<4>().0 {
                     let center = [0, 1, 2].map(|axis| {
                         quad.iter().map(|v| v.pos[axis]).sum::<f32>() / 4.0 + origin[axis]
                     });

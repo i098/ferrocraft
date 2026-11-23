@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::{fmt, fs, io};
 
-use portablemc::{base, forge};
+use portablemc::{base, forge, moj};
 use sha1::{Digest, Sha1};
 
 use crate::{Config, Loader, StagingDir};
@@ -92,7 +92,13 @@ impl Config {
         #[cfg(not(unix))]
         let policy = base::JvmPolicy::Mojang;
         moj.base_mut().set_jvm_policy(policy);
-        let game = installer.install(())?;
+        let mut legacy = LegacyLibraries {
+            dir: main.join("libraries"),
+            result: Ok(()),
+        };
+        let game = installer.install(&mut legacy);
+        legacy.result?;
+        let game = game?;
 
         let cp = game
             .jvm_args
@@ -157,6 +163,55 @@ fn discard_partial_version(main: &Path, version: &str) -> io::Result<()> {
         Ok(_) => Ok(()),
         Err(e) if e.is_syntax() || e.is_eof() => fs::remove_file(path),
         Err(e) => Err(io::Error::from(e)),
+    }
+}
+
+struct LegacyLibraries {
+    dir: PathBuf,
+    result: io::Result<()>,
+}
+
+impl forge::Handler for LegacyLibraries {
+    fn on_event(&mut self, event: forge::Event<'_>) {
+        if let forge::Event::Mojang(moj::Event::Base(base::Event::FilterLibraries { libraries })) =
+            event
+        {
+            for lib in libraries {
+                let Some(download) = lib.download.as_mut() else {
+                    continue;
+                };
+                if lib.path.is_some() || download.size.is_some() || download.sha1.is_some() {
+                    continue;
+                }
+                if lib.name.group() == "net.minecraftforge"
+                    && lib.name.artifact() == "forge"
+                    && lib.name.version() == FORGE
+                {
+                    download.url = format!(
+                        "https://maven.minecraftforge.net/net/minecraftforge/forge/{FORGE}/forge-{FORGE}-universal.jar"
+                    );
+                    download.sha1 =
+                        Some(parse_sha1("beda619c465af293e63952dd573c137c17c0a4cd").unwrap());
+                }
+                if let Err(error) = discard_partial_library(&self.dir.join(lib.name.file())) {
+                    self.result = Err(error);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn discard_partial_library(path: &Path) -> io::Result<()> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    match zip::ZipArchive::new(file) {
+        Ok(jar) if !jar.is_empty() => Ok(()),
+        Err(zip::result::ZipError::Io(e)) if e.kind() != io::ErrorKind::UnexpectedEof => Err(e),
+        _ => fs::remove_file(path),
     }
 }
 

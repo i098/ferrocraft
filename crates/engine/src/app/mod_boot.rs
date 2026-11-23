@@ -36,11 +36,18 @@ pub struct Boot {
 }
 
 impl Boot {
-    pub fn poll(&mut self) -> Option<std::io::Result<Option<ModHost>>> {
+    pub fn poll(&mut self, watch: Option<&mut Watch>) -> Option<Option<ModHost>> {
         match self.result.try_recv() {
-            Ok(host) => Some(host),
+            Ok(Ok(host)) => Some(host),
+            Ok(Err(e)) => {
+                log::line(&format!("mod host did not start: {e}"));
+                if let Some(watch) = watch {
+                    watch.retry_after_archive_error(Instant::now());
+                }
+                Some(None)
+            }
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Ok(None)),
+            Err(TryRecvError::Disconnected) => Some(None),
         }
     }
 }
@@ -85,7 +92,7 @@ impl Watch {
         }
     }
 
-    pub fn retry_after_archive_error(&mut self, now: Instant) {
+    fn retry_after_archive_error(&mut self, now: Instant) {
         self.changed_at = Some(now);
     }
 
@@ -407,21 +414,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn restored_archive_permissions_allow_a_pending_reload() {
-        use std::fs::{self, File, Permissions};
-        use std::os::unix::fs::PermissionsExt;
+    fn recovered_archive_read_error_schedules_reload() {
+        use std::fs;
 
-        let root =
-            std::env::temp_dir().join(format!("fc-archive-permission-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("fc-archive-read-{}", std::process::id()));
         let dir = root.join("mods");
-        fs::create_dir_all(&dir).unwrap();
-        let jar = dir.join("mod.jar");
+        fs::create_dir_all(dir.join("1.8.9")).unwrap();
+        let archive = PathBuf::from("1.8.9/mod.zip");
+        let jar = dir.join(&archive);
         fs::write(&jar, "mod").unwrap();
-        fs::set_permissions(&jar, Permissions::from_mode(0o000)).unwrap();
-        if File::open(&jar).is_ok() {
-            fs::remove_dir_all(root).unwrap();
-            return;
-        }
         let snapshot = scan(&dir, true).unwrap();
         let mut watch = Watch {
             seen: Some(snapshot.clone()),
@@ -430,6 +431,9 @@ mod tests {
             last_scan: None,
             changed_at: None,
         };
+        let parked = root.join("parked.zip");
+        fs::rename(&jar, &parked).unwrap();
+        fs::create_dir(&jar).unwrap();
         let prepared = || Prepared {
             cfg: Config {
                 loader: ferrocraft_modhost::Loader::Forge,
@@ -438,15 +442,25 @@ mod tests {
                 game_dir: root.clone(),
                 assets_dir: root.clone(),
             },
-            plain: Some((dir.clone(), vec!["mod.jar".into()])),
+            plain: Some((dir.clone(), vec![archive.clone()])),
         };
-        let Err(error) = prepared().start() else {
-            panic!("unreadable archive must produce a retryable failure");
-        };
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        let failed = prepared();
+        let mut boot = spawn_preparing(move || Ok(Some(failed)));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(host) = boot.poll(Some(&mut watch)) {
+                assert!(host.is_none(), "a failed archive read must prevent startup");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "boot did not report the archive error"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let t = Instant::now();
-        watch.retry_after_archive_error(t);
-        fs::set_permissions(&jar, Permissions::from_mode(0o600)).unwrap();
+        fs::remove_dir(&jar).unwrap();
+        fs::rename(&parked, &jar).unwrap();
         assert_eq!(scan(&dir, true).unwrap(), snapshot);
         assert!(watch.poll(t + SETTLE));
         prepared().start().unwrap().unwrap().stop();

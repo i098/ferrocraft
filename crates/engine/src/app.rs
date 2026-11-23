@@ -1640,16 +1640,12 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        if let Some(done) = self.mods_boot.as_mut().and_then(mod_boot::Boot::poll) {
-            match done {
-                Ok(host) => self.mods = host,
-                Err(e) => {
-                    crate::log::line(&format!("mod host did not start: {e}"));
-                    if let Some(watch) = &mut self.mods_watch {
-                        watch.retry_after_archive_error(std::time::Instant::now());
-                    }
-                }
-            }
+        if let Some(done) = self
+            .mods_boot
+            .as_mut()
+            .and_then(|boot| boot.poll(self.mods_watch.as_mut()))
+        {
+            self.mods = done;
             self.mods_boot = None;
             if std::mem::take(&mut self.mods_reload_pending) {
                 self.reload_mods();

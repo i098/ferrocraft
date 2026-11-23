@@ -245,6 +245,38 @@ impl From<io::Error> for StagedStartError {
     }
 }
 
+fn stage_archive(
+    mods: &Path,
+    target: &Path,
+    path: &Path,
+    buffer: &mut [u8],
+) -> Result<(), StagedStartError> {
+    use std::io::Write;
+    let mut source = match std::fs::File::open(mods.join(path)) {
+        Ok(source) => source,
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(());
+        }
+        Err(e) => return Err(StagedStartError::Archive(e)),
+    };
+    let dest = target.join(path);
+    std::fs::create_dir_all(dest.parent().unwrap())?;
+    let mut dest = std::fs::File::create(dest)?;
+    loop {
+        match source.read(buffer) {
+            Ok(0) => return Ok(()),
+            Ok(n) => dest.write_all(&buffer[..n])?,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(StagedStartError::Archive(e)),
+        }
+    }
+}
+
 impl ModHost {
     /// Start the JVM and return at once. A worker thread waits for it to connect, which is after FML
     /// has loaded the mods, and gives up when the process exits first.
@@ -258,24 +290,24 @@ impl ModHost {
         archives: impl IntoIterator<Item = PathBuf>,
     ) -> Result<Self, StagedStartError> {
         let staging = StagingDir::new(&cfg.game_dir, "plain")?;
+        let target = staging.0.join("mods");
+        let mut buffer = [0; 64 * 1024];
         for path in archives {
             use std::path::Component::Normal;
             let mut components = path.components();
-            if !matches!(components.next(), Some(Normal(_)))
-                || !matches!(components.next(), None | Some(Normal(_)))
-                || components.next().is_some()
+            let supported = match (components.next(), components.next(), components.next()) {
+                (Some(Normal(_)), None, None) => true,
+                (Some(Normal(version)), Some(Normal(_)), None) => version == "1.8.9",
+                _ => false,
+            };
+            if !supported
+                || !path
+                    .extension()
+                    .is_some_and(|ext| ext == "jar" || ext == "zip")
             {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid mod path").into());
             }
-            let mut source = match std::fs::File::open(mods.join(&path)) {
-                Ok(source) => source,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-                Err(e) if e.kind() == io::ErrorKind::NotADirectory => continue,
-                Err(e) => return Err(StagedStartError::Archive(e)),
-            };
-            let dest = staging.0.join("mods").join(&path);
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            io::copy(&mut source, &mut std::fs::File::create(dest)?)?;
+            stage_archive(mods, &target, &path, &mut buffer)?;
         }
         cfg.game_dir.clone_from(&staging.0);
         Self::spawn(&cfg, Some(staging)).map_err(StagedStartError::Start)
@@ -1180,16 +1212,22 @@ printf '%s\n' "$PWD" > "$0.result"
         let source = root.join("source");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("sample.jar"), b"mod").unwrap();
-        let cfg = Config {
+        let config = || Config {
             loader: Loader::Forge,
             java: java.clone(),
             class_path: vec![],
             game_dir: root.clone(),
             assets_dir: root.clone(),
         };
+        std::fs::create_dir(source.join("other")).unwrap();
+        std::fs::write(source.join("other/sample.jar"), b"mod").unwrap();
+        assert!(matches!(
+            ModHost::start_staged(config(), &source, ["other/sample.jar".into()]),
+            Err(StagedStartError::Start(e)) if e.kind() == io::ErrorKind::InvalidInput
+        ));
         std::fs::write(source.join("1.8.9"), b"not a directory").unwrap();
         let mut host = ModHost::start_staged(
-            cfg,
+            config(),
             &source,
             [
                 "removed.jar".into(),

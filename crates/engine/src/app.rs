@@ -91,6 +91,7 @@ pub struct App {
     mods: Option<ferrocraft_modhost::ModHost>,
     /// The mod host while it starts on its thread.
     mods_boot: Option<std::sync::mpsc::Receiver<Option<ferrocraft_modhost::ModHost>>>,
+    mods_reload_pending: bool,
     /// Hot reload of the mods folder.
     mods_watch: Option<mod_boot::Watch>,
     /// The resource pack the server sent (S48): on top of the selected packs until the world is left.
@@ -205,6 +206,7 @@ impl App {
             hud: gui::Hud::default(),
             mods: None,
             mods_boot: None,
+            mods_reload_pending: false,
             mods_watch: None,
             server_pack: None,
             server: String::new(),
@@ -1640,6 +1642,9 @@ impl ApplicationHandler for App {
         if let Some(done) = self.mods_boot.as_ref().and_then(mod_boot::poll) {
             self.mods = done;
             self.mods_boot = None;
+            if std::mem::take(&mut self.mods_reload_pending) {
+                self.reload_mods();
+            }
         }
         if self
             .mods_watch

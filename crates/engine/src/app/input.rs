@@ -51,9 +51,10 @@ impl App {
     }
 
     /// Hot reload: kills the JVM, then starts a new host with a fresh config. The world and the server link stay; no
-    /// mod draws or answers until the new hello. A start in progress is left to finish.
+    /// mod draws or answers until the new hello. A start in progress finishes, then reloads again.
     pub(super) fn reload_mods(&mut self) {
         if self.mods_boot.is_some() {
+            self.mods_reload_pending = true;
             return;
         }
         if let Some(mut old) = self.mods.take() {

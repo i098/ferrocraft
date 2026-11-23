@@ -168,7 +168,7 @@ public final class GlState {
             t.names.put(key, name);
         }
         byte[] png = null;
-        if (!Sink.defined(name)) {
+        if (!Sink.defined(name) || Sink.needsCrosshairImage(name)) {
             if (part == null) part = region(t, sx, sy, sw, sh, ow, oh, blend, alpha);
             png = png(ow, oh, part);
         }

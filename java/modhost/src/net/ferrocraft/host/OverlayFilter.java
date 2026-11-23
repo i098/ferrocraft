@@ -64,7 +64,7 @@ public final class OverlayFilter {
         }
         try {
             listener.invoke(event);
-            if (crosshair && event.isCanceled()) Sink.centeredCrosshairDrawn(mark);
+            if (crosshair && event.isCanceled()) Sink.centeredCrosshairDrawn();
         } catch (Exception failure) {
             if (event.isCancelable()) event.setCanceled(canceled);
             if (chat != null) {

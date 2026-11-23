@@ -53,14 +53,11 @@ fn java_frame() -> Vec<u8> {
 fn quads(r: &Renderer, mods: Option<&ModHost>, textures: &mut Vec<(String, Vec<u8>)>) -> Vec<Quad> {
     let mut hud = Hud::default();
     let mut frame = Frame::default();
-    if let Some(m) = mods {
-        m.hud_owned().leave_out(&mut frame);
-    }
     let mut g = Gui::new(GuiScale::new(427, 240, 0, false), r.font(), 0);
-    hud.draw(&mut g, &frame);
-    if let Some(m) = mods {
-        m.draw(&mut g, textures);
-    }
+    ModHost::draw(mods, &mut g, textures, |g, owned| {
+        owned.leave_out(&mut frame);
+        hud.draw(g, &frame);
+    });
     g.into_quads()
 }
 

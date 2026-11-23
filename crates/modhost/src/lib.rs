@@ -436,10 +436,20 @@ impl ModHost {
         }
     }
 
-    /// Draw the last finished frame into the HUD's `Gui`, over the vanilla HUD; nothing once the JVM is gone.
+    /// Draw the vanilla HUD, then the mod commands from the same frame if a host is present.
     /// Images the renderer has not seen yet are appended to `textures` as PNG files under the name quads use.
-    pub fn draw(&self, g: &mut gui::Gui, textures: &mut Vec<(String, Vec<u8>)>) {
-        let mut s = self.link.state.lock().unwrap();
+    pub fn draw(
+        host: Option<&Self>,
+        g: &mut gui::Gui,
+        textures: &mut Vec<(String, Vec<u8>)>,
+        draw_hud: impl FnOnce(&mut gui::Gui, hud::Owned),
+    ) {
+        let Some(host) = host else {
+            draw_hud(g, hud::Owned::default());
+            return;
+        };
+        let mut s = host.link.state.lock().unwrap();
+        draw_hud(g, s.hud);
         let Shared {
             commands,
             sources,
@@ -681,12 +691,6 @@ impl ModHost {
             Phase::Live => s.hooks.clone(),
             _ => hooks::Hooks::default(),
         }
-    }
-
-    /// The vanilla HUD elements that Java owns in the last frame, once the JVM is live: Rust does not draw them. Nothing
-    /// is owned before that, so Rust draws the whole HUD.
-    pub fn hud_owned(&self) -> hud::Owned {
-        self.link.state.lock().unwrap().hud
     }
 
     /// Whether a screen a mod opened (OneConfig's GUI) is open: it owns the keys, the mouse and the cursor.

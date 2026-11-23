@@ -62,9 +62,13 @@ public final class OverlayHooksTest implements Opcodes {
                 Sink.clip(new float[] {220, 0, 208, 242});
                 render.invoke(null, 0f, 0L);
                 assertCrosshairOwnership(false, 4);
+                GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {0}));
+                render.invoke(null, 0f, 0L);
+                assertCrosshairOwnership(false, 4);
             } finally {
                 drawSucceeds = false;
             }
+            GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
             assertForgeCrosshair(214, 121, true, null);
             assertForgeCrosshair(2, 121, true, null);
             assertForgeCrosshair(214, 2, true, null);
@@ -73,6 +77,12 @@ public final class OverlayHooksTest implements Opcodes {
             assertShapeCrosshair(() -> Sink.rect(217, 122, 211, 120, -1), true);
             assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, -1), true);
             assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, 0), false);
+            assertShapeCrosshair(() -> Sink.rect(212, 120, 216, 122, 0x19FFFFFF), false);
+            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, 0x19FFFFFF), false);
+            assertShapeCrosshair(() -> Sink.roundRect(210, 117, 218, 125, new float[] {4, 4, 4, 4}, 0x19FFFFFF), false);
+            assertShapeCrosshair(() -> Sink.line(218, 125, 210, 117, 1, 0x19FFFFFF), false);
+            assertSplitCrosshair();
+            assertImageAlpha();
             assertShapeCrosshair(() -> Sink.roundRect(210, 117, 218, 125, new float[] {4, 4, 4, 4}, -1), true);
             assertShapeCrosshair(() -> Sink.roundRect(214, 121, 222, 129, new float[] {4, 4, 4, 4}, -1), false);
             assertShapeCrosshair(() -> Sink.line(218, 125, 210, 117, 0, -1), true);
@@ -203,6 +213,37 @@ public final class OverlayHooksTest implements Opcodes {
         new OverlayFilter().pre(crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
         if (frame.hud != (owned ? 1 << 4 : 0)) throw new AssertionError("incorrect shape crosshair ownership");
+    }
+
+    private static void assertSplitCrosshair() throws IOException {
+        int[][] arms = {{208, 120, 212, 122}, {216, 120, 220, 122},
+                {213, 115, 215, 119}, {213, 123, 215, 127}};
+        RenderGameOverlayEvent.Pre event = crosshairEvent();
+        OverlayFilter.invoke(e -> {
+            for (int[] arm : arms) Sink.rect(arm[0], arm[1], arm[2], arm[3], -1);
+            e.setCanceled(true);
+        }, event);
+        new OverlayFilter().pre(event);
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        if (frame.hud != 1 << 4 || frame.rects.size() != arms.length) {
+            throw new AssertionError("split crosshair must emit four arms and claim the element");
+        }
+        for (int i = 0; i < arms.length; i++) {
+            int[] arm = arms[i];
+            if (!Arrays.equals(frame.rects.get(i), new float[] {arm[0], arm[1], arm[2], arm[3]})) {
+                throw new AssertionError("incorrect crosshair arm " + i);
+            }
+        }
+    }
+
+    private static void assertImageAlpha() throws IOException {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, 0x80FFFFFF);
+        ByteArrayOutputStream png = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", png);
+        byte[] data = png.toByteArray();
+        assertShapeCrosshair(() -> Sink.image("half-alpha", data, 210, 117, 218, 125, 0x20FFFFFF, false), false);
+        assertShapeCrosshair(() -> Sink.image("half-alpha", data, 210, 117, 218, 125, 0x40FFFFFF, false), true);
     }
 
     private static void assertTessellatorRollback() {

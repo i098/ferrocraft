@@ -797,7 +797,7 @@ fn liquid_uv(f: usize, p: [f32; 3]) -> [f32; 2] {
     }
 }
 
-/// `MathHelper.getPositionRandom`: the hash vanilla keys block offsets and model variants on.
+/// The vanilla `MathHelper.getPositionRandom` hash for the supplied coordinates.
 pub(crate) fn position_random(x: i32, y: i32, z: i32) -> i64 {
     let i = x.wrapping_mul(3129871) as i64 ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
     i.wrapping_mul(i)
@@ -843,6 +843,48 @@ mod tests {
             smooth,
             true,
         )
+    }
+
+    #[test]
+    fn poppy_quad_centers_match_vanilla_in_terrain_and_damage() {
+        let poppy = 38 << 4;
+        let mut blocks = vec![0; 16 * 16 * HEIGHT];
+        blocks[index(0, 4, 3)] = poppy;
+        let vanilla_1_8_9_standard_centers = [
+            (0, [16.683_334, 4.5, 3.583_333_3]),
+            (1, [16.383_333, 4.5, 19.75]),
+        ];
+        let atlas = Atlas::flat();
+        for (chunk_z, expected) in vanilla_1_8_9_standard_centers {
+            let hood = Neighborhood {
+                origin: (1, chunk_z),
+                center: &blocks,
+                neighbors: [None; 8],
+                biomes: [None; 9],
+                lights: [None; 9],
+            };
+            let at = [16, 4, chunk_z * 16 + 3];
+            let terrain = mesh_chunk(&hood, &atlas, true, true).opaque.vertices;
+            let damage = crate::crack::quads(at, poppy, &|_, _, _| 0);
+            for (path, vertices, origin) in [
+                ("terrain", terrain, [16.0, 0.0, (chunk_z * 16) as f32]),
+                ("damage", damage, [0.0; 3]),
+            ] {
+                assert_eq!(vertices.len(), 16, "{path} at {at:?}");
+                for quad in vertices.as_chunks::<4>().0 {
+                    let center = [0, 1, 2].map(|axis| {
+                        quad.iter().map(|v| v.pos[axis]).sum::<f32>() / 4.0 + origin[axis]
+                    });
+                    assert!(
+                        center
+                            .into_iter()
+                            .zip(expected)
+                            .all(|(a, b)| (a - b).abs() < 1e-5),
+                        "{path} at {at:?}: expected {expected:?}, got {center:?}",
+                    );
+                }
+            }
+        }
     }
 
     #[test]

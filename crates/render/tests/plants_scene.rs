@@ -49,7 +49,7 @@ fn plants_scene() {
         put(&mut r, x, 64, 6, 31, 1);
     }
     put(&mut r, 10, 64, 6, 32, 0);
-    // Flowers at two heights: the offset hash takes y, so each cell gets its own shift.
+    // Flowers at two heights. Vanilla sets each offset from the world X and Z coordinates.
     put(&mut r, 12, 64, 6, 38, 0);
     put(&mut r, 13, 64, 6, 37, 0);
     put(&mut r, 14, 64, 6, 1, 0);

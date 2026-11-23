@@ -1256,24 +1256,26 @@ mod tests {
     }
 
     #[test]
-    fn lower_stone_slab_side_uses_slime_occlusion_without_culling() {
-        for slime in [(4, 70, 3), (3, 70, 3), (3, 69, 3)] {
-            let c = flat(|x, y, z| match (x, y, z) {
-                (4, 70, 4) => 44 << 4,
-                p if p == slime => 165 << 4,
-                _ => 0,
-            });
-            let mesh = mesh(&c, [None; 8]);
-            let corner = mesh
-                .opaque
-                .vertices
-                .chunks_exact(4)
-                .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == 4.0))
-                .unwrap()
-                .iter()
-                .find(|v| v.pos == [4.0, 70.0, 4.0])
-                .unwrap();
-            assert!((corner.color[0] - 0.6 * SHADE[NORTH] * 0.8).abs() < 1e-6);
+    fn lower_stone_slab_side_uses_vanilla_occlusion_for_slime_and_barriers() {
+        for (id, ao) in [(165, 0.8), (166, 1.0)] {
+            for sample in [(4, 70, 3), (3, 70, 3), (4, 69, 3), (3, 69, 3)] {
+                let c = flat(|x, y, z| match (x, y, z) {
+                    (4, 70, 4) => 44 << 4,
+                    p if p == sample => id << 4,
+                    _ => 0,
+                });
+                let mesh = mesh(&c, [None; 8]);
+                let corner = mesh
+                    .opaque
+                    .vertices
+                    .chunks_exact(4)
+                    .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == 4.0))
+                    .unwrap()
+                    .iter()
+                    .find(|v| v.pos == [4.0, 70.0, 4.0])
+                    .unwrap();
+                assert!((corner.color[0] - 0.6 * SHADE[NORTH] * ao).abs() < 1e-6);
+            }
         }
     }
 

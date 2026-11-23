@@ -1,7 +1,13 @@
 package net.ferrocraft.host;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import net.minecraft.launchwrapper.IClassTransformer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -16,7 +22,10 @@ import org.objectweb.asm.tree.MethodNode;
 public final class OverlayHooks {
     private static final String EVENT_HANDLER = "net/minecraftforge/fml/common/eventhandler/";
     private static final String CALLBACK = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo";
-    private static final String RUNTIME_EXCEPTION = "java/lang/RuntimeException";
+    private static final String EXCEPTION = "java/lang/Exception";
+    private static final String GUI = "net.minecraft.client.gui.GuiIngame";
+    private static final String FORGE_GUI = "net.minecraftforge.client.GuiIngameForge";
+    private static final String RENDERER = "net.minecraft.client.renderer.EntityRenderer";
     private static final String MARK = "net/ferrocraft/host/Sink$Mark";
     private static Thread overlayThread;
 
@@ -34,16 +43,17 @@ public final class OverlayHooks {
         return overlayThread == Thread.currentThread();
     }
 
-    static void failed(RuntimeException failure, Sink.Mark mark) {
+    static void failed(Exception failure, Sink.Mark mark) {
         Sink.rollback(mark);
+        GlState.restoreDrawState(mark.gl);
         failure.printStackTrace();
     }
 
     public static Sink.Mark checkpoint() {
-        return active() ? Sink.mark() : null;
+        return active() ? Sink.mark(GlState.saveDrawState()) : null;
     }
 
-    public static void mixinFailed(RuntimeException failure, Object callback, Sink.Mark mark) {
+    public static void mixinFailed(Exception failure, Object callback, Sink.Mark mark) throws Exception {
         if (mark == null) throw failure;
         if (callback != null) R.set(callback, "cancelled", false);
         failed(failure, mark);
@@ -86,21 +96,66 @@ public final class OverlayHooks {
 
     @SuppressWarnings("unchecked")
     private static byte[] patchHud(String name, byte[] bytes) {
-        if (!name.equals("net.minecraft.client.gui.GuiIngame")
-                && !name.equals("net.minecraft.client.renderer.EntityRenderer")
-                && !name.equals("net.minecraftforge.client.GuiIngameForge")) return bytes;
+        if (!name.equals(GUI) && !name.equals(RENDERER) && !name.equals(FORGE_GUI)) return bytes;
         ClassNode cls = new ClassNode();
         new ClassReader(bytes).accept(cls, 0);
-        List<MethodNode> wrappers = new ArrayList<>();
-        for (Object item : cls.methods) {
-            MethodNode method = (MethodNode) item;
-            if (!method.name.startsWith("handler$") || !method.desc.endsWith(")V") || !ShellTransformer.isMerged(method)) continue;
-            MethodNode wrapper = wrap(cls.name, method);
-            if (wrapper != null) wrappers.add(wrapper);
+        Map<String, MethodNode> methods = new HashMap<>();
+        for (MethodNode method : (List<MethodNode>) cls.methods) methods.put(method.name + method.desc, method);
+        Map<MethodNode, MethodNode> wrappers = new HashMap<>();
+        for (MethodNode method : hudMethods(name, cls.name, methods)) {
+            wrapCalls(cls.name, method, methods, wrappers);
         }
         if (wrappers.isEmpty()) return bytes;
-        cls.methods.addAll(wrappers);
+        cls.methods.addAll(wrappers.values());
         return write(cls);
+    }
+
+    private static List<MethodNode> hudMethods(String name, String owner, Map<String, MethodNode> methods) {
+        Set<String> roots = hudRoots(name);
+        ArrayDeque<MethodNode> pending = new ArrayDeque<>();
+        Set<MethodNode> seen = new HashSet<>();
+        List<MethodNode> hud = new ArrayList<>();
+        for (MethodNode method : methods.values()) {
+            if (roots.contains(method.name) || roots.contains(method.name + method.desc)) pending.add(method);
+        }
+        while (!pending.isEmpty()) {
+            MethodNode method = pending.removeFirst();
+            if (!seen.add(method) || method.name.startsWith("handler$")) continue;
+            hud.add(method);
+            for (MethodInsnNode call : localCalls(owner, method)) {
+                MethodNode target = methods.get(call.name + call.desc);
+                if (target != null) pending.add(target);
+            }
+        }
+        return hud;
+    }
+
+    private static Set<String> hudRoots(String name) {
+        if (name.equals(RENDERER)) return new HashSet<>(Arrays.asList("func_181560_a(FJ)V", "func_78478_c()V"));
+        if (name.equals(FORGE_GUI)) return new HashSet<>(Arrays.asList("func_175180_a(F)V", "renderGameOverlay(F)V"));
+        return new HashSet<>(Arrays.asList("func_175180_a(F)V", "func_175183_b()Z", "func_180476_e",
+                "func_180480_a", "func_175264_a", "func_180479_a", "func_73828_d", "func_180475_a"));
+    }
+
+    private static List<MethodInsnNode> localCalls(String owner, MethodNode method) {
+        List<MethodInsnNode> calls = new ArrayList<>();
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof MethodInsnNode && ((MethodInsnNode) insn).owner.equals(owner)) {
+                calls.add((MethodInsnNode) insn);
+            }
+        }
+        return calls;
+    }
+
+    private static void wrapCalls(String owner, MethodNode method, Map<String, MethodNode> methods,
+            Map<MethodNode, MethodNode> wrappers) {
+        for (MethodInsnNode call : localCalls(owner, method)) {
+            if (!call.name.startsWith("handler$") || !call.desc.endsWith(")V")) continue;
+            MethodNode handler = methods.get(call.name + call.desc);
+            if (handler == null || !ShellTransformer.isMerged(handler)) continue;
+            MethodNode wrapper = wrappers.computeIfAbsent(handler, h -> wrap(owner, h));
+            if (wrapper != null) call.name = wrapper.name;
+        }
     }
 
     private static MethodNode wrap(String owner, MethodNode handler) {
@@ -116,8 +171,7 @@ public final class OverlayHooks {
         }
         if (callback == -1) return null;
 
-        MethodNode wrapper = new MethodNode(handler.access, handler.name, handler.desc, null, null);
-        handler.name += "$ferroOverlay";
+        MethodNode wrapper = new MethodNode(handler.access, handler.name + "$ferroOverlay", handler.desc, null, null);
         int mark = slot;
         wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "checkpoint", "()L" + MARK + ";", false);
         wrapper.visitVarInsn(Opcodes.ASTORE, mark);
@@ -130,7 +184,7 @@ public final class OverlayHooks {
         Label start = new Label();
         Label end = new Label();
         Label caught = new Label();
-        wrapper.visitTryCatchBlock(start, end, caught, RUNTIME_EXCEPTION);
+        wrapper.visitTryCatchBlock(start, end, caught, EXCEPTION);
         wrapper.visitLabel(start);
         wrapper.visitMethodInsn(isStatic ? Opcodes.INVOKESTATIC : Opcodes.INVOKESPECIAL,
                 owner, handler.name, handler.desc, false);
@@ -138,11 +192,11 @@ public final class OverlayHooks {
         wrapper.visitInsn(Opcodes.RETURN);
         wrapper.visitLabel(caught);
         Object[] locals = handlerLocals(owner, isStatic, args);
-        wrapper.visitFrame(Opcodes.F_FULL, locals.length, locals, 1, new Object[] {RUNTIME_EXCEPTION});
+        wrapper.visitFrame(Opcodes.F_FULL, locals.length, locals, 1, new Object[] {EXCEPTION});
         wrapper.visitVarInsn(Opcodes.ALOAD, callback);
         wrapper.visitVarInsn(Opcodes.ALOAD, mark);
         wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "mixinFailed",
-                "(Ljava/lang/RuntimeException;Ljava/lang/Object;L" + MARK + ";)V", false);
+                "(Ljava/lang/Exception;Ljava/lang/Object;L" + MARK + ";)V", false);
         wrapper.visitInsn(Opcodes.RETURN);
         return wrapper;
     }

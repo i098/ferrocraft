@@ -52,6 +52,24 @@ public final class GlState {
     private static boolean blend;
     private static int src = 770, dst = 771;
 
+    static final class DrawState {
+        private final int texture = bound;
+        private final float r = red, g = green, b = blue, a = alpha;
+        private final boolean blending = blend;
+        private final int source = src, destination = dst;
+    }
+
+    static synchronized DrawState saveDrawState() {
+        return new DrawState();
+    }
+
+    static synchronized void restoreDrawState(DrawState state) {
+        bound = state.texture;
+        color(state.r, state.g, state.b, state.a);
+        blend = state.blending;
+        blendFunc(state.source, state.destination);
+    }
+
     private GlState() {
         throw new AssertionError();
     }

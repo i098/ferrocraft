@@ -124,14 +124,14 @@ public final class VanillaHudTest {
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public void pre(RenderGameOverlayEvent.Pre event) {
+    public void pre(RenderGameOverlayEvent.Pre event) throws IOException {
         if (fail && event.type == ElementType.ALL) {
             failureInvoked = true;
             event.setCanceled(true);
             Sink.text(PARTIAL_DRAW, 0, 0, -1, false);
             Sink.push();
             Sink.translate(100, 100);
-            throw new IllegalStateException("VanillaHudTest: overlay handler failed after cancellation");
+            throw new IOException("VanillaHudTest: overlay handler failed after cancellation");
         }
     }
 

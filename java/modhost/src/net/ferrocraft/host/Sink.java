@@ -26,6 +26,8 @@ public final class Sink {
     private static final int CROSSHAIR = 1 << 4;
     private static int hudBits;
     private static int textured;
+    private static int lastCenteredTexture;
+    private static int crosshairX, crosshairY;
     private static boolean crosshairDrawn;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
@@ -54,14 +56,17 @@ public final class Sink {
         final int commands = count;
         final int owned = hudBits;
         final int textures = textured;
+        final int centered = lastCenteredTexture;
         final boolean crosshair = crosshairDrawn;
         final boolean clip = clipped;
         final int definitions = newDefinitions.size();
         final int matrixTop = top;
         final int matrixMode = mode;
         final float[] matrix = new float[(matrixTop + 1) * 3];
+        final GlState.DrawState gl;
 
-        Mark() {
+        Mark(GlState.DrawState gl) {
+            this.gl = gl;
             for (int i = 0; i <= matrixTop; i++) System.arraycopy(STACK[i], 0, matrix, i * 3, 3);
         }
     }
@@ -204,7 +209,14 @@ public final class Sink {
     /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
     static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
         textured++;
+        float[] m = STACK[top];
+        if (argb >>> 24 != 0 && covers(m[0] * x0 + m[1], m[0] * x1 + m[1], crosshairX)
+                && covers(m[0] * y0 + m[2], m[0] * y1 + m[2], crosshairY)) lastCenteredTexture = textured;
         emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
+    }
+
+    private static boolean covers(float a, float b, int center) {
+        return Math.min(a, b) <= center && center < Math.max(a, b);
     }
 
     private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
@@ -255,8 +267,8 @@ public final class Sink {
         hudBits |= bits;
     }
 
-    static synchronized Mark mark() {
-        return new Mark();
+    static synchronized Mark mark(GlState.DrawState gl) {
+        return new Mark(gl);
     }
 
     static synchronized void rollback(Mark mark) {
@@ -264,6 +276,7 @@ public final class Sink {
         count = mark.commands;
         hudBits = mark.owned;
         textured = mark.textures;
+        lastCenteredTexture = mark.centered;
         crosshairDrawn = mark.crosshair;
         clipped = mark.clip;
         top = mark.matrixTop;
@@ -276,6 +289,15 @@ public final class Sink {
 
     static synchronized void crosshairDrawn(int before) {
         crosshairDrawn |= textured > before;
+    }
+
+    static synchronized void crosshairCenter(int x, int y) {
+        crosshairX = x;
+        crosshairY = y;
+    }
+
+    static synchronized void lateCrosshairDrawn(int before) {
+        crosshairDrawn |= lastCenteredTexture > before;
     }
 
     private static void writeHud(int bits) {
@@ -308,6 +330,7 @@ public final class Sink {
         hudBits = 0;
         crosshairDrawn = false;
         textured = 0;
+        lastCenteredTexture = 0;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {

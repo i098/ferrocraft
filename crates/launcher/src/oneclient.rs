@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 const VERSION: &str = "2.12.0";
 
-pub fn data_dir(app_data: &Path) -> io::Result<PathBuf> {
+pub fn data_dirs(app_data: &Path) -> io::Result<(PathBuf, Option<PathBuf>)> {
     if std::env::vars_os().any(|(key, _)| {
         key.to_str()
             .and_then(|key| key.strip_prefix("ONECLIENT_SETTING_"))
@@ -31,7 +31,7 @@ pub fn data_dir(app_data: &Path) -> io::Result<PathBuf> {
     resolve_data_dir(app_data.join("Polyfrost/OneClient"), &legacy)
 }
 
-fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<PathBuf> {
+fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<(PathBuf, Option<PathBuf>)> {
     if !standard.is_absolute() {
         return Err(io::Error::other(
             "Cannot locate the standard OneClient data directory",
@@ -47,7 +47,7 @@ fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<PathBuf> {
     };
     let bytes = match fs::read(settings) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound && !has_legacy => return Ok(standard),
+        Err(e) if e.kind() == io::ErrorKind::NotFound && !has_legacy => return Ok((standard, None)),
         Err(e) => {
             return Err(io::Error::new(
                 e.kind(),
@@ -55,8 +55,18 @@ fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<PathBuf> {
             ));
         }
     };
-    let config: serde_json::Value = serde_json::from_slice(&bytes)
+    let mut config: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| io::Error::other(format!("{}: {e}", settings.display())))?;
+    let previous: Option<PathBuf> = serde_json::from_value(
+        config.get_mut("previous_data_dir").map(serde_json::Value::take).unwrap_or_default(),
+    )
+    .map_err(|e| io::Error::other(format!("{}: invalid previous data directory: {e}", settings.display())))?;
+    if previous.as_ref().is_some_and(|path| !path.is_absolute()) {
+        return Err(io::Error::other(format!(
+            "{}: previous data directory must be absolute",
+            settings.display()
+        )));
+    }
     if config.is_object() && config["data_dir"].is_null() {
         if has_legacy {
             return Err(io::Error::other(format!(
@@ -64,11 +74,11 @@ fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<PathBuf> {
                 legacy.display()
             )));
         }
-        return Ok(standard);
+        return Ok((standard, previous));
     }
     if let Some(path) = config["data_dir"].as_str().map(PathBuf::from) {
         if path.is_absolute() && !path.join(".oneclient_migrating").try_exists()? {
-            return Ok(path);
+            return Ok((path, previous));
         }
     }
     Err(io::Error::other(format!(
@@ -374,7 +384,7 @@ mod tests {
         let custom = tmp.path().join("custom");
         assert_eq!(
             resolve_data_dir(standard.clone(), &legacy).unwrap(),
-            standard
+            (standard.clone(), None)
         );
 
         fs::create_dir_all(&standard).unwrap();
@@ -385,7 +395,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             resolve_data_dir(standard.clone(), &legacy).unwrap(),
-            custom
+            (custom, None)
         );
 
         fs::create_dir_all(&legacy).unwrap();
@@ -400,7 +410,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             resolve_data_dir(standard.clone(), &legacy).unwrap(),
-            legacy_custom
+            (legacy_custom.clone(), None)
         );
         fs::write(legacy_custom.join(".oneclient_migrating"), []).unwrap();
         assert!(resolve_data_dir(standard, &legacy).is_err());

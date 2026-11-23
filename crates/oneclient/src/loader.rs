@@ -136,8 +136,12 @@ mod tests {
         let ordinary = d.join("mods/ferrocraft-fabric.jar");
         std::fs::write(&ordinary, b"jar a").unwrap();
         let mut jar = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        jar.start_file("fabric.mod.json", zip::write::SimpleFileOptions::default())
-            .unwrap();
+        jar.start_file(
+            "fabric.mod.json",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
         jar.write_all(br#"{"id":"ferrocraft"}"#).unwrap();
         let bootstrap = jar.finish().unwrap().into_inner();
         std::fs::write(d.join("mods/renamed.jar"), &bootstrap).unwrap();

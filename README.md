@@ -20,6 +20,7 @@ Windows (PowerShell):
 The installer downloads and verifies Polyfrost OneClient 2.12.0.
 On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
 It installs the `Ferrocraft 1.8.9` Ornithe profile in the active OneClient data directory.
+Exit OneClient if it is running.
 Open OneClient from the path that the installer prints.
 Keep the default data directory if OneClient asks where to store its data.
 Sign in once with a Microsoft account that owns Minecraft: Java Edition.

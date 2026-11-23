@@ -439,14 +439,33 @@ fn default_oneclient_profile(data: &Path) -> Result<(PathBuf, String), String> {
     prepare().map_err(|e| format!("{}: {e}", data.display()))
 }
 
+fn owned_mods_dir(profile: &Path) -> Result<PathBuf, String> {
+    let mods = profile.join("mods");
+    let check = || -> std::io::Result<()> {
+        match fs::symlink_metadata(&mods) {
+            Ok(meta)
+                if meta.is_dir()
+                    && fs::canonicalize(&mods)? == fs::canonicalize(profile)?.join("mods") =>
+            {
+                Ok(())
+            }
+            Err(e) if e.kind() == NotFound => Ok(()),
+            Err(e) => Err(e),
+            Ok(_) => Err(std::io::Error::other("Expected a directory inside the Ferrocraft profile")),
+        }
+    };
+    check().map_err(|e| format!("{}: {e}", mods.display()))?;
+    Ok(mods)
+}
+
 fn install(o: &Opts, env: &Env) -> Result<(), String> {
     // Explicit paths do not download OneClient or create a new profile.
     let explicit = o.mc.is_some() || o.oneclient.is_some();
     let oneclient = if explicit {
         None
     } else {
-        let data =
-            oneclient::data_dir(&env.data).map_err(|e| format!("OneClient data directory: {e}"))?;
+        let (data, _) =
+            oneclient::data_dirs(&env.data).map_err(|e| format!("OneClient data directory: {e}"))?;
         let app = oneclient::install(&env.home.join(".ferrocraft"))
             .map_err(|e| format!("OneClient install failed: {e}"))?;
         Some((app, default_oneclient_profile(&data)?))
@@ -456,7 +475,7 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
         (!explicit && d.is_dir()).then_some(d)
     });
     let mods = if let Some((_, (profile, _))) = &oneclient {
-        vec![profile.join("mods")]
+        vec![owned_mods_dir(profile)?]
     } else {
         o.oneclient
             .as_deref()
@@ -468,7 +487,7 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     install_targets(o, env, mc, mods)?;
     if let Some((app, (_, name))) = oneclient {
         println!(
-            "Open OneClient at {} and select {name} after signing in.",
+            "Exit OneClient if it is running. Open OneClient at {} and select {name} after signing in.",
             app.display()
         );
         if cfg!(target_os = "linux") {
@@ -596,6 +615,43 @@ mod tests {
         fs::remove_dir_all(&tmp).unwrap();
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn default_install_refuses_linked_mods_directory() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Env {
+            home: tmp.path().join("home"),
+            data: tmp.path().join("data"),
+        };
+        let installed = env.home.join(".ferrocraft/oneclient-2.12.0/OneClient.AppImage");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        fs::write(installed, []).unwrap();
+        let data = env.data.join("Polyfrost/OneClient");
+        let (profile, _) = default_oneclient_profile(&data).unwrap();
+        let personal = data.join("clusters/personal/mods");
+        fs::create_dir_all(&personal).unwrap();
+        symlink(&personal, profile.join("mods")).unwrap();
+        let jar = tmp.path().join("incoming.jar");
+        let engine = tmp.path().join("engine");
+        fs::write(&jar, b"bootstrap").unwrap();
+        fs::write(&engine, b"engine").unwrap();
+
+        let opts = Opts {
+            fabric: Some(jar),
+            engine: Some(engine),
+            ..Opts::default()
+        };
+        let err = install(&opts, &env).unwrap_err();
+        assert!(err.contains("Expected a directory inside the Ferrocraft profile"), "{err}");
+        assert!(fs::read_dir(personal).unwrap().next().is_none());
+        assert!(!manifest_path(&env.home).exists());
+        fs::remove_file(profile.join("mods")).unwrap();
+        install(&opts, &env).unwrap();
+        assert_eq!(fs::read(profile.join("mods").join(FABRIC_JAR)).unwrap(), b"bootstrap");
+    }
+
     #[test]
     fn profile_collision_preserves_matching_personal_profile() {
         let tmp = tempfile::tempdir().unwrap();
@@ -663,7 +719,7 @@ mod tests {
              CREATE TABLE cluster_artifacts(cluster_id, hash, cluster_file_name, enabled);
              INSERT INTO clusters VALUES (1, 'ferrocraft-1.8.9');
              INSERT INTO artifacts VALUES ('old', 0, 'old.jar', 'cache-renamed.jar');
-             INSERT INTO cluster_artifacts VALUES (1, 'old', 'ferrocraft-fabric.jar', 1);",
+             INSERT INTO cluster_artifacts VALUES (1, 'old', 'renamed-bootstrap.jar', 1);",
         )
         .unwrap();
         let manifest = manifest_path(&home);
@@ -719,6 +775,28 @@ mod tests {
             assert!(version.is_dir());
             assert!(manifest.is_file());
         }
+        db.execute("UPDATE cluster_artifacts SET cluster_file_name = 'ferrocraft-fabric.jar'", [])
+            .unwrap();
+
+        write_fabric_jar(&cached, "unrelated", "1.0.0");
+        let unrelated = fs::read(&cached).unwrap();
+        fs::write(&jar, &unrelated).unwrap();
+        let err = install_fabric(
+            std::slice::from_ref(&mods),
+            &incoming,
+            &new_engine,
+            &home,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(err.contains("mod at the install destination"), "{err}");
+        let err = uninstall(&manifest, &tmp.path().join("app-data")).unwrap_err();
+        assert!(err.contains("OneClient still manages"), "{err}");
+        assert_eq!(fs::read(&jar).unwrap(), unrelated);
+        assert_eq!(fs::read(&engine).unwrap(), b"engine");
+        assert!(manifest.is_file());
+        fs::remove_file(&jar).unwrap();
+        fs::write(&cached, &old_jar).unwrap();
 
         drop(db);
         let app_data = tmp.path().join("app-data");
@@ -736,11 +814,21 @@ mod tests {
 
         db.execute("DELETE FROM cluster_artifacts", []).unwrap();
         let err = uninstall(&manifest, &app_data).unwrap_err();
-        let recovery = format!("clear {} in OneClient Storage", data.display());
+        assert!(err.contains("remove the mod from the OneClient installation"), "{err}");
+        assert!(!err.contains("OneClient Storage"), "{err}");
+        let previous = tmp.path().join("intermediate-root");
+        fs::rename(&data, &previous).unwrap();
+        fs::write(
+            moved.join("settings.json"),
+            json!({ "previous_data_dir": previous }).to_string(),
+        )
+        .unwrap();
+        let err = uninstall(&manifest, &app_data).unwrap_err();
+        let recovery = format!("clear {} in OneClient Storage", previous.display());
         assert!(err.contains(&recovery), "{err}");
         assert!(engine.is_file() && version.is_dir() && manifest.is_file());
 
-        fs::remove_dir_all(&data).unwrap();
+        fs::remove_dir_all(previous).unwrap();
         let unrelated = moved.join(FABRIC_JAR);
         write_fabric_jar(&unrelated, "unrelated", "1.0.0");
         db.execute_batch(

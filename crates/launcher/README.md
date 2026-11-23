@@ -10,6 +10,7 @@ It installs the mod and engine for the Ornithe profile that Ferrocraft owns.
 It reuses a marked profile or chooses a folder and display name that do not conflict with other profiles.
 The default install does not add the mod to other OneClient profiles.
 It also installs Ferrocraft into the official Minecraft directory if that directory exists.
+Exit OneClient if it is running, then open it again to load the profile.
 The installer reads the boot jar, mod jar, and engine next to its executable.
 An explicit `--minecraft-dir DIR` or `--oneclient-dir DIR` limits installation to the selected launchers and skips the download.
 Use `--fabric-jar JAR` to select a different mod jar.

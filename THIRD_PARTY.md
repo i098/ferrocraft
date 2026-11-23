@@ -36,7 +36,8 @@ The download contains the corresponding source and license text.
 The launcher reads OneClient’s database with `rusqlite` and `libsqlite3-sys` under the MIT license below.
 The bundled [SQLite](https://www.sqlite.org/copyright.html) engine is in the public domain.
 The database reader also uses `fallible-iterator`, `fallible-streaming-iterator`, and `hashlink` under the Apache License 2.0 below.
-The launcher uses `zip` under the MIT license below to identify the bootstrap jar.
+The launcher uses these ZIP and database dependencies under the MIT license below:
+`zip`, `crc32fast`, `flate2`, `indexmap`, `hashbrown`, `equivalent`, `crossbeam-utils`, `miniz_oxide`, `adler2`, and `simd-adler32`.
 
 The upstream MIT files for some of these crates, including `fastrand`, do not contain a copyright line.
 The `rustix` and `linux-raw-sys` contributors retain their copyrights.
@@ -66,6 +67,17 @@ Copyright (c) 2015 Steven Allen (tempfile)
 Copyright (c) 2014 Paho Lurie-Gregg (typenum)
 Copyright (c) Microsoft Corporation. (windows-link, windows-registry, windows-result, windows-strings, windows-sys)
 Copyright (c) 2014 Mathijs van de Nes (zip)
+Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors (crc32fast)
+Copyright (c) 2014-2026 Alex Crichton (flate2)
+Copyright (c) 2016--2017 (indexmap)
+Copyright (c) 2016 Amanieu d'Antras (hashbrown)
+Copyright (c) 2016--2023 (equivalent)
+Copyright (c) 2019 The Crossbeam Project Developers (crossbeam-utils)
+Copyright 2013-2014 RAD Game Tools and Valve Software (miniz_oxide)
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC (miniz_oxide)
+Copyright (c) 2017 Frommi (miniz_oxide)
+Copyright (c) 2017-2024 oyvindln (miniz_oxide)
+Copyright (c) [2021] [Marvin Countryman] (simd-adler32)
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -90,6 +102,30 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+The database reader uses `foldhash` under the Zlib license:
+
+```text
+Copyright (c) 2024 Orson Peters
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+    that you wrote the original software. If you use this software in a product,
+    an acknowledgment in the product documentation would be appreciated but is
+    not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+    misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 ```
 
 ```text

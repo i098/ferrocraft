@@ -51,12 +51,18 @@ fn is_oneclient_process(line: &str, windows: bool) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            matches!(name, "oneclient_app" | "OneClient" | "OneClient.AppImage")
+            matches!(name, "oneclient_app" | "OneClient" | "OneClient.AppImage" | "OneClient.AppIm")
                 || name.starts_with("OneClient_")
         })
 }
 
-pub fn data_dirs(app_data: &Path, include_previous: bool) -> io::Result<(PathBuf, Option<PathBuf>)> {
+pub type Storage = (PathBuf, Option<PathBuf>);
+
+pub fn data_dirs(app_data: &Path) -> Result<Storage, String> {
+    resolve_user_storage(app_data).map_err(|e| format!("OneClient data directory: {e}"))
+}
+
+fn resolve_user_storage(app_data: &Path) -> io::Result<Storage> {
     if std::env::vars_os().any(|(key, _)| {
         key.to_str()
             .and_then(|key| key.strip_prefix("ONECLIENT_SETTING_"))
@@ -75,14 +81,10 @@ pub fn data_dirs(app_data: &Path, include_previous: bool) -> io::Result<(PathBuf
     #[cfg(not(any(windows, target_os = "macos")))]
     let legacy = app_data.join("oneclient");
 
-    resolve_data_dir(app_data.join("Polyfrost/OneClient"), &legacy, include_previous)
+    resolve_data_dir(app_data.join("Polyfrost/OneClient"), &legacy)
 }
 
-fn resolve_data_dir(
-    standard: PathBuf,
-    legacy: &Path,
-    include_previous: bool,
-) -> io::Result<(PathBuf, Option<PathBuf>)> {
+pub(super) fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<Storage> {
     if !standard.is_absolute() {
         return Err(io::Error::other(
             "Cannot locate the standard OneClient data directory",
@@ -108,11 +110,7 @@ fn resolve_data_dir(
     };
     let config: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| io::Error::other(format!("{}: {e}", settings.display())))?;
-    let previous = if include_previous {
-        previous_data_dir(&config["previous_data_dir"], settings)?
-    } else {
-        None
-    };
+    let previous = previous_data_dir(&config["previous_data_dir"], settings)?;
     let active = active_data_dir(&config, standard, has_legacy.then_some(legacy), settings)?;
     Ok((active, previous))
 }
@@ -216,19 +214,22 @@ fn run(command: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
-pub fn prepare(base: &Path, app_data: &Path) -> io::Result<(PathBuf, PathBuf)> {
+pub fn prepare(
+    base: &Path,
+    resolve_storage: impl FnOnce() -> Result<Storage, String>,
+) -> Result<(PathBuf, Storage), String> {
     #[cfg(windows)]
-    let installed = installed_windows(&base.join(format!("oneclient-{VERSION}")))?;
+    let installed = installed_windows(&base.join(format!("oneclient-{VERSION}")))
+        .map_err(|e| e.to_string())?;
     #[cfg(not(windows))]
     let installed: Option<PathBuf> = None;
-    let (data, _) = data_dirs(app_data, false)
-        .map_err(|e| io::Error::new(e.kind(), format!("OneClient data directory: {e}")))?;
+    let storage = resolve_storage()?;
     let app = match installed {
         Some(app) => app,
         None => install(base)
-            .map_err(|e| io::Error::new(e.kind(), format!("OneClient install failed: {e}")))?,
+            .map_err(|e| format!("OneClient install failed: {e}"))?,
     };
-    Ok((app, data))
+    Ok((app, storage))
 }
 
 fn install(base: &Path) -> io::Result<PathBuf> {
@@ -455,6 +456,7 @@ mod tests {
             "oneclient_app",
             "/Applications/OneClient.app/Contents/MacOS/oneclient_app",
             "OneClient_2.12.0_amd64.AppImage",
+            "OneClient.AppIm",
         ] {
             assert!(is_oneclient_process(command, false), "{command}");
         }
@@ -478,7 +480,7 @@ mod tests {
         let legacy = tmp.path().join("legacy");
         let custom = tmp.path().join("custom");
         assert_eq!(
-            resolve_data_dir(standard.clone(), &legacy, true).unwrap(),
+            resolve_data_dir(standard.clone(), &legacy).unwrap(),
             (standard.clone(), None)
         );
 
@@ -488,15 +490,11 @@ mod tests {
             serde_json::json!({ "data_dir": custom, "previous_data_dir": "relative" }).to_string(),
         )
         .unwrap();
-        assert_eq!(
-            resolve_data_dir(standard.clone(), &legacy, false).unwrap(),
-            (custom, None)
-        );
-        assert!(resolve_data_dir(standard.clone(), &legacy, true).is_err());
+        assert!(resolve_data_dir(standard.clone(), &legacy).is_err());
 
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("settings.json"), "{}").unwrap();
-        assert!(resolve_data_dir(standard.clone(), &legacy, true).is_err());
+        assert!(resolve_data_dir(standard.clone(), &legacy).is_err());
         let legacy_custom = tmp.path().join("legacy-custom");
         fs::create_dir_all(&legacy_custom).unwrap();
         fs::write(
@@ -505,10 +503,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            resolve_data_dir(standard.clone(), &legacy, true).unwrap(),
+            resolve_data_dir(standard.clone(), &legacy).unwrap(),
             (legacy_custom.clone(), None)
         );
         fs::write(legacy_custom.join(".oneclient_migrating"), []).unwrap();
-        assert!(resolve_data_dir(standard, &legacy, true).is_err());
+        assert!(resolve_data_dir(standard, &legacy).is_err());
     }
 }

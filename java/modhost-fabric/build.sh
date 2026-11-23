@@ -8,6 +8,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin
 L=${FERRO_LIB:?set FERRO_LIB to the library folder}
 F=${FABRIC_LOADER_JAR:?set FABRIC_LOADER_JAR to a fabric-loader jar}
+J=$(cd "$J" && pwd)
 L=$(cd "$L" && pwd)
 F=$(cd "$(dirname "$F")" && pwd)/$(basename "$F")
 out=$here/../../target/modhost-fabric

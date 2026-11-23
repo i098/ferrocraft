@@ -94,7 +94,7 @@ fn install_fabric(
     fabric_jar: &Path,
     engine: &Path,
     home: &Path,
-    app_data: &Path,
+    storage: Option<&oneclient::Storage>,
     written: &mut Vec<PathBuf>,
     runtime: (&Path, bool),
 ) -> Result<(), String> {
@@ -106,7 +106,7 @@ fn install_fabric(
         .lines()
         .filter_map(recorded_mod)
         .collect();
-    installed_mods::check_reinstall(mods_dirs, &recorded, app_data)?;
+    installed_mods::check_reinstall(mods_dirs, &recorded, storage)?;
     let engine_dir = home.join(".ferrocraft");
     let (source, required) = runtime;
     install_fabric_runtime(source, &engine_dir, written, required)?;
@@ -250,7 +250,10 @@ fn recorded_mod(line: &str) -> Option<&Path> {
 
 /// Remove every install path in the manifest that passes `removable` under a recorded root.
 /// A line that fails is skipped, not removed; the manifest stays then. Returns (removed, skipped).
-fn uninstall(manifest: &Path, app_data: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+fn uninstall(
+    manifest: &Path,
+    resolve_storage: impl FnOnce() -> Result<oneclient::Storage, String>,
+) -> Result<(Vec<String>, Vec<String>), String> {
     let text = fs::read_to_string(manifest)
         .map_err(|e| format!("{}: {e} (nothing installed?)", manifest.display()))?;
     let install_dir = fs::canonicalize(manifest.parent().unwrap())
@@ -264,9 +267,8 @@ fn uninstall(manifest: &Path, app_data: &Path) -> Result<(Vec<String>, Vec<Strin
     let artifacts = || lines().filter(|l| !l.starts_with(ROOT_PREFIX));
     let mods: Vec<_> = artifacts().filter_map(recorded_mod).collect();
     if !mods.is_empty() {
-        oneclient::require_closed()?;
+        installed_mods::check_uninstall(&mods, &resolve_storage()?)?;
     }
-    installed_mods::check_uninstall(&mods, app_data)?;
     for line in artifacts() {
         let found = match removable(line, &roots, &install_dir) {
             Ok(found) => found,
@@ -511,21 +513,39 @@ fn owned_mods_dir(profile: &Path) -> Result<PathBuf, String> {
 
 fn install(o: &Opts, env: &Env) -> Result<(), String> {
     let exe = env::current_exe().map_err(|e| e.to_string())?;
-    install_from(o, env, exe.parent().unwrap_or(Path::new(".")))
-}
-
-fn install_from(o: &Opts, env: &Env, release: &Path) -> Result<(), String> {
-    // Explicit paths do not download OneClient or create a new profile.
-    let explicit = o.mc.is_some() || o.oneclient.is_some();
-    if !explicit || o.oneclient.is_some() {
+    if o.mc.is_none() || o.oneclient.is_some() {
         oneclient::require_closed()?;
     }
-    let oneclient = if explicit {
-        None
+    install_from(o, env, exe.parent().unwrap_or(Path::new(".")), || {
+        oneclient::data_dirs(&env.data)
+    })
+}
+
+fn install_from(
+    o: &Opts,
+    env: &Env,
+    release: &Path,
+    resolve_storage: impl FnOnce() -> Result<oneclient::Storage, String>,
+) -> Result<(), String> {
+    // Explicit paths do not download OneClient or create a new profile.
+    let explicit = o.mc.is_some() || o.oneclient.is_some();
+    let base = env.home.join(".ferrocraft");
+    let (oneclient, storage) = if !explicit {
+        let (app, storage) = oneclient::prepare(&base, resolve_storage)?;
+        let profile = default_oneclient_profile(&storage.0)?;
+        (Some((app, profile)), Some(storage))
     } else {
-        let (app, data) = oneclient::prepare(&env.home.join(".ferrocraft"), &env.data)
-            .map_err(|e| e.to_string())?;
-        Some((app, default_oneclient_profile(&data)?))
+        let mut storage = None;
+        if o.oneclient.is_some() {
+            for name in ENGINE_NAMES {
+                let path = base.join(name);
+                if path.try_exists().map_err(|e| format!("{}: {e}", path.display()))? {
+                    storage = Some(resolve_storage()?);
+                    break;
+                }
+            }
+        }
+        (None, storage)
     };
     let mc = o.mc.clone().or_else(|| {
         let d = env.minecraft_dir();
@@ -541,7 +561,7 @@ fn install_from(o: &Opts, env: &Env, release: &Path) -> Result<(), String> {
     if mc.is_none() && mods.is_empty() {
         return Err("no 1.8.9 Fabric or Ornithe cluster found in --oneclient-dir".into());
     }
-    install_targets(o, env, mc, mods, release)?;
+    install_targets(o, env, mc, mods, release, storage.as_ref())?;
     if let Some((app, (_, name))) = oneclient {
         println!(
             "Open OneClient at {} and select {name} after signing in.",
@@ -560,6 +580,7 @@ fn install_targets(
     mc: Option<PathBuf>,
     mods: Vec<PathBuf>,
     release: &Path,
+    storage: Option<&oneclient::Storage>,
 ) -> Result<(), String> {
     let f = files(o, release);
     let mut written = Vec::new();
@@ -577,7 +598,7 @@ fn install_targets(
                 &f.fabric,
                 &f.engine,
                 &env.home,
-                &env.data,
+                storage,
                 &mut written,
                 (release, o.oneclient.is_none()),
             )?;
@@ -606,7 +627,10 @@ fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("install") => install(&parse(&args[1..])?, &env),
         Some("uninstall") if args.len() == 1 => {
-            let (removed, skipped) = uninstall(&manifest_path(&env.home), &env.data)?;
+            let (removed, skipped) = uninstall(&manifest_path(&env.home), || {
+                oneclient::require_closed()?;
+                oneclient::data_dirs(&env.data)
+            })?;
             for p in removed {
                 println!("removed {p}");
             }
@@ -642,6 +666,18 @@ mod tests {
         d
     }
 
+    fn fixture_storage(app_data: &Path) -> Result<oneclient::Storage, String> {
+        oneclient::resolve_data_dir(app_data.join("Polyfrost/OneClient"), &app_data.join("legacy"))
+            .map_err(|e| e.to_string())
+    }
+
+    fn uninstall_fixture(
+        manifest: &Path,
+        app_data: &Path,
+    ) -> Result<(Vec<String>, Vec<String>), String> {
+        uninstall(manifest, || fixture_storage(app_data))
+    }
+
     #[test]
     fn oneclient_install_creates_a_profile_with_the_mod_and_engine() {
         let tmp = tmp("oneclient");
@@ -658,6 +694,9 @@ mod tests {
         for name in FABRIC_RUNTIME {
             fs::write(release.join(name), name.as_bytes()).unwrap();
         }
+        let legacy = env.data.join("legacy");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("settings.json"), "{}").unwrap();
         let (profile, _) = default_oneclient_profile(&env.data.join("Polyfrost/OneClient")).unwrap();
         install_from(
             &Opts {
@@ -668,6 +707,7 @@ mod tests {
             },
             &env,
             &release,
+            || fixture_storage(&env.data),
         )
         .unwrap();
 
@@ -686,7 +726,8 @@ mod tests {
                 name.as_bytes()
             );
         }
-        uninstall(&manifest_path(&env.home), &env.data).unwrap();
+        fs::remove_dir_all(legacy).unwrap();
+        uninstall_fixture(&manifest_path(&env.home), &env.data).unwrap();
         assert!(!jar.exists());
         assert!(!engine.exists());
         assert!(profile.join(".instance.json").exists());
@@ -709,10 +750,19 @@ mod tests {
         symlink(&relocated, env.home.join(".ferrocraft")).unwrap();
         let release = tmp.path().join("archive");
         fs::create_dir(&release).unwrap();
+        let data = env.data.join("Polyfrost/OneClient");
+        fs::create_dir_all(&data).unwrap();
+        let settings = data.join("settings.json");
+        fs::write(&settings, r#"{"previous_data_dir":"relative"}"#).unwrap();
+        assert!(install_from(&Opts::default(), &env, &release, || fixture_storage(&env.data))
+            .unwrap_err()
+            .contains("previous data directory must be an absolute path"));
+        assert!(!data.join("clusters").exists());
+        assert!(fs::read_dir(&relocated).unwrap().next().is_none());
+        fs::remove_file(settings).unwrap();
         let installed = env.home.join(".ferrocraft/oneclient-2.12.0/OneClient.AppImage");
         fs::create_dir_all(installed.parent().unwrap()).unwrap();
         fs::write(installed, []).unwrap();
-        let data = env.data.join("Polyfrost/OneClient");
         let (profile, _) = default_oneclient_profile(&data).unwrap();
         let personal = data.join("clusters/personal/mods");
         fs::create_dir_all(&personal).unwrap();
@@ -727,23 +777,24 @@ mod tests {
             engine: Some(engine),
             ..Opts::default()
         };
-        let err = install_from(&opts, &env, &release).unwrap_err();
+        let install = || install_from(&opts, &env, &release, || fixture_storage(&env.data));
+        let err = install().unwrap_err();
         assert!(err.contains("Expected a directory inside the Ferrocraft profile"), "{err}");
         assert!(fs::read_dir(personal).unwrap().next().is_none());
         assert!(!manifest_path(&env.home).exists());
         fs::remove_file(profile.join("mods")).unwrap();
-        assert!(install_from(&opts, &env, &release).unwrap_err().contains("Missing Fabric host runtime"));
+        assert!(install().unwrap_err().contains("Missing Fabric host runtime"));
         assert!(!profile.join("mods").join(FABRIC_JAR).exists());
         for name in FABRIC_RUNTIME {
             fs::write(release.join(name), name.as_bytes()).unwrap();
         }
-        install_from(&opts, &env, &release).unwrap();
+        install().unwrap();
         assert_eq!(fs::read(profile.join("mods").join(FABRIC_JAR)).unwrap(), b"bootstrap");
         let engine_dir = env.home.join(".ferrocraft");
         for name in FABRIC_RUNTIME {
             assert_eq!(fs::read(engine_dir.join(name)).unwrap(), name.as_bytes());
         }
-        uninstall(&manifest_path(&env.home), &env.data).unwrap();
+        uninstall_fixture(&manifest_path(&env.home), &env.data).unwrap();
         for name in FABRIC_RUNTIME {
             assert!(!engine_dir.join(name).exists());
         }
@@ -852,7 +903,7 @@ mod tests {
                 &incoming,
                 &new_engine,
                 &home,
-                &app_data,
+                None,
                 &mut Vec::new(),
                 (tmp.path(), false),
             )
@@ -867,7 +918,7 @@ mod tests {
             &cached,
             &new_engine,
             &home,
-            &app_data,
+            None,
             &mut Vec::new(),
             (tmp.path(), false),
         )
@@ -884,7 +935,7 @@ mod tests {
                 &incoming,
                 &new_engine,
                 &home,
-                &app_data,
+                Some(&fixture_storage(&app_data).unwrap()),
                 &mut Vec::new(),
                 (tmp.path(), false),
             )
@@ -897,7 +948,7 @@ mod tests {
             if corrupt {
                 fs::write(&cached, b"truncated archive").unwrap();
             }
-            for err in [reinstall(), uninstall(&manifest, &app_data).unwrap_err()] {
+            for err in [reinstall(), uninstall_fixture(&manifest, &app_data).unwrap_err()] {
                 assert!(
                     err.contains(&renamed.display().to_string())
                         && err.contains(&cached.display().to_string()),
@@ -917,7 +968,7 @@ mod tests {
             } else {
                 fs::remove_file(&jar).unwrap();
             }
-            let err = uninstall(&manifest, &tmp.path().join("app-data")).unwrap_err();
+            let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
             assert!(err.contains("OneClient"), "{err}");
             assert_eq!(jar.exists(), materialized);
             assert_eq!(fs::read(&engine).unwrap(), b"engine");
@@ -938,13 +989,13 @@ mod tests {
             &incoming,
             &new_engine,
             &home,
-            &app_data,
+            None,
             &mut Vec::new(),
             (tmp.path(), false),
         )
         .unwrap_err();
         assert!(err.contains("mod at the install destination"), "{err}");
-        let err = uninstall(&manifest, &tmp.path().join("app-data")).unwrap_err();
+        let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
         assert!(err.contains("OneClient still manages"), "{err}");
         assert_eq!(fs::read(&jar).unwrap(), unrelated);
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
@@ -967,13 +1018,13 @@ mod tests {
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
         assert!(!other_mods.exists());
         fs::rename(&previous, &data).unwrap();
-        let err = uninstall(&manifest, &app_data).unwrap_err();
+        let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
         assert!(err.contains("renamed.jar") && err.contains("not at a recorded install path"));
         assert!(err.contains("remove it in OneClient"), "{err}");
         assert!(engine.is_file() && version.is_dir() && manifest.is_file());
 
         db.execute("DELETE FROM cluster_artifacts", []).unwrap();
-        let err = uninstall(&manifest, &app_data).unwrap_err();
+        let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
         assert!(err.contains("remove the mod from the OneClient installation"), "{err}");
         assert!(!err.contains("OneClient Storage"), "{err}");
         fs::rename(&data, &previous).unwrap();
@@ -985,7 +1036,7 @@ mod tests {
         let err = reinstall();
         assert!(err.contains(&previous.join("clusters").display().to_string()), "{err}");
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
-        let err = uninstall(&manifest, &app_data).unwrap_err();
+        let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
         let recovery = format!("clear {} in OneClient Storage", previous.display());
         assert!(err.contains(&recovery), "{err}");
         assert!(engine.is_file() && version.is_dir() && manifest.is_file());
@@ -998,7 +1049,7 @@ mod tests {
              INSERT INTO cluster_artifacts VALUES (1, 'other', 'ferrocraft-fabric.jar', 1);",
         )
         .unwrap();
-        let (removed, skipped) = uninstall(&manifest, &app_data).unwrap();
+        let (removed, skipped) = uninstall_fixture(&manifest, &app_data).unwrap();
         assert_eq!(removed.len(), 2);
         assert!(skipped.is_empty());
         assert!(unrelated.is_file());
@@ -1029,7 +1080,7 @@ mod tests {
             &incoming,
             &engine,
             &home,
-            &tmp.path().join("app-data"),
+            None,
             &mut written,
             (tmp.path(), false),
         )
@@ -1041,9 +1092,9 @@ mod tests {
         fs::remove_file(&jar).unwrap();
         symlink(&cached, &jar).unwrap();
         record(&manifest, &[mods, home.join(".ferrocraft")], &written).unwrap();
-        assert!(uninstall(&manifest, &tmp.path().join("app-data"))
+        assert!(uninstall_fixture(&manifest, &tmp.path().join("app-data"))
             .unwrap_err()
-            .contains("OneClient"));
+            .contains("OneClient may manage this link"));
         assert_eq!(fs::read_link(&jar).unwrap(), cached);
         assert_eq!(
             fs::read(home.join(".ferrocraft/ferrocraft-engine")).unwrap(),
@@ -1119,7 +1170,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
-            &tmp.join("app-data"),
+            None,
             &mut written,
             (&tmp, false),
         )
@@ -1138,7 +1189,7 @@ mod tests {
         );
         fs::write(tmp.join("mc/versions/ferrocraft-1.8.9/extra.jar"), b"x").unwrap();
         fs::write(tmp.join("mc/ferrocraft/engine.log"), b"x").unwrap();
-        let (removed, skipped) = uninstall(&manifest, &tmp.join("app-data")).unwrap();
+        let (removed, skipped) = uninstall_fixture(&manifest, &tmp.join("app-data")).unwrap();
         assert_eq!(removed.len(), written.len());
         assert!(skipped.is_empty());
         assert!(
@@ -1163,7 +1214,7 @@ mod tests {
         );
         let manifest = tmp.join("manifest.txt");
         let rec = record(&manifest, std::slice::from_ref(&rel), &written);
-        let out = uninstall(&manifest, &tmp.join("app-data"));
+        let out = uninstall_fixture(&manifest, &tmp.join("app-data"));
         let left = rel.join("versions/ferrocraft-1.8.9").exists();
         let _ = fs::remove_dir_all(&rel);
         res.unwrap();
@@ -1188,7 +1239,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &engine,
             &home,
-            &tmp.join("app-data"),
+            None,
             &mut Vec::new(),
             (&tmp, false),
         )
@@ -1211,7 +1262,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
-            &tmp.join("app-data"),
+            None,
             &mut written,
             (&tmp, false),
         );
@@ -1259,7 +1310,7 @@ mod tests {
             let mut text = fs::read_to_string(&manifest).unwrap();
             text.push_str(&format!("{bad}\n"));
             fs::write(&manifest, text).unwrap();
-            let (removed, skipped) = uninstall(&manifest, &tmp.join("app-data")).unwrap();
+            let (removed, skipped) = uninstall_fixture(&manifest, &tmp.join("app-data")).unwrap();
             assert_eq!(removed.len(), 1, "{bad}");
             assert!(skipped.len() == 1 && skipped[0].starts_with(&bad), "{bad}");
             assert!(!ours.exists(), "{bad}");
@@ -1291,7 +1342,7 @@ mod tests {
             &[mc.join("ferrocraft")],
         )
         .unwrap();
-        let (removed, skipped) = uninstall(&manifest, &tmp.join("app-data")).unwrap();
+        let (removed, skipped) = uninstall_fixture(&manifest, &tmp.join("app-data")).unwrap();
         assert!(removed.is_empty() && skipped.len() == 1);
         assert!(outside.join("ferrocraft/ferrocraft-engine").is_file());
         fs::remove_dir_all(&tmp).unwrap();

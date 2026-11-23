@@ -26,6 +26,7 @@ Food crumbs: the engine calls `Particles::eat_crumbs(count, feet, eye, (yaw, pit
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow` (radius 10 columns, 5 on Fast graphics); sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
+Creeper bodies and charge shells share the 1.8.9 `ModelCreeper` pivots.
 Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
 `set_fancy_graphics` applies the Graphics option: Fast makes leaves solid cubes that hide shared faces.
 `set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.

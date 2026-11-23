@@ -108,7 +108,14 @@ impl Light {
         self.sample(x.clamp(-1, 16), y, z.clamp(-1, 16))
     }
 
-    pub(crate) fn sample(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
+    pub(crate) fn sample_slab(&self, hood: &Neighborhood, x: i32, y: i32, z: i32) -> (u8, u8) {
+        if !hood.loaded(x.div_euclid(16), z.div_euclid(16)) {
+            return (self.sky_default, 0);
+        }
+        self.sample(x, y, z)
+    }
+
+    fn sample(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
         if !(0..self.height as i32).contains(&y) {
             return (self.sky_default, 0);
         }

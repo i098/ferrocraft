@@ -294,7 +294,7 @@ impl Mesher<'_> {
                 let mut sky = 0;
                 let mut block = 0;
                 for [dx, dy, dz] in DIRS {
-                    let (s, b) = self.light.sample(x + dx, y + dy, z + dz);
+                    let (s, b) = self.light.sample_slab(self.hood, x + dx, y + dy, z + dz);
                     sky = sky.max(s);
                     block = block.max(b);
                     if sky == 15 && block == 15 {
@@ -303,7 +303,7 @@ impl Mesher<'_> {
                 }
                 (sky, block)
             } else {
-                self.light.sample(x, y, z)
+                self.light.sample_slab(self.hood, x, y, z)
             };
             [sky, block.max(emission(state))]
         };
@@ -1313,6 +1313,42 @@ mod tests {
                     .unwrap();
                 assert!((corner.light[1] - level / 15.0).abs() < 1e-6, "{corner:?}");
             }
+        }
+    }
+
+    #[test]
+    fn slab_side_at_unloaded_chunk_uses_empty_chunk_light() {
+        let c = flat(|x, y, z| match (x, y, z) {
+            (15, 70, 4) => 44 << 4,
+            (15, 69, 4) => 89 << 4,
+            (_, 71, _) => 1 << 4,
+            _ => 0,
+        });
+        let mut sent = vec![0; c.len()];
+        sent[index(15, 69, 4)] = 15;
+        let mut server = [None; 9];
+        server[4] = Some(sent.as_slice());
+        for lights in [[None; 9], server] {
+            let hood = Neighborhood {
+                origin: (0, 0),
+                has_skylight: true,
+                center: &c,
+                neighbors: [None; 8],
+                biomes: [None; 9],
+                lights,
+            };
+            let mesh = mesh_chunk(&hood, &Atlas::flat(), true, true);
+            let side = mesh
+                .opaque
+                .vertices
+                .chunks_exact(4)
+                .find(|q| {
+                    q[0].pos[1] == 70.0
+                        && q[2].pos[1] == 70.5
+                        && q.iter().all(|v| v.pos[0] == 16.0)
+                })
+                .unwrap();
+            assert!(side.iter().all(|v| v.light == [1.0, 0.0]), "{side:?}");
         }
     }
 

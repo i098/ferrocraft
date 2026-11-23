@@ -11,6 +11,8 @@ The right button places blocks (`world::place`): the engine sends `PlayerBlockPl
 Input and chat come from `input-audio`.
 
 Launch arguments: `--username`, `--assetsDir`, `--gameDir`, `--version`, `--server`, `--port`, `--width` (default 854), `--height` (default 480), `--fullscreen`. A bad `--width` or `--height` value exits with code 2.
+For online mode, pass `--uuid` and `--access-token-stdin`, then write the UTF-8 token to stdin and close it.
+Direct launches can use `FERROCRAFT_ACCESS_TOKEN` as a fallback.
 The renderer reads textures and the font from a client jar. The boot jar passes the classpath jar that holds `ascii.png` as a file value of `--assetsDir`, and the engine uses it as is. Otherwise the engine looks for `versions/1.8.9/1.8.9.jar` (or `versions/<--version>/<--version>.jar`) under the assets dir's parent, `--gameDir` or its parent. It logs a warning when no font is found. Resource packs listed in `resourcePacks` in `options.txt` layer over the jar.
 A server resource pack is offered through a Yes/No prompt screen unless the `servers.dat` entry decides it; see `src/app/pack.rs`.
 The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`, `--port` and `FERROCRAFT_SERVER` are all unset, the title screen opens and nothing connects.
@@ -19,8 +21,8 @@ The engine runs the mod host in the background.
 It uses a complete `FERROCRAFT_MODHOST_*` configuration first.
 Otherwise, it uses the OneClient cluster from `FERROCRAFT_CLUSTER` or the manifest in `--gameDir`.
 For a plain game folder, the engine checks `mods/` and `mods/1.8.9/` for JAR and ZIP files.
-The engine copies those archives to its cache and installs Java 8 and Forge there.
-The host uses the cache as its game folder.
+The engine installs Java 8 and Forge in its cache.
+It copies the archives to a separate game folder for each JVM and removes that folder after the JVM exits.
 The engine checks the selected `mods/` folder twice a second.
 One second after the last jar change, or when you press F8, the engine restarts the host without disconnecting.
 If a host start is in progress, the engine waits for it to finish before it restarts the host.

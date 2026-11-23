@@ -30,7 +30,7 @@ pub fn poll<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
 pub struct Watch {
     dir: PathBuf,
     forge: bool,
-    seen: Vec<(PathBuf, SystemTime, u64)>,
+    seen: Option<Vec<(PathBuf, SystemTime, u64)>>,
     last_scan: Option<Instant>,
     changed_at: Option<Instant>,
 }
@@ -42,7 +42,7 @@ const SETTLE: Duration = Duration::from_secs(1);
 impl Watch {
     pub fn new(game_dir: &Path) -> Self {
         let (root, forge) = if let Some(cfg) = Config::from_env() {
-            (cfg.game_dir, true)
+            (cfg.game_dir, false)
         } else if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
             (cluster, false)
         } else {
@@ -50,7 +50,9 @@ impl Watch {
         };
         let dir = root.join("mods");
         Self {
-            seen: scan(&dir, forge),
+            seen: scan(&dir, forge)
+                .map_err(|e| log::line(&e.to_string()))
+                .ok(),
             forge,
             dir,
             last_scan: None,
@@ -67,9 +69,12 @@ impl Watch {
             return false;
         }
         self.last_scan = Some(now);
-        let jars = scan(&self.dir, self.forge);
-        if jars != self.seen {
-            self.seen = jars;
+        let Ok(jars) = scan(&self.dir, self.forge) else {
+            self.changed_at = self.changed_at.map(|_| now);
+            return false;
+        };
+        if self.seen.as_ref() != Some(&jars) {
+            self.seen = Some(jars);
             self.changed_at = Some(now);
         }
         match self.changed_at {
@@ -82,53 +87,39 @@ impl Watch {
     }
 }
 
-fn archives(dir: &Path, forge: bool) -> impl Iterator<Item = (PathBuf, std::fs::Metadata)> + '_ {
-    let folders = [Some(Path::new("")), forge.then_some(Path::new("1.8.9"))];
-    folders.into_iter().flatten().flat_map(move |folder| {
-        std::fs::read_dir(dir.join(folder))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(move |entry| {
-                let name = entry.file_name();
-                match Path::new(&name).extension()?.to_str()? {
-                    "jar" => {}
-                    "zip" if forge => {}
-                    _ => return None,
-                }
-                let metadata = entry.path().metadata().ok()?;
-                metadata.is_file().then(|| (folder.join(name), metadata))
-            })
-    })
-}
-
-fn scan(dir: &Path, forge: bool) -> Vec<(PathBuf, SystemTime, u64)> {
-    let mut jars: Vec<_> = archives(dir, forge)
-        .filter_map(|(path, m)| Some((path, m.modified().ok()?, m.len())))
-        .collect();
+fn scan(dir: &Path, forge: bool) -> std::io::Result<Vec<(PathBuf, SystemTime, u64)>> {
+    let mut jars = Vec::new();
+    scan_folder(dir, Path::new(""), forge, &mut jars)?;
+    if forge {
+        scan_folder(dir, Path::new("1.8.9"), true, &mut jars)?;
+    }
     jars.sort();
-    jars
+    Ok(jars)
 }
 
-fn stage_plain(src: &Path, dst: &Path, mods: impl Iterator<Item = PathBuf>) -> std::io::Result<()> {
-    for folder in [Path::new(""), Path::new("1.8.9")] {
-        let target = dst.join(folder);
-        let source = src.join(folder);
-        if let (Ok(target), Ok(source)) = (target.canonicalize(), source.canonicalize()) {
-            if target == source {
-                return Err(std::io::Error::other("the Forge cache is the profile's mods folder"));
-            }
+fn scan_folder(
+    dir: &Path,
+    folder: &Path,
+    forge: bool,
+    jars: &mut Vec<(PathBuf, SystemTime, u64)>,
+) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir.join(folder)) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        match Path::new(&name).extension().and_then(|ext| ext.to_str()) {
+            Some("jar") => {}
+            Some("zip") if forge => {}
+            _ => continue,
         }
-    }
-    for (old, _) in archives(dst, true) {
-        std::fs::remove_file(dst.join(old))?;
-    }
-    for path in mods {
-        let target = dst.join(&path);
-        std::fs::create_dir_all(target.parent().unwrap())?;
-        let mut input = std::fs::File::open(src.join(path))?;
-        let mut output = std::fs::File::create_new(target)?;
-        std::io::copy(&mut input, &mut output)?;
+        let m = std::fs::metadata(entry.path())?;
+        if m.is_file() {
+            jars.push((folder.join(name), m.modified()?, m.len()));
+        }
     }
     Ok(())
 }
@@ -140,27 +131,25 @@ fn start(game_dir: &Path) -> Option<ModHost> {
         ModHost::start(&from_cluster(&cluster)?)
     } else {
         let src = game_dir.join("mods");
-        let mods: Vec<_> = archives(&src, true).map(|(path, _)| path).collect();
+        let mods = scan(&src, true).map_err(|e| fail::<ModHost>(&e)).ok()?;
         if mods.is_empty() {
             return None;
         }
-        let mut cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
-        cfg.game_dir = cfg.game_dir.join("plain");
-        if let Err(e) = stage_plain(&src, &cfg.game_dir.join("mods"), mods.into_iter()) {
-            return fail(&e);
-        }
-        ModHost::start_in_game_dir(&cfg)
+        let cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
+        ModHost::start_staged(cfg, &src, mods.into_iter().map(|(path, _, _)| path))
     };
     result.map_err(|e| fail::<ModHost>(&e)).ok()
 }
 
 fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
-    env.filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| {
-        game_dir
-            .join(".oneclient-mods.json")
-            .is_file()
-            .then(|| game_dir.to_path_buf())
-    })
+    env.filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            game_dir
+                .join(".oneclient-mods.json")
+                .is_file()
+                .then(|| game_dir.to_path_buf())
+        })
 }
 
 fn from_cluster(cluster: &Path) -> Option<Config> {
@@ -284,26 +273,32 @@ mod tests {
     }
 
     #[test]
-    fn plain_staging_preserves_the_profile_and_forge_archive_layout() {
+    fn failed_scan_does_not_replace_the_watch_snapshot() {
         let root = std::env::temp_dir().join(format!("fc-plain-{}", std::process::id()));
-        let profile = root.join("profile");
-        let src = profile.join("mods");
-        let dst = root.join("cache/mods");
-        std::fs::create_dir_all(src.join("1.8.9")).unwrap();
-        std::fs::create_dir_all(dst.join("1.8.9")).unwrap();
-        std::fs::write(src.join("a.jar"), "top").unwrap();
-        std::fs::write(src.join("1.8.9/a.zip"), "versioned").unwrap();
-        std::fs::write(src.join("ignore.txt"), "unrelated").unwrap();
-        std::fs::write(dst.join("1.8.9/old.jar"), "removed").unwrap();
-        std::fs::write(profile.join("resourcepacks"), "keep").unwrap();
-        stage_plain(&src, &dst, archives(&src, true).map(|(p, _)| p)).unwrap();
-        assert_eq!(std::fs::read(dst.join("a.jar")).unwrap(), b"top");
-        assert_eq!(std::fs::read(dst.join("1.8.9/a.zip")).unwrap(), b"versioned");
-        assert!(!dst.join("ignore.txt").exists());
-        assert!(!dst.join("1.8.9/old.jar").exists());
-        std::fs::write(dst.join("a.jar"), "host write").unwrap();
-        assert_eq!(std::fs::read(src.join("a.jar")).unwrap(), b"top");
-        assert_eq!(std::fs::read(profile.join("resourcepacks")).unwrap(), b"keep");
+        let mods = root.join("mods");
+        let versioned = mods.join("1.8.9");
+        let parked = root.join("parked");
+        std::fs::create_dir_all(&versioned).unwrap();
+        std::fs::write(mods.join("top.jar"), "top").unwrap();
+        std::fs::write(versioned.join("nested.zip"), "nested").unwrap();
+        let mut watch = Watch {
+            seen: Some(scan(&mods, true).unwrap()),
+            dir: mods.clone(),
+            forge: true,
+            last_scan: None,
+            changed_at: None,
+        };
+        std::fs::rename(&versioned, &parked).unwrap();
+        std::fs::write(&versioned, "not a directory").unwrap();
+        assert!(scan(&mods, true).is_err());
+        assert_eq!(scan(&mods, false).unwrap().len(), 1);
+        let t = Instant::now();
+        assert!(!watch.poll(t));
+        assert!(!watch.poll(t + Duration::from_secs(2)));
+        std::fs::remove_file(&versioned).unwrap();
+        std::fs::rename(parked, versioned).unwrap();
+        assert!(!watch.poll(t + Duration::from_secs(4)));
+        assert!(!watch.poll(t + Duration::from_secs(6)));
         std::fs::remove_dir_all(root).unwrap();
     }
 

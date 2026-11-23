@@ -1971,6 +1971,7 @@ mod tests {
                 mc.join("assets").display().to_string(),
             ],
             None,
+            None,
         )
         .unwrap();
         let mut app = App::new(args);

@@ -1,6 +1,8 @@
 package net.ferrocraft.boot;
 
 import java.io.File;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,14 +18,33 @@ public final class Engine {
         File engine = findEngine();
         List<String> cmd = new ArrayList<String>();
         cmd.add(engine.getPath());
-        for (String a : args) cmd.add(a);
+        String token = null;
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equals("--accessToken")) {
+                if (i + 1 < args.length && !args[i + 1].startsWith("--")) token = args[++i];
+            } else if (arg.startsWith("--accessToken=")) {
+                token = arg.substring("--accessToken=".length());
+            } else {
+                cmd.add(arg);
+            }
+        }
         String clientJar = findClientJar();
         if (clientJar != null) {
             cmd.add("--assetsDir");
             cmd.add(clientJar);
         }
         System.out.println("ferrocraft-boot: starting " + engine);
-        return new ProcessBuilder(cmd).inheritIO().start().waitFor();
+        ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
+        String fallback = pb.environment().remove("FERROCRAFT_ACCESS_TOKEN");
+        if (token == null) token = fallback;
+        if (token == null) return pb.start().waitFor();
+        cmd.add("--access-token-stdin");
+        Process child = pb.redirectInput(ProcessBuilder.Redirect.PIPE).start();
+        try (OutputStream input = child.getOutputStream()) {
+            input.write(token.getBytes(StandardCharsets.UTF_8));
+        }
+        return child.waitFor();
     }
 
     /** The classpath jar that holds the vanilla font: the engine reads textures and text from it, wherever the launcher keeps it. */

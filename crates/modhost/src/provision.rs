@@ -72,7 +72,16 @@ impl Config {
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
         moj.base_mut().set_main_dir(&main);
-        moj.base_mut().set_jvm_policy(java_policy(&main)?);
+        #[cfg(unix)]
+        let policy = java_policy(
+            &main,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            java8_x64,
+        )?;
+        #[cfg(not(unix))]
+        let policy = base::JvmPolicy::Mojang;
+        moj.base_mut().set_jvm_policy(policy);
         let game = installer.install(())?;
 
         let cp = game
@@ -126,45 +135,54 @@ impl Config {
 }
 
 #[cfg(any(unix, test))]
-fn needs_rosetta(os: &str, arch: &str) -> bool {
-    (os, arch) == ("macos", "aarch64")
-}
-
-fn java_policy(main: &Path) -> Result<base::JvmPolicy, Error> {
-    #[cfg(unix)]
-    if needs_rosetta(std::env::consts::OS, std::env::consts::ARCH) {
-        use std::process::{Command, Stdio};
-        let supported = Command::new("/usr/bin/arch")
-            .args(["-x86_64", "/usr/bin/true"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if !supported {
-            return Err(Error::Missing(
-                "Forge needs Rosetta to run Java 8. Run `softwareupdate --install-rosetta`.".into(),
-            ));
-        }
-        return java8_x64(main).map(base::JvmPolicy::Static);
+fn java_policy(
+    main: &Path,
+    os: &str,
+    arch: &str,
+    install_x64: impl FnOnce(&Path) -> Result<PathBuf, Error>,
+) -> Result<base::JvmPolicy, Error> {
+    if (os, arch) == ("macos", "aarch64") {
+        install_x64(&main.join("jvm/jre-legacy-mac-os")).map(base::JvmPolicy::Static)
+    } else {
+        Ok(base::JvmPolicy::Mojang)
     }
-    let _ = main;
-    Ok(base::JvmPolicy::Mojang)
 }
 
 #[cfg(unix)]
-fn java8_x64(main: &Path) -> Result<PathBuf, Error> {
-    use std::os::unix::fs::PermissionsExt;
-    let root = main.join("jvm/jre-legacy-mac-os");
+fn java8_x64(root: &Path) -> Result<PathBuf, Error> {
+    use std::process::{Command, Stdio};
+    let supported = Command::new("/usr/bin/arch")
+        .args(["-x86_64", "/usr/bin/true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !supported {
+        return Err(Error::Missing(
+            "Forge needs Rosetta to run Java 8. Run `softwareupdate --install-rosetta`.".into(),
+        ));
+    }
     let manifest = root.join("manifest.json");
     fetch(
         "https://piston-meta.mojang.com/v1/packages/78e31aa15b3f437f37263351436f63e0a96e0067/manifest.json",
         &manifest,
         "78e31aa15b3f437f37263351436f63e0a96e0067",
     )?;
-    let manifest: serde_json::Value = serde_json::from_reader(fs::File::open(manifest)?)
-        .map_err(io::Error::other)?;
+    let manifest: serde_json::Value =
+        serde_json::from_reader(fs::File::open(manifest)?).map_err(io::Error::other)?;
     let invalid = || Error::Missing("Invalid Mojang x64 Java 8 manifest".into());
     let files = manifest["files"].as_object().ok_or_else(invalid)?;
+    download_java_files(root, files)?;
+    Ok(root.join("jre.bundle/Contents/Home/bin/java"))
+}
+
+#[cfg(unix)]
+fn download_java_files(
+    root: &Path,
+    files: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let invalid = || Error::Missing("Invalid Mojang x64 Java 8 manifest".into());
     let mut batch = portablemc::download::Batch::new();
     for (name, entry) in files {
         let relative = Path::new(name);
@@ -193,14 +211,16 @@ fn java8_x64(main: &Path) -> Result<PathBuf, Error> {
             fs::set_permissions(root.join(name), fs::Permissions::from_mode(0o755))?;
         }
     }
-    Ok(root.join("jre.bundle/Contents/Home/bin/java"))
+    Ok(())
 }
 
 fn parse_sha1(text: &str) -> Result<[u8; 20], Error> {
     if text.len() != 40 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(Error::Missing("Invalid download SHA-1".into()));
     }
-    Ok(std::array::from_fn(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap()))
+    Ok(std::array::from_fn(|i| {
+        u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap()
+    }))
 }
 
 fn matches_sha1(path: &Path, expected: [u8; 20]) -> bool {
@@ -226,10 +246,23 @@ fn fetch(url: &str, path: &Path, sha1: &str) -> Result<(), Error> {
 mod tests {
     #[test]
     fn forge_java_uses_rosetta_only_on_apple_silicon() {
-        assert!(super::needs_rosetta("macos", "aarch64"));
-        assert!(!super::needs_rosetta("macos", "x86_64"));
-        assert!(!super::needs_rosetta("linux", "aarch64"));
-        assert!(!super::needs_rosetta("windows", "aarch64"));
+        use super::*;
+        let cache = Path::new("cache");
+        let policy = java_policy(cache, "macos", "aarch64", |root| {
+            Ok(root.join("jre.bundle/Contents/Home/bin/java"))
+        })
+        .unwrap();
+        assert!(matches!(policy, base::JvmPolicy::Static(path)
+            if path == Path::new("cache/jvm/jre-legacy-mac-os/jre.bundle/Contents/Home/bin/java")));
+        for (os, arch) in [
+            ("macos", "x86_64"),
+            ("linux", "aarch64"),
+            ("windows", "aarch64"),
+        ] {
+            let policy =
+                java_policy(cache, os, arch, |_| panic!("unexpected x64 install")).unwrap();
+            assert!(matches!(policy, base::JvmPolicy::Mojang));
+        }
     }
 }
 

@@ -164,10 +164,73 @@ fn host_command(java: &Path) -> Command {
     cmd
 }
 
+fn jvm_command(cfg: &Config, port: u16, token: &str) -> Command {
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let cp = cfg
+        .class_path
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(sep);
+    let mut cmd = host_command(&cfg.java);
+    cmd.env("FERROCRAFT_BRIDGE_TOKEN", token)
+        .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
+    match &cfg.loader {
+        Loader::Forge => {
+            cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
+                .args([
+                    "--tweakClass",
+                    "net.minecraftforge.fml.common.launcher.FMLTweaker",
+                ])
+                .args(["--tweakClass", "net.ferrocraft.tweak.HostTweaker"]);
+        }
+        Loader::Fabric { agent, names } => {
+            cmd.arg(prefixed("-javaagent:", agent))
+                .arg(prefixed("-Dferro.tiny=", names))
+                .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
+                .args([
+                    "-cp",
+                    &cp,
+                    "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                ]);
+        }
+    }
+    cmd.args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
+        .args(["--assetsDir".as_ref(), cfg.assets_dir.as_os_str()])
+        .args(["--version", "1.8.9", "--accessToken", "x"])
+        .stdin(Stdio::null());
+    cmd
+}
+
+struct StagingDir(PathBuf);
+
+impl StagingDir {
+    fn new(cache: &Path) -> io::Result<Self> {
+        let path = cache.join(format!("plain-{}", token()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new().mode(0o700).create(&path)?;
+        }
+        #[cfg(not(unix))]
+        std::fs::create_dir(&path)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0) {
+            eprintln!("mod host: cannot remove {}: {e}", self.0.display());
+        }
+    }
+}
+
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
     child: Arc<Mutex<Child>>,
     link: Arc<Link>,
+    staging: Option<Arc<Mutex<Option<StagingDir>>>>,
 }
 
 impl ModHost {
@@ -177,57 +240,46 @@ impl ModHost {
         Self::spawn(cfg, None)
     }
 
-    pub fn start_in_game_dir(cfg: &Config) -> io::Result<Self> {
-        Self::spawn(cfg, Some(&cfg.game_dir))
+    pub fn start_staged(
+        mut cfg: Config,
+        mods: &Path,
+        archives: impl IntoIterator<Item = PathBuf>,
+    ) -> io::Result<Self> {
+        let staging = StagingDir::new(&cfg.game_dir)?;
+        for path in archives {
+            use std::path::Component::Normal;
+            let mut components = path.components();
+            if !matches!(components.next(), Some(Normal(_)))
+                || !matches!(components.next(), None | Some(Normal(_)))
+                || components.next().is_some()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid mod path",
+                ));
+            }
+            let dest = staging.0.join("mods").join(&path);
+            std::fs::create_dir_all(dest.parent().unwrap())?;
+            std::fs::copy(mods.join(path), dest)?;
+        }
+        cfg.game_dir.clone_from(&staging.0);
+        Self::spawn(&cfg, Some(staging))
     }
 
-    fn spawn(cfg: &Config, cwd: Option<&Path>) -> io::Result<Self> {
+    fn spawn(cfg: &Config, staging: Option<StagingDir>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let cp = cfg
-            .class_path
-            .iter()
-            .map(|p| p.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(sep);
+        let staging = staging.map(|dir| Arc::new(Mutex::new(Some(dir))));
         let token = token();
-        let mut cmd = host_command(&cfg.java);
-        if let Some(cwd) = cwd {
-            cmd.current_dir(cwd);
+        let mut cmd = jvm_command(cfg, port, &token);
+        if staging.is_some() {
+            cmd.current_dir(&cfg.game_dir);
         }
-        cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
-            .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
-        match &cfg.loader {
-            Loader::Forge => {
-                cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
-                    .args([
-                        "--tweakClass",
-                        "net.minecraftforge.fml.common.launcher.FMLTweaker",
-                    ])
-                    .args(["--tweakClass", "net.ferrocraft.tweak.HostTweaker"]);
-            }
-            Loader::Fabric { agent, names } => {
-                cmd.arg(prefixed("-javaagent:", agent))
-                    .arg(prefixed("-Dferro.tiny=", names))
-                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
-                    .args([
-                        "-cp",
-                        &cp,
-                        "net.fabricmc.loader.impl.launch.knot.KnotClient",
-                    ]);
-            }
-        }
-        let child = cmd
-            .args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
-            .args(["--assetsDir".as_ref(), cfg.assets_dir.as_os_str()])
-            .args(["--version", "1.8.9", "--accessToken", "x"])
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()?;
+        let child = cmd.spawn()?;
         let host = Self {
             child: Arc::new(Mutex::new(child)),
+            staging: staging.clone(),
             link: Arc::new(Link {
                 state: Mutex::new(Shared {
                     phase: Phase::Starting,
@@ -261,7 +313,13 @@ impl ModHost {
             }),
         };
         let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
-        thread::spawn(move || run(&listener, &child, &link, &token));
+        thread::spawn(move || {
+            run(&listener, &child, &link, &token);
+            if let Some(staging) = staging {
+                let mut child = child.lock().unwrap();
+                stop_child(&mut child, Some(&staging));
+            }
+        });
         Ok(host)
     }
 
@@ -600,14 +658,22 @@ impl ModHost {
             self.link.answered.notify_all();
         }
         let mut child = self.child.lock().unwrap();
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(&mut child, self.staging.as_deref());
     }
 }
 
 impl Drop for ModHost {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+fn stop_child(child: &mut Child, staging: Option<&Mutex<Option<StagingDir>>>) {
+    let _ = child.kill();
+    if child.wait().is_ok() {
+        if let Some(staging) = staging {
+            drop(staging.lock().unwrap().take());
+        }
     }
 }
 
@@ -654,7 +720,7 @@ fn transition(event: &WindowEvent) -> Option<Event> {
 
 /// Connect, then serve frames until the JVM goes away; then leave no stale commands behind.
 fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str) {
-    let result = connect(listener, child, link, token).and_then(|stream| pump(stream, link));
+    let result = connect(listener, child, link, token).and_then(|stream| pump(stream, child, link));
     let mut s = link.state.lock().unwrap();
     if let (Err(e), false) = (result, s.phase == Phase::Done) {
         eprintln!("mod host stopped: {e}");
@@ -720,24 +786,37 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String, h
     Ok((stream, brand, hooks))
 }
 
+fn wait_for_request<'a>(
+    child: &Mutex<Child>,
+    link: &'a Link,
+) -> io::Result<Option<std::sync::MutexGuard<'a, Shared>>> {
+    let mut s = link.state.lock().unwrap();
+    while s.phase == Phase::Live {
+        if s.fresh
+            || s.player.is_some()
+            || s.world.is_some()
+            || s.anchor.request.is_some()
+            || s.chat.is_some()
+            || s.probe.is_some()
+        {
+            return Ok(Some(s));
+        }
+        let (state, timeout) = link.view.wait_timeout(s, Duration::from_secs(1)).unwrap();
+        s = state;
+        if timeout.timed_out() && child.lock().unwrap().try_wait()?.is_some() {
+            break;
+        }
+    }
+    Ok(None)
+}
+
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
-fn pump(mut stream: TcpStream, link: &Link) -> io::Result<()> {
+fn pump(mut stream: TcpStream, child: &Mutex<Child>, link: &Link) -> io::Result<()> {
     loop {
         let (input, mirror, lists, events) = {
-            let mut s = link.state.lock().unwrap();
-            while s.phase == Phase::Live
-                && !s.fresh
-                && s.player.is_none()
-                && s.world.is_none()
-                && s.anchor.request.is_none()
-                && s.chat.is_none()
-                && s.probe.is_none()
-            {
-                s = link.view.wait(s).unwrap();
-            }
-            if s.phase != Phase::Live {
+            let Some(mut s) = wait_for_request(child, link)? else {
                 return Ok(());
-            }
+            };
             if let Some(p) = s.player.take() {
                 drop(s);
                 round_trip(
@@ -1043,26 +1122,75 @@ mod tests {
         const CHILD: &str = "FERROCRAFT_AUTH_TEST_CHILD";
         if std::env::var_os(CHILD).is_none() {
             let output = Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "tests::host_process_does_not_inherit_authentication"])
+                .args([
+                    "--exact",
+                    "tests::host_process_does_not_inherit_authentication",
+                ])
                 .env(CHILD, "1")
                 .env("FERROCRAFT_ACCESS_TOKEN", "session-secret")
                 .env("MSA_REFRESH_TOKEN", "refresh-secret")
                 .output()
                 .unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}");
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}"
+            );
             return;
         }
-        let status = host_command(Path::new("/bin/sh"))
-            .env("FERROCRAFT_BRIDGE_TOKEN", "bridge")
-            .args([
-                "-c",
-                r#"test -z "${FERROCRAFT_ACCESS_TOKEN+x}${MSA_REFRESH_TOKEN+x}" &&
-                   test "$FERROCRAFT_BRIDGE_TOKEN" = bridge"#,
-            ])
-            .status()
-            .unwrap();
-        assert!(status.success());
+        let root = std::env::temp_dir().join(format!("fc-auth-{}", token()));
+        std::fs::create_dir(&root).unwrap();
+        let java = root.join("java");
+        std::fs::write(
+            &java,
+            r#"#!/bin/sh
+set -eu
+test -z "${FERROCRAFT_ACCESS_TOKEN+x}${MSA_REFRESH_TOKEN+x}"
+test -n "$FERROCRAFT_BRIDGE_TOKEN"
+for arg do
+    case "$arg" in *session-secret*|*refresh-secret*) exit 1 ;; esac
+done
+test "$(cat mods/sample.jar)" = mod
+printf '%s\n' "$PWD" > "$0.result"
+"#,
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let source = root.join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("sample.jar"), b"mod").unwrap();
+        let cfg = Config {
+            loader: Loader::Forge,
+            java: java.clone(),
+            class_path: vec![],
+            game_dir: root.clone(),
+            assets_dir: root.clone(),
+        };
+        let mut host = ModHost::start_staged(cfg, &source, ["sample.jar".into()]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let path = loop {
+            if let Ok(path) = std::fs::read_to_string(java.with_extension("result")) {
+                if !path.is_empty() {
+                    break PathBuf::from(path.trim_end());
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the mod process did not pass the token check"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(path.parent(), Some(root.as_path()));
+        while path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the mod process did not release staging"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        host.stop();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn area(spans: &[([f32; 4], f32)]) -> f32 {
@@ -1177,6 +1305,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let key = |pressed| Event::Key {
@@ -1240,6 +1369,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let mut host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let worker = {
@@ -1270,6 +1400,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let mut host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let worker = {
@@ -1317,6 +1448,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let mut host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let worker = {
@@ -1352,6 +1484,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let mut host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let worker = {
@@ -1401,6 +1534,7 @@ mod tests {
         let child = Arc::new(Mutex::new(Command::new("sleep").arg("10").spawn().unwrap()));
         let mut host = ModHost {
             child: Arc::clone(&child),
+            staging: None,
             link: Arc::clone(&link),
         };
         let worker = {

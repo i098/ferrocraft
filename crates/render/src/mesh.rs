@@ -768,7 +768,7 @@ impl Mesher<'_> {
         };
         let base_light = self.slab_side_light(adjacent);
         let base_ao = ao([0; 3]);
-        let sample = |d| {
+        let sample = |d: [i32; 3]| {
             let light = self.slab_side_light([0, 1, 2].map(|i| adjacent[i] + d[i]));
             (if light == [0, 0] { base_light } else { light }, ao(d))
         };

@@ -346,6 +346,48 @@ fn fetch(url: &str, path: &Path, sha1: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The name of a class path jar in `lib_dir`.
+fn lib_name(jar: &Path, versions: &Path) -> String {
+    let name = jar.file_name().unwrap_or_default().to_string_lossy();
+    if jar.starts_with(versions) {
+        "minecraft-1.8.9.jar".into()
+    } else if name.starts_with("launchwrapper-") {
+        "lw.jar".into()
+    } else if name.starts_with("forge-") {
+        "forge.jar".into()
+    } else {
+        name.into_owned()
+    }
+}
+
+/// Hard link, or copy across file systems; replaces what is there.
+fn link(src: &Path, dst: &Path) -> io::Result<()> {
+    let scratch = StagingDir::new(dst.parent().unwrap(), "export")?;
+    let temp = scratch.0.join("jar");
+    fs::hard_link(src, &temp).or_else(|_| fs::copy(src, &temp).map(drop))?;
+    fs::rename(temp, dst)
+}
+
+fn host_jar() -> Result<PathBuf, Error> {
+    let mut found = Vec::new();
+    found.extend(std::env::var_os("FERROCRAFT_MODHOST_JAR").map(PathBuf::from));
+    found.extend(
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| Some(e.parent()?.join(HOST_JAR))),
+    );
+    found.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../java/modhost")
+            .join(HOST_JAR),
+    );
+    found.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
+        Error::Missing(format!(
+            "{HOST_JAR} not found: run java/modhost/build.sh, or set FERROCRAFT_MODHOST_JAR"
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,46 +429,4 @@ mod tests {
             assert!(matches!(policy, base::JvmPolicy::Mojang));
         }
     }
-}
-
-/// The name of a class path jar in `lib_dir`.
-fn lib_name(jar: &Path, versions: &Path) -> String {
-    let name = jar.file_name().unwrap_or_default().to_string_lossy();
-    if jar.starts_with(versions) {
-        "minecraft-1.8.9.jar".into()
-    } else if name.starts_with("launchwrapper-") {
-        "lw.jar".into()
-    } else if name.starts_with("forge-") {
-        "forge.jar".into()
-    } else {
-        name.into_owned()
-    }
-}
-
-/// Hard link, or copy across file systems; replaces what is there.
-fn link(src: &Path, dst: &Path) -> io::Result<()> {
-    let scratch = StagingDir::new(dst.parent().unwrap(), "export")?;
-    let temp = scratch.0.join("jar");
-    fs::hard_link(src, &temp).or_else(|_| fs::copy(src, &temp).map(drop))?;
-    fs::rename(temp, dst)
-}
-
-fn host_jar() -> Result<PathBuf, Error> {
-    let mut found = Vec::new();
-    found.extend(std::env::var_os("FERROCRAFT_MODHOST_JAR").map(PathBuf::from));
-    found.extend(
-        std::env::current_exe()
-            .ok()
-            .and_then(|e| Some(e.parent()?.join(HOST_JAR))),
-    );
-    found.push(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../java/modhost")
-            .join(HOST_JAR),
-    );
-    found.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
-        Error::Missing(format!(
-            "{HOST_JAR} not found: run java/modhost/build.sh, or set FERROCRAFT_MODHOST_JAR"
-        ))
-    })
 }

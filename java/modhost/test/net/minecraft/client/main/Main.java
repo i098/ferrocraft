@@ -10,6 +10,7 @@ public final class Main {
         else if ("ProbeTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.ProbeTest.run();
         else if ("ChatTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.ChatTest.run();
         else if ("MirrorHudTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.MirrorHudTest.run();
+        else if ("VanillaHudTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.VanillaHudTest.run();
         else if ("MirrorTest".equals(System.getProperty("ferro.test"))) net.ferrocraft.host.MirrorTest.run();
         else net.ferrocraft.host.PlayerTest.run();
     }

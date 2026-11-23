@@ -76,7 +76,7 @@ public final class MirrorHudTest {
         return all.contains("FPS: 144") && all.contains("Taiga") && all.contains("mc.example:25565") && all.contains("Z: -7");
     }
 
-    private static byte[] mirror() throws IOException {
+    static byte[] mirror() throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(b);
         w.writeByte('M');
@@ -102,7 +102,7 @@ public final class MirrorHudTest {
         return b.toByteArray();
     }
 
-    private static byte[] frameRequest() throws IOException {
+    static byte[] frameRequest() throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(b);
         w.writeByte('F');
@@ -119,7 +119,7 @@ public final class MirrorHudTest {
     }
 
     /** The texts of one reply frame; the layout is Sink.take. */
-    private static List<String> readTexts(DataInputStream in) throws IOException {
+    static List<String> readTexts(DataInputStream in) throws IOException {
         in.readUnsignedByte();
         long n = in.readInt() & 0xffffffffL;
         List<String> texts = new ArrayList<>();
@@ -127,6 +127,8 @@ public final class MirrorHudTest {
             int tag = in.readUnsignedByte();
             switch (tag) {
                 case 'R': in.skipBytes(16 + 4); break;
+                case 'S': in.skipBytes(in.readUnsignedByte() == 0 ? 16 + 16 + 4 : 16 + 4 + 4); break;
+                case 'H': in.skipBytes(4); break;
                 case 'G': in.skipBytes(16 + 8); break;
                 case 'T':
                     in.skipBytes(8 + 4 + 1 + 12);
@@ -138,7 +140,7 @@ public final class MirrorHudTest {
                     break;
                 case 'I':
                     string(in);
-                    in.skipBytes(16 + 4 + 1);
+                    in.skipBytes(16 + 4 + 1 + 1);
                     break;
                 case 'C':
                     if (in.readUnsignedByte() != 0) in.skipBytes(16);

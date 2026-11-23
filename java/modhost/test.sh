@@ -48,4 +48,6 @@ if [ -n "${FERRO_MODS:-}" ]; then
     boot HookIndexTest
     # MirrorHudTest is the engine's side of the bridge: it needs the token that Host sends in its hello.
     FERROCRAFT_BRIDGE_TOKEN=0123456789abcdef0123456789abcdef boot MirrorHudTest
+    # VanillaHudTest: fancy graphics on makes GuiIngame draw the vignette, which reads the stand-in world border.
+    FERROCRAFT_BRIDGE_TOKEN=0123456789abcdef0123456789abcdef boot VanillaHudTest
 fi

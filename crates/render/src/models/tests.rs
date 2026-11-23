@@ -301,6 +301,62 @@ const SOUTH: usize = 3;
 const WEST: usize = 4;
 const EAST: usize = 5;
 
+#[test]
+fn jar_isolated_glass_pane_draws_unshaded_vertical_edges() {
+    let Some(models) = jar_models() else { return };
+    let quads = models.quads(102 << 4, NB).unwrap();
+    assert_eq!(quads.len(), 12);
+    assert!(quads.iter().all(|q| !q.shade));
+    for face in [NORTH, SOUTH, WEST, EAST] {
+        let edge = quads.iter().find(|q| q.cull == Some(face)).unwrap();
+        assert_eq!(&*edge.tex, "glass_pane_top");
+        assert_eq!(
+            edge.uv,
+            [
+                [7.0 / 16.0, 0.0],
+                [7.0 / 16.0, 1.0],
+                [9.0 / 16.0, 1.0],
+                [9.0 / 16.0, 0.0],
+            ]
+        );
+    }
+}
+
+#[test]
+fn jar_connected_glass_panes_omit_the_shared_edge_faces() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
+    let Some(models) = jar_models() else { return };
+    let pane = 102 << 4;
+    assert_eq!(
+        models.quads(pane, &world(&[((1, 0), pane)])).unwrap().len(),
+        6
+    );
+
+    let atlas = Atlas {
+        models,
+        ..Atlas::flat()
+    };
+    let mut center = vec![0; 16 * 16 * HEIGHT];
+    center[index(4, 70, 4)] = pane;
+    center[index(5, 70, 4)] = pane;
+    let meshes = mesh_chunk(
+        &Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [None; 8],
+            biomes: [None; 9],
+            lights: [None; 9],
+        },
+        &atlas,
+        true,
+        true,
+    );
+    // Two six-face elements lose the east and west faces at their shared border.
+    assert_eq!(meshes.opaque.vertices.len(), 10 * 4);
+}
+
 /// comparator_unlit.json, repeater_1tick.json, cocoa_age1_s.json and normal_torch_wall.json.
 #[test]
 fn jar_torch_comparator_repeater_and_cocoa_keep_vanilla_uv() {

@@ -36,9 +36,21 @@ fn connected_variant(state: u16, facing: &str, nb: Nb) -> Found {
         107 | 183..=187 => fence_gate(id, meta, facing, nb),
         139 => wall(meta, nb),
         26 => bed(meta, facing),
+        102 => Some(("glass_pane", glass_pane_key(nb))),
         _ if is_stairs(id) => stairs(id, meta, nb),
         _ => mechanism(id, meta, nb),
     }
+}
+
+fn glass_pane_key(nb: Nb) -> String {
+    let joins = |dx, dz| world::dig::pane_joins(nb(dx, 0, dz) >> 4);
+    format!(
+        "east={},north={},south={},west={}",
+        joins(1, 0),
+        joins(0, -1),
+        joins(0, 1),
+        joins(-1, 0)
+    )
 }
 
 fn mechanism(id: u16, meta: usize, nb: Nb) -> Found {

@@ -34,7 +34,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 34] = [
+const BLOCKSTATES: [&str; 35] = [
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",
@@ -68,6 +68,7 @@ const BLOCKSTATES: [&str; 34] = [
     "beacon",
     "cobblestone_wall",
     "mossy_cobblestone_wall",
+    "glass_pane",
     "bed",
 ];
 /// The other door blockstates, one per wood.

@@ -347,7 +347,7 @@ impl Mesher<'_> {
             Kind::Shape => {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
                 if let Some(quads) = self.atlas.models.quads(state, &nb) {
-                    self.modelled(at, quads, &l);
+                    self.modelled(at, quads, &l, state);
                     return;
                 }
                 let list = boxes(state, &nb);
@@ -735,14 +735,18 @@ impl Mesher<'_> {
     }
 
     /// Quads baked from the block's vanilla model: explicit uv, face and element rotation are kept.
-    fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look) {
+    fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look, state: u16) {
         let (plain, tinted) = (
             self.base_color(l, Tint::None, at),
             self.base_color(l, l.tint, at),
         );
         for q in quads {
             let rgb = if q.tint { tinted } else { plain };
-            if q.cull.is_some_and(|c| self.opaque(self.st(at, DIRS[c]))) {
+            if q.cull.is_some_and(|c| {
+                let neighbour = self.st(at, DIRS[c]);
+                // BlockPane.shouldSideBeRendered also hides faces against the same block.
+                self.opaque(neighbour) || (state >> 4 == 102 && neighbour >> 4 == 102)
+            }) {
                 continue;
             }
             let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));

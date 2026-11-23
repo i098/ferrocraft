@@ -117,7 +117,7 @@ pub fn opaque_cube(id: u16) -> bool {
 }
 
 /// `BlockPane.canPaneConnectToBlock`: any opaque-cube block (`isFullBlock`), glass or a pane.
-pub(crate) fn pane_joins(id: u16) -> bool {
+pub fn pane_joins(id: u16) -> bool {
     opaque_cube(id)
         || matches!(
             id,

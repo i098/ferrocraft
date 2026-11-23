@@ -39,10 +39,6 @@ fn is_gate(id: u16) -> bool {
     matches!(id, 107 | 183..=187)
 }
 
-fn is_pane(id: u16) -> bool {
-    matches!(id, 101 | 102 | 160)
-}
-
 fn full(state: u16) -> bool {
     look(state).kind == Kind::Opaque
 }
@@ -341,11 +337,8 @@ fn boxes_4(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
             let mut post = px([7.0, 0.0, 7.0], [9.0, 16.0, 9.0], t);
             post.tex[UP] = top;
             post.tex[DOWN] = top;
-            let joins = |dx, dz| {
-                let n = nb(dx, 0, dz);
-                is_pane(n >> 4) || full(n)
-            };
-            let sides = [(0, -1), (0, 1), (-1, 0), (1, 0)].map(|(dx, dz)| joins(dx, dz));
+            let sides = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+                .map(|(dx, dz)| world::dig::pane_joins(nb(dx, 0, dz) >> 4));
             let any = sides.iter().any(|s| *s);
             if !any {
                 // Isolated pane: both axes, as vanilla.

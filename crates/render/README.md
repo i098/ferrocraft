@@ -6,6 +6,9 @@ wgpu renderer for the 1.8.9 client: face-culled chunk meshes, block textures fro
 (flat colors without assets), the sky clear color, and a 2D overlay of textured `Quad`s that the
 `gui` crate lays out.
 
+Clear glass panes use the 1.8.9 blockstate models and their separate edge texture.
+Without model assets, the renderer uses its box shapes.
+
 Entry points: `Renderer::new` (window), `Renderer::new_offscreen` (tests, screenshots),
 `upload_chunk`, `remove_chunk`, `set_block`, `set_selection`, `resize`, `render`, `render_to_rgba`, `font`.
 Camera yaw and pitch use vanilla degrees; `Camera::pos` is the eye position.

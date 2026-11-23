@@ -184,6 +184,19 @@ pub fn view_opaque(state: u16, fancy: bool) -> bool {
     is_opaque_cube(state) || (!fancy && is_leaves(state))
 }
 
+pub(crate) fn model_face_visible(
+    quad: &Quad,
+    state: u16,
+    fancy: bool,
+    nb: impl FnOnce(i32, i32, i32) -> u16,
+) -> bool {
+    !quad.cull.is_some_and(|face| {
+        let [dx, dy, dz] = DIRS[face];
+        let neighbour = nb(dx, dy, dz);
+        view_opaque(neighbour, fancy) || (state >> 4 == 102 && neighbour >> 4 == 102)
+    })
+}
+
 fn is_leaves(state: u16) -> bool {
     matches!(state >> 4, 18 | 161)
 }
@@ -742,11 +755,7 @@ impl Mesher<'_> {
         );
         for q in quads {
             let rgb = if q.tint { tinted } else { plain };
-            if q.cull.is_some_and(|c| {
-                let neighbour = self.st(at, DIRS[c]);
-                // BlockPane.shouldSideBeRendered also hides faces against the same block.
-                self.opaque(neighbour) || (state >> 4 == 102 && neighbour >> 4 == 102)
-            }) {
+            if !model_face_visible(q, state, self.fancy, |dx, dy, dz| self.st(at, [dx, dy, dz])) {
                 continue;
             }
             let light_face = q.cull.or(q.on_boundary.then_some(q.face));

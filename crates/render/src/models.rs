@@ -171,6 +171,9 @@ fn parse_element(e: &Value) -> Option<Element> {
             tint: f.get("tintindex").is_some(),
         });
     }
+    if faces.iter().all(Option::is_none) {
+        return None;
+    }
     Some(Element {
         from,
         to,
@@ -191,17 +194,13 @@ impl Loader<'_> {
     /// `ModelBlock` with its `parent` chain: the child's textures win, its elements replace the parent's.
     fn model(&mut self, name: &str, depth: u8) -> Option<Model> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
-        if depth != 0 && name.starts_with("builtin/") {
-            return Some(Model::default());
-        }
-        if depth > 16 {
+        if depth > 16 || name.starts_with("builtin/") {
             return None;
         }
         if let Some(m) = self.models.get(name) {
             return Some(m.clone());
         }
-        let prefix = if name.contains('/') { "" } else { "block/" };
-        let path = format!("assets/minecraft/models/{prefix}{name}.json");
+        let path = format!("assets/minecraft/models/{name}.json");
         let json: serde_json::Map<String, Value> =
             serde_json::from_slice(&self.source.read(&path)?).ok()?;
         let mut model = match json.get("parent") {
@@ -216,12 +215,17 @@ impl Loader<'_> {
             }
         }
         if let Some(list) = json.get("elements") {
-            model.elements = list
-                .as_array()?
-                .iter()
-                .map(parse_element)
-                .collect::<Option<Vec<_>>>()?
-                .into();
+            let list = list.as_array()?;
+            if !list.is_empty() {
+                model.elements = list
+                    .iter()
+                    .map(parse_element)
+                    .collect::<Option<Vec<_>>>()?
+                    .into();
+            }
+        }
+        if model.elements.is_empty() {
+            return None;
         }
         self.models.insert(name.to_owned(), model.clone());
         Some(model)
@@ -250,7 +254,9 @@ impl Loader<'_> {
     }
 
     fn bake(&mut self, spec: &Value) -> Option<Vec<Quad>> {
-        let model = self.model(spec.get("model")?.as_str()?, 0)?;
+        let name = spec.get("model")?.as_str()?;
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let model = self.model(&format!("block/{name}"), 0)?;
         let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
         let (x, y) = (turn("x"), turn("y"));
         let uvlock = spec.get("uvlock").and_then(Value::as_bool) == Some(true);

@@ -316,18 +316,20 @@ fn glass_pane_pack_models(case: &str) -> Models {
             "east=true,north=false,south=false,west=false":[{"model":"pane_nsew"}],
             "east=false,north=true,south=false,west=false":{"model":"missing"},
             "east=false,north=false,south=true,west=false":{"model":"empty"},
-            "east=false,north=false,south=false,west=true":{"model":"broken_parent"}
+            "east=false,north=false,south=false,west=true":{"model":"broken_parent"},
+            "east=true,north=true,south=false,west=false":{"model":"no_elements"},
+            "east=false,north=false,south=true,west=true":{"model":"unknown_builtin"}
         }}"#,
     );
     write(
         "pack",
         "blockstates/glass_pane.json",
-        r#"{"variants":{"east=false,north=false,south=false,west=false":{"model":"minecraft:glass_pane_nsew"}}}"#,
+        r#"{"variants":{"east=false,north=false,south=false,west=false":{"model":"minecraft:decor/glass_pane_nsew"}}}"#,
     );
     write(
         "pack",
-        "models/block/glass_pane_nsew.json",
-        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/glass_pane_top"}}"#,
+        "models/block/decor/glass_pane_nsew.json",
+        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/glass_pane_top"},"elements":[]}"#,
     );
     write(
         "base",
@@ -353,6 +355,12 @@ fn glass_pane_pack_models(case: &str) -> Models {
         "models/block/broken_parent.json",
         r#"{"parent":"minecraft:block/missing"}"#,
     );
+    write("base", "models/block/no_elements.json", "{}");
+    write(
+        "base",
+        "models/block/unknown_builtin.json",
+        r#"{"parent":"minecraft:builtin/unknown"}"#,
+    );
     let models = Models::load(&mut AssetSource::Layers(vec![
         AssetSource::Dir(dir.join("pack")),
         AssetSource::Dir(dir.join("base")),
@@ -370,10 +378,16 @@ fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
         let east = [((1, 0), id << 4)];
         assert_eq!(&*models.quads(pane, &world(&east)).unwrap()[0].tex, "glass");
     }
-    for direction in [(0, -1), (-1, 0)] {
-        assert!(models.quads(pane, &world(&[(direction, pane)])).is_none());
+    for neighbours in [
+        &[(0, -1)][..],
+        &[(-1, 0)],
+        &[(0, 1)],
+        &[(1, 0), (0, -1)],
+        &[(0, 1), (-1, 0)],
+    ] {
+        let blocks: Vec<_> = neighbours.iter().map(|&p| (p, pane)).collect();
+        assert!(models.quads(pane, &world(&blocks)).is_none());
     }
-    assert_eq!(models.quads(pane, &world(&[((0, 1), pane)])), Some(&[][..]));
 }
 
 #[test]
@@ -410,7 +424,16 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
         true,
     );
     let quads = meshes.opaque.vertices.chunks_exact(4);
-    let expected = [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [6, 6], [2, 2]];
+    let expected = [
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+        [6, 6],
+        [6, 6],
+        [2, 2],
+    ];
     assert_eq!(quads.len(), expected.len());
     for (quad, levels) in quads.zip(expected) {
         assert!(quad
@@ -419,6 +442,22 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
         assert!(quad
             .iter()
             .all(|v| v.color == meshes.opaque.vertices[0].color));
+    }
+}
+
+#[test]
+fn glass_pane_cracks_follow_pack_geometry_and_hide_shared_faces() {
+    let models = glass_pane_pack_models("cracks");
+    let pane = 102 << 4;
+    let at = [4, 70, 4];
+    for (below, fancy, count) in [(0, true, 32), (pane, true, 28), (18 << 4, false, 28)] {
+        let nb = |x, y, z| if (x, y, z) == (4, 69, 4) { below } else { 0 };
+        let vertices = crate::crack::quads(at, pane, &nb, &models, fancy);
+        assert_eq!(vertices.len(), count);
+        assert!(vertices.chunks_exact(4).any(|quad| quad
+            .iter()
+            .all(|v| { (4.4375..=4.5625).contains(&v.pos[0]) && v.pos[2] == 4.4375 })));
+        assert_eq!(vertices.iter().any(|v| v.pos[2] == 4.5625), below == 0);
     }
 }
 

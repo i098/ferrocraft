@@ -9,8 +9,8 @@ import org.objectweb.asm.Opcodes;
 
 /**
  * Runs {@link ShellTransformer} on a class that has the shape Mixin leaves in Minecraft, and runs the result. No FML needed.
- * The class has ten handlers: {@code head} (may cancel), {@code body} (a block in the middle of the method), {@code nul}
- * (called with a null CallbackInfo), {@code loop} (inside a loop), {@code cond} (inside an if), {@code off} (an if that never holds), {@code flag} (an if on a field), {@code wr} (an if on a field that vanilla writes first), {@code sw} (inside a switch case), {@code catch} (inside a catch handler) and {@code tail} (cannot cancel). The shell must call all
+ * The class has twelve handlers: {@code head} (may cancel), {@code body} (a block in the middle of the method), {@code nul}
+ * (called with a null CallbackInfo), {@code direct} (a new CallbackInfo passed to the call with no local), {@code loop} (inside a loop), {@code cond} (inside an if), {@code off} (an if that never holds), {@code flag} (an if on a field), {@code wr} (an if on a field that vanilla writes first), {@code sw} (inside a switch case), {@code catch} (inside a catch handler) and {@code tail} (cannot cancel). The shell must call all
  * but {@code off} and {@code loop} in order ({@code flag} only when the field is set; {@code wr} and {@code sw} unguarded), run no vanilla instruction, report {@code loop} as lost, and verify.
  */
 public final class ShellTest implements Opcodes {
@@ -28,11 +28,11 @@ public final class ShellTest implements Opcodes {
         Object o = cls.newInstance();
         cls.getMethod("func_71407_l").invoke(o);
         cls.getMethod("func_71411_J").invoke(o);
-        check(log(cls).toString().equals("[head, body, nul, cond, wr, sw, tail, head]"), "the shell runs the handlers in order, the ifs only when their test holds, the switch case and the field written earlier unguarded, one handler at head and return twice, and no vanilla code: " + log(cls));
+        check(log(cls).toString().equals("[head, body, nul, direct, cond, wr, sw, tail, head]"), "the shell runs the handlers in order, the ifs only when their test holds, the switch case and the field written earlier unguarded, one handler at head and return twice, and no vanilla code: " + log(cls));
         log(cls).clear();
         cls.getField("flag").setInt(o, 1);
         cls.getMethod("func_71407_l").invoke(o);
-        check(log(cls).toString().equals("[head, body, nul, cond, flag, wr, sw, tail, head]"), "the handler under a field test runs when the field is set: " + log(cls));
+        check(log(cls).toString().equals("[head, body, nul, direct, cond, flag, wr, sw, tail, head]"), "the handler under a field test runs when the field is set: " + log(cls));
         // Host order: head part, then the body (here a marker), then the tail part.
         Loader second = new Loader();
         second.define(CI, callbackInfo());
@@ -41,9 +41,9 @@ public final class ShellTest implements Opcodes {
         parts.getMethod("func_71407_l$head").invoke(p);
         log(parts).add("MARK");
         parts.getMethod("func_71407_l$tail").invoke(p);
-        check(log(parts).toString().equals("[head, body, nul, cond, wr, sw, MARK, tail, head]"), "head handlers run before the body, return handlers after: " + log(parts));
+        check(log(parts).toString().equals("[head, body, nul, direct, cond, wr, sw, MARK, tail, head]"), "head handlers run before the body, return handlers after: " + log(parts));
         String kept = ShellTransformer.kept().toString();
-        check(ShellTransformer.kept().size() == 11 && kept.contains("conditional: Fake.func_71407_l: handler$cond") && kept.contains("conditional: Fake.func_71407_l: handler$flag") && kept.contains("unguarded: Fake.func_71407_l: handler$wr") && kept.contains("unguarded: Fake.func_71407_l: handler$sw") && kept.contains("unguarded: Fake.func_71384_a: handler$catch") && !kept.contains("handler$loop"), "eleven handler call sites kept, the ifs as conditional, the switch case, the catch and the written field as unguarded: " + kept);
+        check(ShellTransformer.kept().size() == 12 && kept.contains("conditional: Fake.func_71407_l: handler$cond") && kept.contains("conditional: Fake.func_71407_l: handler$flag") && kept.contains("unguarded: Fake.func_71407_l: handler$wr") && kept.contains("unguarded: Fake.func_71407_l: handler$sw") && kept.contains("unguarded: Fake.func_71384_a: handler$catch") && !kept.contains("handler$loop"), "twelve handler call sites kept, the ifs as conditional, the switch case, the catch and the written field as unguarded: " + kept);
         String lost = ShellTransformer.lost().toString();
         check(ShellTransformer.lost().size() == 1 && lost.contains("handler$loop"), "only the handler in the loop is lost: " + lost);
         System.out.println("ShellTest passed");
@@ -107,7 +107,7 @@ public final class ShellTest implements Opcodes {
         m.visitInsn(RETURN);
         m.visitMaxs(0, 0);
         m.visitEnd();
-        for (String h : new String[] {"head", "body", "nul", "cond", "off", "flag", "wr", "sw", "catch", "loop", "tail"}) {
+        for (String h : new String[] {"head", "body", "nul", "direct", "cond", "off", "flag", "wr", "sw", "catch", "loop", "tail"}) {
             m = cw.visitMethod(ACC_PRIVATE, "handler$" + h, "(L" + CI + ";)V", null, null);
             m.visitAnnotation(MERGED, false).visitEnd();
             record(m, h);
@@ -124,6 +124,14 @@ public final class ShellTest implements Opcodes {
         m.visitVarInsn(ALOAD, 0);
         m.visitInsn(ACONST_NULL);
         m.visitMethodInsn(INVOKESPECIAL, FAKE, "handler$nul", "(L" + CI + ";)V", false);
+        // What Mixin 0.7.11 emits for a handler that cannot cancel: the new CallbackInfo goes straight to the call, no local.
+        m.visitVarInsn(ALOAD, 0);
+        m.visitTypeInsn(NEW, CI);
+        m.visitInsn(DUP);
+        m.visitLdcInsn("func_71407_l");
+        m.visitInsn(ICONST_0);
+        m.visitMethodInsn(INVOKESPECIAL, CI, "<init>", "(Ljava/lang/String;Z)V", false);
+        m.visitMethodInsn(INVOKESPECIAL, FAKE, "handler$direct", "(L" + CI + ";)V", false);
         Label skip = new Label();
         m.visitInsn(ICONST_1);
         m.visitJumpInsn(IFEQ, skip);

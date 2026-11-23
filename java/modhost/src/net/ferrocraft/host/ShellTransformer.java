@@ -185,7 +185,26 @@ public final class ShellTransformer implements IClassTransformer {
 
     private static Block blockAt(AbstractInsnNode n, ClassNode cls, Set<String> merged) {
         boolean callbackNew = n.getOpcode() == Opcodes.NEW && ((TypeInsnNode) n).desc.equals(CALLBACK);
-        return callbackNew ? block(n, cls, merged) : nullBlock(n, cls, merged);
+        if (callbackNew) return block(n, cls, merged);
+        Block none = nullBlock(n, cls, merged);
+        return none != null ? none : directBlock(n, cls, merged);
+    }
+
+    /**
+     * Mixin passes a new CallbackInfo straight to a handler that cannot cancel and does not read it:
+     * {@code aload_0; new CallbackInfo; dup; ldc; iconst; invokespecial <init>; invokespecial handler}, with no local for the
+     * CallbackInfo. Null when {@code start} does not begin such a call.
+     */
+    private static Block directBlock(AbstractInsnNode start, ClassNode cls, Set<String> merged) {
+        if (start.getOpcode() != Opcodes.ALOAD || ((VarInsnNode) start).var != 0) return null;
+        AbstractInsnNode first = start.getNext();
+        if (first == null || first.getOpcode() != Opcodes.NEW || !((TypeInsnNode) first).desc.equals(CALLBACK)) return null;
+        int steps = 0;
+        for (AbstractInsnNode n = first.getNext(); n != null && steps < MAX_BLOCK; n = n.getNext(), steps++) {
+            if (n instanceof JumpInsnNode || n instanceof VarInsnNode || n.getOpcode() == Opcodes.RETURN) return null;
+            if (isHandlerCall(n, cls, merged)) return new Block(n, -1, null);
+        }
+        return null;
     }
 
     private static void keepBlock(AbstractInsnNode start, Block b, List<AbstractInsnNode> keep, Map<LabelNode, Integer> frames, String tag, Map<AbstractInsnNode, String> cond) {

@@ -2,9 +2,18 @@
 
 Owner: fc-dropin.
 
-Drop-in install for the official launcher (and any launcher that reads a version json).
+The installer supports Polyfrost OneClient and launchers that read a version JSON file.
 
-`ferrocraft-launcher install` with no flags is the installer in the release archive. It uses the `ferrocraft-boot.jar`, `ferrocraft-fabric.jar` and `ferrocraft-engine` files next to it, so an install into a custom folder must run from the extracted archive. It installs into every launcher it finds: the official launcher and OneClient clusters for 1.8.9 Fabric. It records what it wrote in `~/.ferrocraft/install-manifest.txt`, also when an install fails halfway, and copies itself to `~/.ferrocraft` so `uninstall` works afterwards. `ferrocraft-launcher uninstall` removes those files, including extra files the launcher or engine put in the recorded version and engine dirs. It skips with a warning, and exits nonzero for, a manifest line that is not a ferrocraft file in a recorded launcher dir or is a symlink. OneClient has no documented data dir, so it is found by name under the app-data dir; pass `--oneclient-dir DIR` if it is elsewhere. A `--minecraft-dir` or `--oneclient-dir` flag limits the install to the flagged launchers. `--fabric-jar JAR` picks the mod jar.
+`ferrocraft-launcher install` downloads the pinned official OneClient release and verifies its SHA-256 digest.
+It creates a `Ferrocraft 1.8.9` Ornithe profile and installs the mod jar and engine.
+It also installs Ferrocraft into existing compatible launchers that it finds.
+The installer reads the boot jar, mod jar, and engine next to its executable.
+An explicit `--minecraft-dir DIR` or `--oneclient-dir DIR` limits installation to the selected launchers and skips the download.
+Use `--fabric-jar JAR` to select a different mod jar.
+
+The installer records Ferrocraft files in `~/.ferrocraft/install-manifest.txt` and copies itself to `~/.ferrocraft`.
+The uninstall command removes those files, but leaves OneClient and the profile data.
+It warns and exits with an error if a manifest entry is not a permitted Ferrocraft path.
 
 - `ferrocraft-launcher install --minecraft-dir DIR --boot-jar JAR --engine BIN` writes, for the official launcher:
   - `versions/ferrocraft-1.8.9/ferrocraft-1.8.9.json` (`inheritsFrom` `1.8.9`, `mainClass` `net.ferrocraft.boot.Main`)

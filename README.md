@@ -17,15 +17,30 @@ Windows (PowerShell):
 
     irm https://github.com/i098/ferrocraft/releases/latest/download/install.ps1 | iex
 
-The installer installs into every launcher it finds:
+The installer downloads and verifies Polyfrost OneClient 2.12.0.
+It installs the `Ferrocraft 1.8.9` Ornithe profile in the default OneClient data directory.
+Open OneClient from the path that the installer prints.
+Keep the default data directory during setup.
+Sign in once with a Microsoft account that owns Minecraft: Java Edition, then select `Ferrocraft 1.8.9`.
+OneClient downloads the game and loader when you start the profile.
+On Linux without FUSE, run the AppImage with `--appimage-extract-and-run`.
 
-- Official launcher: the `ferrocraft-1.8.9` version.
-- OneClient clusters that run 1.8.9 with Fabric: the Fabric mod jar. The engine goes to `~/.ferrocraft`.
-- Lunar Client and Badlion cannot start custom versions, so the installer skips them.
+To use an existing launcher without a OneClient download, extract the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases).
+Run `./ferrocraft-launcher install --minecraft-dir DIR` for the official launcher or `./ferrocraft-launcher install --oneclient-dir DIR` for an existing 1.8.9 Fabric or Ornithe profile.
+Lunar Client and Badlion cannot start custom versions.
 
-The installer prints what it did and the uninstall command: `~/.ferrocraft/ferrocraft-launcher uninstall`. If your launcher is in a custom folder, download the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases), extract it, and run `./ferrocraft-launcher install --minecraft-dir DIR` (or `--oneclient-dir DIR`) from the extracted folder.
+Run `~/.ferrocraft/ferrocraft-engine` to start the standalone engine on Unix.
+Run `$HOME\.ferrocraft\ferrocraft-engine.exe` on Windows.
+Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
+The uninstall command preserves OneClient and the profile's data.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
+
+## Credits
+
+Thanks to [Polyfrost](https://polyfrost.org/projects/oneclient/) and the OneLauncher contributors for OneClient.
+Thanks to the [Ornithe](https://ornithemc.net/) and [Fabric](https://fabricmc.net/) contributors for the mod platform.
+See [third-party credits and notices](THIRD_PARTY.md).
 
 ## Documentation
 

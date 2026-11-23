@@ -1,6 +1,7 @@
 //! `ferrocraft-launcher install`: write the `ferrocraft-1.8.9` version into a `.minecraft` dir.
 
 mod detect;
+mod oneclient;
 
 use detect::Env;
 use serde_json::{json, Value};
@@ -283,22 +284,89 @@ fn files(o: &Opts) -> Files {
     }
 }
 
+/// OneClient 2.12 reads .instance.json on startup to adopt this profile from disk.
+fn default_oneclient_profile(env: &Env) -> Result<PathBuf, String> {
+    let clusters = env.data.join("Polyfrost/OneClient/clusters");
+    let profile = clusters.join(VERSION_ID);
+    let identity = json!({
+        "name": "Ferrocraft 1.8.9",
+        "mc_version": BASE_VERSION,
+        "mc_loader": "Ornithe",
+        "kind": "modded",
+        "user_created": true
+    });
+    let prepare = || -> std::io::Result<()> {
+        if profile.exists() {
+            let existing: Value =
+                serde_json::from_slice(&fs::read(profile.join(".instance.json"))?)?;
+            if ["mc_version", "mc_loader", "kind"]
+                .iter()
+                .any(|key| existing[*key] != identity[*key])
+            {
+                return Err(std::io::Error::other(
+                    "An incompatible OneClient profile exists",
+                ));
+            }
+        } else {
+            fs::create_dir_all(&clusters)?;
+            let stage = tempfile::tempdir_in(clusters.parent().unwrap())?;
+            fs::write(stage.path().join(".instance.json"), identity.to_string())?;
+            fs::rename(stage.path(), &profile)?;
+        }
+        Ok(())
+    };
+    prepare().map_err(|e| format!("{}: {e}", profile.display()))?;
+    Ok(profile)
+}
+
 fn install(o: &Opts, env: &Env) -> Result<(), String> {
-    let f = files(o);
-    // A dir flag limits the install to the flagged launchers; none means every launcher found.
+    // Explicit paths do not download OneClient or create a new profile.
     let explicit = o.mc.is_some() || o.oneclient.is_some();
+    let oneclient = if explicit {
+        None
+    } else {
+        let app = oneclient::install(&env.home.join(".ferrocraft"))
+            .map_err(|e| format!("OneClient install failed: {e}"))?;
+        Some((app, default_oneclient_profile(env)?))
+    };
     let mc = o.mc.clone().or_else(|| {
         let d = env.minecraft_dir();
         (!explicit && d.is_dir()).then_some(d)
     });
-    let mods = if o.oneclient.is_some() || !explicit {
+    let mut mods = if o.oneclient.is_some() || !explicit {
         detect::fabric_mods_dirs(&detect::oneclient_roots(env, o.oneclient.clone()))
     } else {
         Vec::new()
     };
-    if mc.is_none() && mods.is_empty() {
-        return Err("no launcher found. Start your launcher once, or pass --minecraft-dir or --oneclient-dir".into());
+    if let Some((_, profile)) = &oneclient {
+        let dir = profile.join("mods");
+        if !mods.contains(&dir) {
+            mods.push(dir);
+        }
     }
+    if mc.is_none() && mods.is_empty() {
+        return Err("no 1.8.9 Fabric or Ornithe cluster found in --oneclient-dir".into());
+    }
+    install_targets(o, env, mc, mods)?;
+    if let Some((app, _)) = oneclient {
+        println!(
+            "Open OneClient at {} and select Ferrocraft 1.8.9 after signing in.",
+            app.display()
+        );
+        if cfg!(target_os = "linux") {
+            println!("If FUSE is unavailable, run the AppImage with --appimage-extract-and-run.");
+        }
+    }
+    Ok(())
+}
+
+fn install_targets(
+    o: &Opts,
+    env: &Env,
+    mc: Option<PathBuf>,
+    mods: Vec<PathBuf>,
+) -> Result<(), String> {
+    let f = files(o);
     let mut written = Vec::new();
     let res: Result<(), String> = (|| {
         if let Some(mc) = &mc {
@@ -326,8 +394,7 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     res?;
     let kept = kept?;
     println!("Lunar Client and Badlion cannot start custom versions: not installed there.");
-    println!("To remove everything: {} uninstall", kept.display());
-    println!("Then delete {}", kept.parent().unwrap().display());
+    println!("To remove the Ferrocraft files: {} uninstall", kept.display());
     Ok(())
 }
 
@@ -370,6 +437,45 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn oneclient_install_creates_a_profile_with_the_mod_and_engine() {
+        let tmp = tmp("oneclient");
+        let env = Env {
+            home: tmp.join("home"),
+            data: tmp.join("data"),
+        };
+        let fabric = tmp.join("mod.jar");
+        let engine = tmp.join("engine");
+        fs::write(&fabric, b"mod").unwrap();
+        fs::write(&engine, b"engine").unwrap();
+        let profile = default_oneclient_profile(&env).unwrap();
+        install(
+            &Opts {
+                oneclient: Some(env.data.join("Polyfrost/OneClient")),
+                fabric: Some(fabric),
+                engine: Some(engine),
+                ..Opts::default()
+            },
+            &env,
+        )
+        .unwrap();
+
+        let identity = fs::read(profile.join(".instance.json")).unwrap();
+        let identity: Value = serde_json::from_slice(&identity).unwrap();
+        assert_eq!(identity["mc_version"], "1.8.9");
+        assert_eq!(identity["mc_loader"], "Ornithe");
+        assert_eq!(identity["kind"], "modded");
+        let jar = profile.join("mods").join(FABRIC_JAR);
+        assert_eq!(fs::read(&jar).unwrap(), b"mod");
+        let engine = env.home.join(".ferrocraft/ferrocraft-engine");
+        assert_eq!(fs::read(&engine).unwrap(), b"engine");
+        uninstall(&manifest_path(&env.home)).unwrap();
+        assert!(!jar.exists());
+        assert!(!engine.exists());
+        assert!(profile.join(".instance.json").exists());
+        fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]

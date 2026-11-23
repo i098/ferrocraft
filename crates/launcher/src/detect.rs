@@ -37,9 +37,15 @@ impl Env {
     }
 }
 
-/// OneClient data dir names are not documented; `--oneclient-dir` overrides them.
+/// Include the current OneClient data directory and older names.
 pub fn oneclient_roots(env: &Env, root: Option<PathBuf>) -> Vec<PathBuf> {
-    let names = ["OneClient", "oneclient", "OneLauncher", "onelauncher"];
+    let names = [
+        "Polyfrost/OneClient",
+        "OneClient",
+        "oneclient",
+        "OneLauncher",
+        "onelauncher",
+    ];
     root.map_or_else(
         || names.iter().map(|n| env.data.join(n)).collect(),
         |r| vec![r],
@@ -52,7 +58,7 @@ fn has_189(text: &str) -> bool {
         .any(|t| t.trim_matches('.') == "1.8.9")
 }
 
-/// An instance is a 1.8.9 Fabric one when its name or json files mention both.
+/// An instance is compatible when its name or json mentions 1.8.9 and a Fabric loader.
 fn is_fabric_189(dir: &Path) -> bool {
     let mut text = dir
         .file_name()
@@ -65,10 +71,13 @@ fn is_fabric_189(dir: &Path) -> bool {
             text.push_str(&fs::read_to_string(&p).unwrap_or_default());
         }
     }
-    has_189(&text) && text.to_lowercase().contains("fabric")
+    has_189(&text) && {
+        let text = text.to_ascii_lowercase();
+        text.contains("fabric") || text.contains("ornithe")
+    }
 }
 
-/// Mods dir of every 1.8.9 Fabric cluster under the OneClient data dirs `roots`.
+/// Mods dir of every 1.8.9 Fabric or Ornithe cluster under the OneClient data dirs `roots`.
 pub fn fabric_mods_dirs(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for root in roots {

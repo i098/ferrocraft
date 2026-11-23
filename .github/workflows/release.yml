@@ -48,6 +48,7 @@ jobs:
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
           bin=target/${{ matrix.target }}/release
           cp "$bin/ferrocraft-engine$ext" "$bin/ferrocraft-launcher$ext" stage/
+          cp THIRD_PARTY.md stage/
           tar -czf "ferrocraft-${{ matrix.target }}.tar.gz" -C stage .
       - uses: actions/upload-artifact@v4
         with:

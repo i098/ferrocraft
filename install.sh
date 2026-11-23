@@ -14,4 +14,4 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL -o "$tmp/$asset" "https://github.com/$repo/releases/latest/download/$asset" ||
   { echo "ferrocraft: download failed." >&2; exit 1; }
 tar -xzf "$tmp/$asset" -C "$tmp"
-"$tmp/ferrocraft-launcher" install
+"$tmp/ferrocraft-launcher" install "$@"

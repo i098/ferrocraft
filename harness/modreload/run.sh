@@ -22,7 +22,7 @@ others=; for j in "$L"/*.jar; do case $j in *forge.jar*|*minecraft-1*) ;; *) oth
 export FERROCRAFT_MODHOST_JAVA=$J FERROCRAFT_MODHOST_GAMEDIR=$OUT/run
 export FERROCRAFT_MODHOST_CP="$root/java/modhost/cls:$others$L/forge.jar:$L/minecraft-1.8.9.jar"
 ( cd "$OUT/run" && exec "$ENGINE" --username Proof --gameDir "$OUT/run" --assetsDir "$L/../assets" --version 1.8.9 \
-    --server "127.0.0.1:$PORT" >"$OUT/engine.log" 2>&1 ) & eng=$!; pids+=($eng)
+    --server "127.0.0.1:$PORT" >"$OUT/engine.log" 2>&1 ) & eng=$!; pids+=("$eng")
 loaded() { grep -c 'ferro-host\] mods loaded' "$OUT/engine.log" || true; }
 shot() { ffmpeg -nostdin -loglevel error -y -f x11grab -video_size 1280x720 -i "$DISP" -frames:v 1 "$1"; }
 for _ in $(seq 240); do [ "$(loaded)" -ge 1 ] && break; sleep 1; done

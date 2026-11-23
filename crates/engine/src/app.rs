@@ -91,6 +91,7 @@ pub struct App {
     mods: Option<ferrocraft_modhost::ModHost>,
     /// The mod host while it starts on its thread.
     mods_boot: Option<std::sync::mpsc::Receiver<Option<ferrocraft_modhost::ModHost>>>,
+    /// A reload asked while the host starts: runs when the start ends.
     mods_reload_pending: bool,
     /// Hot reload of the mods folder.
     mods_watch: Option<mod_boot::Watch>,

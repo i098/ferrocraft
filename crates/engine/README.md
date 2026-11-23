@@ -26,4 +26,5 @@ It copies the archives to a separate game folder for each JVM and removes that f
 The engine checks the selected `mods/` folder twice a second.
 One second after the last jar change, or when you press F8, the engine restarts the host without disconnecting.
 If a host start is in progress, the engine waits for it to finish before it restarts the host.
+If you close the engine during host startup, it waits for startup to finish and then stops the host.
 Player skins: the `textures` profile property of a spawned player gives a skin URL and an optional cape URL. The engine downloads them in the background (trusted hosts only, see `ferrocraft_net_client::parse_textures`), caches them in `<gameDir>/assets/skins`, and draws the default skin (no cape) until they arrive. The tab list draws each listed player's head (face and hat layer) from the same skin; see `skins.rs` and `engine/tests/skin_server.rs`.

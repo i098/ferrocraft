@@ -40,7 +40,7 @@ public final class PreLaunch implements PreLaunchEntrypoint {
             if (arg.equals("--accessToken")) {
                 if (i + 1 < launchArgs.length && !launchArgs[i + 1].startsWith("--")) token = launchArgs[++i];
             } else if (arg.startsWith("--accessToken=")) {
-                token = arg.substring("--accessToken=".length());
+                throw new IllegalArgumentException("Use --accessToken VALUE.");
             } else {
                 cmd.add(arg);
             }

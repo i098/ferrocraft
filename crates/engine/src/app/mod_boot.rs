@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
 use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost};
@@ -9,20 +9,28 @@ use ferrocraft_oneclient as oneclient;
 use crate::log;
 
 /// Runs on its own thread: Modrinth, jar downloads and the first-run Java 8 and Forge install take long.
-pub fn spawn(game_dir: PathBuf) -> Receiver<Option<ModHost>> {
-    let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(start(&game_dir));
-    });
-    rx
+pub fn spawn(game_dir: PathBuf) -> Boot {
+    Boot(Some(thread::spawn(move || start(&game_dir))))
 }
 
-/// `Some(Some(host))` once the host is up; `Some(None)` when it will never come (no mods, an error, a dead thread).
-pub fn poll<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
-    match rx.try_recv() {
-        Ok(host) => Some(host),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(None),
+pub struct Boot(Option<JoinHandle<Option<ModHost>>>);
+
+impl Boot {
+    pub fn poll(&mut self) -> Option<Option<ModHost>> {
+        if self.0.as_ref().is_some_and(JoinHandle::is_finished) {
+            return Some(self.finish());
+        }
+        None
+    }
+
+    fn finish(&mut self) -> Option<ModHost> {
+        self.0.take()?.join().ok().flatten()
+    }
+}
+
+impl Drop for Boot {
+    fn drop(&mut self) {
+        drop(self.finish());
     }
 }
 
@@ -116,7 +124,11 @@ fn scan_folder(
             Some("zip") if forge => {}
             _ => continue,
         }
-        let m = std::fs::metadata(entry.path())?;
+        let m = match std::fs::metadata(entry.path()) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
         if m.is_file() {
             jars.push((folder.join(name), m.modified()?, m.len()));
         }
@@ -302,16 +314,19 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
-    fn poll_reports_host_error_and_dead_thread() {
-        let (tx, rx) = channel();
-        assert!(poll::<u8>(&rx).is_none());
-        tx.send(Some(7u8)).unwrap();
-        assert_eq!(poll(&rx), Some(Some(7)));
-        tx.send(None).unwrap();
-        assert_eq!(poll::<u8>(&rx), Some(None));
-        drop(tx);
-        assert_eq!(poll::<u8>(&rx), Some(None));
+    fn dangling_archives_do_not_hide_valid_mods() {
+        let root = std::env::temp_dir().join(format!("fc-dangling-{}", std::process::id()));
+        let versioned = root.join("1.8.9");
+        std::fs::create_dir_all(&versioned).unwrap();
+        std::fs::write(root.join("valid.jar"), "mod").unwrap();
+        std::os::unix::fs::symlink("missing", root.join("dangling.jar")).unwrap();
+        std::os::unix::fs::symlink("missing", versioned.join("dangling.zip")).unwrap();
+        let mods = scan(&root, true).unwrap();
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].0, Path::new("valid.jar"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

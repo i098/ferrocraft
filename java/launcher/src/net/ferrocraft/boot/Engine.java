@@ -24,7 +24,7 @@ public final class Engine {
             if (arg.equals("--accessToken")) {
                 if (i + 1 < args.length && !args[i + 1].startsWith("--")) token = args[++i];
             } else if (arg.startsWith("--accessToken=")) {
-                token = arg.substring("--accessToken=".length());
+                throw new IllegalArgumentException("Use --accessToken VALUE.");
             } else {
                 cmd.add(arg);
             }

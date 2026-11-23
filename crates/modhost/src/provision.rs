@@ -101,7 +101,7 @@ impl Config {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        let mut class_path = vec![main.join(HOST_JAR)];
+        let mut class_path = vec![std::path::absolute(host)?];
         for (name, url, sha1) in [
             (
                 "asm-all-5.2.jar",
@@ -122,7 +122,6 @@ impl Config {
             link(&jar, &lib.join(lib_name(&jar, &main.join("versions"))))?;
             class_path.push(jar);
         }
-        fs::copy(&host, &class_path[0])?;
         fs::create_dir_all(main.join("mods"))?;
         Ok(Config {
             loader: Loader::Forge,
@@ -139,17 +138,21 @@ fn java_policy(
     main: &Path,
     os: &str,
     arch: &str,
-    install_x64: impl FnOnce(&Path) -> Result<PathBuf, Error>,
+    install_x64: impl FnOnce(&Path, &str) -> Result<PathBuf, Error>,
 ) -> Result<base::JvmPolicy, Error> {
     if (os, arch) == ("macos", "aarch64") {
-        install_x64(&main.join("jvm/jre-legacy-mac-os")).map(base::JvmPolicy::Static)
+        install_x64(
+            &main.join("jvm/jre-legacy-mac-os"),
+            "78e31aa15b3f437f37263351436f63e0a96e0067",
+        )
+        .map(base::JvmPolicy::Static)
     } else {
         Ok(base::JvmPolicy::Mojang)
     }
 }
 
 #[cfg(unix)]
-fn java8_x64(root: &Path) -> Result<PathBuf, Error> {
+fn java8_x64(root: &Path, manifest_sha1: &str) -> Result<PathBuf, Error> {
     use std::process::{Command, Stdio};
     let supported = Command::new("/usr/bin/arch")
         .args(["-x86_64", "/usr/bin/true"])
@@ -164,9 +167,9 @@ fn java8_x64(root: &Path) -> Result<PathBuf, Error> {
     }
     let manifest = root.join("manifest.json");
     fetch(
-        "https://piston-meta.mojang.com/v1/packages/78e31aa15b3f437f37263351436f63e0a96e0067/manifest.json",
+        &format!("https://piston-meta.mojang.com/v1/packages/{manifest_sha1}/manifest.json"),
         &manifest,
-        "78e31aa15b3f437f37263351436f63e0a96e0067",
+        manifest_sha1,
     )?;
     let manifest: serde_json::Value =
         serde_json::from_reader(fs::File::open(manifest)?).map_err(io::Error::other)?;
@@ -248,7 +251,8 @@ mod tests {
     fn forge_java_uses_rosetta_only_on_apple_silicon() {
         use super::*;
         let cache = Path::new("cache");
-        let policy = java_policy(cache, "macos", "aarch64", |root| {
+        let policy = java_policy(cache, "macos", "aarch64", |root, manifest_sha1| {
+            assert_eq!(manifest_sha1, "78e31aa15b3f437f37263351436f63e0a96e0067");
             Ok(root.join("jre.bundle/Contents/Home/bin/java"))
         })
         .unwrap();
@@ -260,7 +264,7 @@ mod tests {
             ("windows", "aarch64"),
         ] {
             let policy =
-                java_policy(cache, os, arch, |_| panic!("unexpected x64 install")).unwrap();
+                java_policy(cache, os, arch, |_, _| panic!("unexpected x64 install")).unwrap();
             assert!(matches!(policy, base::JvmPolicy::Mojang));
         }
     }

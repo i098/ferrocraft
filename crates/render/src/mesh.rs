@@ -797,7 +797,7 @@ fn liquid_uv(f: usize, p: [f32; 3]) -> [f32; 2] {
     }
 }
 
-/// `MathHelper.getPositionRandom`: the hash vanilla keys block offsets and model variants on.
+/// `MathHelper.getPositionRandom`: the hash for model variants and offsets in the AO renderer.
 pub(crate) fn position_random(x: i32, y: i32, z: i32) -> i64 {
     let i = x.wrapping_mul(3129871) as i64 ^ (z as i64).wrapping_mul(116129781) ^ y as i64;
     i.wrapping_mul(i)

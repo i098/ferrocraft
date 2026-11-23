@@ -77,10 +77,6 @@ public final class OverlayHooks {
                 Tessellator.drawing()) : null;
     }
 
-    public static void crosshairCompleted(Sink.Mark mark) {
-        if (mark != null) Sink.crosshairDrawn(mark.textures);
-    }
-
     public static void mixinFailed(Exception failure, Object callback, Sink.Mark mark) throws Exception {
         if (mark == null) throw failure;
         if (callback != null) R.set(callback, "cancelled", false);
@@ -186,16 +182,6 @@ public final class OverlayHooks {
         }
     }
 
-    private static boolean drawsPolyCrosshair(MethodNode handler) {
-        for (AbstractInsnNode insn : handler.instructions.toArray()) {
-            if (!(insn instanceof MethodInsnNode)) continue;
-            MethodInsnNode call = (MethodInsnNode) insn;
-            if (call.owner.equals("org/polyfrost/crosshair/render/CrosshairRenderer") && call.name.equals("drawCrosshair")
-                    && call.desc.equals("(Lnet/minecraft/client/renderer/EntityRenderer;)V")) return true;
-        }
-        return false;
-    }
-
     private static MethodNode wrap(String owner, MethodNode handler) {
         Type[] args = Type.getArgumentTypes(handler.desc);
         boolean isStatic = (handler.access & Opcodes.ACC_STATIC) != 0;
@@ -227,11 +213,6 @@ public final class OverlayHooks {
         wrapper.visitMethodInsn(isStatic ? Opcodes.INVOKESTATIC : Opcodes.INVOKESPECIAL,
                 owner, handler.name, handler.desc, false);
         wrapper.visitLabel(end);
-        if (drawsPolyCrosshair(handler)) {
-            wrapper.visitVarInsn(Opcodes.ALOAD, mark);
-            wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "crosshairCompleted",
-                    "(L" + MARK + ";)V", false);
-        }
         wrapper.visitInsn(Opcodes.RETURN);
         wrapper.visitLabel(caught);
         Object[] locals = handlerLocals(owner, isStatic, args);

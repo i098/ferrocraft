@@ -15,6 +15,7 @@ import java.util.List;
 import javax.imageio.ImageIO;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
+import net.minecraftforge.fml.common.eventhandler.IEventListener;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -22,24 +23,16 @@ import org.objectweb.asm.Opcodes;
 public final class OverlayHooksTest implements Opcodes {
     private static final String RENDERER = "net/minecraft/client/renderer/EntityRenderer";
     private static final String CALLBACK = "org/spongepowered/asm/mixin/injection/callback/CallbackInfo";
-    private static final String CROSSHAIR_RENDERER = "org/polyfrost/crosshair/render/CrosshairRenderer";
     private static final String TEST = "net/ferrocraft/host/OverlayHooksTest";
     private static final String DESC = "(FJL" + CALLBACK + ";D[I)V";
     private static final String FAILED = "failed HUD draw";
     private static final String LATER = "later HUD draw";
-    private static boolean drawSucceeds;
-    private static boolean reverseReplacement;
-    private static Object resolution;
 
     public static void main(String[] args) throws Exception {
         Loader loader = new Loader();
         loader.define(CALLBACK, callbackBytes());
         byte[] renderer = new OverlayHooks.HudTransformer().transform(RENDERER, RENDERER.replace('/', '.'), rendererBytes());
         Class<?> cls = loader.define(RENDERER, renderer);
-        loader.define(CROSSHAIR_RENDERER, crosshairRendererBytes());
-        resolution = R.alloc("avr");
-        R.set(resolution, "c", 429);
-        R.set(resolution, "d", 243);
         GlState.bindTexture(3553, GlState.genTexture());
         GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
         GlState.color(1, 1, 1, 1);
@@ -50,52 +43,10 @@ public final class OverlayHooksTest implements Opcodes {
         try {
             Method render = cls.getMethod("func_181560_a", float.class, long.class);
             render.invoke(null, 0f, 0L);
-            assertCrosshairOwnership(false);
-            drawSucceeds = true;
-            try {
-                render.invoke(null, 0f, 0L);
-                assertCrosshairOwnership(true);
-                reverseReplacement = true;
-                render.invoke(null, 0f, 0L);
-                assertCrosshairOwnership(false, 4);
-                reverseReplacement = false;
-                Sink.clip(new float[] {220, 0, 208, 242});
-                render.invoke(null, 0f, 0L);
-                assertCrosshairOwnership(false, 4);
-                GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {0}));
-                render.invoke(null, 0f, 0L);
-                assertCrosshairOwnership(false, 4);
-            } finally {
-                drawSucceeds = false;
-            }
-            GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
-            assertForgeCrosshair(214, 121, true, null);
-            assertForgeCrosshair(2, 121, true, null);
-            assertForgeCrosshair(214, 2, true, null);
-            assertForgeCrosshair(214, 121, false, null);
-            assertForgeCrosshair(214, 121, true, new float[] {220, 0, 208, 242});
-            assertShapeCrosshair(() -> Sink.rect(217, 122, 211, 120, -1), true);
-            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, -1), true);
-            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, 0), false);
-            assertShapeCrosshair(() -> Sink.rect(212, 120, 216, 122, 0x19FFFFFF), false);
-            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, 0x19FFFFFF), false);
-            assertShapeCrosshair(() -> Sink.roundRect(210, 117, 218, 125, new float[] {4, 4, 4, 4}, 0x19FFFFFF), false);
-            assertShapeCrosshair(() -> Sink.line(218, 125, 210, 117, 1, 0x19FFFFFF), false);
-            assertSplitCrosshair();
-            assertImageAlpha();
-            assertShapeCrosshair(() -> Sink.roundRect(210, 117, 218, 125, new float[] {4, 4, 4, 4}, -1), true);
-            assertShapeCrosshair(() -> Sink.roundRect(214, 121, 222, 129, new float[] {4, 4, 4, 4}, -1), false);
-            assertShapeCrosshair(() -> Sink.line(218, 125, 210, 117, 0, -1), true);
-            assertShapeCrosshair(() -> Sink.line(210, 117, 218, 123, 1, -1), false);
-            assertShapeCrosshair(() -> {
-                Sink.clip(new float[] {220, 0, 208, 242});
-                Sink.rect(212, 120, 216, 122, -1);
-            }, false);
+            assertRecoveredDraw(MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false)))));
+            assertCrosshairCancellation();
             assertTessellatorRollback();
-            assertForgeCrosshair(214, 121, true, new float[] {0, 127, 428, 115});
             assertScissorRollback();
-            assertClippedCrosshair();
-            assertPostImageDoesNotClaimCrosshair();
             assertEventPayloadRollback();
             assertPropagates(cls.getMethod("unrelated", double.class), IOException.class, 0d);
             assertPropagates(render, AssertionError.class, 1f, 0L);
@@ -106,144 +57,33 @@ public final class OverlayHooksTest implements Opcodes {
         System.out.println("OverlayHooksTest passed");
     }
 
-    private static void assertClippedCrosshair() throws IOException {
-        BufferedImage icons = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
-        BufferedImage crosshair = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
-        icons.setRGB(1, 1, -1);
-        crosshair.setRGB(1, 1, -1);
-        ByteArrayOutputStream png = new ByteArrayOutputStream();
-        ImageIO.write(crosshair, "png", png);
-        byte[] data = png.toByteArray();
-        Sink.clip(new float[] {206, 113, 214, 129});
-        emitCrosshair(data);
-        Sink.clip(new float[] {206, 113, 222, 121});
-        emitCrosshair(data);
-        Sink.clip(new float[] {214, 121, 222, 129});
-        emitCrosshair(data);
-        Sink.clip(null);
-        emitCrosshair(data);
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(frame.definitions.get("clip-test")));
-        for (int i = 0; i < 4; i++) {
-            if (VanillaHudTest.sameCrosshairPixels(frame.images.get(i), decoded, icons) != (i >= 2)) {
-                throw new AssertionError("incorrect crosshair visibility for clip " + i);
-            }
-        }
-    }
-
-    private static void emitCrosshair(byte[] png) {
-        Sink.image("clip-test", png, 206, 113, 222, 129, -1, false);
-    }
-
-    private static void assertPostImageDoesNotClaimCrosshair() throws IOException {
-        RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
-        Sink.hud(1 << 4);
-        OverlayFilter.invoke(event -> GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1),
-                new RenderGameOverlayEvent.Post(parent, ElementType.ALL));
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != 0 || frame.images.size() != 1) {
-            throw new AssertionError("an unrelated Post(ALL) draw must not hide the vanilla crosshair");
-        }
-    }
-
-    private static void assertCrosshairOwnership(boolean drawn) throws IOException {
-        assertCrosshairOwnership(drawn, drawn ? 4 : 3);
-    }
-
-    private static void assertCrosshairOwnership(boolean drawn, int images) throws IOException {
-        OverlayFilter filter = new OverlayFilter();
-        RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.ALL);
-        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
-        OverlayFilter.invoke(event -> drawCrosshair(), all);
-        OverlayFilter.invoke(event -> filter.pre(all), all);
-        OverlayFilter.invoke(event -> {
-            drawCrosshair();
+    private static void assertCrosshairCancellation() throws IOException {
+        assertCrosshairFrame(event -> drawImage(), 0, 1);
+        assertCrosshairFrame(event -> event.setCanceled(true), 1 << 4, 0);
+        assertCrosshairFrame(event -> {
             event.setCanceled(true);
-        }, crosshair);
-        OverlayFilter.invoke(event -> filter.pre(crosshair), crosshair);
+            drawImage();
+            throw new IllegalStateException("test crosshair listener failed");
+        }, 0, 0);
+    }
+
+    private static void assertCrosshairFrame(IEventListener listener, int hud, int images) throws IOException {
+        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
+        OverlayFilter.invoke(listener, crosshair);
+        new OverlayFilter().pre(crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != (drawn ? 1 << 4 : 0) || frame.images.size() != images) {
-            throw new AssertionError("unrelated images must not validate cancellation after a failed replacement");
+        if (frame.hud != hud || frame.images.size() != images) {
+            throw new AssertionError("only a successful mod cancellation must suppress the Rust crosshair");
         }
-        if (images == 3) assertRecoveredDraw(frame);
-        if (drawn && frame.images.get(0).x0 != 4) throw new AssertionError("the replacement draw did not reach the frame");
     }
 
     private static RenderGameOverlayEvent.Pre crosshairEvent() {
-        return new RenderGameOverlayEvent.Pre(eventWithResolution(), ElementType.CROSSHAIRS) {
+        return new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.CROSSHAIRS) {
             @Override
             public boolean isCancelable() {
                 return true;
             }
         };
-    }
-
-    private static RenderGameOverlayEvent eventWithResolution() {
-        try {
-            return RenderGameOverlayEvent.class.getConstructor(float.class, resolution.getClass()).newInstance(0f, resolution);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError(e);
-        }
-    }
-
-    private static void assertForgeCrosshair(int x, int y, boolean cancel, float[] clip) throws IOException {
-        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
-        OverlayFilter.invoke(event -> {
-            Sink.clip(clip);
-            Sink.push();
-            Sink.translate(x, y);
-            GlState.quadSized(-1, -1, 0, 0, 2, 2, 1, 1);
-            Sink.pop();
-            if (cancel) event.setCanceled(true);
-        }, crosshair);
-        OverlayFilter.invoke(event -> new OverlayFilter().pre(crosshair), crosshair);
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        int expected = x == 214 && y == 121 && cancel && clip == null ? 1 << 4 : 0;
-        if (frame.hud != expected || frame.images.size() != 1) {
-            throw new AssertionError("Forge crosshair ownership does not match the listener's draw and cancellation");
-        }
-    }
-
-    private static void assertShapeCrosshair(Runnable draw, boolean owned) throws IOException {
-        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
-        OverlayFilter.invoke(event -> {
-            draw.run();
-            event.setCanceled(true);
-        }, crosshair);
-        new OverlayFilter().pre(crosshair);
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != (owned ? 1 << 4 : 0)) throw new AssertionError("incorrect shape crosshair ownership");
-    }
-
-    private static void assertSplitCrosshair() throws IOException {
-        int[][] arms = {{208, 120, 212, 122}, {216, 120, 220, 122},
-                {213, 115, 215, 119}, {213, 123, 215, 127}};
-        RenderGameOverlayEvent.Pre event = crosshairEvent();
-        OverlayFilter.invoke(e -> {
-            for (int[] arm : arms) Sink.rect(arm[0], arm[1], arm[2], arm[3], -1);
-            e.setCanceled(true);
-        }, event);
-        new OverlayFilter().pre(event);
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != 1 << 4 || frame.rects.size() != arms.length) {
-            throw new AssertionError("split crosshair must emit four arms and claim the element");
-        }
-        for (int i = 0; i < arms.length; i++) {
-            int[] arm = arms[i];
-            if (!Arrays.equals(frame.rects.get(i), new float[] {arm[0], arm[1], arm[2], arm[3]})) {
-                throw new AssertionError("incorrect crosshair arm " + i);
-            }
-        }
-    }
-
-    private static void assertImageAlpha() throws IOException {
-        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
-        image.setRGB(0, 0, 0x80FFFFFF);
-        ByteArrayOutputStream png = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", png);
-        byte[] data = png.toByteArray();
-        assertShapeCrosshair(() -> Sink.image("half-alpha", data, 210, 117, 218, 125, 0x20FFFFFF, false), false);
-        assertShapeCrosshair(() -> Sink.image("half-alpha", data, 210, 117, 218, 125, 0x40FFFFFF, false), true);
     }
 
     private static void assertTessellatorRollback() {
@@ -278,11 +118,11 @@ public final class OverlayHooksTest implements Opcodes {
             Nvg.resetScissor(1L, inner);
             throw new IllegalStateException("test scissor listener failed");
         }, post);
-        drawCrosshair();
+        drawImage();
         Nvg.resetScissor(1L, inner);
-        drawCrosshair();
+        drawImage();
         Nvg.clearScissors(1L);
-        drawCrosshair();
+        drawImage();
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
         if (!Arrays.equals(frame.images.get(0).clip, new float[] {1, 1, 5, 5})
                 || !Arrays.equals(frame.images.get(1).clip, box) || frame.images.get(2).clip != null) {
@@ -343,7 +183,6 @@ public final class OverlayHooksTest implements Opcodes {
 
     public static void fail(Object callback, int error) throws IOException {
         if (error != 0) throw new AssertionError("fatal HUD error");
-        if (drawSucceeds) return;
         R.set(callback, "cancelled", true);
         Sink.hud(2);
         Sink.text(FAILED, 0, 0, -1, false);
@@ -362,21 +201,8 @@ public final class OverlayHooksTest implements Opcodes {
         GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
     }
 
-    public static void drawCrosshair() {
+    private static void drawImage() {
         GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
-    }
-
-    public static void drawReplacement() {
-        GlState.quad(4, 5, 0, 0, 1, 1, reverseReplacement ? -1 : 1, 1, 1, 1);
-    }
-
-    private static byte[] crosshairRendererBytes() {
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-        cw.visit(V1_8, ACC_PUBLIC, CROSSHAIR_RENDERER, null, "java/lang/Object", null);
-        MethodVisitor draw = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "drawCrosshair", "(L" + RENDERER + ";)V", null, null);
-        draw.visitMethodInsn(INVOKESTATIC, TEST, "drawReplacement", "()V", false);
-        finish(draw);
-        return cw.toByteArray();
     }
 
     private static byte[] rendererBytes() {
@@ -391,8 +217,6 @@ public final class OverlayHooksTest implements Opcodes {
         entry(cw, "unrelated");
         MethodVisitor handler = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "handler$test", DESC, null, null);
         handler.visitAnnotation("Lorg/spongepowered/asm/mixin/transformer/meta/MixinMerged;", true).visitEnd();
-        handler.visitInsn(ACONST_NULL);
-        handler.visitMethodInsn(INVOKESTATIC, CROSSHAIR_RENDERER, "drawCrosshair", "(L" + RENDERER + ";)V", false);
         handler.visitVarInsn(ALOAD, 3);
         handler.visitVarInsn(DLOAD, 4);
         handler.visitInsn(D2I);

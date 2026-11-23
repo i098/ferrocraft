@@ -54,17 +54,8 @@ public final class OverlayFilter {
         List<String> left = text == null ? null : new ArrayList<>(text.left);
         List<String> right = text == null ? null : new ArrayList<>(text.right);
         Sink.Mark mark = OverlayHooks.checkpoint();
-        boolean crosshair = ((RenderGameOverlayEvent) event).type == ElementType.CROSSHAIRS
-                && event.isCancelable() && !canceled;
-        Sink.Mark previous = null;
-        if (crosshair) {
-            Object size = R.get(event, "resolution");
-            previous = Sink.trackCrosshair(mark, (Integer) R.call(size, "func_78326_a") / 2,
-                    (Integer) R.call(size, "func_78328_b") / 2, (Integer) R.call(size, "func_78325_e"));
-        }
         try {
             listener.invoke(event);
-            if (crosshair && event.isCanceled()) Sink.centeredCrosshairDrawn();
         } catch (Exception failure) {
             if (event.isCancelable()) event.setCanceled(canceled);
             if (chat != null) {
@@ -78,8 +69,6 @@ public final class OverlayFilter {
                 text.right.addAll(right);
             }
             OverlayHooks.failed(failure, mark);
-        } finally {
-            if (crosshair) Sink.stopTrackingCrosshair(mark, previous);
         }
     }
 

@@ -7,7 +7,6 @@
 //! it needs LaunchWrapper's classes, which the loader does not ship.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::{fmt, fs, io};
 
 use portablemc::{base, fabric, moj};
@@ -142,10 +141,8 @@ impl Config {
 
     /// The Ornithe profile: Java 25 (Mojang's `java-runtime-epsilon`), Fabric Loader 0.20.1 on Ornithe's gen2 intermediary
     /// (the names of the public OneClient 1.8.9 bundles), and Ornithe's library upgrades for 1.8.9 in place of the old
-    /// log4j, gson and jopt-simple of the game. Everything lives in `~/.ferrocraft/modhost-ornithe`. The host owns the window and
-    /// the input, so `pylon` (the mod that opens an SDL window and reads the keyboard) never loads: `mods/` loses any
-    /// `pylon` jar and gets a stand-in mod of that id, which keeps the mods that depend on it. Same inputs as `provision_fabric`.
-    pub fn provision_ornithe() -> Result<Config, Error> {
+    /// log4j, gson and jopt-simple of the game. The runtime cache lives in `~/.ferrocraft/modhost-ornithe`.
+    pub fn provision_ornithe(mods: &Path) -> Result<Config, Error> {
         let natives = lwjgl3_natives(std::env::consts::OS, std::env::consts::ARCH)?;
         let main = ornithe_dir()?;
         let profile = main
@@ -199,8 +196,8 @@ impl Config {
             config.class_path.insert(2 + i, dest);
         }
 
-        let mods = main.join("mods");
-        for entry in fs::read_dir(&mods)? {
+        fs::create_dir_all(mods)?;
+        for entry in fs::read_dir(mods)? {
             let path = entry?.path();
             if file_name(&path).to_lowercase().starts_with("pylon")
                 && path.extension().is_some_and(|e| e == "jar")
@@ -214,7 +211,7 @@ impl Config {
             fs::write(&stub, jar)?;
         }
         // The mods that depend on `pylon` need not have it: the host owns the window and the input. A file the player wrote stays.
-        let overrides = main.join("config").join("fabric_loader_dependencies.json");
+        let overrides = main.join("config/fabric_loader_dependencies.json");
         if !overrides.exists() {
             fs::create_dir_all(main.join("config"))?;
             fs::write(&overrides, PYLON_DEPENDS_OVERRIDE)?;
@@ -223,9 +220,15 @@ impl Config {
     }
 }
 
-/// `~/.ferrocraft/modhost-ornithe`: the Minecraft main directory and the game directory of the Ornithe profile.
+/// The shared Minecraft runtime cache for the Ornithe profile.
 pub fn ornithe_dir() -> Result<PathBuf, Error> {
     Ok(main_dir()?.with_file_name("modhost-ornithe"))
+}
+
+pub fn ornithe_workspace() -> Result<tempfile::TempDir, Error> {
+    let main = ornithe_dir()?;
+    fs::create_dir_all(&main)?;
+    Ok(tempfile::Builder::new().prefix("launch-").tempdir_in(main)?)
 }
 
 /// What both profiles share after the installer ran: the name table (from the intermediary jar on the class path), the host jar
@@ -351,7 +354,7 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
     let srg = main.join("mcp-1.8.9-srg.zip");
     fetch(SRG_URL, SRG_SHA1, &srg)?;
     let tmp = table.with_extension("tiny.part");
-    let out = Command::new(java)
+    let out = crate::java_command(java)
         .arg("-cp")
         .arg(&names_jar)
         .arg("net.ferrocraft.prepare.NameTable")
@@ -419,6 +422,7 @@ fn find_jar(env: &str, name: &str, tree_dir: &str, how: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn ornithe_selects_lwjgl_natives_for_release_targets() {
@@ -458,7 +462,7 @@ mod tests {
         let mods = ornithe_dir().unwrap().join("mods");
         fs::create_dir_all(&mods).unwrap();
         fs::write(mods.join("pylon-0.2.8.jar"), b"the real pylon").unwrap();
-        let config = Config::provision_ornithe().expect("provision");
+        let config = Config::provision_ornithe(&mods).expect("provision");
         let version = Command::new(&config.java).arg("-version").output().unwrap();
         assert!(String::from_utf8_lossy(&version.stderr).contains("\"25."));
         let names: Vec<String> = config.class_path.iter().map(|j| file_name(j)).collect();

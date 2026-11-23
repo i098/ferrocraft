@@ -94,7 +94,7 @@ fn install_fabric(
     fabric_jar: &Path,
     engine: &Path,
     home: &Path,
-    storage: Option<&oneclient::Storage>,
+    resolve_storage: impl FnOnce(bool) -> Result<Option<oneclient::Storage>, String>,
     written: &mut Vec<PathBuf>,
     runtime: (&Path, bool),
 ) -> Result<(), String> {
@@ -106,7 +106,8 @@ fn install_fabric(
         .lines()
         .filter_map(recorded_mod)
         .collect();
-    installed_mods::check_reinstall(mods_dirs, &recorded, storage)?;
+    let storage = resolve_storage(!recorded.is_empty())?;
+    installed_mods::check_reinstall(mods_dirs, &recorded, storage.as_ref())?;
     let engine_dir = home.join(".ferrocraft");
     let (source, required) = runtime;
     install_fabric_runtime(source, &engine_dir, written, required)?;
@@ -513,9 +514,7 @@ fn owned_mods_dir(profile: &Path) -> Result<PathBuf, String> {
 
 fn install(o: &Opts, env: &Env) -> Result<(), String> {
     let exe = env::current_exe().map_err(|e| e.to_string())?;
-    if o.mc.is_none() || o.oneclient.is_some() {
-        oneclient::require_closed()?;
-    }
+    oneclient::require_closed()?;
     install_from(o, env, exe.parent().unwrap_or(Path::new(".")), || {
         oneclient::data_dirs(&env.data)
     })
@@ -528,48 +527,28 @@ fn install_from(
     resolve_storage: impl FnOnce() -> Result<oneclient::Storage, String>,
 ) -> Result<(), String> {
     // Explicit paths do not download OneClient or create a new profile.
-    let explicit = o.mc.is_some() || o.oneclient.is_some();
-    let base = env.home.join(".ferrocraft");
-    let (oneclient, storage) = if !explicit {
-        let (app, storage) = oneclient::prepare(&base, resolve_storage)?;
-        let profile = default_oneclient_profile(&storage.0)?;
-        (Some((app, profile)), Some(storage))
-    } else {
-        let mut storage = None;
-        if o.oneclient.is_some() {
-            for name in ENGINE_NAMES {
-                let path = base.join(name);
-                if path.try_exists().map_err(|e| format!("{}: {e}", path.display()))? {
-                    storage = Some(resolve_storage()?);
-                    break;
-                }
-            }
-        }
-        (None, storage)
-    };
-    let mc = o.mc.clone().or_else(|| {
-        let d = env.minecraft_dir();
-        (!explicit && d.is_dir()).then_some(d)
-    });
-    let mods = if let Some((_, (profile, _))) = &oneclient {
-        vec![owned_mods_dir(profile)?]
-    } else {
-        o.oneclient
+    if o.mc.is_some() || o.oneclient.is_some() {
+        let mods = o.oneclient
             .as_deref()
-            .map_or_else(Vec::new, detect::fabric_mods_dirs)
-    };
-    if mc.is_none() && mods.is_empty() {
-        return Err("no 1.8.9 Fabric or Ornithe cluster found in --oneclient-dir".into());
-    }
-    install_targets(o, env, mc, mods, release, storage.as_ref())?;
-    if let Some((app, (_, name))) = oneclient {
-        println!(
-            "Open OneClient at {} and select {name} after signing in.",
-            app.display()
-        );
-        if cfg!(target_os = "linux") {
-            println!("If FUSE is unavailable, run the AppImage with --appimage-extract-and-run.");
+            .map_or_else(Vec::new, detect::fabric_mods_dirs);
+        if o.mc.is_none() && mods.is_empty() {
+            return Err("no 1.8.9 Fabric or Ornithe cluster found in --oneclient-dir".into());
         }
+        return install_targets(o, env, o.mc.clone(), mods, release, |has_install| {
+            has_install.then(resolve_storage).transpose()
+        });
+    }
+    let (app, storage) = oneclient::prepare(&env.home.join(".ferrocraft"), resolve_storage)?;
+    let (profile, name) = default_oneclient_profile(&storage.0)?;
+    let mods = vec![owned_mods_dir(&profile)?];
+    let mc = env.minecraft_dir();
+    install_targets(o, env, mc.is_dir().then_some(mc), mods, release, |_| Ok(Some(storage)))?;
+    println!(
+        "Open OneClient at {} and select {name} after signing in.",
+        app.display()
+    );
+    if cfg!(target_os = "linux") {
+        println!("If FUSE is unavailable, run the AppImage with --appimage-extract-and-run.");
     }
     Ok(())
 }
@@ -580,25 +559,18 @@ fn install_targets(
     mc: Option<PathBuf>,
     mods: Vec<PathBuf>,
     release: &Path,
-    storage: Option<&oneclient::Storage>,
+    resolve_storage: impl FnOnce(bool) -> Result<Option<oneclient::Storage>, String>,
 ) -> Result<(), String> {
     let f = files(o, release);
     let mut written = Vec::new();
     let res: Result<(), String> = (|| {
-        if let Some(mc) = &mc {
-            install_official(mc, &f.boot, &f.engine, &mut written)?;
-            println!(
-                "official launcher: installed {VERSION_ID} into {}",
-                mc.display()
-            );
-        }
         if !mods.is_empty() {
             install_fabric(
                 &mods,
                 &f.fabric,
                 &f.engine,
                 &env.home,
-                storage,
+                resolve_storage,
                 &mut written,
                 (release, o.oneclient.is_none()),
             )?;
@@ -609,8 +581,18 @@ fn install_targets(
                 );
             }
         }
+        if let Some(mc) = &mc {
+            install_official(mc, &f.boot, &f.engine, &mut written)?;
+            println!(
+                "official launcher: installed {VERSION_ID} into {}",
+                mc.display()
+            );
+        }
         Ok(())
     })();
+    if written.is_empty() && res.is_err() {
+        return res;
+    }
     let mut roots: Vec<PathBuf> = mc.iter().chain(&mods).cloned().collect();
     roots.push(env.home.join(".ferrocraft"));
     let kept =
@@ -903,7 +885,7 @@ mod tests {
                 &incoming,
                 &new_engine,
                 &home,
-                None,
+                |_| Ok(None),
                 &mut Vec::new(),
                 (tmp.path(), false),
             )
@@ -918,7 +900,7 @@ mod tests {
             &cached,
             &new_engine,
             &home,
-            None,
+            |_| Ok(None),
             &mut Vec::new(),
             (tmp.path(), false),
         )
@@ -935,7 +917,7 @@ mod tests {
                 &incoming,
                 &new_engine,
                 &home,
-                Some(&fixture_storage(&app_data).unwrap()),
+                |_| fixture_storage(&app_data).map(Some),
                 &mut Vec::new(),
                 (tmp.path(), false),
             )
@@ -989,7 +971,7 @@ mod tests {
             &incoming,
             &new_engine,
             &home,
-            None,
+            |_| Ok(None),
             &mut Vec::new(),
             (tmp.path(), false),
         )
@@ -1013,9 +995,31 @@ mod tests {
             .unwrap();
         let previous = tmp.path().join("intermediate-root");
         fs::rename(&data, &previous).unwrap();
-        let err = reinstall();
+        let selected = tmp.path().join("other");
+        fs::create_dir_all(other_mods.parent().unwrap()).unwrap();
+        fs::write(
+            other_mods.parent().unwrap().join(".instance.json"),
+            br#"{"mc_version":"1.8.9","mc_loader":"Ornithe"}"#,
+        )
+        .unwrap();
+        fs::remove_file(&engine).unwrap();
+        let before = fs::read(&manifest).unwrap();
+        let err = install_from(
+            &Opts {
+                oneclient: Some(selected),
+                engine: Some(new_engine.clone()),
+                fabric: Some(incoming.clone()),
+                ..Opts::default()
+            },
+            &Env { home: home.clone(), data: app_data.clone() },
+            tmp.path(),
+            || fixture_storage(&app_data),
+        )
+        .unwrap_err();
         assert!(err.contains(&moved.join("clusters").display().to_string()), "{err}");
-        assert_eq!(fs::read(&engine).unwrap(), b"engine");
+        assert!(!engine.exists());
+        assert_eq!(fs::read(&manifest).unwrap(), before);
+        fs::write(&engine, b"engine").unwrap();
         assert!(!other_mods.exists());
         fs::rename(&previous, &data).unwrap();
         let err = uninstall_fixture(&manifest, &app_data).unwrap_err();
@@ -1080,7 +1084,7 @@ mod tests {
             &incoming,
             &engine,
             &home,
-            None,
+            |_| Ok(None),
             &mut written,
             (tmp.path(), false),
         )
@@ -1170,7 +1174,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
-            None,
+            |_| Ok(None),
             &mut written,
             (&tmp, false),
         )
@@ -1239,7 +1243,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &engine,
             &home,
-            None,
+            |_| Ok(None),
             &mut Vec::new(),
             (&tmp, false),
         )
@@ -1262,7 +1266,7 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
-            None,
+            |_| Ok(None),
             &mut written,
             (&tmp, false),
         );

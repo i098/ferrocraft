@@ -53,6 +53,7 @@ fn is_oneclient_process(line: &str, windows: bool) -> bool {
         .is_some_and(|name| {
             matches!(name, "oneclient_app" | "OneClient" | "OneClient.AppImage" | "OneClient.AppIm")
                 || name.starts_with("OneClient_")
+                || name.starts_with("oneclient_app_")
         })
 }
 
@@ -391,6 +392,34 @@ fn installed_windows(managed_dir: &Path) -> io::Result<Option<PathBuf>> {
 }
 
 #[cfg(windows)]
+const WINDOWS_PROTOCOL_COMMAND: &str = r"Software\Classes\oneclient\shell\open\command";
+
+#[cfg(any(windows, test))]
+fn protocol_executable(command: &str) -> Option<&str> {
+    let command = command.trim_start();
+    if let Some(quoted) = command.strip_prefix('"') {
+        quoted.split_once('"').map(|(path, _)| path)
+    } else {
+        command.split_ascii_whitespace().next()
+    }
+}
+
+#[cfg(windows)]
+fn registered_protocol(command: &str, registered: &mut bool) -> Option<PathBuf> {
+    let app = Path::new(protocol_executable(command)?);
+    if !app.is_absolute() || !app.is_file() {
+        return None;
+    }
+    let name = app.file_name()?;
+    if name.eq_ignore_ascii_case("oneclient_app.exe") {
+        *registered = true;
+        return compatible_windows_executable(app).then(|| app.to_path_buf());
+    }
+    *registered |= name.eq_ignore_ascii_case("OneClient.exe");
+    None
+}
+
+#[cfg(windows)]
 fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
     use windows_registry::{CURRENT_USER, LOCAL_MACHINE};
 
@@ -399,6 +428,7 @@ fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
     const FILE_NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
     const PATH_NOT_FOUND: i32 = 0x8007_0003_u32 as i32;
     let locations = [
+        (WINDOWS_PROTOCOL_COMMAND, ""),
         (
             r"Software\Microsoft\Windows\CurrentVersion\Uninstall\OneClient",
             "InstallLocation",
@@ -417,13 +447,19 @@ fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
             Err(e) if matches!(e.code().0, FILE_NOT_FOUND | PATH_NOT_FOUND) => continue,
             Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
         };
-        registered = true;
+        let protocol = subkey == WINDOWS_PROTOCOL_COMMAND;
+        registered |= !protocol;
         let dir = match key.get_string(value) {
             Ok(dir) => dir,
             Err(e) if e.code().0 == FILE_NOT_FOUND => continue,
             Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
         };
-        if let Some(app) = windows_executable(Path::new(dir.trim_matches('"')), &mut registered) {
+        let app = if protocol {
+            registered_protocol(&dir, &mut registered)
+        } else {
+            windows_executable(Path::new(dir.trim_matches('"')), &mut registered)
+        };
+        if let Some(app) = app {
             return Ok((Some(app), true));
         }
     }
@@ -457,6 +493,8 @@ mod tests {
             "/Applications/OneClient.app/Contents/MacOS/oneclient_app",
             "OneClient_2.12.0_amd64.AppImage",
             "OneClient.AppIm",
+            "oneclient_app_2.12.0_x86_64.AppImage",
+            "oneclient_app_2",
         ] {
             assert!(is_oneclient_process(command, false), "{command}");
         }
@@ -464,6 +502,19 @@ mod tests {
         assert!(is_oneclient_process(r#""ONECLIENT.EXE","123","Console""#, true));
         assert!(!is_oneclient_process(r#""not-OneClient.exe","123","Console""#, true));
         assert!(!is_oneclient_process("oneclient_app-helper", false));
+    }
+
+    #[test]
+    fn protocol_registration_selects_the_executable_not_its_arguments() {
+        assert_eq!(
+            protocol_executable(r#""D:\Custom Apps\OneClient\oneclient_app.exe" "%1""#),
+            Some(r"D:\Custom Apps\OneClient\oneclient_app.exe")
+        );
+        assert_eq!(
+            protocol_executable(r"D:\OneClient\oneclient_app.exe %1"),
+            Some(r"D:\OneClient\oneclient_app.exe")
+        );
+        assert_eq!(protocol_executable(r#""D:\Custom Apps\unfinished"#), None);
     }
 
     #[test]

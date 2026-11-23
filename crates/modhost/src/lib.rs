@@ -142,12 +142,21 @@ fn prefixed(prefix: &str, path: &Path) -> OsString {
 pub struct ModHost {
     child: Arc<Mutex<Child>>,
     link: Arc<Link>,
+    staging: Option<Arc<Mutex<Option<tempfile::TempDir>>>>,
 }
 
 impl ModHost {
     /// Start the JVM and return at once. A worker thread waits for it to connect, which is after FML
     /// has loaded the mods, and gives up when the process exits first.
     pub fn start(cfg: &Config) -> io::Result<Self> {
+        Self::start_inner(cfg, None)
+    }
+
+    pub fn start_staged(cfg: &Config, staging: tempfile::TempDir) -> io::Result<Self> {
+        Self::start_inner(cfg, Some(staging))
+    }
+
+    fn start_inner(cfg: &Config, staging: Option<tempfile::TempDir>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
@@ -159,10 +168,12 @@ impl ModHost {
             .collect::<Vec<_>>()
             .join(sep);
         let token = token();
-        let mut cmd = Command::new(&cfg.java);
-        cmd.env_remove("FERROCRAFT_ACCESS_TOKEN")
-            .env("FERROCRAFT_BRIDGE_TOKEN", &token)
+        let mut cmd = java_command(&cfg.java);
+        cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
+        if let Some(dir) = &staging {
+            cmd.arg(prefixed("-Dfabric.modsFolder=", dir.path()));
+        }
         match &cfg.loader {
             Loader::Forge => {
                 cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
@@ -192,6 +203,7 @@ impl ModHost {
             .spawn()?;
         let host = Self {
             child: Arc::new(Mutex::new(child)),
+            staging: staging.map(|dir| Arc::new(Mutex::new(Some(dir)))),
             link: Arc::new(Link {
                 state: Mutex::new(Shared {
                     phase: Phase::Starting,
@@ -225,7 +237,16 @@ impl ModHost {
             }),
         };
         let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
-        thread::spawn(move || run(&listener, &child, &link, &token));
+        let staging = host.staging.clone();
+        thread::spawn(move || {
+            run(&listener, &child, &link, &token);
+            if let Some(staging) = staging {
+                while matches!(child.lock().unwrap().try_wait(), Ok(None)) {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                staging.lock().unwrap().take();
+            }
+        });
         Ok(host)
     }
 
@@ -565,7 +586,11 @@ impl ModHost {
         }
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
-        let _ = child.wait();
+        if child.wait().is_ok() {
+            if let Some(staging) = &self.staging {
+                staging.lock().unwrap().take();
+            }
+        }
     }
 }
 
@@ -573,6 +598,12 @@ impl Drop for ModHost {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn java_command(java: &Path) -> Command {
+    let mut command = Command::new(java);
+    command.env_remove("FERROCRAFT_ACCESS_TOKEN");
+    command
 }
 
 fn transition(event: &WindowEvent) -> Option<Event> {
@@ -1072,6 +1103,53 @@ mod tests {
         assert_eq!(std::env::var("FERROCRAFT_ACCESS_TOKEN").unwrap(), "test-session");
     }
 
+    #[test]
+    fn staged_hosts_keep_separate_mods_until_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+
+        let root = tempfile::tempdir().unwrap();
+        let java = root.path().join("java");
+        std::fs::write(&java, r#"#!/bin/sh
+while [ "$#" -ne 0 ]; do
+    case "$1" in -Dfabric.modsFolder=*) cd "${1#*=}" || exit 1; break;; esac
+    shift
+done
+[ "$#" -ne 0 ] && cat ./*.jar > loaded || exit 1
+while [ ! -f exit ]; do sleep 0.02; done
+"#).unwrap();
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let launch = |name: &str| {
+            let dir = tempfile::tempdir_in(root.path()).unwrap();
+            let path = dir.path().to_path_buf();
+            std::fs::write(path.join(name), name).unwrap();
+            let cfg = Config {
+                loader: Loader::Fabric { agent: root.path().join("agent.jar"), names: root.path().join("names.tiny") },
+                java: java.clone(),
+                class_path: Vec::new(),
+                game_dir: root.path().to_path_buf(),
+                assets_dir: root.path().to_path_buf(),
+            };
+            (ModHost::start_staged(&cfg, dir).unwrap(), path)
+        };
+        let (_a, first) = launch("first.jar");
+        let (mut b, second) = launch("second.jar");
+        let wait_for = |ready: &dyn Fn() -> bool| {
+            let until = Instant::now() + Duration::from_secs(5);
+            while !ready() {
+                assert!(Instant::now() < until);
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        wait_for(&|| std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
+            && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar"));
+        std::fs::write(first.join("exit"), []).unwrap();
+        wait_for(&|| !first.exists());
+        assert!(second.is_dir());
+        b.stop();
+        assert!(!second.exists());
+    }
+
     pub(super) fn link() -> Arc<Link> {
         Arc::new(Link {
             state: Mutex::new(Shared {
@@ -1157,6 +1235,7 @@ mod tests {
         let host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let key = |pressed| Event::Key {
             code: 54,
@@ -1220,6 +1299,7 @@ mod tests {
         let mut host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
@@ -1250,6 +1330,7 @@ mod tests {
         let mut host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
@@ -1297,6 +1378,7 @@ mod tests {
         let mut host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
@@ -1332,6 +1414,7 @@ mod tests {
         let mut host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
@@ -1381,6 +1464,7 @@ mod tests {
         let mut host = ModHost {
             child: Arc::clone(&child),
             link: Arc::clone(&link),
+            staging: None,
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));

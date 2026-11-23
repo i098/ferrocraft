@@ -99,11 +99,14 @@ fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
 }
 
 fn start(game_dir: &Path) -> Option<ModHost> {
-    let cfg = match Config::from_env() {
-        Some(cfg) => cfg,
-        None => from_cluster(&cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir))?,
-    };
-    match ModHost::start(&cfg) {
+    if let Some(cfg) = Config::from_env() {
+        return started(ModHost::start(&cfg));
+    }
+    from_cluster(&cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir))
+}
+
+fn started(result: std::io::Result<ModHost>) -> Option<ModHost> {
+    match result {
         Ok(host) => Some(host),
         Err(e) => {
             log::line(&format!("mod host did not start: {e}"));
@@ -117,7 +120,7 @@ fn cluster(env: Option<std::ffi::OsString>, game_dir: &Path) -> PathBuf {
         .map_or_else(|| game_dir.to_path_buf(), PathBuf::from)
 }
 
-fn from_cluster(cluster: &Path) -> Option<Config> {
+fn from_cluster(cluster: &Path) -> Option<ModHost> {
     let loader = match oneclient::loader(cluster) {
         Ok(l) => l,
         Err(e) => return fail(&e),
@@ -129,13 +132,40 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         ));
         return None;
     };
-    stage(cluster, loader, host)?;
+    if host == Host::Ornithe {
+        return start_ornithe(cluster, loader);
+    }
+    let main = match host {
+        Host::Forge => provision::main_dir().map_err(|e| e.to_string()),
+        Host::Fabric => provision_fabric::main_dir().map_err(|e| e.to_string()),
+        Host::Ornithe => unreachable!(),
+    };
+    let main = match main {
+        Ok(main) => main,
+        Err(e) => return fail(&e),
+    };
+    stage(cluster, loader, &main.join("mods"))?;
     let cfg = match host {
         Host::Forge => Config::provision().map_err(|e| e.to_string()),
         Host::Fabric => Config::provision_fabric().map_err(|e| e.to_string()),
-        Host::Ornithe => Config::provision_ornithe().map_err(|e| e.to_string()),
+        Host::Ornithe => unreachable!(),
     };
-    cfg.map_err(|e| fail::<Config>(&e)).ok()
+    match cfg {
+        Ok(cfg) => started(ModHost::start(&cfg)),
+        Err(e) => fail(&e),
+    }
+}
+
+fn start_ornithe(cluster: &Path, loader: oneclient::Loader) -> Option<ModHost> {
+    let workspace = match provision_fabric::ornithe_workspace() {
+        Ok(dir) => dir,
+        Err(e) => return fail(&e),
+    };
+    stage(cluster, loader, workspace.path())?;
+    match Config::provision_ornithe(workspace.path()) {
+        Ok(cfg) => started(ModHost::start_staged(&cfg, workspace)),
+        Err(e) => fail(&e),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,27 +187,18 @@ fn host_for(loader: oneclient::Loader) -> Option<Host> {
 }
 
 /// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
-fn stage(cluster: &Path, loader: oneclient::Loader, host: Host) -> Option<()> {
-    let main = match host {
-        Host::Forge => provision::main_dir().map_err(|e| e.to_string()),
-        Host::Fabric => provision_fabric::main_dir().map_err(|e| e.to_string()),
-        Host::Ornithe => provision_fabric::ornithe_dir().map_err(|e| e.to_string()),
-    };
-    let mods = match main {
-        Ok(main) => main.join("mods"),
-        Err(e) => return fail(&e),
-    };
-    let resolved = if host == Host::Forge {
-        oneclient::resolve(cluster, &mods)
+fn stage(cluster: &Path, loader: oneclient::Loader, mods: &Path) -> Option<()> {
+    let resolved = if loader == oneclient::Loader::Forge {
+        oneclient::resolve(cluster, mods)
     } else {
-        oneclient::fabric_jars(cluster, &mods)
+        oneclient::fabric_jars(cluster, mods)
     };
     let r = match resolved {
         Ok(r) => r,
         Err(oneclient::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => return fail(&e),
     };
-    prune(&mods, &r.jars);
+    prune(mods, &r.jars);
     let twin = if r.no_forge.is_empty() {
         String::new()
     } else {

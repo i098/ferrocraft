@@ -54,7 +54,7 @@ fn is_fabric_189(dir: &Path) -> bool {
         };
         if instance.get("mc_loader").is_some() {
             let loader = &instance["mc_loader"];
-            if loader != 4 {
+            if loader != 4 && loader != 5 {
                 return instance["mc_version"] == "1.8.9" && loader == "Ornithe";
             }
             if instance["mc_version"] != "1.8.9" {
@@ -128,6 +128,7 @@ mod tests {
         for (name, version, loader) in [
             ("ornithe", "1.8.9", serde_json::json!("Ornithe")),
             ("ornithe-numeric", "1.8.9", serde_json::json!(5)),
+            ("1.8.9 Fabric legacy", "1.8.9", serde_json::json!(5)),
             ("fabric-numeric", "1.8.9", serde_json::json!(4)),
             ("pvp", "1.8.9", serde_json::json!(4)),
             ("fabric-string", "1.8.9", serde_json::json!("Fabric")),
@@ -151,6 +152,7 @@ mod tests {
         assert_eq!(
             found,
             [
+                c.join("1.8.9 Fabric legacy/mods"),
                 c.join("fabric-numeric/mods"),
                 c.join("ornithe/mods")
             ]

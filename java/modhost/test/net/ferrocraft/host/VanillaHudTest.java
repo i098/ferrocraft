@@ -94,20 +94,34 @@ public final class VanillaHudTest {
             if (matchesCrosshair(image, icons)) matches++;
         }
         if (matches != 1) throw new AssertionError("expected one visible PolyCrosshair image, got " + matches);
-        if (fail && frame.images.stream().noneMatch(image -> image.x0 == 2 && image.y0 == 3
-                && image.x1 == 3 && image.y1 == 4 && image.argb == 0x804080bf && image.blend == 3)) {
+        if (fail && !hasRecoveryProbe(frame)) {
             throw new AssertionError("Minecraft's cached GL calls did not draw the recovery probe");
         }
         return frame.hud;
     }
 
+    private boolean hasRecoveryProbe(MirrorHudTest.Frame frame) throws IOException {
+        for (MirrorHudTest.Image image : frame.images) {
+            if (image.x0 != 2 || image.y0 != 3 || image.x1 != 3 || image.y1 != 4
+                    || image.argb != 0x804080bf || image.blend != 3 || image.recolor) continue;
+            BufferedImage decoded = decodeTexture(image.name);
+            if (decoded != null && decoded.getWidth() == 1 && decoded.getHeight() == 1 && decoded.getRGB(0, 0) == -1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean matchesCrosshair(MirrorHudTest.Image image, BufferedImage icons) throws IOException {
         if (image.x0 != 206 || image.y0 != 113 || image.x1 != 222 || image.y1 != 129
                 || image.argb != -1 || image.recolor || image.blend != 1) return false;
-        byte[] png = textures.get(image.name);
-        if (png == null) return false;
-        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
+        BufferedImage decoded = decodeTexture(image.name);
         return decoded != null && sameCrosshairPixels(image, decoded, icons);
+    }
+
+    private BufferedImage decodeTexture(String name) throws IOException {
+        byte[] png = textures.get(name);
+        return png == null ? null : ImageIO.read(new ByteArrayInputStream(png));
     }
 
     static boolean sameCrosshairPixels(MirrorHudTest.Image image, BufferedImage decoded, BufferedImage icons) {

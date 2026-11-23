@@ -1,7 +1,11 @@
 package net.ferrocraft.host;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.Chat;
 import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.Text;
 import net.minecraftforge.fml.common.eventhandler.Event;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.IEventListener;
@@ -44,16 +48,32 @@ public final class OverlayFilter {
             return;
         }
         boolean canceled = event.isCancelable() && event.isCanceled();
+        Chat chat = event instanceof Chat ? (Chat) event : null;
+        int x = chat == null ? 0 : chat.posX;
+        int y = chat == null ? 0 : chat.posY;
+        Text text = event instanceof Text ? (Text) event : null;
+        List<String> left = text == null ? null : new ArrayList<>(text.left);
+        List<String> right = text == null ? null : new ArrayList<>(text.right);
         Sink.Mark mark = OverlayHooks.checkpoint();
         try {
             listener.invoke(event);
         } catch (Exception failure) {
             if (event.isCancelable()) event.setCanceled(canceled);
+            if (chat != null) {
+                chat.posX = x;
+                chat.posY = y;
+            }
+            if (text != null) {
+                text.left.clear();
+                text.left.addAll(left);
+                text.right.clear();
+                text.right.addAll(right);
+            }
             OverlayHooks.failed(failure, mark);
             return;
         }
         ElementType type = ((RenderGameOverlayEvent) event).type;
-        if (type == ElementType.CROSSHAIRS || (type == ElementType.ALL && event instanceof RenderGameOverlayEvent.Post)) {
+        if (type == ElementType.CROSSHAIRS) {
             Sink.crosshairDrawn(mark.textures);
         }
     }

@@ -8,7 +8,13 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import javax.imageio.ImageIO;
+import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -37,6 +43,8 @@ public final class OverlayHooksTest implements Opcodes {
             cls.getMethod("func_181560_a", float.class, long.class).invoke(null, 0f, 0L);
             assertFrame();
             assertClippedCrosshair();
+            assertPostImageDoesNotClaimCrosshair();
+            assertEventPayloadRollback();
             assertPropagates(cls.getMethod("unrelated"), IOException.class);
             assertPropagates(cls.getMethod("func_78478_c"), AssertionError.class);
         } finally {
@@ -73,6 +81,43 @@ public final class OverlayHooksTest implements Opcodes {
 
     private static void emitCrosshair(byte[] png) {
         Sink.image("clip-test", png, 206, 113, 222, 129, -1, false);
+    }
+
+    private static void assertPostImageDoesNotClaimCrosshair() throws IOException {
+        RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
+        Sink.hud(1 << 4);
+        OverlayFilter.invoke(event -> GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1),
+                new RenderGameOverlayEvent.Post(parent, ElementType.ALL));
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        if (frame.hud != 0 || frame.images.size() != 1) {
+            throw new AssertionError("an unrelated Post(ALL) draw must not hide the vanilla crosshair");
+        }
+    }
+
+    private static void assertEventPayloadRollback() {
+        RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
+        RenderGameOverlayEvent.Chat chat = new RenderGameOverlayEvent.Chat(parent, 2, 3);
+        OverlayFilter.invoke(event -> chat.posY = 4, chat);
+        OverlayFilter.invoke(event -> {
+            chat.posX = -100;
+            chat.posY = -200;
+            throw new IllegalStateException("test chat listener failed");
+        }, chat);
+        if (chat.posX != 2 || chat.posY != 4) throw new AssertionError("failed listener moved chat");
+
+        List<String> expectedLeft = Arrays.asList("first", "second", "second");
+        List<String> expectedRight = Collections.singletonList("kept");
+        RenderGameOverlayEvent.Text text = new RenderGameOverlayEvent.Text(
+                parent, new ArrayList<>(expectedLeft), new ArrayList<>());
+        OverlayFilter.invoke(event -> text.right.add("kept"), text);
+        OverlayFilter.invoke(event -> {
+            text.left.clear();
+            text.right.set(0, "failed");
+            throw new IllegalStateException("test text listener failed");
+        }, text);
+        if (!text.left.equals(expectedLeft) || !text.right.equals(expectedRight)) {
+            throw new AssertionError("failed listener changed overlay text");
+        }
     }
 
     private static void assertFrame() throws IOException {

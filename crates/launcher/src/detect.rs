@@ -55,7 +55,7 @@ fn is_fabric_189(dir: &Path) -> bool {
         if instance.get("mc_loader").is_some() {
             let loader = &instance["mc_loader"];
             return instance["mc_version"] == "1.8.9"
-                && (loader == "Fabric" || loader == 4 || loader == "Ornithe" || loader == 5);
+                && (loader == 4 || loader == "Ornithe" || loader == 5);
         }
     }
     let mut text = dir
@@ -118,13 +118,16 @@ mod tests {
     }
 
     #[test]
-    fn explicit_root_only_selects_ornithe_with_matching_metadata() {
+    fn explicit_root_selects_only_supported_loader_metadata() {
         let root = tmp("ornithe");
         let c = root.join("OneClient/clusters");
         for (name, version, loader) in [
-            ("ornithe", "1.8.9", "Ornithe"),
-            ("forge", "1.8.9", "Forge"),
-            ("other-version", "1.21", "Ornithe"),
+            ("ornithe", "1.8.9", serde_json::json!("Ornithe")),
+            ("ornithe-numeric", "1.8.9", serde_json::json!(5)),
+            ("fabric-numeric", "1.8.9", serde_json::json!(4)),
+            ("fabric-string", "1.8.9", serde_json::json!("Fabric")),
+            ("forge", "1.8.9", serde_json::json!(1)),
+            ("other-version", "1.21", serde_json::json!("Ornithe")),
         ] {
             fs::create_dir_all(c.join(name)).unwrap();
             fs::write(
@@ -138,9 +141,15 @@ mod tests {
             )
             .unwrap();
         }
+        let mut found = fabric_mods_dirs(&root.join("OneClient"));
+        found.sort();
         assert_eq!(
-            fabric_mods_dirs(&root.join("OneClient")),
-            [c.join("ornithe/mods")]
+            found,
+            [
+                c.join("fabric-numeric/mods"),
+                c.join("ornithe/mods"),
+                c.join("ornithe-numeric/mods")
+            ]
         );
         fs::remove_dir_all(root).unwrap();
     }

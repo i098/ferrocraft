@@ -15,3 +15,6 @@ png = "0.17"
 portablemc = "5.0.6"
 sha1 = "0.10"
 ureq = "3"
+
+[dev-dependencies]
+tempfile = "3"

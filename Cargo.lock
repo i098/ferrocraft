@@ -936,6 +936,8 @@ dependencies = [
  "sha2",
  "tempfile",
  "windows-registry",
+ "windows-sys 0.61.2",
+ "zip 2.6.1",
 ]
 
 [[package]]
@@ -948,6 +950,7 @@ dependencies = [
  "render",
  "resvg",
  "sha1 0.10.7",
+ "tempfile",
  "ureq",
  "winit",
 ]

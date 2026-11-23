@@ -160,7 +160,8 @@ impl ModHost {
             .join(sep);
         let token = token();
         let mut cmd = Command::new(&cfg.java);
-        cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
+        cmd.env_remove("FERROCRAFT_ACCESS_TOKEN")
+            .env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
         match &cfg.loader {
             Loader::Forge => {
@@ -1028,6 +1029,48 @@ mod tests {
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;
+
+    #[test]
+    fn mod_host_does_not_inherit_minecraft_access_token() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let name = "tests::mod_host_does_not_inherit_minecraft_access_token";
+        if std::env::var_os("FERROCRAFT_TEST_HOST_ENV").is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env("FERROCRAFT_TEST_HOST_ENV", "1")
+                .env("FERROCRAFT_ACCESS_TOKEN", "test-session")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let java = tmp.path().join("java");
+        std::fs::write(
+            &java,
+            "#!/bin/sh\n[ -z \"${FERROCRAFT_ACCESS_TOKEN+x}\" ] && [ -n \"$FERROCRAFT_BRIDGE_TOKEN\" ]\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for loader in [
+            Loader::Forge,
+            Loader::Fabric { agent: tmp.path().join("agent.jar"), names: tmp.path().join("names.tiny") },
+        ] {
+            let host = ModHost::start(&Config {
+                loader,
+                java: java.clone(),
+                class_path: Vec::new(),
+                game_dir: tmp.path().to_path_buf(),
+                assets_dir: tmp.path().to_path_buf(),
+            })
+            .unwrap();
+            assert!(host.child.lock().unwrap().wait().unwrap().success());
+        }
+        assert_eq!(std::env::var("FERROCRAFT_ACCESS_TOKEN").unwrap(), "test-session");
+    }
 
     pub(super) fn link() -> Arc<Link> {
         Arc::new(Link {

@@ -30,6 +30,7 @@ On Linux without FUSE, run the AppImage with `--appimage-extract-and-run`.
 To use an existing launcher without a OneClient download, extract the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases).
 Run `./ferrocraft-launcher install --minecraft-dir DIR` for the official launcher.
 Use `./ferrocraft-launcher install --oneclient-dir DIR` with the OneClient data directory to target its 1.8.9 Fabric or Ornithe profiles.
+Before you reinstall, remove the bootstrap mod in OneClient if OneClient already manages it.
 Lunar Client and Badlion cannot start custom versions.
 
 Run `~/.ferrocraft/ferrocraft-engine` to start the standalone engine on Unix.
@@ -39,6 +40,7 @@ Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files
 The uninstall command preserves OneClient and the profile's data.
 If OneClient still manages the bootstrap mod, the command stops before it removes any files.
 Remove the bootstrap mod in OneClient before you retry.
+If the message identifies an old data folder after a move, clear that folder in OneClient Storage before you retry.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

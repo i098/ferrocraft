@@ -95,7 +95,7 @@ fn install_fabric(
     home: &Path,
     written: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
-    installed_mods::check_reinstall(mods_dirs, fabric_jar)?;
+    installed_mods::check_reinstall(mods_dirs)?;
     let engine_dst = home.join(".ferrocraft").join(engine_file_name(engine));
     written.push(engine_dst.clone());
     copy(engine, &engine_dst)?;
@@ -303,18 +303,124 @@ fn files(o: &Opts) -> Files {
     }
 }
 
+fn registered_oneclient_profiles(data: &Path) -> std::io::Result<Vec<(String, String)>> {
+    let database = data.join("user_data.db");
+    if !database.try_exists()? {
+        return Ok(Vec::new());
+    }
+    let db = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(std::io::Error::other)?;
+    let mut query = db
+        .prepare("SELECT folder_name, name FROM clusters")
+        .map_err(std::io::Error::other)?;
+    let rows = query
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(std::io::Error::other)?;
+    rows.collect::<Result<_, _>>().map_err(std::io::Error::other)
+}
+
+struct OwnedProfile {
+    slot: usize,
+    path: PathBuf,
+    folder: String,
+    name: String,
+}
+
+fn scan_oneclient_profiles(
+    clusters: &Path,
+) -> std::io::Result<(Vec<String>, Option<OwnedProfile>)> {
+    let mut disk_names = Vec::new();
+    let mut owned: Option<OwnedProfile> = None;
+    for entry in fs::read_dir(clusters)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let folder = entry.file_name();
+        let Some(folder) = folder.to_str() else {
+            continue;
+        };
+        let path = entry.path();
+        let slot = if folder == VERSION_ID {
+            Some(1)
+        } else {
+            folder.strip_prefix(VERSION_ID).and_then(|suffix| {
+                let suffix = suffix.strip_prefix('-')?;
+                let number = suffix.parse::<usize>().ok()?;
+                (number >= 2 && !suffix.starts_with(['0', '+'])).then_some(number)
+            })
+        };
+        let identity = fs::read(path.join(".instance.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        if let Some(slot) = slot.filter(|_| {
+            fs::read(path.join(PROFILE_MARKER)).as_deref().ok() == Some(b"1\n")
+        }) {
+            let name = identity
+                .as_ref()
+                .filter(|identity| {
+                    identity["mc_version"] == BASE_VERSION
+                        && identity["mc_loader"] == "Ornithe"
+                        && identity["kind"] == "modded"
+                })
+                .and_then(|identity| identity["name"].as_str())
+                .ok_or_else(|| std::io::Error::other("The Ferrocraft profile is incompatible"))?;
+            if owned.as_ref().is_none_or(|profile| slot < profile.slot) {
+                owned = Some(OwnedProfile {
+                    slot,
+                    path,
+                    folder: folder.to_owned(),
+                    name: name.to_owned(),
+                });
+            }
+        } else if let Some(name) = identity.as_ref().and_then(|identity| identity["name"].as_str()) {
+            disk_names.push(name.to_owned());
+        }
+    }
+    Ok((disk_names, owned))
+}
+
 /// OneClient 2.12 reads .instance.json on startup to adopt this profile from disk.
 fn default_oneclient_profile(data: &Path) -> Result<(PathBuf, String), String> {
     let prepare = || -> std::io::Result<_> {
         let clusters = data.join("clusters");
         fs::create_dir_all(&clusters)?;
+        let registered = registered_oneclient_profiles(data)?;
+        let (disk_names, owned) = scan_oneclient_profiles(&clusters)?;
+        if let Some(OwnedProfile { path, folder, name, .. }) = owned {
+            let name = registered
+                .iter()
+                .find(|(stem, _)| stem == &folder)
+                .map_or(name.as_str(), |(_, name)| name);
+            if disk_names.iter().any(|n| n == name)
+                || registered.iter().any(|(stem, n)| stem != &folder && n == name)
+            {
+                return Err(std::io::Error::other(format!(
+                    "More than one OneClient profile is named {name}; rename the other profile before reinstalling"
+                )));
+            }
+            return Ok((path, name.to_owned()));
+        }
         for number in 1.. {
             let (stem, name) = if number == 1 {
                 (VERSION_ID.to_owned(), "Ferrocraft 1.8.9".to_owned())
             } else {
                 (format!("{VERSION_ID}-{number}"), format!("Ferrocraft 1.8.9 ({number})"))
             };
+            if registered.iter().any(|(folder, display)| {
+                folder.eq_ignore_ascii_case(&stem) || display == &name
+            }) || disk_names.contains(&name) {
+                continue;
+            }
             let profile = clusters.join(stem);
+            match fs::symlink_metadata(&profile) {
+                Ok(_) => continue,
+                Err(e) if e.kind() == NotFound => {}
+                Err(e) => return Err(e),
+            }
             let identity = json!({
                 "name": name,
                 "mc_version": BASE_VERSION,
@@ -322,31 +428,11 @@ fn default_oneclient_profile(data: &Path) -> Result<(PathBuf, String), String> {
                 "kind": "modded",
                 "user_created": true
             });
-            match fs::symlink_metadata(&profile) {
-                Ok(meta) if meta.is_dir() => {
-                    if fs::read(profile.join(PROFILE_MARKER)).as_deref().ok() != Some(b"1\n") {
-                        continue;
-                    }
-                    let existing: Value =
-                        serde_json::from_slice(&fs::read(profile.join(".instance.json"))?)?;
-                    if ["mc_version", "mc_loader", "kind"]
-                        .iter()
-                        .any(|key| existing[*key] != identity[*key])
-                    {
-                        return Err(std::io::Error::other("The Ferrocraft profile is incompatible"));
-                    }
-                    return Ok((profile, existing["name"].as_str().unwrap_or(&name).to_owned()));
-                }
-                Ok(_) => continue,
-                Err(e) if e.kind() == NotFound => {
-                    let stage = tempfile::tempdir_in(data)?;
-                    fs::write(stage.path().join(".instance.json"), identity.to_string())?;
-                    fs::write(stage.path().join(PROFILE_MARKER), b"1\n")?;
-                    fs::rename(stage.path(), &profile)?;
-                    return Ok((profile, name));
-                }
-                Err(e) => return Err(e),
-            }
+            let stage = tempfile::tempdir_in(data)?;
+            fs::write(stage.path().join(".instance.json"), identity.to_string())?;
+            fs::write(stage.path().join(PROFILE_MARKER), b"1\n")?;
+            fs::rename(stage.path(), &profile)?;
+            return Ok((profile, name));
         }
         unreachable!()
     };
@@ -523,6 +609,34 @@ mod tests {
         assert_eq!(fs::read(personal.join(".instance.json")).unwrap(), original);
         assert!(!personal.join("mods").exists());
         assert_eq!(default_oneclient_profile(tmp.path()).unwrap().0, profile);
+        fs::remove_dir_all(personal).unwrap();
+        assert_eq!(default_oneclient_profile(tmp.path()).unwrap(), (profile, name));
+    }
+
+    #[test]
+    fn profile_allocation_reserves_registered_folder_and_display_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = rusqlite::Connection::open(tmp.path().join("user_data.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE clusters(folder_name, name);
+             INSERT INTO clusters VALUES ('ferrocraft-1.8.9', 'Personal');
+             INSERT INTO clusters VALUES ('different-folder', 'Ferrocraft 1.8.9 (2)');",
+        )
+        .unwrap();
+        let (profile, name) = default_oneclient_profile(tmp.path()).unwrap();
+        assert_eq!(profile, tmp.path().join("clusters/ferrocraft-1.8.9-3"));
+        assert_eq!(name, "Ferrocraft 1.8.9 (3)");
+    }
+
+    fn write_fabric_jar(path: &Path, id: &str, version: &str) {
+        use std::io::Write;
+
+        let mut jar = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        jar.start_file("fabric.mod.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        let metadata = json!({ "schemaVersion": 1, "id": id, "version": version });
+        jar.write_all(metadata.to_string().as_bytes()).unwrap();
+        jar.finish().unwrap();
     }
 
     #[test]
@@ -541,15 +655,15 @@ mod tests {
         fs::create_dir_all(&version).unwrap();
         fs::write(&engine, b"engine").unwrap();
         let cached = data.join("old.jar");
-        fs::write(&cached, b"old bootstrap").unwrap();
+        write_fabric_jar(&cached, "ferrocraft", "1.0.0");
         let db = rusqlite::Connection::open(data.join("user_data.db")).unwrap();
         db.execute_batch(
             "CREATE TABLE clusters(id, folder_name);
              CREATE TABLE artifacts(hash, content_type, path, file_name);
-             CREATE TABLE cluster_artifacts(cluster_id, hash, cluster_file_name);
+             CREATE TABLE cluster_artifacts(cluster_id, hash, cluster_file_name, enabled);
              INSERT INTO clusters VALUES (1, 'ferrocraft-1.8.9');
-             INSERT INTO artifacts VALUES ('old', 0, 'old.jar', 'ferrocraft-fabric.jar');
-             INSERT INTO cluster_artifacts VALUES (1, 'old', 'ferrocraft-fabric.jar');",
+             INSERT INTO artifacts VALUES ('old', 0, 'old.jar', 'cache-renamed.jar');
+             INSERT INTO cluster_artifacts VALUES (1, 'old', 'ferrocraft-fabric.jar', 1);",
         )
         .unwrap();
         let manifest = manifest_path(&home);
@@ -562,19 +676,35 @@ mod tests {
 
         let incoming = tmp.path().join("incoming.jar");
         let new_engine = tmp.path().join("incoming-engine");
-        fs::write(&incoming, b"new bootstrap").unwrap();
+        write_fabric_jar(&incoming, "ferrocraft", "2.0.0");
         fs::write(&new_engine, b"new engine").unwrap();
-        fs::write(&jar, b"old bootstrap").unwrap();
+        let old_jar = fs::read(&cached).unwrap();
+        fs::write(&jar, &old_jar).unwrap();
+        for manifest in [None, Some("invalid"), Some(r#"{"version":1,"cluster_id":2,"files":[]}"#)] {
+            if let Some(contents) = manifest {
+                fs::write(profile.join(".oneclient-mods.json"), contents).unwrap();
+            }
+            assert!(install_fabric(
+                std::slice::from_ref(&mods),
+                &incoming,
+                &new_engine,
+                &home,
+                &mut Vec::new(),
+            )
+            .is_err());
+        }
+        db.execute("UPDATE cluster_artifacts SET enabled = 0", []).unwrap();
+        fs::remove_file(profile.join(".oneclient-mods.json")).unwrap();
         assert!(install_fabric(
             std::slice::from_ref(&mods),
-            &incoming,
+            &cached,
             &new_engine,
             &home,
             &mut Vec::new(),
         )
         .is_err());
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
-        assert_eq!(fs::read(&jar).unwrap(), b"old bootstrap");
+        assert_eq!(fs::read(&jar).unwrap(), old_jar);
 
         for materialized in [true, false] {
             if materialized {
@@ -593,19 +723,35 @@ mod tests {
         drop(db);
         let app_data = tmp.path().join("app-data");
         let moved = app_data.join("Polyfrost/OneClient");
-        fs::create_dir_all(moved.parent().unwrap()).unwrap();
-        fs::rename(data, &moved).unwrap();
+        fs::create_dir_all(&moved).unwrap();
+        fs::copy(data.join("user_data.db"), moved.join("user_data.db")).unwrap();
+        fs::copy(&cached, moved.join("old.jar")).unwrap();
         let db = rusqlite::Connection::open(moved.join("user_data.db")).unwrap();
         db.execute("UPDATE cluster_artifacts SET cluster_file_name='renamed.jar'", [])
             .unwrap();
         let err = uninstall(&manifest, &app_data).unwrap_err();
         assert!(err.contains("renamed.jar") && err.contains("not at a recorded install path"));
+        assert!(err.contains("remove it in OneClient"), "{err}");
         assert!(engine.is_file() && version.is_dir() && manifest.is_file());
 
         db.execute("DELETE FROM cluster_artifacts", []).unwrap();
+        let err = uninstall(&manifest, &app_data).unwrap_err();
+        let recovery = format!("clear {} in OneClient Storage", data.display());
+        assert!(err.contains(&recovery), "{err}");
+        assert!(engine.is_file() && version.is_dir() && manifest.is_file());
+
+        fs::remove_dir_all(&data).unwrap();
+        let unrelated = moved.join(FABRIC_JAR);
+        write_fabric_jar(&unrelated, "unrelated", "1.0.0");
+        db.execute_batch(
+            "INSERT INTO artifacts VALUES ('other', 0, 'ferrocraft-fabric.jar', 'ferrocraft-fabric.jar');
+             INSERT INTO cluster_artifacts VALUES (1, 'other', 'ferrocraft-fabric.jar', 1);",
+        )
+        .unwrap();
         let (removed, skipped) = uninstall(&manifest, &app_data).unwrap();
         assert_eq!(removed.len(), 2);
         assert!(skipped.is_empty());
+        assert!(unrelated.is_file());
     }
 
     #[cfg(unix)]

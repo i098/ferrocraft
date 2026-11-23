@@ -139,7 +139,7 @@ fn run(command: &mut Command) -> io::Result<()> {
 
 pub fn install(base: &Path) -> io::Result<PathBuf> {
     #[cfg(windows)]
-    if let Some(app) = installed_windows()? {
+    if let Some(app) = installed_windows(&base.join(format!("oneclient-{VERSION}")))? {
         return Ok(app);
     }
     let Some((asset, digest, executable)) =
@@ -151,6 +151,7 @@ pub fn install(base: &Path) -> io::Result<PathBuf> {
     };
     let dest = base.join(format!("oneclient-{VERSION}"));
     let installed = dest.join(executable);
+    #[cfg(not(windows))]
     if installed.is_file() {
         return Ok(installed);
     }
@@ -186,9 +187,8 @@ pub fn install(base: &Path) -> io::Result<PathBuf> {
     )?;
     check(fs::File::open(&archive)?, digest)?;
     println!("Verified the OneClient download (SHA-256).");
-
     #[cfg(windows)]
-    if let Some(app) = installed_windows()? {
+    if let Some(app) = installed_windows(&dest)? {
         return Ok(app);
     }
     unpack(&archive, stage.path(), &dest)?;
@@ -225,18 +225,58 @@ fn unpack(archive: &Path, stage: &Path, dest: &Path) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn windows_executable(dir: &Path) -> Option<PathBuf> {
+fn compatible_windows_executable(app: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null_mut, read_unaligned};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    };
+
+    let path: Vec<u16> = app.as_os_str().encode_wide().chain([0]).collect();
+    unsafe {
+        let size = GetFileVersionInfoSizeW(path.as_ptr(), null_mut());
+        if size == 0 {
+            return false;
+        }
+        let mut bytes = vec![0_u8; size as usize];
+        if GetFileVersionInfoW(path.as_ptr(), 0, size, bytes.as_mut_ptr().cast()) == 0 {
+            return false;
+        }
+        let (mut value, mut len) = (null_mut(), 0);
+        if VerQueryValueW(
+            bytes.as_ptr().cast(),
+            [b'\\' as u16, 0].as_ptr(),
+            &mut value,
+            &mut len,
+        ) == 0
+            || value.is_null()
+            || (len as usize) < size_of::<VS_FIXEDFILEINFO>()
+        {
+            return false;
+        }
+        let info = read_unaligned(value.cast::<VS_FIXEDFILEINFO>());
+        info.dwSignature == 0xFEEF04BD
+            && info.dwFileVersionMS >> 16 == 2
+            && info.dwFileVersionMS & 0xffff >= 12
+    }
+}
+
+#[cfg(windows)]
+fn windows_executable(dir: &Path, installed: &mut bool) -> Option<PathBuf> {
+    if !dir.is_absolute() {
+        return None;
+    }
     let app = dir.join("oneclient_app.exe");
-    (app.is_absolute() && app.is_file()).then_some(app)
+    if !app.is_file() {
+        *installed |= dir.join("OneClient.exe").is_file();
+        return None;
+    }
+    *installed = true;
+    compatible_windows_executable(&app).then_some(app)
 }
 
 #[cfg(windows)]
-fn legacy_windows(dir: &Path) -> bool {
-    dir.is_absolute() && dir.join("OneClient.exe").is_file()
-}
-
-#[cfg(windows)]
-fn installed_windows() -> io::Result<Option<PathBuf>> {
+fn installed_windows(managed_dir: &Path) -> io::Result<Option<PathBuf>> {
     let (app, mut registered) = registered_windows()?;
     let app = app.or_else(|| {
         dirs::data_local_dir()
@@ -248,14 +288,12 @@ fn installed_windows() -> io::Result<Option<PathBuf>> {
                     .map(PathBuf::from),
             )
             .map(|dir| dir.join("OneClient"))
-            .find_map(|dir| {
-                registered |= legacy_windows(&dir);
-                windows_executable(&dir)
-            })
+            .chain([managed_dir.to_path_buf()])
+            .find_map(|dir| windows_executable(&dir, &mut registered))
     });
     if app.is_none() && registered {
         return Err(io::Error::other(
-            "OneClient is already installed without a compatible executable; update or repair it in OneClient before retrying",
+            "OneClient is already installed without a compatible executable; update to OneClient 2.12 or later in the 2.x series before retrying",
         ));
     }
     Ok(app)
@@ -294,7 +332,7 @@ fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
             Err(e) if e.code().0 == FILE_NOT_FOUND => continue,
             Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
         };
-        if let Some(app) = windows_executable(Path::new(dir.trim_matches('"'))) {
+        if let Some(app) = windows_executable(Path::new(dir.trim_matches('"')), &mut registered) {
             return Ok((Some(app), true));
         }
     }

@@ -6,7 +6,7 @@ use crate::assets::Atlas;
 use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
     cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light, Kind, Look, Tint,
-    DOWN, NORTH, UP, WEST,
+    DOWN, NORTH, SOUTH, UP, WEST,
 };
 use crate::light::Light;
 use crate::models::Quad;
@@ -274,16 +274,20 @@ impl Mesher<'_> {
         self.hood.block(at[0] + d[0], at[1] + d[1], at[2] + d[2])
     }
 
-    fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
+    fn light_levels_at(&self, at: [i32; 3], d: [i32; 3]) -> (u8, u8) {
         let p = [at[0] + d[0], at[1] + d[1], at[2] + d[2]];
-        let (s, b) = if uses_neighbor_light(self.hood.block(p[0], p[1], p[2])) {
+        if uses_neighbor_light(self.hood.block(p[0], p[1], p[2])) {
             [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
                 .iter()
                 .map(|o| self.light.get(p[0] + o[0], p[1] + o[1], p[2] + o[2]))
                 .fold((0, 0), |(s, b), (s2, b2)| (s.max(s2), b.max(b2)))
         } else {
             self.light.get(p[0], p[1], p[2])
-        };
+        }
+    }
+
+    fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
+        let (s, b) = self.light_levels_at(at, d);
         [s as f32 / 15.0, b as f32 / 15.0]
     }
 
@@ -321,8 +325,9 @@ impl Mesher<'_> {
                 } else {
                     variants::Orient::default()
                 };
+                let smooth_slab = self.smooth && !self.flat && matches!(state >> 4, 44 | 126 | 182);
                 for b in &list {
-                    self.boxed(at, b, Self::pass_of(state), orient);
+                    self.boxed(at, b, Self::pass_of(state), orient, smooth_slab);
                 }
                 if state >> 4 == 117 {
                     self.brewing_spokes(at, state & 7);
@@ -724,7 +729,83 @@ impl Mesher<'_> {
         }
     }
 
-    fn boxed(&mut self, at: [i32; 3], b: &Bx, pass: Pass, orient: variants::Orient) {
+    /// `AmbientOcclusionFace` samples on the far side of the slab face's block boundary.
+    fn slab_side_corners(&self, at: [i32; 3], face: usize) -> [([f32; 2], f32); 4] {
+        let dir = DIRS[face];
+        let axis = if face <= SOUTH { 0 } else { 2 };
+        let adjacent = [0, 1, 2].map(|i| at[i] + dir[i]);
+        let ao = |d| {
+            if self.opaque(self.st(adjacent, d)) {
+                0.2
+            } else {
+                1.0
+            }
+        };
+        let (sky, block) = self.light_levels_at(adjacent, [0; 3]);
+        let base_light = [sky, block];
+        let base_ao = ao([0; 3]);
+        let sample = |d| {
+            let (sky, block) = self.light_levels_at(adjacent, d);
+            let light = if (sky, block) == (0, 0) {
+                base_light
+            } else {
+                [sky, block]
+            };
+            (light, ao(d))
+        };
+        let edge = |d: [i32; 3]| {
+            let beyond = [0, 1, 2].map(|i| d[i] + dir[i]);
+            (sample(d), material_solid(self.st(adjacent, beyond)))
+        };
+        let vertical = [-1, 1].map(|y| edge([0, y, 0]));
+        let horizontal = [-1, 1].map(|sign| {
+            let mut d = [0; 3];
+            d[axis] = sign;
+            edge(d)
+        });
+        CORNERS[face].map(|p| {
+            let h = p[axis] as usize;
+            let v = p[1] as usize;
+            let ((h_light, h_ao), h_blocks) = horizontal[h];
+            let ((v_light, v_ao), v_blocks) = vertical[v];
+            // Vanilla's first neighbor pair is horizontal on SOUTH and vertical on the other sides.
+            let (d_light, d_ao) = match (h_blocks && v_blocks, face) {
+                (true, SOUTH) => (h_light, h_ao),
+                (true, _) => (v_light, v_ao),
+                (false, _) => {
+                    let mut d = [0, 2 * v as i32 - 1, 0];
+                    d[axis] = 2 * h as i32 - 1;
+                    sample(d)
+                }
+            };
+            let light = [0, 1]
+                .map(|i| f32::from(h_light[i] + v_light[i] + d_light[i] + base_light[i]) * 0.25);
+            (light, (h_ao + v_ao + d_ao + base_ao) * 0.25)
+        })
+    }
+
+    /// Blend the full-height corner samples at the slab model's bottom and top.
+    fn slab_side_lighting(&self, at: [i32; 3], face: usize, b: &Bx) -> [([f32; 2], f32); 4] {
+        let corners = self.slab_side_corners(at, face);
+        std::array::from_fn(|i| {
+            // The last two vertices reverse the horizontal order of the first two.
+            let side = i.min(3 - i);
+            let (low, low_ao) = corners[side];
+            let (high, high_ao) = corners[3 - side];
+            let y = if i < 2 { b.min[1] } else { b.max[1] };
+            let light = [0, 1].map(|j| (low[j] * (1.0 - y) + high[j] * y) / 15.0);
+            (light, low_ao * (1.0 - y) + high_ao * y)
+        })
+    }
+
+    fn boxed(
+        &mut self,
+        at: [i32; 3],
+        b: &Bx,
+        pass: Pass,
+        orient: variants::Orient,
+        smooth_slab: bool,
+    ) {
         let l = Look {
             kind: Kind::Shape,
             tint: b.tint,
@@ -747,7 +828,12 @@ impl Mesher<'_> {
             if b.cull && on_border && self.opaque(self.st(at, DIRS[f])) {
                 continue;
             }
-            let light = self.flat_light(at, if on_border { DIRS[f] } else { [0; 3] });
+            let lighting = if smooth_slab && f >= NORTH {
+                self.slab_side_lighting(at, f, b)
+            } else {
+                let light = self.flat_light(at, if on_border { DIRS[f] } else { [0; 3] });
+                [(light, 1.0); 4]
+            };
             let mut verts = [Vertex::zeroed(); 4];
             for (i, c) in CORNERS[f].iter().enumerate() {
                 let p = [0, 1, 2].map(|a| if c[a] > 0.5 { b.max[a] } else { b.min[a] });
@@ -755,7 +841,8 @@ impl Mesher<'_> {
                 if f == UP {
                     uv = rot_uv(uv, b.rot);
                 }
-                let k = self.lit(SHADE[f]);
+                let (light, ao) = lighting[i];
+                let k = self.lit(SHADE[f] * ao);
                 verts[i] = Vertex {
                     pos: [
                         at[0] as f32 + p[0],
@@ -782,7 +869,7 @@ impl Mesher<'_> {
             rot: 0,
             cull: false,
         };
-        self.boxed(at, &core, Pass::Blend, variants::Orient::default());
+        self.boxed(at, &core, Pass::Blend, variants::Orient::default(), false);
     }
 }
 
@@ -1085,6 +1172,58 @@ mod tests {
         let m = mesh(&c, [None; 8]);
         assert!(m.opaque.vertices.iter().all(|v| v.pos[1] <= 70.5));
         assert!(m.opaque.vertices.iter().any(|v| v.pos[1] == 70.5));
+    }
+
+    #[test]
+    fn lower_stone_slab_side_blends_floor_occlusion_over_half_its_height() {
+        let c = flat(|x, y, z| match (x, y, z) {
+            (_, 69, _) => 1 << 4,
+            (4, 70, 4) => 44 << 4,
+            _ => 0,
+        });
+        for (smooth, expected) in [(true, [0.6, 0.8]), (false, [1.0; 2])] {
+            let mesh = mesh_smooth(&c, [None; 8], smooth);
+            let sides: Vec<_> = mesh
+                .opaque
+                .vertices
+                .chunks_exact(4)
+                .filter(|q| q[0].pos[1] == 70.0 && q[2].pos[1] == 70.5)
+                .collect();
+            assert_eq!(sides.len(), 4);
+            for q in sides {
+                let face = if q[0].pos[0] == q[1].pos[0] {
+                    WEST
+                } else {
+                    NORTH
+                };
+                for (i, v) in q.iter().enumerate() {
+                    let want = 0.6 * SHADE[face] * expected[i / 2];
+                    assert!((v.color[0] - want).abs() < 1e-6, "{v:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lower_stone_slab_side_uses_vanillas_neighbor_order_for_blocked_diagonals() {
+        let c = flat(|x, y, z| match (x, y, z) {
+            (_, 69, _) | (3, 70, 2 | 6) => 1 << 4,
+            (4, 70, 4) => 44 << 4,
+            _ => 0,
+        });
+        let mesh = mesh_smooth(&c, [None; 8], true);
+        for (z, ao) in [(4.0, 0.6), (5.0, 0.8)] {
+            let corner = mesh
+                .opaque
+                .vertices
+                .chunks_exact(4)
+                .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == z))
+                .unwrap()
+                .iter()
+                .find(|v| v.pos == [4.0, 70.0, z])
+                .unwrap();
+            assert!((corner.color[0] - 0.6 * SHADE[NORTH] * ao).abs() < 1e-6);
+        }
     }
 
     #[test]

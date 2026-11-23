@@ -4,7 +4,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -23,18 +25,46 @@ public final class Sink {
     /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
     private static final int CROSSHAIR = 1 << 4;
     private static int hudBits;
-    private static boolean overlayFailed;
-    private static boolean textured;
+    private static int textured;
+    private static boolean crosshairDrawn;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
     private static final float[][] STACK = new float[DEPTH][3];
     private static int top;
     private static int mode = MODELVIEW;
-    private static ByteArrayOutputStream bytes = new ByteArrayOutputStream(4096);
-    private static DataOutputStream out = new DataOutputStream(bytes);
+    private static final FrameBytes bytes = new FrameBytes();
+    private static final DataOutputStream out = new DataOutputStream(bytes);
     private static int count;
     private static boolean clipped;
     private static final Set<String> DEFINED = new HashSet<>();
+    private static final List<String> newDefinitions = new ArrayList<>();
+
+    private static final class FrameBytes extends ByteArrayOutputStream {
+        FrameBytes() {
+            super(4096);
+        }
+
+        void truncate(int size) {
+            count = size;
+        }
+    }
+
+    public static final class Mark {
+        final int size = bytes.size();
+        final int commands = count;
+        final int owned = hudBits;
+        final int textures = textured;
+        final boolean crosshair = crosshairDrawn;
+        final boolean clip = clipped;
+        final int definitions = newDefinitions.size();
+        final int matrixTop = top;
+        final int matrixMode = mode;
+        final float[] matrix = new float[(matrixTop + 1) * 3];
+
+        Mark() {
+            for (int i = 0; i <= matrixTop; i++) System.arraycopy(STACK[i], 0, matrix, i * 3, 3);
+        }
+    }
 
     private Sink() {
         throw new AssertionError();
@@ -173,7 +203,7 @@ public final class Sink {
 
     /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
     static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
-        textured = true;
+        textured++;
         emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
     }
 
@@ -181,6 +211,7 @@ public final class Sink {
         float[] m = STACK[top];
         try {
             if (DEFINED.add(name)) {
+                newDefinitions.add(name);
                 out.writeByte('D');
                 string(name);
                 out.writeInt(data.length);
@@ -224,8 +255,27 @@ public final class Sink {
         hudBits |= bits;
     }
 
-    static synchronized void overlayFailed() {
-        overlayFailed = true;
+    static synchronized Mark mark() {
+        return new Mark();
+    }
+
+    static synchronized void rollback(Mark mark) {
+        bytes.truncate(mark.size);
+        count = mark.commands;
+        hudBits = mark.owned;
+        textured = mark.textures;
+        crosshairDrawn = mark.crosshair;
+        clipped = mark.clip;
+        top = mark.matrixTop;
+        mode = mark.matrixMode;
+        for (int i = 0; i <= top; i++) System.arraycopy(mark.matrix, i * 3, STACK[i], 0, 3);
+        while (newDefinitions.size() > mark.definitions) {
+            DEFINED.remove(newDefinitions.remove(newDefinitions.size() - 1));
+        }
+    }
+
+    static synchronized void crosshairDrawn(int before) {
+        crosshairDrawn |= textured > before;
     }
 
     private static void writeHud(int bits) {
@@ -253,11 +303,11 @@ public final class Sink {
 
     /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
     static synchronized byte[] take(boolean modScreen) {
-        int owned = textured ? hudBits : hudBits & ~CROSSHAIR;
-        if (!overlayFailed && owned != 0) writeHud(owned);
+        int owned = crosshairDrawn ? hudBits : hudBits & ~CROSSHAIR;
+        if (owned != 0) writeHud(owned);
         hudBits = 0;
-        overlayFailed = false;
-        textured = false;
+        crosshairDrawn = false;
+        textured = 0;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {
@@ -267,8 +317,8 @@ public final class Sink {
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
-        bytes = new ByteArrayOutputStream(4096);
-        out = new DataOutputStream(bytes);
+        bytes.reset();
+        newDefinitions.clear();
         count = 0;
         top = 0;
         mode = MODELVIEW;

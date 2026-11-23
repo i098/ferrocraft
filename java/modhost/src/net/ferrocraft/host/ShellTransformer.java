@@ -61,9 +61,8 @@ public final class ShellTransformer implements IClassTransformer {
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] bytes) {
-        if (bytes == null) return null;
-        if (transformedName.equals(Names.of("net.minecraft.client.Minecraft"))) return shell(bytes);
-        return OverlayHooks.patchHud(transformedName, bytes);
+        if (bytes == null || !transformedName.equals(Names.of("net.minecraft.client.Minecraft"))) return bytes;
+        return shell(bytes);
     }
 
     /** Handler calls kept in a shell, as {@code Class.method: handler}. */

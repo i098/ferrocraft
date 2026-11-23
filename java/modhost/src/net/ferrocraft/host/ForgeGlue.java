@@ -46,6 +46,16 @@ final class ForgeGlue implements Glue {
     }
 
     @Override
+    public void renderOverlay(Object mc, float partial) {
+        OverlayHooks.begin();
+        try {
+            Minecraft.renderOverlay(mc, partial);
+        } finally {
+            OverlayHooks.end();
+        }
+    }
+
+    @Override
     public void preClientTick() {
         R.call(fml(), "onPreClientTick");
     }

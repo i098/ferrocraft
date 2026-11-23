@@ -28,6 +28,7 @@ public final class HostTweaker implements ITweaker {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
+        cl.registerTransformer("net.ferrocraft.host.OverlayHooks$EventBusTransformer");
         cl.registerTransformer("net.ferrocraft.host.BridgeTransformer");
         System.out.println("[ferro-host] transformer registered");
     }

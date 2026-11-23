@@ -76,8 +76,9 @@ final class ChatGui {
      * runs, which is what {@code GuiNewChat.getChatOpen} reads; and the HUD tick counter runs, which fades the lines.
      */
     void render(Object mc, float partial) {
+        Glue glue = Glue.current();
         if (!owned()) {
-            Minecraft.renderOverlay(mc, partial);
+            glue.renderOverlay(mc, partial);
             return;
         }
         Object ingame = R.get(mc, "field_71456_v");
@@ -90,7 +91,7 @@ final class ChatGui {
             R.set(mc, "field_71462_r", stand);
         }
         try {
-            Minecraft.renderOverlay(mc, partial);
+            glue.renderOverlay(mc, partial);
         } finally {
             if (open) R.set(mc, "field_71462_r", before);
         }

@@ -2,6 +2,7 @@ package net.ferrocraft.host;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.launchwrapper.IClassTransformer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Label;
@@ -16,6 +17,7 @@ public final class OverlayHooks {
     private static final String EVENT_HANDLER = "net/minecraftforge/fml/common/eventhandler/";
     private static final String CALLBACK = "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo";
     private static final String RUNTIME_EXCEPTION = "java/lang/RuntimeException";
+    private static final String MARK = "net/ferrocraft/host/Sink$Mark";
     private static Thread overlayThread;
 
     private OverlayHooks() {}
@@ -32,18 +34,37 @@ public final class OverlayHooks {
         return overlayThread == Thread.currentThread();
     }
 
-    static void failed(RuntimeException failure) {
-        Sink.overlayFailed();
+    static void failed(RuntimeException failure, Sink.Mark mark) {
+        Sink.rollback(mark);
         failure.printStackTrace();
     }
 
-    public static void mixinFailed(RuntimeException failure, Object callback) {
-        if (!active()) throw failure;
-        if (callback != null) R.set(callback, "cancelled", false);
-        failed(failure);
+    public static Sink.Mark checkpoint() {
+        return active() ? Sink.mark() : null;
     }
 
-    static byte[] patchEventBus(byte[] bytes) {
+    public static void mixinFailed(RuntimeException failure, Object callback, Sink.Mark mark) {
+        if (mark == null) throw failure;
+        if (callback != null) R.set(callback, "cancelled", false);
+        failed(failure, mark);
+    }
+
+    public static final class EventBusTransformer implements IClassTransformer {
+        @Override
+        public byte[] transform(String name, String transformedName, byte[] bytes) {
+            return bytes != null && transformedName.equals("net.minecraftforge.fml.common.eventhandler.EventBus")
+                    ? patchEventBus(bytes) : bytes;
+        }
+    }
+
+    public static final class HudTransformer implements IClassTransformer {
+        @Override
+        public byte[] transform(String name, String transformedName, byte[] bytes) {
+            return bytes == null ? null : patchHud(transformedName, bytes);
+        }
+    }
+
+    private static byte[] patchEventBus(byte[] bytes) {
         ClassNode cls = new ClassNode();
         new ClassReader(bytes).accept(cls, 0);
         for (Object item : cls.methods) {
@@ -64,9 +85,9 @@ public final class OverlayHooks {
     }
 
     @SuppressWarnings("unchecked")
-    static byte[] patchHud(String name, byte[] bytes) {
-        if (!name.equals(Names.of("net.minecraft.client.gui.GuiIngame"))
-                && !name.equals(Names.of("net.minecraft.client.renderer.EntityRenderer"))
+    private static byte[] patchHud(String name, byte[] bytes) {
+        if (!name.equals("net.minecraft.client.gui.GuiIngame")
+                && !name.equals("net.minecraft.client.renderer.EntityRenderer")
                 && !name.equals("net.minecraftforge.client.GuiIngameForge")) return bytes;
         ClassNode cls = new ClassNode();
         new ClassReader(bytes).accept(cls, 0);
@@ -90,7 +111,6 @@ public final class OverlayHooks {
         for (Type arg : args) {
             if (arg.getDescriptor().equals(CALLBACK + ";") || arg.getDescriptor().equals(CALLBACK + "Returnable;")) {
                 callback = slot;
-                break;
             }
             slot += arg.getSize();
         }
@@ -98,6 +118,9 @@ public final class OverlayHooks {
 
         MethodNode wrapper = new MethodNode(handler.access, handler.name, handler.desc, null, null);
         handler.name += "$ferroOverlay";
+        int mark = slot;
+        wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "checkpoint", "()L" + MARK + ";", false);
+        wrapper.visitVarInsn(Opcodes.ASTORE, mark);
         if (!isStatic) wrapper.visitVarInsn(Opcodes.ALOAD, 0);
         slot = isStatic ? 0 : 1;
         for (Type arg : args) {
@@ -114,12 +137,32 @@ public final class OverlayHooks {
         wrapper.visitLabel(end);
         wrapper.visitInsn(Opcodes.RETURN);
         wrapper.visitLabel(caught);
-        wrapper.visitFrame(Opcodes.F_SAME1, 0, null, 1, new Object[] {RUNTIME_EXCEPTION});
+        Object[] locals = handlerLocals(owner, isStatic, args);
+        wrapper.visitFrame(Opcodes.F_FULL, locals.length, locals, 1, new Object[] {RUNTIME_EXCEPTION});
         wrapper.visitVarInsn(Opcodes.ALOAD, callback);
+        wrapper.visitVarInsn(Opcodes.ALOAD, mark);
         wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "mixinFailed",
-                "(Ljava/lang/RuntimeException;Ljava/lang/Object;)V", false);
+                "(Ljava/lang/RuntimeException;Ljava/lang/Object;L" + MARK + ";)V", false);
         wrapper.visitInsn(Opcodes.RETURN);
         return wrapper;
+    }
+
+    private static Object[] handlerLocals(String owner, boolean isStatic, Type[] args) {
+        Object[] locals = new Object[args.length + (isStatic ? 1 : 2)];
+        int index = 0;
+        if (!isStatic) locals[index++] = owner;
+        for (Type arg : args) {
+            switch (arg.getSort()) {
+                case Type.ARRAY:
+                case Type.OBJECT: locals[index++] = arg.getInternalName(); break;
+                case Type.LONG: locals[index++] = Opcodes.LONG; break;
+                case Type.DOUBLE: locals[index++] = Opcodes.DOUBLE; break;
+                case Type.FLOAT: locals[index++] = Opcodes.FLOAT; break;
+                default: locals[index++] = Opcodes.INTEGER;
+            }
+        }
+        locals[index] = MARK;
+        return locals;
     }
 
     private static byte[] write(ClassNode cls) {

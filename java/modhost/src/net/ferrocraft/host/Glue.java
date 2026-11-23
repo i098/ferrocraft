@@ -49,6 +49,10 @@ interface Glue {
     /** The in-game GUI object, with Rust's HUD elements switched off, see {@link Minecraft}. */
     Object newIngameGui(Object mc);
 
+    default void renderOverlay(Object mc, float partial) {
+        Minecraft.renderOverlay(mc, partial);
+    }
+
     void preClientTick();
 
     void postClientTick();

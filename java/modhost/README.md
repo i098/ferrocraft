@@ -42,8 +42,8 @@ Set `FERRO_MODS` to a folder of mod jars to add the mod boot test, `ModBootTest`
 
 `VanillaHudTest` (also under `FERRO_MODS`) turns on fancy graphics, then checks overlay completion and the PolyCrosshair image and ownership.
 `GuiIngame.renderVignette` reads the stand-in world's `worldBorder` when fancy graphics are on.
-The host logs runtime exceptions from overlay handlers and continues drawing.
-If a handler fails, the host sends no HUD ownership bits for that frame, so Rust continues to draw the vanilla elements.
+On Forge, the host logs runtime exceptions from overlay handlers and continues drawing.
+The host discards the failed handler's draw commands and cancellation, but keeps the results of completed handlers.
 
 Set `FERRO_PREPARE_OUT` to the folder `java/modhost-prepare/run.sh` wrote, and both boots run on `ferro-mc-1.8.9.jar` and `ferro-forge.jar` instead of the player's client and Forge jars. The generated Minecraft jar is unsigned, so the test passes `-Dfml.ignoreInvalidMinecraftCertificates=true`.
 

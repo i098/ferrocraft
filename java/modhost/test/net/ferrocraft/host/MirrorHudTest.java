@@ -120,12 +120,15 @@ public final class MirrorHudTest {
     static final class Frame {
         final List<String> texts = new ArrayList<>();
         final List<Image> images = new ArrayList<>();
+        final java.util.Map<String, byte[]> definitions = new java.util.HashMap<>();
         int hud;
     }
 
     static final class Image {
         final String name;
         final float x0, y0, x1, y1;
+        final int argb, blend;
+        final boolean recolor;
 
         Image(DataInputStream in) throws IOException {
             name = string(in);
@@ -133,7 +136,9 @@ public final class MirrorHudTest {
             y0 = in.readFloat();
             x1 = in.readFloat();
             y1 = in.readFloat();
-            skip(in, 4 + 1 + 1);
+            argb = in.readInt();
+            recolor = in.readUnsignedByte() != 0;
+            blend = in.readUnsignedByte();
         }
     }
 
@@ -159,10 +164,7 @@ public final class MirrorHudTest {
                     skip(in, 8 + 4 + 1 + 12);
                     frame.texts.add(string(in));
                     break;
-                case 'D':
-                    string(in);
-                    skip(in, in.readInt());
-                    break;
+                case 'D': frame.definitions.put(string(in), bytes(in)); break;
                 case 'I': frame.images.add(new Image(in)); break;
                 case 'C':
                     if (in.readUnsignedByte() != 0) skip(in, 16);
@@ -178,9 +180,13 @@ public final class MirrorHudTest {
     }
 
     private static String string(DataInputStream in) throws IOException {
+        return new String(bytes(in), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] bytes(DataInputStream in) throws IOException {
         byte[] b = new byte[in.readInt()];
         in.readFully(b);
-        return new String(b, StandardCharsets.UTF_8);
+        return b;
     }
 
     private static void check(boolean ok, String what) {

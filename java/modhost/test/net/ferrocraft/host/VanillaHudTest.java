@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.IntBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import javax.imageio.ImageIO;
@@ -27,6 +28,7 @@ public final class VanillaHudTest {
 
     private volatile boolean fail;
     private volatile boolean failureInvoked;
+    private int probeTexture;
 
     private VanillaHudTest() {}
 
@@ -92,6 +94,10 @@ public final class VanillaHudTest {
             if (matchesCrosshair(image, icons)) matches++;
         }
         if (matches != 1) throw new AssertionError("expected one visible PolyCrosshair image, got " + matches);
+        if (fail && frame.images.stream().noneMatch(image -> image.x0 == 2 && image.y0 == 3
+                && image.x1 == 3 && image.y1 == 4 && image.argb == 0x804080bf && image.blend == 3)) {
+            throw new AssertionError("Minecraft's cached GL calls did not draw the recovery probe");
+        }
         return frame.hud;
     }
 
@@ -101,22 +107,28 @@ public final class VanillaHudTest {
         byte[] png = textures.get(image.name);
         if (png == null) return false;
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
-        return decoded != null && sameCrosshairPixels(decoded, icons);
+        return decoded != null && sameCrosshairPixels(image, decoded, icons);
     }
 
-    private static boolean sameCrosshairPixels(BufferedImage decoded, BufferedImage icons) {
+    static boolean sameCrosshairPixels(MirrorHudTest.Image image, BufferedImage decoded, BufferedImage icons) {
         int size = icons.getWidth() / 16;
         if (decoded.getWidth() != size || decoded.getHeight() != size) return false;
+        float dx = (image.x1 - image.x0) / size, dy = (image.y1 - image.y0) / size;
         boolean visible = false;
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
                 int expected = crosshairPixel(icons.getRGB(x, y));
                 int actual = decoded.getRGB(x, y);
                 if (expected != (actual >>> 24 == 0 ? 0 : actual)) return false;
-                visible |= expected != 0;
+                visible |= expected != 0 && insideClip(image.clip, image.x0 + x * dx, image.y0 + y * dy, dx, dy);
             }
         }
         return visible;
+    }
+
+    private static boolean insideClip(float[] clip, float x, float y, float dx, float dy) {
+        return clip == null || (Math.max(clip[0], x) < Math.min(clip[2], x + dx)
+                && Math.max(clip[1], y) < Math.min(clip[3], y + dy));
     }
 
     private static int crosshairPixel(int pixel) {
@@ -131,8 +143,33 @@ public final class VanillaHudTest {
             Sink.text(PARTIAL_DRAW, 0, 0, -1, false);
             Sink.push();
             Sink.translate(100, 100);
+            probeTexture = GlState.genTexture();
+            GlState.DrawState beforeUpload = GlState.saveDrawState();
+            GlState.bindTexture(3553, probeTexture);
+            GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
+            GlState.restoreDrawState(beforeUpload);
+            selectProbeState();
             throw new IOException("VanillaHudTest: overlay handler failed after cancellation");
         }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public void drawAfterFailure(RenderGameOverlayEvent.Pre event) {
+        if (!fail || event.type != ElementType.ALL) return;
+        selectProbeState();
+        GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
+        Class<?> gl = R.cls("net.minecraft.client.renderer.GlStateManager");
+        R.call(gl, "func_179131_c", 1f, 1f, 1f, 1f);
+        R.call(gl, "func_179112_b", 770, 771);
+        R.call(gl, "func_179144_i", 0);
+    }
+
+    private void selectProbeState() {
+        Class<?> gl = R.cls("net.minecraft.client.renderer.GlStateManager");
+        R.call(gl, "func_179144_i", probeTexture);
+        R.call(gl, "func_179131_c", .25f, .5f, .75f, .5f);
+        R.call(gl, "func_179147_l");
+        R.call(gl, "func_179112_b", 768, 1);
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

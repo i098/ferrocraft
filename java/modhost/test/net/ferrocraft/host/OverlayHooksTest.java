@@ -1,13 +1,14 @@
 package net.ferrocraft.host;
 
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.IntBuffer;
-import net.minecraftforge.client.event.RenderGameOverlayEvent;
-import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
+import javax.imageio.ImageIO;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -31,11 +32,11 @@ public final class OverlayHooksTest implements Opcodes {
         GlState.enable(3042);
         GlState.blendFunc(775, 769);
 
-        OverlayHooks.begin();
+        OverlayHooks.begin(null);
         try {
             cls.getMethod("func_181560_a", float.class, long.class).invoke(null, 0f, 0L);
             assertFrame();
-            assertLateCrosshair();
+            assertClippedCrosshair();
             assertPropagates(cls.getMethod("unrelated"), IOException.class);
             assertPropagates(cls.getMethod("func_78478_c"), AssertionError.class);
         } finally {
@@ -45,21 +46,33 @@ public final class OverlayHooksTest implements Opcodes {
         System.out.println("OverlayHooksTest passed");
     }
 
-    private static void assertLateCrosshair() throws IOException {
-        RenderGameOverlayEvent.Post post = new RenderGameOverlayEvent.Post(new RenderGameOverlayEvent(0, null), ElementType.ALL);
-        Sink.crosshairCenter(213, 120);
-        assertLateImage(post, 2, 119, 0);
-        assertLateImage(post, 212, 3, 0);
-        assertLateImage(post, 212, 119, 1 << 4);
+    private static void assertClippedCrosshair() throws IOException {
+        BufferedImage icons = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage crosshair = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+        icons.setRGB(1, 1, -1);
+        crosshair.setRGB(1, 1, -1);
+        ByteArrayOutputStream png = new ByteArrayOutputStream();
+        ImageIO.write(crosshair, "png", png);
+        byte[] data = png.toByteArray();
+        Sink.clip(new float[] {206, 113, 214, 129});
+        emitCrosshair(data);
+        Sink.clip(new float[] {206, 113, 222, 121});
+        emitCrosshair(data);
+        Sink.clip(new float[] {214, 121, 222, 129});
+        emitCrosshair(data);
+        Sink.clip(null);
+        emitCrosshair(data);
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(frame.definitions.get("clip-test")));
+        for (int i = 0; i < 4; i++) {
+            if (VanillaHudTest.sameCrosshairPixels(frame.images.get(i), decoded, icons) != (i >= 2)) {
+                throw new AssertionError("incorrect crosshair visibility for clip " + i);
+            }
+        }
     }
 
-    private static void assertLateImage(RenderGameOverlayEvent.Post post, int x, int y, int hud) throws IOException {
-        Sink.hud(1 << 4);
-        OverlayFilter.invoke(event -> GlState.quadSized(x, y, 0, 0, 3, 3, 3, 3), post);
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != hud || frame.images.size() != 1) {
-            throw new AssertionError("only a Post(ALL) image covering the crosshair center can retain ownership");
-        }
+    private static void emitCrosshair(byte[] png) {
+        Sink.image("clip-test", png, 206, 113, 222, 129, -1, false);
     }
 
     private static void assertFrame() throws IOException {

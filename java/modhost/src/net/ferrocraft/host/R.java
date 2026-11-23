@@ -90,7 +90,7 @@ final class R {
         }
     }
 
-    private static Field field(Object target, String name) {
+    static Field field(Object target, String name) {
         Class<?> c = target instanceof Class ? (Class<?>) target : target.getClass();
         for (Class<?> k = c; k != null; k = k.getSuperclass()) {
             try {

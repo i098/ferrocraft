@@ -28,15 +28,18 @@ public final class OverlayHooks {
     private static final String RENDERER = "net.minecraft.client.renderer.EntityRenderer";
     private static final String MARK = "net/ferrocraft/host/Sink$Mark";
     private static Thread overlayThread;
+    private static GlCache glCache;
 
     private OverlayHooks() {}
 
-    static void begin() {
+    static void begin(GlCache cache) {
+        glCache = cache;
         overlayThread = Thread.currentThread();
     }
 
     static void end() {
         overlayThread = null;
+        glCache = null;
     }
 
     static boolean active() {
@@ -46,11 +49,12 @@ public final class OverlayHooks {
     static void failed(Exception failure, Sink.Mark mark) {
         Sink.rollback(mark);
         GlState.restoreDrawState(mark.gl);
+        if (glCache != null) glCache.restore(mark.cache);
         failure.printStackTrace();
     }
 
     public static Sink.Mark checkpoint() {
-        return active() ? Sink.mark(GlState.saveDrawState()) : null;
+        return active() ? Sink.mark(GlState.saveDrawState(), glCache == null ? null : glCache.save()) : null;
     }
 
     public static void mixinFailed(Exception failure, Object callback, Sink.Mark mark) throws Exception {

@@ -129,8 +129,10 @@ public final class MirrorHudTest {
         final float x0, y0, x1, y1;
         final int argb, blend;
         final boolean recolor;
+        final float[] clip;
 
-        Image(DataInputStream in) throws IOException {
+        Image(DataInputStream in, float[] clip) throws IOException {
+            this.clip = clip;
             name = string(in);
             x0 = in.readFloat();
             y0 = in.readFloat();
@@ -146,6 +148,7 @@ public final class MirrorHudTest {
         in.readUnsignedByte();
         long n = in.readInt() & 0xffffffffL;
         Frame frame = new Frame();
+        float[] clip = null;
         for (long i = 0; i < n; i++) {
             int tag = in.readUnsignedByte();
             switch (tag) {
@@ -165,9 +168,10 @@ public final class MirrorHudTest {
                     frame.texts.add(string(in));
                     break;
                 case 'D': frame.definitions.put(string(in), bytes(in)); break;
-                case 'I': frame.images.add(new Image(in)); break;
+                case 'I': frame.images.add(new Image(in, clip)); break;
                 case 'C':
-                    if (in.readUnsignedByte() != 0) skip(in, 16);
+                    clip = in.readUnsignedByte() == 0 ? null
+                            : new float[] {in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat()};
                     break;
                 default: throw new IOException("unknown command " + tag);
             }

@@ -26,9 +26,6 @@ public final class OverlayFilter {
         boolean modChat = e.type == ElementType.CHAT && ChatGui.owned();
         if (e.type == ElementType.ALL) {
             Sink.crosshairDrawn(0);
-            Object resolution = R.get(e, "resolution");
-            Sink.crosshairCenter((Integer) R.call(resolution, "func_78326_a") / 2,
-                    (Integer) R.call(resolution, "func_78328_b") / 2);
             if (e.isCanceled()) Sink.hud(EVERY_BIT);
             return;
         }
@@ -42,7 +39,7 @@ public final class OverlayFilter {
     }
 
     public static void invoke(IEventListener listener, Event event) {
-        if (!OverlayHooks.active() || !(event instanceof RenderGameOverlayEvent)) {
+        if (!OverlayHooks.active() || !(event instanceof RenderGameOverlayEvent) || listener instanceof EventPriority) {
             listener.invoke(event);
             return;
         }
@@ -56,8 +53,9 @@ public final class OverlayFilter {
             return;
         }
         ElementType type = ((RenderGameOverlayEvent) event).type;
-        if (type == ElementType.CROSSHAIRS) Sink.crosshairDrawn(mark.textures);
-        if (type == ElementType.ALL && event instanceof RenderGameOverlayEvent.Post) Sink.lateCrosshairDrawn(mark.textures);
+        if (type == ElementType.CROSSHAIRS || (type == ElementType.ALL && event instanceof RenderGameOverlayEvent.Post)) {
+            Sink.crosshairDrawn(mark.textures);
+        }
     }
 
     /** The wire bit of an element Rust can leave out, or 0. */

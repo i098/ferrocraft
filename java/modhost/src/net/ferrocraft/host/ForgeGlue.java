@@ -45,9 +45,13 @@ final class ForgeGlue implements Glue {
         return R.neu("net.minecraftforge.client.GuiIngameForge", mc);
     }
 
+    private static final class OverlayCache {
+        static final GlCache INSTANCE = new GlCache(R.cls("net.minecraft.client.renderer.GlStateManager"));
+    }
+
     @Override
     public void renderOverlay(Object mc, float partial) {
-        OverlayHooks.begin();
+        OverlayHooks.begin(OverlayCache.INSTANCE);
         try {
             Minecraft.renderOverlay(mc, partial);
         } finally {

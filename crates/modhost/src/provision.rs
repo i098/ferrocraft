@@ -8,7 +8,7 @@ use std::{fmt, fs, io};
 use portablemc::{base, forge};
 use sha1::{Digest, Sha1};
 
-use crate::{Config, Loader};
+use crate::{Config, Loader, StagingDir};
 
 /// Forge 1.8.9 build the mods are made for.
 const FORGE: &str = "1.8.9-11.15.1.2318-1.8.9";
@@ -68,6 +68,14 @@ impl Config {
     pub fn provision() -> Result<Config, Error> {
         let main = main_dir()?;
         let host = host_jar()?;
+        fs::create_dir_all(&main)?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(main.join("provision.lock"))?;
+        lock.lock()?;
         let mut installer =
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
@@ -187,6 +195,9 @@ fn download_java_files(
     use std::os::unix::fs::PermissionsExt;
     let invalid = || Error::Missing("Invalid Mojang x64 Java 8 manifest".into());
     let mut batch = portablemc::download::Batch::new();
+    fs::create_dir_all(root)?;
+    let scratch = StagingDir::new(root, "download")?;
+    let mut pending = Vec::new();
     for (name, entry) in files {
         let relative = Path::new(name);
         if !relative
@@ -200,7 +211,9 @@ fn download_java_files(
         let url = raw["url"].as_str().ok_or_else(invalid)?;
         let sha1 = parse_sha1(raw["sha1"].as_str().ok_or_else(invalid)?)?;
         if !matches_sha1(&path, sha1) {
-            batch.push(url, path).set_expected_sha1(Some(sha1));
+            let temp = scratch.0.join(relative);
+            batch.push(url, temp.clone()).set_expected_sha1(Some(sha1));
+            pending.push((temp, path));
         }
     }
     if !batch.is_empty() {
@@ -208,6 +221,10 @@ fn download_java_files(
         if let Some(error) = result.iter_errors().next() {
             return Err(io::Error::other(error.to_string()).into());
         }
+    }
+    for (temp, path) in pending {
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::rename(temp, path)?;
     }
     for (name, entry) in files {
         if entry["executable"].as_bool() == Some(true) {
@@ -237,10 +254,15 @@ fn matches_sha1(path: &Path, expected: [u8; 20]) -> bool {
 fn fetch(url: &str, path: &Path, sha1: &str) -> Result<(), Error> {
     let sha1 = parse_sha1(sha1)?;
     if !matches_sha1(path, sha1) {
-        portablemc::download::single(url, path)
+        let parent = path.parent().unwrap();
+        fs::create_dir_all(parent)?;
+        let scratch = StagingDir::new(parent, "download")?;
+        let temp = scratch.0.join("file");
+        portablemc::download::single(url, temp.as_path())
             .set_expected_sha1(Some(sha1))
             .download(())
             .map_err(io::Error::other)?;
+        fs::rename(temp, path)?;
     }
     Ok(())
 }
@@ -286,8 +308,10 @@ fn lib_name(jar: &Path, versions: &Path) -> String {
 
 /// Hard link, or copy across file systems; replaces what is there.
 fn link(src: &Path, dst: &Path) -> io::Result<()> {
-    let _ = fs::remove_file(dst);
-    fs::hard_link(src, dst).or_else(|_| fs::copy(src, dst).map(drop))
+    let scratch = StagingDir::new(dst.parent().unwrap(), "export")?;
+    let temp = scratch.0.join("jar");
+    fs::hard_link(src, &temp).or_else(|_| fs::copy(src, &temp).map(drop))?;
+    fs::rename(temp, dst)
 }
 
 fn host_jar() -> Result<PathBuf, Error> {

@@ -205,8 +205,8 @@ fn jvm_command(cfg: &Config, port: u16, token: &str) -> Command {
 struct StagingDir(PathBuf);
 
 impl StagingDir {
-    fn new(cache: &Path) -> io::Result<Self> {
-        let path = cache.join(format!("plain-{}", token()));
+    fn new(cache: &Path, prefix: &str) -> io::Result<Self> {
+        let path = cache.join(format!("{prefix}-{}", token()));
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
@@ -245,7 +245,7 @@ impl ModHost {
         mods: &Path,
         archives: impl IntoIterator<Item = PathBuf>,
     ) -> io::Result<Self> {
-        let staging = StagingDir::new(&cfg.game_dir)?;
+        let staging = StagingDir::new(&cfg.game_dir, "plain")?;
         for path in archives {
             use std::path::Component::Normal;
             let mut components = path.components();
@@ -258,9 +258,15 @@ impl ModHost {
                     "invalid mod path",
                 ));
             }
+            let mut source = match std::fs::File::open(mods.join(&path)) {
+                Ok(source) => source,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) if e.kind() == io::ErrorKind::NotADirectory => continue,
+                Err(e) => return Err(e),
+            };
             let dest = staging.0.join("mods").join(&path);
             std::fs::create_dir_all(dest.parent().unwrap())?;
-            std::fs::copy(mods.join(path), dest)?;
+            io::copy(&mut source, &mut std::fs::File::create(dest)?)?;
         }
         cfg.game_dir.clone_from(&staging.0);
         Self::spawn(&cfg, Some(staging))
@@ -1167,7 +1173,17 @@ printf '%s\n' "$PWD" > "$0.result"
             game_dir: root.clone(),
             assets_dir: root.clone(),
         };
-        let mut host = ModHost::start_staged(cfg, &source, ["sample.jar".into()]).unwrap();
+        std::fs::write(source.join("1.8.9"), b"not a directory").unwrap();
+        let mut host = ModHost::start_staged(
+            cfg,
+            &source,
+            [
+                "removed.jar".into(),
+                "1.8.9/removed.zip".into(),
+                "sample.jar".into(),
+            ],
+        )
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let path = loop {
             if let Ok(path) = std::fs::read_to_string(java.with_extension("result")) {

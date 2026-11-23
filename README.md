@@ -34,9 +34,14 @@ The installer installs into every launcher it finds:
 
 The installer prints what it did and the uninstall command: `~/.ferrocraft/ferrocraft-launcher uninstall`. If your launcher is in a custom folder, download the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases), extract it, and run `./ferrocraft-launcher install --minecraft-dir DIR` (or `--oneclient-dir DIR`) from the extracted folder.
 
+For an official launcher install, open the [Minecraft Launcher](https://www.minecraft.net/download).
+Install it first if you do not have it.
+Select `ferrocraft-1.8.9`, then click Play.
+
 ### Mods
 
-Put compatible Forge 1.8.9 mod jars in `mods/` in your game folder.
+Put compatible Forge 1.8.9 mod JARs in `mods/` in the selected profile's game folder before you click Play.
+Use the folder that the installer printed if the profile has no custom game folder.
 The client installs Java 8 and Forge when it first starts the mod host.
 This first start needs an internet connection.
 On Apple silicon, the Forge host needs Rosetta to run Java 8.

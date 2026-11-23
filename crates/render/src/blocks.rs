@@ -1310,7 +1310,7 @@ pub fn flower_pot_state(plant: u16, data: i32) -> u16 {
     }
 }
 
-/// Blocks that count as full cubes for ambient occlusion and face culling.
+/// Full cubes for face culling and the regular cube lighting path, not slab-side occlusion.
 pub fn is_opaque_cube(state: u16) -> bool {
     cached(state).kind == Kind::Opaque
 }

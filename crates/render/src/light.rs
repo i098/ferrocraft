@@ -1,7 +1,7 @@
-//! Sky and block light of one chunk plus a two-block border, flood-filled like vanilla `World.checkLight`.
-//! The server sends light data but the renderer is fed blocks only, so light is recomputed here.
-//! The flood covers the chunk and its eight neighbours: light travels at most 15 blocks, so every source that can
-//! reach the border lies inside that 48 x 48 block window.
+//! Sky and block light for one chunk and the two-block border that slab sides sample.
+//! Use server light, as in vanilla `Chunk.getLightFor`, if every loaded chunk in the window has it.
+//! Otherwise, flood the chunk and its eight neighbors as in vanilla `World.checkLight`.
+//! Light loses at least one level per step in the flood. No source outside the 48 × 48 window can affect the border.
 
 use crate::blocks::{emission, light_opacity};
 use crate::mesh::{index, Neighborhood, HEIGHT};
@@ -40,7 +40,7 @@ fn ring_idx(x: i32, y: usize, z: i32) -> usize {
 
 impl Light {
     pub fn compute(hood: &Neighborhood) -> Light {
-        // Above the highest block the column is open air at sky 15; block light reaches at most 14 cells above its source.
+        // Keep enough layers above the highest block for its block light to fade out.
         let top = std::iter::once(hood.center)
             .chain(hood.neighbors.iter().flatten().copied())
             .filter_map(|b| b.iter().rposition(|&s| s != 0))
@@ -108,6 +108,8 @@ impl Light {
         self.sample(x.clamp(-1, 16), y, z.clamp(-1, 16))
     }
 
+    /// Sample within the two-block border without copying the chunk edge for missing neighbors.
+    /// Match vanilla `ChunkCache`: use the dimension's default light for unloaded chunks.
     pub(crate) fn sample_slab(&self, hood: &Neighborhood, x: i32, y: i32, z: i32) -> (u8, u8) {
         if !hood.loaded(x.div_euclid(16), z.div_euclid(16)) {
             return (self.sky_default, 0);
@@ -124,7 +126,12 @@ impl Light {
     }
 }
 
-fn flood_ring(height: usize, loaded: impl Fn(i32, i32) -> bool, sky: &[u8], block: &[u8]) -> Vec<u8> {
+fn flood_ring(
+    height: usize,
+    loaded: impl Fn(i32, i32) -> bool,
+    sky: &[u8],
+    block: &[u8],
+) -> Vec<u8> {
     let mut cells = vec![0u8; height * RING * RING];
     for y in 0..height {
         for z in -BORDER..16 + BORDER {
@@ -142,8 +149,6 @@ fn flood_ring(height: usize, loaded: impl Fn(i32, i32) -> bool, sky: &[u8], bloc
     cells
 }
 
-/// The light the server sent, as `Chunk.getLightFor`, for every ring cell; `None` unless the chunk and every loaded
-/// neighbour kept it (a changed chunk is flooded again).
 fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
     let mut slots = [None; 9];
     for (slot, light) in hood.lights.iter().enumerate() {

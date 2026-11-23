@@ -1345,9 +1345,7 @@ mod tests {
                 .vertices
                 .chunks_exact(4)
                 .find(|q| {
-                    q[0].pos[1] == 70.0
-                        && q[2].pos[1] == 70.5
-                        && q.iter().all(|v| v.pos[0] == 16.0)
+                    q[0].pos[1] == 70.0 && q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[0] == 16.0)
                 })
                 .unwrap();
             assert!(side.iter().all(|v| v.light == [1.0, 0.0]), "{side:?}");

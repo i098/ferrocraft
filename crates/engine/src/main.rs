@@ -20,7 +20,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 fn main() {
     let started = std::time::Instant::now();
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let args = match args::launch_token(&argv, std::io::stdin().lock())
+    let fallback = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
+    std::env::remove_var("FERROCRAFT_ACCESS_TOKEN");
+    let args = match args::launch_token(&argv, std::io::stdin().lock(), fallback)
         .and_then(|token| args::parse(&argv, std::env::var("FERROCRAFT_SERVER").ok(), token))
     {
         Ok(a) => a,

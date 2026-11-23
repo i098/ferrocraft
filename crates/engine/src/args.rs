@@ -40,9 +40,11 @@ impl Default for Args {
     }
 }
 
-pub fn launch_token(args: &[String], input: impl Read) -> Result<Option<String>, String> {
-    let fallback = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
-    std::env::remove_var("FERROCRAFT_ACCESS_TOKEN");
+pub fn launch_token(
+    args: &[String],
+    input: impl Read,
+    fallback: Option<String>,
+) -> Result<Option<String>, String> {
     reject_token_argument(args)?;
     if !args.iter().any(|arg| arg == "--access-token-stdin") {
         return Ok(fallback);
@@ -260,12 +262,9 @@ mod tests {
 
     #[test]
     fn auth_needs_token_and_uuid_and_never_prints_the_token() {
-        let a = super::parse(
-            &v("--uuid 12345678-1234-1234-1234-123456789abc"),
-            None,
-            Some("sekrit".into()),
-        )
-        .unwrap();
+        let argv = v("--access-token-stdin --uuid 12345678-1234-1234-1234-123456789abc");
+        let token = launch_token(&argv, &b"sekrit"[..], Some("fallback".into())).unwrap();
+        let a = super::parse(&argv, None, token).unwrap();
         assert_eq!(
             a.auth,
             Some(Auth::new(

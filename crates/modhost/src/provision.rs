@@ -76,6 +76,8 @@ impl Config {
             .truncate(false)
             .open(main.join("provision.lock"))?;
         lock.lock()?;
+        discard_partial_version(&main, &format!("forge-{FORGE}"))?;
+        discard_partial_version(&main, "1.8.9")?;
         let mut installer =
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
@@ -138,6 +140,23 @@ impl Config {
             assets_dir: main.join("assets"),
             game_dir: main,
         })
+    }
+}
+
+fn discard_partial_version(main: &Path, version: &str) -> io::Result<()> {
+    let path = main
+        .join("versions")
+        .join(version)
+        .join(format!("{version}.json"));
+    let file = match fs::File::open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    match serde_json::from_reader::<_, serde_json::Value>(io::BufReader::new(file)) {
+        Ok(_) => Ok(()),
+        Err(e) if e.is_syntax() || e.is_eof() => fs::remove_file(path),
+        Err(e) => Err(io::Error::from(e)),
     }
 }
 
@@ -269,9 +288,27 @@ fn fetch(url: &str, path: &Path, sha1: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_version_write_allows_reinstall() {
+        let root = std::env::temp_dir().join(format!("fc-version-{}", std::process::id()));
+        let version = "forge-1.8.9-11.15.1.2318-1.8.9";
+        let dir = root.join("versions").join(version);
+        let file = dir.join(format!("{version}.json"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&file, b"{\"id\":").unwrap();
+        discard_partial_version(&root, version).unwrap();
+        assert!(!file.exists());
+        let complete = br#"{"id":"forge-1.8.9-11.15.1.2318-1.8.9","inheritsFrom":"1.8.9"}"#;
+        fs::write(&file, complete).unwrap();
+        discard_partial_version(&root, version).unwrap();
+        assert_eq!(fs::read(file).unwrap(), complete);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn forge_java_uses_rosetta_only_on_apple_silicon() {
-        use super::*;
         let cache = Path::new("cache");
         let policy = java_policy(cache, "macos", "aarch64", |root, manifest_sha1| {
             assert_eq!(manifest_sha1, "78e31aa15b3f437f37263351436f63e0a96e0067");

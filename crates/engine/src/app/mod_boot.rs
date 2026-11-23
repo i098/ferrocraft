@@ -14,7 +14,9 @@ pub fn spawn(game_dir: PathBuf) -> Boot {
     spawn_preparing(move || prepare(&game_dir))
 }
 
-fn spawn_preparing(prepare: impl FnOnce() -> Option<Prepared> + Send + 'static) -> Boot {
+fn spawn_preparing(
+    prepare: impl FnOnce() -> std::io::Result<Option<Prepared>> + Send + 'static,
+) -> Boot {
     let (tx, result) = mpsc::channel();
     let closed = Arc::new(Mutex::new(false));
     let gate = Arc::clone(&closed);
@@ -22,23 +24,23 @@ fn spawn_preparing(prepare: impl FnOnce() -> Option<Prepared> + Send + 'static) 
         let prepared = prepare();
         let closed = gate.lock().unwrap();
         if !*closed {
-            let _ = tx.send(prepared.and_then(Prepared::start));
+            let _ = tx.send(prepared.map(|p| p.and_then(Prepared::start)));
         }
     });
     Boot { result, closed }
 }
 
 pub struct Boot {
-    result: Receiver<Option<ModHost>>,
+    result: Receiver<std::io::Result<Option<ModHost>>>,
     closed: Arc<Mutex<bool>>,
 }
 
 impl Boot {
-    pub fn poll(&mut self) -> Option<Option<ModHost>> {
+    pub fn poll(&mut self) -> Option<std::io::Result<Option<ModHost>>> {
         match self.result.try_recv() {
             Ok(host) => Some(host),
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(None),
+            Err(TryRecvError::Disconnected) => Some(Ok(None)),
         }
     }
 }
@@ -81,6 +83,10 @@ impl Watch {
             last_scan: None,
             changed_at: None,
         }
+    }
+
+    pub fn retry_after_failed_scan(&mut self, now: Instant) {
+        self.changed_at = Some(now);
     }
 
     /// True once per change, after the change has settled.
@@ -171,25 +177,26 @@ impl Prepared {
     }
 }
 
-fn prepare(game_dir: &Path) -> Option<Prepared> {
+fn prepare(game_dir: &Path) -> std::io::Result<Option<Prepared>> {
     if let Some(cfg) = Config::from_env() {
-        return Some(Prepared { cfg, plain: None });
+        return Ok(Some(Prepared { cfg, plain: None }));
     }
     if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
-        let cfg = from_cluster(&cluster)?;
-        return Some(Prepared { cfg, plain: None });
+        return Ok(from_cluster(&cluster).map(|cfg| Prepared { cfg, plain: None }));
     }
     let src = game_dir.join("mods");
-    let mods = scan(&src, true).map_err(|e| fail::<ModHost>(&e)).ok()?;
+    let mods = scan(&src, true)?;
     if mods.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
+    let Some(cfg) = Config::provision().map_err(|e| fail::<Config>(&e)).ok() else {
+        return Ok(None);
+    };
     let paths = mods.into_iter().map(|(path, _, _)| path).collect();
-    Some(Prepared {
+    Ok(Some(Prepared {
         cfg,
         plain: Some((src, paths)),
-    })
+    }))
 }
 
 fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
@@ -351,6 +358,9 @@ mod tests {
         std::fs::rename(parked, versioned).unwrap();
         assert!(!watch.poll(t + Duration::from_secs(4)));
         assert!(!watch.poll(t + Duration::from_secs(6)));
+        watch.retry_after_failed_scan(t + Duration::from_secs(6));
+        assert!(watch.poll(t + Duration::from_secs(7)));
+        assert!(!watch.poll(t + Duration::from_secs(9)));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -388,7 +398,7 @@ mod tests {
         let boot = spawn_preparing(move || {
             started_tx.send(()).unwrap();
             let _ = release_rx.recv();
-            None
+            Ok(None)
         });
         started_rx.recv().unwrap();
         let (closed_tx, closed_rx) = mpsc::channel();
@@ -442,6 +452,7 @@ mod tests {
         let cluster =
             PathBuf::from(std::env::var_os("FERRO_LIVE_CLUSTER").expect("FERRO_LIVE_CLUSTER"));
         let mut host = prepare(&cluster)
+            .unwrap()
             .and_then(Prepared::start)
             .expect("the cluster started no host");
         let end = std::time::Instant::now() + std::time::Duration::from_secs(300);

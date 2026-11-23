@@ -61,8 +61,9 @@ public final class ShellTransformer implements IClassTransformer {
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] bytes) {
-        if (bytes == null || !transformedName.equals(Names.of("net.minecraft.client.Minecraft"))) return bytes;
-        return shell(bytes);
+        if (bytes == null) return null;
+        if (transformedName.equals(Names.of("net.minecraft.client.Minecraft"))) return shell(bytes);
+        return OverlayHooks.patchHud(transformedName, bytes);
     }
 
     /** Handler calls kept in a shell, as {@code Class.method: handler}. */
@@ -458,7 +459,7 @@ public final class ShellTransformer implements IClassTransformer {
         return null;
     }
 
-    private static boolean isMerged(MethodNode m) {
+    static boolean isMerged(MethodNode m) {
         return contains(m.visibleAnnotations) || contains(m.invisibleAnnotations);
     }
 

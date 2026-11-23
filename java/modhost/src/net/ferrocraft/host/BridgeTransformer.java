@@ -51,6 +51,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return patch(bytes, BridgeTransformer::keyboardMethod);
             case "org/lwjgl/input/Mouse":
                 return patch(bytes, BridgeTransformer::mouseMethod);
+            case "net/minecraftforge/fml/common/eventhandler/EventBus":
+                return OverlayHooks.patchEventBus(bytes);
             case "net/minecraftforge/fml/client/SplashProgress":
                 return patch(bytes, BridgeTransformer::splashMethod);
             case "org/lwjgl/Sys":

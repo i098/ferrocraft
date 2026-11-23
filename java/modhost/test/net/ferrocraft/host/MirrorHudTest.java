@@ -26,33 +26,32 @@ public final class MirrorHudTest {
             Thread host = new Thread(() -> Host.run(new String[0]), "host");
             host.setDaemon(true);
             host.start();
-            try (Socket s = server.accept()) {
-                DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
-                DataOutputStream out = new DataOutputStream(new BufferedOutputStream(s.getOutputStream()));
-                byte[] hello = new byte[33];
-                in.readFully(hello);
-                check(hello[0] == 'H', "hello");
-                in.readUTF(); // the brand
-                HookIndex.skip(in);
-                enable("getFps", "getFps");
-                enable("getBiome", "getHud");
-                enable("getServerIP", "getHud");
-                R.call(R.cls("cc.polyfrost.oneconfig.internal.hud.HudCore"), "reInitHuds");
-                List<String> texts = new ArrayList<>();
-                for (int frame = 0; frame < 30 && !done(texts); frame++) {
-                    out.write(mirror());
-                    out.write(frameRequest());
-                    out.flush();
-                    texts = readTexts(in);
-                    Thread.sleep(60);
-                }
-                System.out.println("[mirror-hud] texts: " + texts);
-                String all = String.join("\n", texts);
-                check(texts.contains("FPS: 144"), "FPS text: " + texts);
-                check(texts.contains("Biome: Taiga"), "Biome text: " + texts);
-                check(texts.stream().anyMatch(t -> t.contains("mc.example:25565")), "Server text: " + texts);
-                check(texts.containsAll(java.util.Arrays.asList("X: 12", "Y: 64", "Z: -7")), "Coordinates text: " + texts);
+            Socket s = server.accept();
+            s.setSoTimeout(60_000);
+            DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
+            DataOutputStream out = new DataOutputStream(new BufferedOutputStream(s.getOutputStream()));
+            byte[] hello = new byte[33];
+            in.readFully(hello);
+            check(hello[0] == 'H', "hello");
+            in.readUTF(); // the brand
+            HookIndex.skip(in);
+            enable("getFps", "getFps");
+            enable("getBiome", "getHud");
+            enable("getServerIP", "getHud");
+            R.call(R.cls("cc.polyfrost.oneconfig.internal.hud.HudCore"), "reInitHuds");
+            List<String> texts = new ArrayList<>();
+            for (int frame = 0; frame < 30 && !done(texts); frame++) {
+                out.write(mirror());
+                out.write(frameRequest());
+                out.flush();
+                texts = readFrame(in).texts;
+                Thread.sleep(60);
             }
+            System.out.println("[mirror-hud] texts: " + texts);
+            check(texts.contains("FPS: 144"), "FPS text: " + texts);
+            check(texts.contains("Biome: Taiga"), "Biome text: " + texts);
+            check(texts.stream().anyMatch(t -> t.contains("mc.example:25565")), "Server text: " + texts);
+            check(texts.containsAll(java.util.Arrays.asList("X: 12", "Y: 64", "Z: -7")), "Coordinates text: " + texts);
             System.out.println("MirrorHudTest passed");
             code = 0;
         } catch (Throwable t) {
@@ -118,37 +117,64 @@ public final class MirrorHudTest {
         return b.toByteArray();
     }
 
-    /** The texts of one reply frame; the layout is Sink.take. */
-    static List<String> readTexts(DataInputStream in) throws IOException {
+    static final class Frame {
+        final List<String> texts = new ArrayList<>();
+        final List<Image> images = new ArrayList<>();
+        int hud;
+    }
+
+    static final class Image {
+        final String name;
+        final float x0, y0, x1, y1;
+
+        Image(DataInputStream in) throws IOException {
+            name = string(in);
+            x0 = in.readFloat();
+            y0 = in.readFloat();
+            x1 = in.readFloat();
+            y1 = in.readFloat();
+            skip(in, 4 + 1 + 1);
+        }
+    }
+
+    static Frame readFrame(DataInputStream in) throws IOException {
         in.readUnsignedByte();
         long n = in.readInt() & 0xffffffffL;
-        List<String> texts = new ArrayList<>();
+        Frame frame = new Frame();
         for (long i = 0; i < n; i++) {
             int tag = in.readUnsignedByte();
             switch (tag) {
-                case 'R': in.skipBytes(16 + 4); break;
-                case 'S': in.skipBytes(in.readUnsignedByte() == 0 ? 16 + 16 + 4 : 16 + 4 + 4); break;
-                case 'H': in.skipBytes(4); break;
-                case 'G': in.skipBytes(16 + 8); break;
+                case 'R': skip(in, 16 + 4); break;
+                case 'S':
+                    int kind = in.readUnsignedByte();
+                    switch (kind) {
+                        case 0: skip(in, 16 + 16 + 4); break;
+                        case 1: skip(in, 16 + 4 + 4); break;
+                        default: throw new IOException("unknown shape kind " + kind);
+                    }
+                    break;
+                case 'H': frame.hud |= in.readInt(); break;
+                case 'G': skip(in, 16 + 8); break;
                 case 'T':
-                    in.skipBytes(8 + 4 + 1 + 12);
-                    texts.add(string(in));
+                    skip(in, 8 + 4 + 1 + 12);
+                    frame.texts.add(string(in));
                     break;
                 case 'D':
                     string(in);
-                    in.skipBytes(in.readInt());
+                    skip(in, in.readInt());
                     break;
-                case 'I':
-                    string(in);
-                    in.skipBytes(16 + 4 + 1 + 1);
-                    break;
+                case 'I': frame.images.add(new Image(in)); break;
                 case 'C':
-                    if (in.readUnsignedByte() != 0) in.skipBytes(16);
+                    if (in.readUnsignedByte() != 0) skip(in, 16);
                     break;
                 default: throw new IOException("unknown command " + tag);
             }
         }
-        return texts;
+        return frame;
+    }
+
+    private static void skip(DataInputStream in, int bytes) throws IOException {
+        if (in.skipBytes(bytes) != bytes) throw new IOException("incomplete draw command");
     }
 
     private static String string(DataInputStream in) throws IOException {

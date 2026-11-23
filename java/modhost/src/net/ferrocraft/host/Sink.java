@@ -22,7 +22,8 @@ import java.util.Set;
 public final class Sink {
     /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
     private static final int CROSSHAIR = 1 << 4;
-    private static boolean crosshair;
+    private static int hudBits;
+    private static boolean overlayFailed;
     private static boolean textured;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
@@ -220,12 +221,11 @@ public final class Sink {
 
     /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */
     static synchronized void hud(int bits) {
-        if ((bits & CROSSHAIR) != 0) {
-            crosshair = true;
-            bits &= ~CROSSHAIR;
-            if (bits == 0) return;
-        }
-        writeHud(bits);
+        hudBits |= bits;
+    }
+
+    static synchronized void overlayFailed() {
+        overlayFailed = true;
     }
 
     private static void writeHud(int bits) {
@@ -253,8 +253,10 @@ public final class Sink {
 
     /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
     static synchronized byte[] take(boolean modScreen) {
-        if (crosshair && textured) writeHud(CROSSHAIR);
-        crosshair = false;
+        int owned = textured ? hudBits : hudBits & ~CROSSHAIR;
+        if (!overlayFailed && owned != 0) writeHud(owned);
+        hudBits = 0;
+        overlayFailed = false;
         textured = false;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);

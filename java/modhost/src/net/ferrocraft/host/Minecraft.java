@@ -88,7 +88,12 @@ final class Minecraft {
     }
 
     static void renderOverlay(Object mc, float partial) {
-        R.call(R.get(mc, "field_71460_t"), "func_181560_a", partial, 0L); // EntityRenderer.updateCameraAndRender: the HUD and its hooks
+        OverlayHooks.begin();
+        try {
+            R.call(R.get(mc, "field_71460_t"), "func_181560_a", partial, 0L); // EntityRenderer.updateCameraAndRender: the HUD and its hooks
+        } finally {
+            OverlayHooks.end();
+        }
     }
 
     /**

@@ -2,7 +2,9 @@ package net.ferrocraft.host;
 
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
+import net.minecraftforge.fml.common.eventhandler.Event;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
+import net.minecraftforge.fml.common.eventhandler.IEventListener;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 /**
@@ -32,6 +34,20 @@ public final class OverlayFilter {
             Sink.hud(bit);
         } else {
             e.setCanceled(true);
+        }
+    }
+
+    public static void invoke(IEventListener listener, Event event) {
+        if (!OverlayHooks.active() || !(event instanceof RenderGameOverlayEvent)) {
+            listener.invoke(event);
+            return;
+        }
+        boolean canceled = event.isCancelable() && event.isCanceled();
+        try {
+            listener.invoke(event);
+        } catch (RuntimeException failure) {
+            if (event.isCancelable()) event.setCanceled(canceled);
+            OverlayHooks.failed(failure);
         }
     }
 

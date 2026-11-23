@@ -150,11 +150,7 @@ public final class Host {
             int arg = in.readInt();
             Input.event(kind, arg, in.readUnsignedByte(), in.readUnsignedShort());
         }
-        try {
-            frame(w, h, scale, unicode, screen, overlays);
-        } catch (RuntimeException e) { // a mod's hook threw: log it, answer the frame
-            e.printStackTrace();
-        }
+        frame(w, h, scale, unicode, screen, overlays);
         out.write(Sink.take(Minecraft.modScreen(mc) != null));
         out.flush();
     }

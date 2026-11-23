@@ -9,6 +9,74 @@ use sha2::{Digest, Sha256};
 
 const VERSION: &str = "2.12.0";
 
+pub fn data_dir(app_data: &Path) -> io::Result<PathBuf> {
+    if std::env::vars_os().any(|(key, _)| {
+        key.to_str()
+            .and_then(|key| key.strip_prefix("ONECLIENT_SETTING_"))
+            .is_some_and(|key| key.eq_ignore_ascii_case("data_dir"))
+    }) {
+        return Err(io::Error::other(
+            "Unset ONECLIENT_SETTING_DATA_DIR and save the data directory in OneClient settings",
+        ));
+    }
+    #[cfg(windows)]
+    let legacy = dirs::data_local_dir()
+        .ok_or_else(|| io::Error::other("Cannot locate Local AppData"))?
+        .join("Polyfrost/OneClient/data");
+    #[cfg(target_os = "macos")]
+    let legacy = app_data.join("org.Polyfrost.OneClient");
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let legacy = app_data.join("oneclient");
+
+    resolve_data_dir(app_data.join("Polyfrost/OneClient"), &legacy)
+}
+
+fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<PathBuf> {
+    if !standard.is_absolute() {
+        return Err(io::Error::other(
+            "Cannot locate the standard OneClient data directory",
+        ));
+    }
+    let legacy_settings = legacy.join("settings.json");
+    let standard_settings = standard.join("settings.json");
+    let has_legacy = legacy_settings.try_exists()?;
+    let settings = if has_legacy {
+        &legacy_settings
+    } else {
+        &standard_settings
+    };
+    let bytes = match fs::read(settings) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound && !has_legacy => return Ok(standard),
+        Err(e) => {
+            return Err(io::Error::new(
+                e.kind(),
+                format!("{}: {e}", settings.display()),
+            ));
+        }
+    };
+    let config: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| io::Error::other(format!("{}: {e}", settings.display())))?;
+    if config.is_object() && config["data_dir"].is_null() {
+        if has_legacy {
+            return Err(io::Error::other(format!(
+                "{}: OneClient can move this legacy directory at startup; open OneClient first or set a data directory in OneClient",
+                legacy.display()
+            )));
+        }
+        return Ok(standard);
+    }
+    if let Some(path) = config["data_dir"].as_str().map(PathBuf::from) {
+        if path.is_absolute() && !path.join(".oneclient_migrating").try_exists()? {
+            return Ok(path);
+        }
+    }
+    Err(io::Error::other(format!(
+        "{}: invalid data directory or unfinished move; check the storage settings in OneClient",
+        settings.display()
+    )))
+}
+
 // Digests from https://github.com/Polyfrost/OneLauncher/releases/tag/oneclient-2.12.0.
 fn release_asset(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match (os, arch) {
@@ -70,6 +138,10 @@ fn run(command: &mut Command) -> io::Result<()> {
 }
 
 pub fn install(base: &Path) -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    if let Some(app) = installed_windows()? {
+        return Ok(app);
+    }
     let Some((asset, digest, executable)) =
         release_asset(std::env::consts::OS, std::env::consts::ARCH)
     else {
@@ -115,6 +187,10 @@ pub fn install(base: &Path) -> io::Result<PathBuf> {
     check(fs::File::open(&archive)?, digest)?;
     println!("Verified the OneClient download (SHA-256).");
 
+    #[cfg(windows)]
+    if let Some(app) = installed_windows()? {
+        return Ok(app);
+    }
     unpack(&archive, stage.path(), &dest)?;
     if !installed.is_file() {
         return Err(io::Error::other(format!(
@@ -149,6 +225,76 @@ fn unpack(archive: &Path, stage: &Path, dest: &Path) -> io::Result<()> {
 }
 
 #[cfg(windows)]
+fn windows_executable(dir: &Path) -> Option<PathBuf> {
+    ["oneclient_app.exe", "OneClient.exe"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|file| file.is_absolute() && file.is_file())
+}
+
+#[cfg(windows)]
+fn installed_windows() -> io::Result<Option<PathBuf>> {
+    let (app, registered) = registered_windows()?;
+    let app = app.or_else(|| {
+        dirs::data_local_dir()
+            .into_iter()
+            .chain(
+                ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+                    .into_iter()
+                    .filter_map(std::env::var_os)
+                    .map(PathBuf::from),
+            )
+            .find_map(|dir| windows_executable(&dir.join("OneClient")))
+    });
+    if app.is_none() && registered {
+        return Err(io::Error::other(
+            "OneClient is registered, but its executable is missing; repair the existing installation in Windows before retrying",
+        ));
+    }
+    Ok(app)
+}
+
+#[cfg(windows)]
+fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
+    use windows_registry::{CURRENT_USER, LOCAL_MACHINE};
+
+    const KEY_WOW64_64KEY: u32 = 0x0100;
+    const KEY_WOW64_32KEY: u32 = 0x0200;
+    const FILE_NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
+    const PATH_NOT_FOUND: i32 = 0x8007_0003_u32 as i32;
+    let locations = [
+        (
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\OneClient",
+            "InstallLocation",
+        ),
+        (r"Software\Polyfrost Inc.\OneClient", ""),
+    ];
+    let views = [CURRENT_USER, LOCAL_MACHINE]
+        .into_iter()
+        .flat_map(|hive| [KEY_WOW64_64KEY, KEY_WOW64_32KEY].map(|view| (hive, view)));
+    let mut registered = false;
+    for (hive, view, subkey, value) in
+        views.flat_map(|(hive, view)| locations.map(|(subkey, value)| (hive, view, subkey, value)))
+    {
+        let key = match hive.options().read().access(view).open(subkey) {
+            Ok(key) => key,
+            Err(e) if matches!(e.code().0, FILE_NOT_FOUND | PATH_NOT_FOUND) => continue,
+            Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
+        };
+        registered = true;
+        let dir = match key.get_string(value) {
+            Ok(dir) => dir,
+            Err(e) if e.code().0 == FILE_NOT_FOUND => continue,
+            Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
+        };
+        if let Some(app) = windows_executable(Path::new(dir.trim_matches('"'))) {
+            return Ok((Some(app), true));
+        }
+    }
+    Ok((None, registered))
+}
+
+#[cfg(windows)]
 fn unpack(archive: &Path, _: &Path, dest: &Path) -> io::Result<()> {
     use std::os::windows::process::CommandExt;
     // NSIS requires the unquoted /D= argument last, even when the path has spaces.
@@ -173,5 +319,45 @@ mod tests {
         let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         check(&b"abc"[..], digest).unwrap();
         assert!(check(&b"abd"[..], digest).is_err());
+    }
+
+    #[test]
+    fn data_dir_follows_oneclient_settings_or_refuses_an_unstable_legacy_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let standard = tmp.path().join("Polyfrost/OneClient");
+        let legacy = tmp.path().join("legacy");
+        let custom = tmp.path().join("custom");
+        assert_eq!(
+            resolve_data_dir(standard.clone(), &legacy).unwrap(),
+            standard
+        );
+
+        fs::create_dir_all(&standard).unwrap();
+        fs::write(
+            standard.join("settings.json"),
+            serde_json::json!({ "data_dir": custom }).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_data_dir(standard.clone(), &legacy).unwrap(),
+            custom
+        );
+
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("settings.json"), "{}").unwrap();
+        assert!(resolve_data_dir(standard.clone(), &legacy).is_err());
+        let legacy_custom = tmp.path().join("legacy-custom");
+        fs::create_dir_all(&legacy_custom).unwrap();
+        fs::write(
+            legacy.join("settings.json"),
+            serde_json::json!({ "data_dir": legacy_custom }).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_data_dir(standard.clone(), &legacy).unwrap(),
+            legacy_custom
+        );
+        fs::write(legacy_custom.join(".oneclient_migrating"), []).unwrap();
+        assert!(resolve_data_dir(standard, &legacy).is_err());
     }
 }

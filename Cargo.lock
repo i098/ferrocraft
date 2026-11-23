@@ -917,9 +917,11 @@ dependencies = [
 name = "ferrocraft-launcher"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "serde_json",
  "sha2",
  "tempfile",
+ "windows-registry",
 ]
 
 [[package]]

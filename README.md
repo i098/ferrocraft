@@ -18,21 +18,25 @@ Windows (PowerShell):
     irm https://github.com/i098/ferrocraft/releases/latest/download/install.ps1 | iex
 
 The installer downloads and verifies Polyfrost OneClient 2.12.0.
-It installs the `Ferrocraft 1.8.9` Ornithe profile in the default OneClient data directory.
+On Windows it reuses an existing OneClient installation.
+It installs the `Ferrocraft 1.8.9` Ornithe profile in the active OneClient data directory.
 Open OneClient from the path that the installer prints.
-Keep the default data directory during setup.
+Keep the default data directory if OneClient asks where to store its data.
 Sign in once with a Microsoft account that owns Minecraft: Java Edition, then select `Ferrocraft 1.8.9`.
 OneClient downloads the game and loader when you start the profile.
 On Linux without FUSE, run the AppImage with `--appimage-extract-and-run`.
 
 To use an existing launcher without a OneClient download, extract the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases).
-Run `./ferrocraft-launcher install --minecraft-dir DIR` for the official launcher or `./ferrocraft-launcher install --oneclient-dir DIR` for an existing 1.8.9 Fabric or Ornithe profile.
+Run `./ferrocraft-launcher install --minecraft-dir DIR` for the official launcher.
+Use `./ferrocraft-launcher install --oneclient-dir DIR` with the OneClient data directory to target its 1.8.9 Fabric or Ornithe profiles.
 Lunar Client and Badlion cannot start custom versions.
 
 Run `~/.ferrocraft/ferrocraft-engine` to start the standalone engine on Unix.
 Run `$HOME\.ferrocraft\ferrocraft-engine.exe` on Windows.
+Close OneClient before you uninstall Ferrocraft.
 Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
 The uninstall command preserves OneClient and the profile's data.
+If OneClient may manage a recorded mod, the command stops before it removes any files.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

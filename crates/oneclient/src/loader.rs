@@ -17,8 +17,8 @@ pub enum Loader {
     Other,
 }
 
-/// The loader in `<cluster>/.instance.json`. OneClient numbers its loaders: Vanilla 0, Forge 1, NeoForge 2, Quilt 3,
-/// Fabric 4, Ornithe 5. A cluster with no `.instance.json` is Forge, the loader of the twin route.
+/// The loader in `<cluster>/.instance.json`. Older clusters use numeric loaders.
+/// A cluster with no `.instance.json` is Forge, the loader of the twin route.
 /// `cluster` is the cluster directory or its `.oneclient-mods.json`.
 pub fn loader(cluster: &Path) -> Result<Loader, Error> {
     let file = manifest_path(cluster).with_file_name(".instance.json");
@@ -30,13 +30,13 @@ pub fn loader(cluster: &Path) -> Result<Loader, Error> {
     let v: Value = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Format(format!("{}: {e}", file.display())))?;
     let raw = &v["mc_loader"];
-    match raw.as_i64() {
-        Some(1) => Ok(Loader::Forge),
-        Some(4) => Ok(Loader::Fabric),
-        Some(5) => Ok(Loader::Ornithe),
-        Some(_) => Ok(Loader::Other),
-        None => Err(Error::Format(format!(
-            "{}: no numeric `mc_loader`",
+    match (raw.as_i64(), raw.as_str()) {
+        (Some(1), _) | (_, Some("Forge")) => Ok(Loader::Forge),
+        (Some(4), _) | (_, Some("Fabric")) => Ok(Loader::Fabric),
+        (Some(5), _) | (_, Some("Ornithe")) => Ok(Loader::Ornithe),
+        (Some(_), _) | (_, Some("minecraft" | "NeoForge" | "Quilt")) => Ok(Loader::Other),
+        _ => Err(Error::Format(format!(
+            "{}: invalid `mc_loader`",
             file.display()
         ))),
     }
@@ -54,6 +54,9 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
     };
     std::fs::create_dir_all(out_dir)?;
     for (path, hash) in read_manifest(&manifest)? {
+        if path.rsplit('/').next() == Some("ferrocraft-fabric.jar") {
+            continue;
+        }
         let src = dir.join(&path);
         // A missing jar is an error, never a quiet "no cluster".
         let bytes =
@@ -97,6 +100,10 @@ mod tests {
         for (json, want) in [
             (r#"{"mc_loader":4}"#, Loader::Fabric),
             (r#"{"mc_loader":5}"#, Loader::Ornithe),
+            (r#"{"mc_loader":"Ornithe"}"#, Loader::Ornithe),
+            (r#"{"mc_loader":"Fabric"}"#, Loader::Fabric),
+            (r#"{"mc_loader":"Forge"}"#, Loader::Forge),
+            (r#"{"mc_loader":"minecraft"}"#, Loader::Other),
             (r#"{"mc_loader":1}"#, Loader::Forge),
             (r#"{"mc_loader":3}"#, Loader::Other),
             (r#"{"mc_loader":0}"#, Loader::Other),
@@ -114,8 +121,13 @@ mod tests {
         let d = temp("jars");
         std::fs::create_dir_all(d.join("mods")).unwrap();
         std::fs::write(d.join("mods/a.jar"), b"jar a").unwrap();
-        let manifest =
-            |hash: &str| format!(r#"{{"entries":[{{"path":"mods/a.jar","hash":"{hash}"}}]}}"#);
+        std::fs::write(d.join("mods/ferrocraft-fabric.jar"), b"bootstrap").unwrap();
+        let manifest = |hash: &str| {
+            format!(
+                r#"{{"entries":[{{"path":"mods/a.jar","hash":"{hash}"}},{{"path":"mods/ferrocraft-fabric.jar","hash":"{}"}}]}}"#,
+                sha1_hex(b"bootstrap")
+            )
+        };
         let out = d.join("out");
         std::fs::write(
             d.join(".oneclient-mods.json"),
@@ -125,6 +137,7 @@ mod tests {
         let r = fabric_jars(&d, &out).unwrap();
         assert_eq!(r.jars, vec![out.join("a.jar")]);
         assert_eq!(std::fs::read(&r.jars[0]).unwrap(), b"jar a");
+        assert!(!out.join("ferrocraft-fabric.jar").exists());
 
         std::fs::write(d.join(".oneclient-mods.json"), manifest(&"0".repeat(40))).unwrap();
         assert!(matches!(fabric_jars(&d, &out), Err(Error::Sha1 { .. })));

@@ -28,6 +28,8 @@ public final class OverlayHooksTest implements Opcodes {
     private static final String FAILED = "failed HUD draw";
     private static final String LATER = "later HUD draw";
     private static boolean drawSucceeds;
+    private static boolean reverseReplacement;
+    private static Object resolution;
 
     public static void main(String[] args) throws Exception {
         Loader loader = new Loader();
@@ -35,13 +37,16 @@ public final class OverlayHooksTest implements Opcodes {
         byte[] renderer = new OverlayHooks.HudTransformer().transform(RENDERER, RENDERER.replace('/', '.'), rendererBytes());
         Class<?> cls = loader.define(RENDERER, renderer);
         loader.define(CROSSHAIR_RENDERER, crosshairRendererBytes());
+        resolution = R.alloc("avr");
+        R.set(resolution, "c", 429);
+        R.set(resolution, "d", 243);
         GlState.bindTexture(3553, GlState.genTexture());
         GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
         GlState.color(1, 1, 1, 1);
         GlState.enable(3042);
         GlState.blendFunc(775, 769);
 
-        OverlayHooks.begin(null, 214, 121);
+        OverlayHooks.begin(null);
         try {
             Method render = cls.getMethod("func_181560_a", float.class, long.class);
             render.invoke(null, 0f, 0L);
@@ -50,13 +55,22 @@ public final class OverlayHooksTest implements Opcodes {
             try {
                 render.invoke(null, 0f, 0L);
                 assertCrosshairOwnership(true);
+                reverseReplacement = true;
+                render.invoke(null, 0f, 0L);
+                assertCrosshairOwnership(false, 4);
+                reverseReplacement = false;
+                Sink.clip(new float[] {220, 0, 208, 242});
+                render.invoke(null, 0f, 0L);
+                assertCrosshairOwnership(false, 4);
             } finally {
                 drawSucceeds = false;
             }
-            assertForgeCrosshair(true, true, false);
-            assertForgeCrosshair(false, true, false);
-            assertForgeCrosshair(true, false, false);
-            assertForgeCrosshair(true, true, true);
+            assertForgeCrosshair(214, 121, true, null);
+            assertForgeCrosshair(2, 121, true, null);
+            assertForgeCrosshair(214, 2, true, null);
+            assertForgeCrosshair(214, 121, false, null);
+            assertForgeCrosshair(214, 121, true, new float[] {220, 0, 208, 242});
+            assertForgeCrosshair(214, 121, true, new float[] {0, 127, 428, 115});
             assertScissorRollback();
             assertClippedCrosshair();
             assertPostImageDoesNotClaimCrosshair();
@@ -111,6 +125,10 @@ public final class OverlayHooksTest implements Opcodes {
     }
 
     private static void assertCrosshairOwnership(boolean drawn) throws IOException {
+        assertCrosshairOwnership(drawn, drawn ? 4 : 3);
+    }
+
+    private static void assertCrosshairOwnership(boolean drawn, int images) throws IOException {
         OverlayFilter filter = new OverlayFilter();
         RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.ALL);
         RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
@@ -122,15 +140,15 @@ public final class OverlayHooksTest implements Opcodes {
         }, crosshair);
         OverlayFilter.invoke(event -> filter.pre(crosshair), crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.hud != (drawn ? 1 << 4 : 0) || frame.images.size() != (drawn ? 4 : 3)) {
+        if (frame.hud != (drawn ? 1 << 4 : 0) || frame.images.size() != images) {
             throw new AssertionError("unrelated images must not validate cancellation after a failed replacement");
         }
-        if (!drawn) assertRecoveredDraw(frame);
+        if (images == 3) assertRecoveredDraw(frame);
         if (drawn && frame.images.get(0).x0 != 4) throw new AssertionError("the replacement draw did not reach the frame");
     }
 
     private static RenderGameOverlayEvent.Pre crosshairEvent() {
-        return new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.CROSSHAIRS) {
+        return new RenderGameOverlayEvent.Pre(eventWithResolution(), ElementType.CROSSHAIRS) {
             @Override
             public boolean isCancelable() {
                 return true;
@@ -138,19 +156,27 @@ public final class OverlayHooksTest implements Opcodes {
         };
     }
 
-    private static void assertForgeCrosshair(boolean centered, boolean cancel, boolean clipped) throws IOException {
+    private static RenderGameOverlayEvent eventWithResolution() {
+        try {
+            return RenderGameOverlayEvent.class.getConstructor(float.class, resolution.getClass()).newInstance(0f, resolution);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private static void assertForgeCrosshair(int x, int y, boolean cancel, float[] clip) throws IOException {
         RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
         OverlayFilter.invoke(event -> {
-            if (clipped) Sink.clip(new float[] {0, 0, 213, 121});
+            Sink.clip(clip);
             Sink.push();
-            Sink.translate(centered ? 214 : 2, 121);
+            Sink.translate(x, y);
             GlState.quadSized(-1, -1, 0, 0, 2, 2, 1, 1);
             Sink.pop();
             if (cancel) event.setCanceled(true);
         }, crosshair);
         OverlayFilter.invoke(event -> new OverlayFilter().pre(crosshair), crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        int expected = centered && cancel && !clipped ? 1 << 4 : 0;
+        int expected = x == 214 && y == 121 && cancel && clip == null ? 1 << 4 : 0;
         if (frame.hud != expected || frame.images.size() != 1) {
             throw new AssertionError("Forge crosshair ownership does not match the listener's draw and cancellation");
         }
@@ -210,13 +236,19 @@ public final class OverlayHooksTest implements Opcodes {
         }
     }
 
-    private static void assertRecoveredDraw(MirrorHudTest.Frame frame) {
+    private static void assertRecoveredDraw(MirrorHudTest.Frame frame) throws IOException {
         if (frame.texts.contains(FAILED) || !frame.texts.contains(LATER)) {
             throw new AssertionError("failed HUD draw survived or the later HUD draw was lost");
         }
         MirrorHudTest.Image image = frame.images.get(0);
         if (image.argb != -1 || image.blend != 1 || image.x0 != 2 || image.y0 != 3) {
             throw new AssertionError("the failed callback changed the later image");
+        }
+        byte[] png = frame.definitions.get(image.name);
+        if (png == null) throw new AssertionError("the recovered image has no texture definition");
+        BufferedImage pixels = ImageIO.read(new ByteArrayInputStream(png));
+        if (pixels == null || pixels.getWidth() != 1 || pixels.getHeight() != 1 || pixels.getRGB(0, 0) != -1) {
+            throw new AssertionError("the recovered image does not contain the uploaded white pixel");
         }
     }
 
@@ -255,7 +287,7 @@ public final class OverlayHooksTest implements Opcodes {
     }
 
     public static void drawReplacement() {
-        GlState.quadSized(4, 5, 0, 0, 1, 1, 1, 1);
+        GlState.quad(4, 5, 0, 0, 1, 1, reverseReplacement ? -1 : 1, 1, 1, 1);
     }
 
     private static byte[] crosshairRendererBytes() {

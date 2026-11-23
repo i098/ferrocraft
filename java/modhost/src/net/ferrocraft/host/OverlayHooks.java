@@ -32,8 +32,7 @@ public final class OverlayHooks {
 
     private OverlayHooks() {}
 
-    static void begin(GlCache cache, int centerX, int centerY) {
-        Sink.center(centerX, centerY);
+    static void begin(GlCache cache) {
         glCache = cache;
         overlayThread = Thread.currentThread();
     }

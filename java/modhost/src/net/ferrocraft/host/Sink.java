@@ -27,8 +27,7 @@ public final class Sink {
     private static int hudBits;
     private static int textured;
     private static int centeredImages;
-    private static int centerX, centerY;
-    private static boolean centerClipped;
+    private static Mark crosshairListener;
     private static boolean crosshairDrawn;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
@@ -38,7 +37,7 @@ public final class Sink {
     private static FrameBytes bytes = new FrameBytes();
     private static DataOutputStream out = new DataOutputStream(bytes);
     private static int count;
-    private static boolean clipped;
+    private static float[] clip;
     private static final Set<String> DEFINED = new HashSet<>();
     private static final List<String> newDefinitions = new ArrayList<>();
 
@@ -59,8 +58,8 @@ public final class Sink {
         final int textures = textured;
         final int centered = centeredImages;
         final boolean crosshair = crosshairDrawn;
-        final boolean clip = clipped;
-        final boolean clippedCenter = centerClipped;
+        final float[] clip = Sink.clip;
+        int centerX, centerY;
         final int definitions = newDefinitions.size();
         final int matrixTop = top;
         final int matrixMode = mode;
@@ -208,17 +207,21 @@ public final class Sink {
 
     /** The image {@code name} (defined with {@code data} the first time) in the box x0 y0 x1 y1. */
     public static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor) {
-        emit(name, data, x0, y0, x1, y1, argb, recolor, 0);
+        emit(name, data, x0, y0, x1, y1, argb, recolor, 0, false);
     }
 
     /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
     static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
-        textured++;
-        emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
+        emit(name, data, x0, y0, x1, y1, argb, recolor, blend, true);
     }
 
-    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
+    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb,
+            boolean recolor, int blend, boolean texturedQuad) {
         float[] m = STACK[top];
+        x0 = m[0] * x0 + m[1];
+        y0 = m[0] * y0 + m[2];
+        x1 = m[0] * x1 + m[1];
+        y1 = m[0] * y1 + m[2];
         try {
             if (DEFINED.add(name)) {
                 newDefinitions.add(name);
@@ -230,15 +233,25 @@ public final class Sink {
             }
             out.writeByte('I');
             string(name);
-            quad(m, x0, y0, x1, y1);
+            out.writeFloat(x0);
+            out.writeFloat(y0);
+            out.writeFloat(x1);
+            out.writeFloat(y1);
             out.writeInt(argb);
             out.writeByte(recolor ? 1 : 0);
             out.writeByte(blend);
             count++;
-            if (!centerClipped && (argb >>> 24) != 0
-                    && covers(centerX, m[0] * x0 + m[1], m[0] * x1 + m[1])
-                    && covers(centerY, m[0] * y0 + m[2], m[0] * y1 + m[2])) {
-                centeredImages++;
+            if (clip != null) {
+                x0 = Math.max(x0, clip[0]);
+                y0 = Math.max(y0, clip[1]);
+                x1 = Math.min(x1, clip[2]);
+                y1 = Math.min(y1, clip[3]);
+            }
+            if (x0 < x1 && y0 < y1 && (argb >>> 24) != 0) {
+                if (texturedQuad) textured++;
+                Mark listener = crosshairListener;
+                if (listener != null && x0 <= listener.centerX && listener.centerX < x1
+                        && y0 <= listener.centerY && listener.centerY < y1) centeredImages++;
             }
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -253,13 +266,12 @@ public final class Sink {
 
     /** Cuts what follows to {@code box} (x0 y0 x1 y1, already on the screen), or lifts the cut when null. */
     public static synchronized void clip(float[] box) {
-        if (box == null && !clipped) return;
+        if (box == null && clip == null) return;
         try {
             out.writeByte('C');
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
-            clipped = box != null;
-            centerClipped = clipped && (!covers(centerX, box[0], box[2]) || !covers(centerY, box[1], box[3]));
+            clip = box;
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -282,8 +294,7 @@ public final class Sink {
         textured = mark.textures;
         centeredImages = mark.centered;
         crosshairDrawn = mark.crosshair;
-        clipped = mark.clip;
-        centerClipped = mark.clippedCenter;
+        clip = mark.clip;
         Nvg.restoreScissors(mark.scissors);
         top = mark.matrixTop;
         mode = mark.matrixMode;
@@ -297,17 +308,21 @@ public final class Sink {
         crosshairDrawn |= textured > before;
     }
 
-    static synchronized void center(int x, int y) {
-        centerX = x;
-        centerY = y;
+    static synchronized Mark trackCrosshair(Mark mark, int x, int y) {
+        Mark previous = crosshairListener;
+        mark.centerX = x;
+        mark.centerY = y;
+        crosshairListener = mark;
+        return previous;
+    }
+
+    static synchronized void stopTrackingCrosshair(Mark mark, Mark previous) {
+        centeredImages = mark.centered;
+        crosshairListener = previous;
     }
 
     static synchronized void centeredCrosshairDrawn(Mark mark) {
         crosshairDrawn |= centeredImages > mark.centered;
-    }
-
-    private static boolean covers(int center, float a, float b) {
-        return (a <= center && center < b) || (b <= center && center < a);
     }
 
     private static void writeHud(int bits) {
@@ -356,8 +371,7 @@ public final class Sink {
         count = 0;
         top = 0;
         mode = MODELVIEW;
-        clipped = false;
-        centerClipped = false;
+        clip = null;
         STACK[0][0] = 1;
         STACK[0][1] = 0;
         STACK[0][2] = 0;

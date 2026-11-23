@@ -51,9 +51,7 @@ final class ForgeGlue implements Glue {
 
     @Override
     public void renderOverlay(Object mc, float partial) {
-        Object size = R.neu("net.minecraft.client.gui.ScaledResolution", mc);
-        OverlayHooks.begin(OverlayCache.INSTANCE, (Integer) R.call(size, "func_78326_a") / 2,
-                (Integer) R.call(size, "func_78328_b") / 2);
+        OverlayHooks.begin(OverlayCache.INSTANCE);
         try {
             Minecraft.renderOverlay(mc, partial);
         } finally {

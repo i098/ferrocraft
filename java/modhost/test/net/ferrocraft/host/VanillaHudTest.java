@@ -113,7 +113,7 @@ public final class VanillaHudTest {
     }
 
     private boolean matchesCrosshair(MirrorHudTest.Image image, BufferedImage icons) throws IOException {
-        if (image.x0 != 206 || image.y0 != 113 || image.x1 != 222 || image.y1 != 129
+        if (image.x0 != 206.5f || image.y0 != 113 || image.x1 != 222.5f || image.y1 != 129
                 || image.argb != -1 || image.recolor || image.blend != 1) return false;
         BufferedImage decoded = decodeTexture(image.name);
         return decoded != null && sameCrosshairPixels(image, decoded, icons);

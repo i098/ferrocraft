@@ -296,8 +296,16 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     } else {
         Vec::new()
     };
+    // No launcher at all: install into the default `.minecraft`, which `install_official` creates.
+    let mc = if mc.is_none() && mods.is_empty() && !explicit {
+        let d = env.minecraft_dir();
+        println!("no launcher found: creating {}", d.display());
+        Some(d)
+    } else {
+        mc
+    };
     if mc.is_none() && mods.is_empty() {
-        return Err("no launcher found. Start your launcher once, or pass --minecraft-dir or --oneclient-dir".into());
+        return Err("no launcher found in the given dir. Pass --minecraft-dir or --oneclient-dir with a valid folder".into());
     }
     let mut written = Vec::new();
     let res: Result<(), String> = (|| {

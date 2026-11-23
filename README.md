@@ -21,9 +21,17 @@ The installer installs into every launcher it finds:
 
 - Official launcher: the `ferrocraft-1.8.9` version.
 - OneClient clusters that run 1.8.9 with Fabric: the Fabric mod jar. The engine goes to `~/.ferrocraft`.
+- No launcher found (a new user): the installer creates the default `.minecraft` folder (`~/.minecraft`; on macOS `~/Library/Application Support/minecraft`) and installs the `ferrocraft-1.8.9` version there. It prints the path.
 - Lunar Client and Badlion cannot start custom versions, so the installer skips them.
 
 The installer prints what it did and the uninstall command: `~/.ferrocraft/ferrocraft-launcher uninstall`. If your launcher is in a custom folder, download the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases), extract it, and run `./ferrocraft-launcher install --minecraft-dir DIR` (or `--oneclient-dir DIR`) from the extracted folder.
+
+### Mods
+
+A plain `mods/` folder in the game dir is not read by default. The engine starts the mod host in one of two ways:
+
+- A OneClient cluster game dir (a folder with `.oneclient-mods.json`): the host starts with no setup.
+- Any other game dir: set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_GAMEDIR` before you start the client. The host then loads the jars in `$FERROCRAFT_MODHOST_GAMEDIR/mods`. See [Mod host](docs/mod-host.md).
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

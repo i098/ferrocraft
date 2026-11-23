@@ -421,7 +421,14 @@ impl Models {
                 let entries = spec
                     .as_array()
                     .map_or(std::slice::from_ref(&spec), Vec::as_slice);
-                if let Some(quads) = entries.iter().find_map(|entry| loader.bake(entry)) {
+                let quads = entries.iter().find_map(|entry| {
+                    let start = loader.names.len();
+                    loader.bake(entry).or_else(|| {
+                        loader.names.truncate(start);
+                        None
+                    })
+                });
+                if let Some(quads) = quads {
                     baked.insert(key, quads);
                 }
             }

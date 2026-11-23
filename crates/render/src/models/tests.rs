@@ -367,7 +367,10 @@ fn glass_pane_pack_models(case: &str) -> Models {
     write(
         "base",
         "models/block/wrong_texture_root.json",
-        r#"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"west":{"texture":"minecraft:items/glass"}}}]}"#,
+        r#"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{
+            "up":{"texture":"blocks/rejected"},
+            "west":{"texture":"minecraft:items/glass"}
+        }}]}"#,
     );
     write("base", "models/block/empty.json", r#"{"elements":[]}"#);
     write(
@@ -397,6 +400,7 @@ fn glass_pane_pack_models(case: &str) -> Models {
 #[test]
 fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
     let models = glass_pane_pack_models("variants");
+    assert!(!models.textures().iter().any(|t| &**t == "rejected"));
     let pane = 102 << 4;
     assert_eq!(
         &*models.quads(pane, NB).unwrap()[0].tex,
@@ -416,6 +420,36 @@ fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
     ] {
         let blocks: Vec<_> = neighbours.iter().map(|&p| (p, pane)).collect();
         assert!(models.quads(pane, &world(&blocks)).is_none());
+    }
+}
+
+#[test]
+fn glass_pane_fallback_cracks_omit_shared_arm_caps() {
+    let models = Models::default();
+    let pane = 102 << 4;
+    for (dx, dz, axis, boundary) in [
+        (0, -1, 2, 0.0),
+        (0, 1, 2, 1.0),
+        (-1, 0, 0, 0.0),
+        (1, 0, 0, 1.0),
+    ] {
+        for (neighbour, cap) in [(pane, false), (101 << 4, true)] {
+            let nb = |x, y, z| {
+                if (x, y, z) == (dx, 0, dz) {
+                    neighbour
+                } else {
+                    0
+                }
+            };
+            let vertices = crate::crack::quads([0; 3], pane, &nb, &models, true);
+            assert_eq!(
+                vertices
+                    .chunks_exact(4)
+                    .filter(|quad| quad.iter().all(|v| v.pos[axis] == boundary))
+                    .count(),
+                usize::from(cap)
+            );
+        }
     }
 }
 

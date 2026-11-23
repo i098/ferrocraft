@@ -1,4 +1,4 @@
-//! Sky and block light of one chunk plus a one-block border, flood-filled like vanilla `World.checkLight`.
+//! Sky and block light of one chunk plus a two-block border, flood-filled like vanilla `World.checkLight`.
 //! The server sends light data but the renderer is fed blocks only, so light is recomputed here.
 //! The flood covers the chunk and its eight neighbours: light travels at most 15 blocks, so every source that can
 //! reach the border lies inside that 48 x 48 block window.
@@ -12,6 +12,8 @@ use std::sync::LazyLock;
 /// Width of the flooded window and the offset of chunk-local coordinate 0 in it.
 const W: usize = 48;
 const OFF: i32 = 16;
+const BORDER: i32 = 2;
+const RING: usize = 16 + 2 * BORDER as usize;
 
 /// `(light_opacity, emission)` per block state.
 static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
@@ -21,7 +23,7 @@ static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
 });
 
 pub struct Light {
-    /// `sky << 4 | block` per cell, `x` and `z` in `-1..=16`, `y` below `height`.
+    /// `sky << 4 | block` per cell, `x` and `z` in `-2..=17`, `y` below `height`.
     cells: Vec<u8>,
     /// Layers computed; above them the air is sky 15 with no block light.
     height: usize,
@@ -31,9 +33,8 @@ fn idx(x: i32, y: usize, z: i32) -> usize {
     (y * W + (z + OFF) as usize) * W + (x + OFF) as usize
 }
 
-/// Index into the 18 x 18 cells of the border ring.
 fn ring_idx(x: i32, y: usize, z: i32) -> usize {
-    (y * 18 + (z + 1) as usize) * 18 + (x + 1) as usize
+    (y * RING + (z + BORDER) as usize) * RING + (x + BORDER) as usize
 }
 
 impl Light {
@@ -83,10 +84,10 @@ impl Light {
         spread(&opacity, &mut sky, sky_queue, height);
         spread(&opacity, &mut block, queue, height);
 
-        let mut cells = vec![0u8; height * 18 * 18];
+        let mut cells = vec![0u8; height * RING * RING];
         for y in 0..height {
-            for z in -1..=16 {
-                for x in -1..=16 {
+            for z in -BORDER..16 + BORDER {
+                for x in -BORDER..16 + BORDER {
                     let (sx, sz) = if loaded(x, z) {
                         (x, z)
                     } else {
@@ -102,13 +103,17 @@ impl Light {
 
     /// `(sky, block)` light levels; `x` and `z` in `-1..=16`.
     pub fn get(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
-        if y >= self.height as i32 {
-            return (15, 0);
-        }
         if y < 0 {
             return (0, 0);
         }
-        let c = self.cells[ring_idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
+        self.sample(x.clamp(-1, 16), y, z.clamp(-1, 16))
+    }
+
+    pub(crate) fn sample(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
+        if !(0..self.height as i32).contains(&y) {
+            return (15, 0);
+        }
+        let c = self.cells[ring_idx(x, y as usize, z)];
         (c >> 4, c & 15)
     }
 }
@@ -126,10 +131,10 @@ fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
         }
     }
     slots[4]?;
-    let mut cells = vec![0u8; height * 18 * 18];
+    let mut cells = vec![0u8; height * RING * RING];
     for y in 0..height {
-        for z in -1..=16i32 {
-            for x in -1..=16i32 {
+        for z in -BORDER..16 + BORDER {
+            for x in -BORDER..16 + BORDER {
                 let slot = (z.div_euclid(16) + 1) * 3 + x.div_euclid(16) + 1;
                 // An unloaded neighbour copies the edge of the chunk, as the flooded light does.
                 let (slot, x, z) = match slots[slot as usize] {

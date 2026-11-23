@@ -1315,6 +1315,25 @@ pub fn is_opaque_cube(state: u16) -> bool {
     cached(state).kind == Kind::Opaque
 }
 
+pub(crate) fn is_ao_normal_cube(state: u16) -> bool {
+    matches!(
+        state >> 4,
+        1..=5 | 7 | 12..=19 | 21..=25 | 35 | 41..=43 | 45..=49 | 52 | 56..=58 | 61..=62
+            | 73..=74 | 79..=80 | 82 | 84 | 86..=89 | 91 | 97..=100 | 103 | 110 | 112
+            | 120..=121 | 123..=125 | 129 | 133 | 137 | 152..=153 | 155 | 158..=159
+            | 161..=162 | 165..=166 | 168..=170 | 172..=174 | 179 | 181
+    )
+}
+
+pub(crate) fn is_block_translucent(state: u16) -> bool {
+    matches!(
+        state >> 4,
+        0 | 6 | 27..=28 | 31..=32 | 37..=40 | 50..=51 | 55 | 59 | 65..=66 | 69 | 75..=78 | 83
+            | 90 | 93..=94 | 104..=106 | 111 | 115 | 119 | 127 | 131..=132 | 140..=144
+            | 149..=150 | 157 | 166 | 171 | 175
+    )
+}
+
 /// Every texture name any state can ask for, for atlas building.
 pub fn texture_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = (0..4096u16)

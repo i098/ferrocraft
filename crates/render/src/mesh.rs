@@ -5,8 +5,8 @@
 use crate::assets::Atlas;
 use crate::biome::{blended, Tint as BiomeTint};
 use crate::blocks::{
-    cached, is_opaque_cube, material_solid, tint_color, uses_neighbor_light, Kind, Look, Tint,
-    DOWN, NORTH, SOUTH, UP, WEST,
+    cached, emission, is_ao_normal_cube, is_block_translucent, is_opaque_cube, material_solid,
+    tint_color, uses_neighbor_light, Kind, Look, Tint, DOWN, NORTH, SOUTH, UP, WEST,
 };
 use crate::light::Light;
 use crate::models::Quad;
@@ -274,21 +274,45 @@ impl Mesher<'_> {
         self.hood.block(at[0] + d[0], at[1] + d[1], at[2] + d[2])
     }
 
-    fn light_levels_at(&self, at: [i32; 3], d: [i32; 3]) -> (u8, u8) {
+    fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
         let p = [at[0] + d[0], at[1] + d[1], at[2] + d[2]];
-        if uses_neighbor_light(self.hood.block(p[0], p[1], p[2])) {
+        let (s, b) = if uses_neighbor_light(self.hood.block(p[0], p[1], p[2])) {
             [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
                 .iter()
                 .map(|o| self.light.get(p[0] + o[0], p[1] + o[1], p[2] + o[2]))
                 .fold((0, 0), |(s, b), (s2, b2)| (s.max(s2), b.max(b2)))
         } else {
             self.light.get(p[0], p[1], p[2])
-        }
+        };
+        [s as f32 / 15.0, b as f32 / 15.0]
     }
 
-    fn light_at(&self, at: [i32; 3], d: [i32; 3]) -> [f32; 2] {
-        let (s, b) = self.light_levels_at(at, d);
-        [s as f32 / 15.0, b as f32 / 15.0]
+    fn slab_side_light(&self, [x, y, z]: [i32; 3]) -> [u8; 2] {
+        let combined = |y, state| {
+            let (sky, block) = if uses_neighbor_light(state) {
+                let mut sky = 0;
+                let mut block = 0;
+                for [dx, dy, dz] in DIRS {
+                    let (s, b) = self.light.sample(x + dx, y + dy, z + dz);
+                    sky = sky.max(s);
+                    block = block.max(b);
+                    if sky == 15 && block == 15 {
+                        break;
+                    }
+                }
+                (sky, block)
+            } else {
+                self.light.sample(x, y, z)
+            };
+            [sky, block.max(emission(state))]
+        };
+        let state = self.hood.block(x, y, z);
+        let light = combined(y, state);
+        if light == [0, 0] && matches!(state >> 4, 43 | 44 | 125 | 126 | 181 | 182) {
+            combined(y - 1, self.hood.block(x, y - 1, z))
+        } else {
+            light
+        }
     }
 
     /// Brighter of the block's own cell and its neighbour in direction `d`.
@@ -735,27 +759,21 @@ impl Mesher<'_> {
         let axis = if face <= SOUTH { 0 } else { 2 };
         let adjacent = [0, 1, 2].map(|i| at[i] + dir[i]);
         let ao = |d| {
-            if self.opaque(self.st(adjacent, d)) {
+            if is_ao_normal_cube(self.st(adjacent, d)) {
                 0.2
             } else {
                 1.0
             }
         };
-        let (sky, block) = self.light_levels_at(adjacent, [0; 3]);
-        let base_light = [sky, block];
+        let base_light = self.slab_side_light(adjacent);
         let base_ao = ao([0; 3]);
         let sample = |d| {
-            let (sky, block) = self.light_levels_at(adjacent, d);
-            let light = if (sky, block) == (0, 0) {
-                base_light
-            } else {
-                [sky, block]
-            };
-            (light, ao(d))
+            let light = self.slab_side_light([0, 1, 2].map(|i| adjacent[i] + d[i]));
+            (if light == [0, 0] { base_light } else { light }, ao(d))
         };
         let edge = |d: [i32; 3]| {
             let beyond = [0, 1, 2].map(|i| d[i] + dir[i]);
-            (sample(d), material_solid(self.st(adjacent, beyond)))
+            (sample(d), !is_block_translucent(self.st(adjacent, beyond)))
         };
         let vertical = [-1, 1].map(|y| edge([0, y, 0]));
         let horizontal = [-1, 1].map(|sign| {
@@ -1207,7 +1225,8 @@ mod tests {
     #[test]
     fn lower_stone_slab_side_uses_vanillas_neighbor_order_for_blocked_diagonals() {
         let c = flat(|x, y, z| match (x, y, z) {
-            (_, 69, _) | (3, 70, 2 | 6) => 1 << 4,
+            (_, 69, _) | (3, 70, 2) => 1 << 4,
+            (3, 70, 6) => 30 << 4,
             (4, 70, 4) => 44 << 4,
             _ => 0,
         });
@@ -1223,6 +1242,66 @@ mod tests {
                 .find(|v| v.pos == [4.0, 70.0, z])
                 .unwrap();
             assert!((corner.color[0] - 0.6 * SHADE[NORTH] * ao).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn lower_stone_slab_side_uses_slime_occlusion_without_culling() {
+        for slime in [(4, 70, 3), (3, 70, 3), (3, 69, 3)] {
+            let c = flat(|x, y, z| match (x, y, z) {
+                (4, 70, 4) => 44 << 4,
+                p if p == slime => 165 << 4,
+                _ => 0,
+            });
+            let mesh = mesh(&c, [None; 8]);
+            let corner = mesh
+                .opaque
+                .vertices
+                .chunks_exact(4)
+                .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == 4.0))
+                .unwrap()
+                .iter()
+                .find(|v| v.pos == [4.0, 70.0, 4.0])
+                .unwrap();
+            assert!((corner.color[0] - 0.6 * SHADE[NORTH] * 0.8).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn lower_stone_slab_side_reads_light_below_and_beyond_the_chunk_border() {
+        let c = flat(|x, y, z| if (x, y, z) == (15, 70, 4) { 44 << 4 } else { 0 });
+        let dark = vec![0; c.len()];
+        for (source, flooded_level) in [((0, 69, 4), 14.25), ((1, 70, 4), 13.25)] {
+            let east = flat(|x, y, z| match (x, y, z) {
+                (0, 70, 4) => 44 << 4 | 8,
+                p if p == source => 89 << 4,
+                _ => 0,
+            });
+            let mut east_light = dark.clone();
+            east_light[index(source.0, source.1, source.2)] = 15;
+            let mut server = [None; 9];
+            server[4] = Some(dark.as_slice());
+            server[5] = Some(east_light.as_slice());
+            for (lights, level) in [([None; 9], flooded_level), (server, 15.0)] {
+                let hood = Neighborhood {
+                    origin: (0, 0),
+                    center: &c,
+                    neighbors: [None, None, None, None, Some(&east), None, None, None],
+                    biomes: [None; 9],
+                    lights,
+                };
+                let mesh = mesh_chunk(&hood, &Atlas::flat(), true, true);
+                let corner = mesh
+                    .opaque
+                    .vertices
+                    .chunks_exact(4)
+                    .find(|q| q.iter().all(|v| v.pos[0] == 16.0))
+                    .unwrap()
+                    .iter()
+                    .find(|v| v.pos == [16.0, 70.0, 4.0])
+                    .unwrap();
+                assert!((corner.light[1] - level / 15.0).abs() < 1e-6, "{corner:?}");
+            }
         }
     }
 

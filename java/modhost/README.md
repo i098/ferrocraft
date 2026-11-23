@@ -15,15 +15,13 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 - Rust sends whether a screen (menu, container, chat) is open. `Host` mirrors it into `Minecraft.currentScreen` with a stand-in `GuiIngameMenu` and calls `KeyBinding.unPressAllKeys()` on each change, as `displayGuiScreen` does. Events that arrived while a screen was open are not game input: no `KeyBinding` press, no `InputEvent`; only their releases clear the key bind. Polled `Keyboard` and `Mouse` state and `Keyboard.next()` still see them.
 - A screen a mod opens (OneConfig's GUI) goes through `Minecraft.displayGuiScreen`, which `BridgeTransformer` replaces with `Host.displayScreen`: it closes the old screen, releases the key binds and sizes the new one. `Minecraft.setIngameFocus` (which `GuiScreen.keyTyped` calls after Escape) and `Minecraft.dispatchKeypresses` (which `GuiScreen.handleKeyboardInput` calls after each key, for F11, F2 and the Twitch keys) do nothing. `Keyboard.getEventCharacter` returns the character Rust sends with the key press, so a mod screen can type into a text field. While the mod screen is current, `Host` calls its `handleInput` and `updateScreen` each tick instead of the game input loops, so the events reach it through the patched `Keyboard` and `Mouse`, and draws it after the overlay. Rust's mirror does not replace it. Each reply frame starts with a byte that says a mod screen is current: Rust then frees the cursor, sends no game input, and lets Escape reach the screen, which closes itself as `GuiScreen.keyTyped` does.
 - `Host` posts Forge's `RenderGameOverlayEvent` so mods can draw the HUD.
-  Rust draws the vanilla HUD, except for chat when `ChatGui` owns it.
-  A mod can cancel the pumpkin overlay, hotbar, debug screen, or player list.
+  Rust draws the vanilla HUD unless a mod takes the element.
+  A mod can cancel the pumpkin overlay, hotbar, debug screen, player list, or crosshair.
+  `ChatGui` detects when a mod owns chat.
   Java sends wire command `H` (`crates/modhost/src/hud.rs`) to tell Rust not to draw that element.
-  Cancellation of `ALL` claims all HUD elements, with the crosshair check below.
+  Cancellation of `ALL` claims all five elements.
   `Minecraft.setOverlayKeys` mirrors the F3 and Tab keys so Forge posts the debug and player list events.
-  A Forge listener claims `CROSSHAIRS` when it cancels the event and draws a visible PNG or shape at the center.
-  Draws on opposite sides of a center axis also qualify, so a gap can remain between the arms.
-  SVG images do not count toward ownership because Rust rasterizes them after the host sends the frame.
-  PolyCrosshair can cancel separately because the host checks its draw callback for completion.
+  For `CROSSHAIRS`, the Forge event cancellation controls ownership regardless of the draw commands.
   PolyCrosshair draws a `DynamicTexture` with `Gui.drawScaledCustomSizeModalRect`.
   `BridgeTransformer` routes the LWJGL calls and the two `Gui` textured quad methods to `GlState` through `GlPatch`.
   A quad becomes an image command with its screen bounds, tint, and blend function.

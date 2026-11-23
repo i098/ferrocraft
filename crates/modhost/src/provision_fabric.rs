@@ -126,7 +126,6 @@ impl Config {
     /// (`FERROCRAFT_NAMES_JAR`, same places).
     pub fn provision_fabric() -> Result<Config, Error> {
         let main = main_dir()?;
-        let _cache = lock_runtime(&main)?;
         let mut installer = fabric::Installer::new(
             fabric::Loader::LegacyFabric,
             fabric::GameVersion::Name(GAME.into()),

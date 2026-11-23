@@ -138,6 +138,32 @@ fn prefixed(prefix: &str, path: &Path) -> OsString {
     arg
 }
 
+fn host_command(java: &Path) -> Command {
+    let mut cmd = Command::new(java);
+    cmd.env_clear();
+    for key in [
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "WINDIR",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "DISPLAY",
+        "XAUTHORITY",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+    cmd
+}
+
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
     child: Arc<Mutex<Child>>,
@@ -148,6 +174,14 @@ impl ModHost {
     /// Start the JVM and return at once. A worker thread waits for it to connect, which is after FML
     /// has loaded the mods, and gives up when the process exits first.
     pub fn start(cfg: &Config) -> io::Result<Self> {
+        Self::spawn(cfg, None)
+    }
+
+    pub fn start_in_game_dir(cfg: &Config) -> io::Result<Self> {
+        Self::spawn(cfg, Some(&cfg.game_dir))
+    }
+
+    fn spawn(cfg: &Config, cwd: Option<&Path>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
@@ -159,7 +193,10 @@ impl ModHost {
             .collect::<Vec<_>>()
             .join(sep);
         let token = token();
-        let mut cmd = Command::new(&cfg.java);
+        let mut cmd = host_command(&cfg.java);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
         cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
         match &cfg.loader {
@@ -1000,6 +1037,33 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::time::Instant;
+
+    #[test]
+    fn host_process_does_not_inherit_authentication() {
+        const CHILD: &str = "FERROCRAFT_AUTH_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::host_process_does_not_inherit_authentication"])
+                .env(CHILD, "1")
+                .env("FERROCRAFT_ACCESS_TOKEN", "session-secret")
+                .env("MSA_REFRESH_TOKEN", "refresh-secret")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}");
+            return;
+        }
+        let status = host_command(Path::new("/bin/sh"))
+            .env("FERROCRAFT_BRIDGE_TOKEN", "bridge")
+            .args([
+                "-c",
+                r#"test -z "${FERROCRAFT_ACCESS_TOKEN+x}${MSA_REFRESH_TOKEN+x}" &&
+                   test "$FERROCRAFT_BRIDGE_TOKEN" = bridge"#,
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 
     fn area(spans: &[([f32; 4], f32)]) -> f32 {
         spans

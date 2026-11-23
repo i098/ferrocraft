@@ -29,7 +29,8 @@ pub fn poll<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
 /// Hot reload: sees jars come, go or change in the mods folder and says when the folder has been still for `SETTLE`.
 pub struct Watch {
     dir: PathBuf,
-    seen: Vec<(OsString, SystemTime, u64)>,
+    forge: bool,
+    seen: Vec<(PathBuf, SystemTime, u64)>,
     last_scan: Option<Instant>,
     changed_at: Option<Instant>,
 }
@@ -40,20 +41,17 @@ const SETTLE: Duration = Duration::from_secs(1);
 
 impl Watch {
     pub fn new(game_dir: &Path) -> Self {
-        let root = if let Some(cfg) = Config::from_env() {
-            cfg.game_dir
+        let (root, forge) = if let Some(cfg) = Config::from_env() {
+            (cfg.game_dir, true)
         } else if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
-            if cluster.is_file() {
-                cluster.parent().unwrap_or(game_dir).to_path_buf()
-            } else {
-                cluster
-            }
+            (cluster, false)
         } else {
-            game_dir.to_path_buf()
+            (game_dir.to_path_buf(), true)
         };
         let dir = root.join("mods");
         Self {
-            seen: scan(&dir),
+            seen: scan(&dir, forge),
+            forge,
             dir,
             last_scan: None,
             changed_at: None,
@@ -69,7 +67,7 @@ impl Watch {
             return false;
         }
         self.last_scan = Some(now);
-        let jars = scan(&self.dir);
+        let jars = scan(&self.dir, self.forge);
         if jars != self.seen {
             self.seen = jars;
             self.changed_at = Some(now);
@@ -84,46 +82,76 @@ impl Watch {
     }
 }
 
-fn mod_jars(dir: &Path) -> impl Iterator<Item = (std::fs::DirEntry, std::fs::Metadata)> {
-    std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| Path::new(&e.file_name()).extension().is_some_and(|x| x == "jar"))
-        .filter_map(|e| {
-            let m = e.path().metadata().ok()?;
-            m.is_file().then_some((e, m))
-        })
+fn archives(dir: &Path, forge: bool) -> impl Iterator<Item = (PathBuf, std::fs::Metadata)> + '_ {
+    let folders = [Some(Path::new("")), forge.then_some(Path::new("1.8.9"))];
+    folders.into_iter().flatten().flat_map(move |folder| {
+        std::fs::read_dir(dir.join(folder))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(move |entry| {
+                let name = entry.file_name();
+                match Path::new(&name).extension()?.to_str()? {
+                    "jar" => {}
+                    "zip" if forge => {}
+                    _ => return None,
+                }
+                let metadata = entry.path().metadata().ok()?;
+                metadata.is_file().then(|| (folder.join(name), metadata))
+            })
+    })
 }
 
-fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
-    let mut jars: Vec<_> = mod_jars(dir)
-        .filter_map(|(e, m)| Some((e.file_name(), m.modified().ok()?, m.len())))
+fn scan(dir: &Path, forge: bool) -> Vec<(PathBuf, SystemTime, u64)> {
+    let mut jars: Vec<_> = archives(dir, forge)
+        .filter_map(|(path, m)| Some((path, m.modified().ok()?, m.len())))
         .collect();
     jars.sort();
     jars
 }
 
-fn start(game_dir: &Path) -> Option<ModHost> {
-    let cfg = match Config::from_env() {
-        Some(cfg) => cfg,
-        None => match cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
-            Some(cluster) => from_cluster(&cluster)?,
-            None if mod_jars(&game_dir.join("mods")).next().is_some() => {
-                let mut cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
-                cfg.game_dir = game_dir.to_path_buf();
-                cfg
+fn stage_plain(src: &Path, dst: &Path, mods: impl Iterator<Item = PathBuf>) -> std::io::Result<()> {
+    for folder in [Path::new(""), Path::new("1.8.9")] {
+        let target = dst.join(folder);
+        let source = src.join(folder);
+        if let (Ok(target), Ok(source)) = (target.canonicalize(), source.canonicalize()) {
+            if target == source {
+                return Err(std::io::Error::other("the Forge cache is the profile's mods folder"));
             }
-            None => return None,
-        },
-    };
-    match ModHost::start(&cfg) {
-        Ok(host) => Some(host),
-        Err(e) => {
-            log::line(&format!("mod host did not start: {e}"));
-            None
         }
     }
+    for (old, _) in archives(dst, true) {
+        std::fs::remove_file(dst.join(old))?;
+    }
+    for path in mods {
+        let target = dst.join(&path);
+        std::fs::create_dir_all(target.parent().unwrap())?;
+        let mut input = std::fs::File::open(src.join(path))?;
+        let mut output = std::fs::File::create_new(target)?;
+        std::io::copy(&mut input, &mut output)?;
+    }
+    Ok(())
+}
+
+fn start(game_dir: &Path) -> Option<ModHost> {
+    let result = if let Some(cfg) = Config::from_env() {
+        ModHost::start(&cfg)
+    } else if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
+        ModHost::start(&from_cluster(&cluster)?)
+    } else {
+        let src = game_dir.join("mods");
+        let mods: Vec<_> = archives(&src, true).map(|(path, _)| path).collect();
+        if mods.is_empty() {
+            return None;
+        }
+        let mut cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
+        cfg.game_dir = cfg.game_dir.join("plain");
+        if let Err(e) = stage_plain(&src, &cfg.game_dir.join("mods"), mods.into_iter()) {
+            return fail(&e);
+        }
+        ModHost::start_in_game_dir(&cfg)
+    };
+    result.map_err(|e| fail::<ModHost>(&e)).ok()
 }
 
 fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
@@ -242,17 +270,41 @@ mod tests {
     }
 
     #[test]
-    fn watch_fires_once_after_a_jar_settles() {
+    fn watch_fires_once_after_a_versioned_zip_settles() {
         let d = std::env::temp_dir().join(format!("fc-watch-{}", std::process::id()));
-        std::fs::create_dir_all(d.join("mods")).unwrap();
+        std::fs::create_dir_all(d.join("mods/1.8.9")).unwrap();
         let mut w = Watch::new(&d);
         let t0 = Instant::now();
         assert!(!w.poll(t0));
-        std::fs::write(d.join("mods/a.jar"), "x").unwrap();
+        std::fs::write(d.join("mods/1.8.9/a.zip"), "x").unwrap();
         assert!(!w.poll(t0 + Duration::from_secs(1)));
         assert!(w.poll(t0 + Duration::from_secs(3)));
         assert!(!w.poll(t0 + Duration::from_secs(5)));
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn plain_staging_preserves_the_profile_and_forge_archive_layout() {
+        let root = std::env::temp_dir().join(format!("fc-plain-{}", std::process::id()));
+        let profile = root.join("profile");
+        let src = profile.join("mods");
+        let dst = root.join("cache/mods");
+        std::fs::create_dir_all(src.join("1.8.9")).unwrap();
+        std::fs::create_dir_all(dst.join("1.8.9")).unwrap();
+        std::fs::write(src.join("a.jar"), "top").unwrap();
+        std::fs::write(src.join("1.8.9/a.zip"), "versioned").unwrap();
+        std::fs::write(src.join("ignore.txt"), "unrelated").unwrap();
+        std::fs::write(dst.join("1.8.9/old.jar"), "removed").unwrap();
+        std::fs::write(profile.join("resourcepacks"), "keep").unwrap();
+        stage_plain(&src, &dst, archives(&src, true).map(|(p, _)| p)).unwrap();
+        assert_eq!(std::fs::read(dst.join("a.jar")).unwrap(), b"top");
+        assert_eq!(std::fs::read(dst.join("1.8.9/a.zip")).unwrap(), b"versioned");
+        assert!(!dst.join("ignore.txt").exists());
+        assert!(!dst.join("1.8.9/old.jar").exists());
+        std::fs::write(dst.join("a.jar"), "host write").unwrap();
+        assert_eq!(std::fs::read(src.join("a.jar")).unwrap(), b"top");
+        assert_eq!(std::fs::read(profile.join("resourcepacks")).unwrap(), b"keep");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

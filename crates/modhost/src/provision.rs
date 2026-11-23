@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::{fmt, fs, io};
 
 use portablemc::{base, forge};
+use sha1::{Digest, Sha1};
 
 use crate::{Config, Loader};
 
@@ -49,7 +50,9 @@ impl From<forge::Error> for Error {
 pub fn main_dir() -> Result<PathBuf, Error> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     let home = home.ok_or_else(|| Error::Missing("HOME is not set".into()))?;
-    Ok(Path::new(&home).join(".ferrocraft").join("modhost"))
+    Ok(std::path::absolute(Path::new(&home))?
+        .join(".ferrocraft")
+        .join("modhost"))
 }
 
 /// Folder with the jars under the names `java/modhost/build.sh` and `test.sh` expect (`FERRO_LIB`): `lw.jar`, `forge.jar`,
@@ -69,7 +72,7 @@ impl Config {
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
         moj.base_mut().set_main_dir(&main);
-        moj.base_mut().set_jvm_policy(base::JvmPolicy::Mojang);
+        moj.base_mut().set_jvm_policy(java_policy(&main)?);
         let game = installer.install(())?;
 
         let cp = game
@@ -79,18 +82,38 @@ impl Config {
             .find(|(flag, _)| matches!(flag.as_str(), "-cp" | "-classpath"))
             .map(|(_, cp)| cp)
             .ok_or_else(|| Error::Missing("the Forge version has no class path".into()))?;
-        let libs: Vec<PathBuf> = std::env::split_paths(cp).collect();
+        let libs = std::env::split_paths(cp)
+            .filter(|p| p.file_name().is_none_or(|name| name != "asm-all-5.0.3.jar"));
 
         let lib = lib_dir()?;
         fs::create_dir_all(&lib)?;
-        for jar in &libs {
-            link(jar, &lib.join(lib_name(jar, &main.join("versions"))))?;
+        match fs::remove_file(lib.join("asm-all-5.0.3.jar")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
-
-        let host_dst = main.join(HOST_JAR);
-        fs::copy(&host, &host_dst)?;
-        let mut class_path = vec![host_dst];
-        class_path.extend(libs);
+        let mut class_path = vec![main.join(HOST_JAR)];
+        for (name, url, sha1) in [
+            (
+                "asm-all-5.2.jar",
+                "https://maven.minecraftforge.net/org/ow2/asm/asm-all/5.2/asm-all-5.2.jar",
+                "2ea49e08b876bbd33e0a7ce75c8f371d29e1f10a",
+            ),
+            (
+                "maven-artifact-3.3.9.jar",
+                "https://repo.maven.apache.org/maven2/org/apache/maven/maven-artifact/3.3.9/maven-artifact-3.3.9.jar",
+                "0f43afa184555fbc6e36b3334b17246c39b30f6e",
+            ),
+        ] {
+            let path = lib.join(name);
+            fetch(url, &path, sha1)?;
+            class_path.push(path);
+        }
+        for jar in libs {
+            link(&jar, &lib.join(lib_name(&jar, &main.join("versions"))))?;
+            class_path.push(jar);
+        }
+        fs::copy(&host, &class_path[0])?;
         fs::create_dir_all(main.join("mods"))?;
         Ok(Config {
             loader: Loader::Forge,
@@ -99,6 +122,114 @@ impl Config {
             assets_dir: main.join("assets"),
             game_dir: main,
         })
+    }
+}
+
+#[cfg(any(unix, test))]
+fn needs_rosetta(os: &str, arch: &str) -> bool {
+    (os, arch) == ("macos", "aarch64")
+}
+
+fn java_policy(main: &Path) -> Result<base::JvmPolicy, Error> {
+    #[cfg(unix)]
+    if needs_rosetta(std::env::consts::OS, std::env::consts::ARCH) {
+        use std::process::{Command, Stdio};
+        let supported = Command::new("/usr/bin/arch")
+            .args(["-x86_64", "/usr/bin/true"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !supported {
+            return Err(Error::Missing(
+                "Forge needs Rosetta to run Java 8. Run `softwareupdate --install-rosetta`.".into(),
+            ));
+        }
+        return java8_x64(main).map(base::JvmPolicy::Static);
+    }
+    let _ = main;
+    Ok(base::JvmPolicy::Mojang)
+}
+
+#[cfg(unix)]
+fn java8_x64(main: &Path) -> Result<PathBuf, Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let root = main.join("jvm/jre-legacy-mac-os");
+    let manifest = root.join("manifest.json");
+    fetch(
+        "https://piston-meta.mojang.com/v1/packages/78e31aa15b3f437f37263351436f63e0a96e0067/manifest.json",
+        &manifest,
+        "78e31aa15b3f437f37263351436f63e0a96e0067",
+    )?;
+    let manifest: serde_json::Value = serde_json::from_reader(fs::File::open(manifest)?)
+        .map_err(io::Error::other)?;
+    let invalid = || Error::Missing("Invalid Mojang x64 Java 8 manifest".into());
+    let files = manifest["files"].as_object().ok_or_else(invalid)?;
+    let mut batch = portablemc::download::Batch::new();
+    for (name, entry) in files {
+        let relative = Path::new(name);
+        if !relative
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(invalid());
+        }
+        let path = root.join(relative);
+        let raw = &entry["downloads"]["raw"];
+        let url = raw["url"].as_str().ok_or_else(invalid)?;
+        let sha1 = parse_sha1(raw["sha1"].as_str().ok_or_else(invalid)?)?;
+        if !matches_sha1(&path, sha1) {
+            batch.push(url, path).set_expected_sha1(Some(sha1));
+        }
+    }
+    if !batch.is_empty() {
+        let result = batch.download(()).map_err(io::Error::other)?;
+        if let Some(error) = result.iter_errors().next() {
+            return Err(io::Error::other(error.to_string()).into());
+        }
+    }
+    for (name, entry) in files {
+        if entry["executable"].as_bool() == Some(true) {
+            fs::set_permissions(root.join(name), fs::Permissions::from_mode(0o755))?;
+        }
+    }
+    Ok(root.join("jre.bundle/Contents/Home/bin/java"))
+}
+
+fn parse_sha1(text: &str) -> Result<[u8; 20], Error> {
+    if text.len() != 40 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::Missing("Invalid download SHA-1".into()));
+    }
+    Ok(std::array::from_fn(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap()))
+}
+
+fn matches_sha1(path: &Path, expected: [u8; 20]) -> bool {
+    let mut hash = Sha1::new();
+    fs::File::open(path)
+        .and_then(|mut file| io::copy(&mut file, &mut hash))
+        .is_ok()
+        && hash.finalize()[..] == expected
+}
+
+fn fetch(url: &str, path: &Path, sha1: &str) -> Result<(), Error> {
+    let sha1 = parse_sha1(sha1)?;
+    if !matches_sha1(path, sha1) {
+        portablemc::download::single(url, path)
+            .set_expected_sha1(Some(sha1))
+            .download(())
+            .map_err(io::Error::other)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn forge_java_uses_rosetta_only_on_apple_silicon() {
+        assert!(super::needs_rosetta("macos", "aarch64"));
+        assert!(!super::needs_rosetta("macos", "x86_64"));
+        assert!(!super::needs_rosetta("linux", "aarch64"));
+        assert!(!super::needs_rosetta("windows", "aarch64"));
     }
 }
 

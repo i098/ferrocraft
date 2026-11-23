@@ -36,6 +36,7 @@ The installer prints what it did and the uninstall command: `~/.ferrocraft/ferro
 Put compatible Forge 1.8.9 mod jars in `mods/` in your game folder.
 The client installs Java 8 and Forge when it first starts the mod host.
 This first start needs an internet connection.
+On Apple silicon, the Forge host needs Rosetta to run Java 8.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

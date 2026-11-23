@@ -18,8 +18,9 @@ The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`
 The engine runs the mod host in the background.
 It uses a complete `FERROCRAFT_MODHOST_*` configuration first.
 Otherwise, it uses the OneClient cluster from `FERROCRAFT_CLUSTER` or the manifest in `--gameDir`.
-For a plain game folder, the engine starts the Forge host when it finds a jar in `mods/`.
-The Forge host installs Java 8 and Forge in its cache and reads plain mods from the game folder without copying them.
+For a plain game folder, the engine checks `mods/` and `mods/1.8.9/` for JAR and ZIP files.
+The engine copies those archives to its cache and installs Java 8 and Forge there.
+The host uses the cache as its game folder.
 The engine checks the selected `mods/` folder twice a second.
 One second after the last jar change, or when you press F8, the engine restarts the host without disconnecting.
 If a host start is in progress, the engine waits for it to finish before it restarts the host.

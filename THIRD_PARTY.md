@@ -33,6 +33,10 @@ This list includes `cmov` and `ctutils`, which the joint launcher and engine rel
 The Windows launcher also uses [`option-ext` 0.2.0](https://crates.io/api/v1/crates/option-ext/0.2.0/download) under the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/).
 The download contains the corresponding source and license text.
 
+The launcher reads OneClient’s database with `rusqlite` and `libsqlite3-sys` under the MIT license below.
+The bundled [SQLite](https://www.sqlite.org/copyright.html) engine is in the public domain.
+The database reader also uses `fallible-iterator`, `fallible-streaming-iterator`, and `hashlink` under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
 The upstream MIT files for some of these crates, including `fastrand`, do not contain a copyright line.
 The `rustix` and `linux-raw-sys` contributors retain their copyrights.
 
@@ -52,6 +56,7 @@ Copyright (c) 2018-2026 The rust-random Project Developers (getrandom)
 Copyright (c) 2022-2026 The RustCrypto Project Developers (hybrid-array)
 Copyright (c) The Rust Project Developers (libc)
 Copyright (c) 2015 Andrew Gallant (memchr)
+Copyright (c) 2014 The rusqlite developers (rusqlite, libsqlite3-sys)
 Copyright (c) 2016-2026 The RustCrypto Project Developers (sha2)
 Copyright (c) 2016 Artyom Pavlov (sha2)
 Copyright (c) 2009-2013 Mozilla Foundation (sha2)

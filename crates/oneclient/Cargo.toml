@@ -10,3 +10,4 @@ description = "Reads a OneClient cluster and fetches the Forge 1.8.9 build of ea
 serde_json = "1"
 sha1 = "0.10"
 ureq = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }

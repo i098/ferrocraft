@@ -40,23 +40,14 @@ impl Env {
     }
 }
 
-/// OneClient data dir names are not documented; `--oneclient-dir` overrides them.
-pub fn oneclient_roots(env: &Env, root: Option<PathBuf>) -> Vec<PathBuf> {
-    let names = ["OneClient", "oneclient", "OneLauncher", "onelauncher"];
-    root.map_or_else(
-        || names.iter().map(|n| env.data.join(n)).collect(),
-        |r| vec![r],
-    )
-}
-
 /// True when `text` has `1.8.9` as a whole version token (`11.8.9`, `1.8.90` do not count).
 fn has_189(text: &str) -> bool {
     text.split(|c: char| !c.is_ascii_digit() && c != '.')
         .any(|t| t.trim_matches('.') == "1.8.9")
 }
 
-/// Select 1.8.9 Fabric instances, or Ornithe instances under an explicit root.
-fn is_fabric_189(dir: &Path, explicit: bool) -> bool {
+/// Select 1.8.9 Fabric or Ornithe instances.
+fn is_fabric_189(dir: &Path) -> bool {
     if let Ok(bytes) = fs::read(dir.join(".instance.json")) {
         let Ok(instance) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
             return false;
@@ -64,9 +55,7 @@ fn is_fabric_189(dir: &Path, explicit: bool) -> bool {
         if instance.get("mc_loader").is_some() {
             let loader = &instance["mc_loader"];
             return instance["mc_version"] == "1.8.9"
-                && (loader == "Fabric"
-                    || loader == 4
-                    || (explicit && (loader == "Ornithe" || loader == 5)));
+                && (loader == "Fabric" || loader == 4 || loader == "Ornithe" || loader == 5);
         }
     }
     let mut text = dir
@@ -83,22 +72,16 @@ fn is_fabric_189(dir: &Path, explicit: bool) -> bool {
     has_189(&text) && text.to_lowercase().contains("fabric")
 }
 
-/// Find compatible clusters under the specified OneClient data roots.
-pub fn fabric_mods_dirs(roots: &[PathBuf], explicit: bool) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for root in roots {
-        for entry in fs::read_dir(root.join("clusters"))
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            let inst = entry.path();
-            if inst.is_dir() && is_fabric_189(&inst, explicit) {
-                out.push(inst.join("mods"));
-            }
-        }
-    }
-    out
+/// Find compatible clusters under the specified OneClient data root.
+pub fn fabric_mods_dirs(root: &Path) -> Vec<PathBuf> {
+    fs::read_dir(root.join("clusters"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|dir| dir.is_dir() && is_fabric_189(dir))
+        .map(|dir| dir.join("mods"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -128,14 +111,14 @@ mod tests {
             fs::create_dir_all(c.join(name)).unwrap();
             fs::write(c.join(name).join("cluster.json"), json).unwrap();
         }
-        let mut got = fabric_mods_dirs(std::slice::from_ref(&root), true);
+        let mut got = fabric_mods_dirs(&root);
         got.sort();
         assert_eq!(got, [c.join("1.8.9-fabric/mods"), c.join("a/mods")]);
         fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
-    fn ornithe_requires_an_explicit_root_and_exact_metadata() {
+    fn explicit_root_only_selects_ornithe_with_matching_metadata() {
         let root = tmp("ornithe");
         let c = root.join("OneClient/clusters");
         for (name, version, loader) in [
@@ -155,13 +138,8 @@ mod tests {
             )
             .unwrap();
         }
-        let env = Env {
-            home: root.clone(),
-            data: root.clone(),
-        };
-        assert!(fabric_mods_dirs(&oneclient_roots(&env, None), false).is_empty());
         assert_eq!(
-            fabric_mods_dirs(&[root.join("OneClient")], true),
+            fabric_mods_dirs(&root.join("OneClient")),
             [c.join("ornithe/mods")]
         );
         fs::remove_dir_all(root).unwrap();

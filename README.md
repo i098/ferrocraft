@@ -18,11 +18,12 @@ Windows (PowerShell):
     irm https://github.com/i098/ferrocraft/releases/latest/download/install.ps1 | iex
 
 The installer downloads and verifies Polyfrost OneClient 2.12.0.
-On Windows it reuses an existing OneClient installation.
+On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
 It installs the `Ferrocraft 1.8.9` Ornithe profile in the active OneClient data directory.
 Open OneClient from the path that the installer prints.
 Keep the default data directory if OneClient asks where to store its data.
-Sign in once with a Microsoft account that owns Minecraft: Java Edition, then select `Ferrocraft 1.8.9`.
+Sign in once with a Microsoft account that owns Minecraft: Java Edition.
+Select the profile name that the installer prints.
 OneClient downloads the game and loader when you start the profile.
 On Linux without FUSE, run the AppImage with `--appimage-extract-and-run`.
 
@@ -36,7 +37,8 @@ Run `$HOME\.ferrocraft\ferrocraft-engine.exe` on Windows.
 Close OneClient before you uninstall Ferrocraft.
 Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
 The uninstall command preserves OneClient and the profile's data.
-If OneClient may manage a recorded mod, the command stops before it removes any files.
+If OneClient still manages the bootstrap mod, the command stops before it removes any files.
+Remove the bootstrap mod in OneClient before you retry.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

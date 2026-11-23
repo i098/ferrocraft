@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 mod loader;
-pub use loader::{fabric_jars, loader, Loader};
+pub use loader::{fabric_jars, is_bootstrap, loader, Loader};
 
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};

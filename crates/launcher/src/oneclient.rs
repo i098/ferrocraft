@@ -226,15 +226,18 @@ fn unpack(archive: &Path, stage: &Path, dest: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 fn windows_executable(dir: &Path) -> Option<PathBuf> {
-    ["oneclient_app.exe", "OneClient.exe"]
-        .into_iter()
-        .map(|name| dir.join(name))
-        .find(|file| file.is_absolute() && file.is_file())
+    let app = dir.join("oneclient_app.exe");
+    (app.is_absolute() && app.is_file()).then_some(app)
+}
+
+#[cfg(windows)]
+fn legacy_windows(dir: &Path) -> bool {
+    dir.is_absolute() && dir.join("OneClient.exe").is_file()
 }
 
 #[cfg(windows)]
 fn installed_windows() -> io::Result<Option<PathBuf>> {
-    let (app, registered) = registered_windows()?;
+    let (app, mut registered) = registered_windows()?;
     let app = app.or_else(|| {
         dirs::data_local_dir()
             .into_iter()
@@ -244,11 +247,15 @@ fn installed_windows() -> io::Result<Option<PathBuf>> {
                     .filter_map(std::env::var_os)
                     .map(PathBuf::from),
             )
-            .find_map(|dir| windows_executable(&dir.join("OneClient")))
+            .map(|dir| dir.join("OneClient"))
+            .find_map(|dir| {
+                registered |= legacy_windows(&dir);
+                windows_executable(&dir)
+            })
     });
     if app.is_none() && registered {
         return Err(io::Error::other(
-            "OneClient is registered, but its executable is missing; repair the existing installation in Windows before retrying",
+            "OneClient is already installed without a compatible executable; update or repair it in OneClient before retrying",
         ));
     }
     Ok(app)

@@ -686,9 +686,9 @@ fn creeper_parts(d: &EntityDraw) -> Vec<Part> {
         0.0,
     ];
     let mut parts = vec![
-        Part::new([0.0, 4.0, 0.0], [-4.0, -8.0, -4.0], [8.0; 3], (0.0, 0.0)).rot(head_rot),
+        Part::new([0.0, 6.0, 0.0], [-4.0, -8.0, -4.0], [8.0; 3], (0.0, 0.0)).rot(head_rot),
         Part::new(
-            [0.0, 4.0, 0.0],
+            [0.0, 6.0, 0.0],
             [-4.0, 0.0, -2.0],
             [8.0, 12.0, 4.0],
             (16.0, 16.0),
@@ -698,10 +698,10 @@ fn creeper_parts(d: &EntityDraw) -> Vec<Part> {
         d,
         6.0,
         [
-            [-2.0, 16.0, 4.0],
-            [2.0, 16.0, 4.0],
-            [-2.0, 16.0, -4.0],
-            [2.0, 16.0, -4.0],
+            [-2.0, 18.0, 4.0],
+            [2.0, 18.0, 4.0],
+            [-2.0, 18.0, -4.0],
+            [2.0, 18.0, -4.0],
         ],
         (0.0, 16.0),
         4.0,
@@ -2716,6 +2716,32 @@ pub(crate) mod tests {
         m[2][3] = -1.0;
         m[3][3] = 0.0;
         m
+    }
+
+    #[test]
+    fn standing_creeper_matches_vanilla_world_height() {
+        let d = EntityDraw {
+            class: Class::Mob(CREEPER),
+            pos: [0.0; 3],
+            ..steve()
+        };
+        let xf = Xf::new(&d, false);
+        let bounds: Vec<_> = creeper(&d)
+            .parts
+            .iter()
+            .map(|part| {
+                let mut mesh = MeshData::default();
+                emit_part(&mut mesh, &xf, part, 0.0, [1.0; 3], 0.0);
+                mesh.vertices
+                    .iter()
+                    .fold([f32::INFINITY, f32::NEG_INFINITY], |[min, max], v| {
+                        [min.min(v.pos[1]), max.max(v.pos[1])]
+                    })
+            })
+            .collect();
+        // ModelCreeper at 1/16 scale, with RendererLivingEntity's 193/128-block offset.
+        let expected = [[145, 209], [49, 145], [1, 49], [1, 49], [1, 49], [1, 49]];
+        assert_eq!(bounds, expected.map(|pair| pair.map(|y| y as f32 / 128.0)));
     }
 
     #[test]

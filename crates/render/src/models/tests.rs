@@ -159,6 +159,20 @@ fn element_rotation_leans_the_wall_torch() {
     assert!(x(&top) - x(&bottom) > 0.3, "top leans east");
 }
 
+#[test]
+fn rotated_east_face_projects_uv_lock_from_above() {
+    let json = r#"{"elements":[{"from":[7,0,7],"to":[8,8,9],
+        "rotation":{"origin":[8,0,8],"axis":"z","angle":45},
+        "faces":{"east":{"texture":"blocks/glass","cullface":"east"}}}]}"#;
+    let quads = bake(json, r#"{"model":"m","uvlock":true}"#);
+    let quad = &quads[0];
+    assert_eq!(quad.face, UP);
+    assert_eq!(quad.uv[1], [0.5, 9.0 / 16.0]);
+    assert_eq!(quad.cull, Some(EAST));
+    assert_eq!(quad.shade_face, EAST);
+    assert!(!quad.on_boundary);
+}
+
 fn jar() -> Option<AssetSource> {
     let Some(path) = std::env::var_os("FERROCRAFT_CLIENT_JAR") else {
         eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");
@@ -313,7 +327,7 @@ fn glass_pane_pack_models(case: &str) -> Models {
         "blockstates/glass_pane.json",
         r#"{"variants":{
             "east=false,north=false,south=false,west=false":{"model":"pane_nsew"},
-            "east=true,north=false,south=false,west=false":[{"model":"pane_nsew"}],
+            "east=true,north=false,south=false,west=false":[{"model":"missing"},{"model":"wrong_texture_root"},{"model":"pane_nsew"}],
             "east=false,north=true,south=false,west=false":{"model":"missing"},
             "east=false,north=false,south=true,west=false":{"model":"empty"},
             "east=false,north=false,south=false,west=true":{"model":"broken_parent"},
@@ -349,6 +363,11 @@ fn glass_pane_pack_models(case: &str) -> Models {
                 "south":{"texture":"#edge","cullface":"down"}
             }}
         ]}"##,
+    );
+    write(
+        "base",
+        "models/block/wrong_texture_root.json",
+        r#"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"west":{"texture":"minecraft:items/glass"}}}]}"#,
     );
     write("base", "models/block/empty.json", r#"{"elements":[]}"#);
     write(
@@ -406,6 +425,7 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
     use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
 
     let atlas = Atlas {
+        textured: true,
         models: glass_pane_pack_models("light"),
         ..Atlas::flat()
     };
@@ -449,9 +469,7 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
         assert!(quad
             .iter()
             .all(|v| v.light == levels.map(|n| n as f32 / 15.0)));
-        assert!(quad
-            .iter()
-            .all(|v| v.color == meshes.opaque.vertices[0].color));
+        assert!(quad.iter().all(|v| v.color == [1.0; 4]));
     }
 }
 

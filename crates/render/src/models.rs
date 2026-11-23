@@ -86,8 +86,8 @@ pub struct Quad {
     pub pos: [[f32; 3]; 4],
     pub uv: [[f32; 2]; 4],
     pub tex: Arc<str>,
-    /// Face used for the brightness (`BakedQuad.getFace`), after the blockstate rotation.
     pub face: usize,
+    pub shade_face: usize,
     /// `cullface` after the blockstate rotation: hidden when that neighbour is opaque.
     pub cull: Option<usize>,
     pub on_boundary: bool,
@@ -239,11 +239,8 @@ impl Loader<'_> {
                 None => break,
             }
         }
-        if r.starts_with('#') {
-            return None;
-        }
         let r = r.strip_prefix("minecraft:").unwrap_or(r);
-        let name = r.strip_prefix("blocks/").unwrap_or(r);
+        let name = r.strip_prefix("blocks/")?;
         if name.contains(['\\', ':']) || name.split('/').any(|part| matches!(part, "" | "." | ".."))
         {
             return None;
@@ -299,6 +296,24 @@ fn rotate_part(
     [0, 1, 2].map(|a| r[a] + origin[a])
 }
 
+fn geometric_face(pos: &[[f32; 3]; 4], fallback: usize) -> usize {
+    let a: [f32; 3] = std::array::from_fn(|i| pos[1][i] - pos[0][i]);
+    let b: [f32; 3] = std::array::from_fn(|i| pos[2][i] - pos[0][i]);
+    let [x, y, z] = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    let mut face = fallback;
+    let mut best = 0.0;
+    for (i, score) in [y, -y, -z, z, -x, x].into_iter().enumerate() {
+        if score > best {
+            (face, best) = (i, score);
+        }
+    }
+    face
+}
+
 /// `FaceBakery.makeBakedQuad` for one face of `el`, then the blockstate rotation `(x, y)` in quarter turns.
 fn bake_quad(
     el: &Element,
@@ -332,29 +347,39 @@ fn bake_quad(
             } / 16.0,
         ];
     }
-    let face_after_turn =
+    let shade_face =
         turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal");
-    if uvlock {
-        lock_uv(&mut uv, &pos, face_after_turn, face.turns);
-    }
-    let axis = [1, 2, 0][face_after_turn / 2];
-    let plane = pos[0][axis];
-    let reaches_boundary = if NORMALS[face_after_turn][axis] < 0.0 {
-        plane < 0.0001
+    let geometric_face = if el.rot.is_some() {
+        geometric_face(&pos, shade_face)
     } else {
-        plane > 0.9999
+        shade_face
     };
-    let on_boundary = reaches_boundary && pos[1..].iter().all(|p| p[axis] == plane);
+    if uvlock {
+        lock_uv(&mut uv, &pos, geometric_face, face.turns);
+    }
+    let on_boundary = on_boundary(&pos, geometric_face);
     Quad {
         pos,
         uv,
         tex,
-        face: face_after_turn,
+        face: geometric_face,
+        shade_face,
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
         on_boundary,
         shade: el.shade,
         tint: face.tint,
     }
+}
+
+fn on_boundary(pos: &[[f32; 3]; 4], face: usize) -> bool {
+    let axis = [1, 2, 0][face / 2];
+    let plane = pos[0][axis];
+    let reaches_boundary = if NORMALS[face][axis] < 0.0 {
+        plane < 0.0001
+    } else {
+        plane > 0.9999
+    };
+    reaches_boundary && pos[1..].iter().all(|p| p[axis] == plane)
 }
 
 /// `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its
@@ -393,9 +418,10 @@ impl Models {
             }
             let mut baked = HashMap::new();
             for (key, spec) in variants {
-                // A list is a weighted random choice; the first entry stands for it.
-                let spec = spec.as_array().and_then(|a| a.first()).unwrap_or(&spec);
-                if let Some(quads) = loader.bake(spec) {
+                let entries = spec
+                    .as_array()
+                    .map_or(std::slice::from_ref(&spec), Vec::as_slice);
+                if let Some(quads) = entries.iter().find_map(|entry| loader.bake(entry)) {
                     baked.insert(key, quads);
                 }
             }

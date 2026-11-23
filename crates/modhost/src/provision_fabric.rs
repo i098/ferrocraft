@@ -136,6 +136,7 @@ impl Config {
         moj.base_mut().set_main_dir(&main);
         moj.base_mut().set_jvm_policy(base::JvmPolicy::Mojang);
         let game = installer.install(())?;
+        fs::create_dir_all(main.join("mods"))?;
         assemble(&main, game, &[])
     }
 
@@ -163,10 +164,8 @@ impl Config {
                     "{ORNITHE_PROFILE_URL}: unexpected profile"
                 )));
             }
-            let part = profile.with_extension("json.part");
-            fs::create_dir_all(part.parent().unwrap_or(&main))?;
-            fs::write(&part, json)?;
-            fs::rename(&part, &profile)?;
+            fs::create_dir_all(profile.parent().unwrap())?;
+            publish(&profile, json.as_bytes())?;
         }
         let mut installer = moj::Installer::new(ORNITHE_ID);
         installer.base_mut().set_main_dir(&main);
@@ -263,13 +262,12 @@ fn assemble(main: &Path, game: base::Game, upgrades: &[PathBuf]) -> Result<Confi
         "java/modhost-fabric/build.sh",
     )?;
     let host_dst = main.join(HOST_JAR);
-    fs::copy(&host, &host_dst)?;
+    publish(&host_dst, fs::File::open(host)?)?;
     let lw = main.join("launchwrapper-1.12.jar");
     fetch(LW_URL, LW_SHA1, &lw)?;
     let mut class_path = vec![host_dst.clone(), lw];
     class_path.extend_from_slice(upgrades);
     class_path.extend(libs);
-    fs::create_dir_all(main.join("mods"))?;
     Ok(Config {
         loader: Loader::Fabric {
             agent: host_dst,
@@ -352,7 +350,8 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
     )?;
     let srg = main.join("mcp-1.8.9-srg.zip");
     fetch(SRG_URL, SRG_SHA1, &srg)?;
-    let tmp = table.with_extension("tiny.part");
+    let staged = tempfile::tempdir_in(main)?;
+    let tmp = staged.path().join("names.tiny");
     let out = crate::java_command(java)
         .arg("-cp")
         .arg(&names_jar)
@@ -362,7 +361,6 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
         .arg(&tmp)
         .output()?;
     if !out.status.success() {
-        let _ = fs::remove_file(&tmp);
         return Err(Error::Missing(format!(
             "NameTable failed: {}{}",
             String::from_utf8_lossy(&out.stdout),
@@ -387,7 +385,15 @@ fn fetch(url: &str, sha1: &str, dest: &Path) -> Result<(), Error> {
             "sha1 of {url} is {actual}, expected {sha1}"
         )));
     }
-    Ok(fs::write(dest, bytes)?)
+    Ok(publish(dest, bytes.as_slice())?)
+}
+
+fn publish(dest: &Path, mut contents: impl io::Read) -> io::Result<()> {
+    let mut staged = tempfile::NamedTempFile::new_in(dest.parent().unwrap())?;
+    io::copy(&mut contents, &mut staged)?;
+    drop(contents);
+    staged.persist(dest)?;
+    Ok(())
 }
 
 fn sha1_hex(bytes: &[u8]) -> String {
@@ -502,7 +508,7 @@ mod tests {
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
         zip.start_file("fabric.mod.json", options).unwrap();
-        zip.write_all(br#"{"schemaVersion":1,"id":"outer_fixture","version":"1.0.0","depends":{"nested_fixture":"*"},"jars":[{"file":"nested.jar"}]}"#)
+        zip.write_all(br#"{"schemaVersion":1,"id":"oneconfig","version":"1.0.0","depends":{"pylon":"*","nested_fixture":"*"},"jars":[{"file":"nested.jar"}]}"#)
             .unwrap();
         zip.start_file("nested.jar", options).unwrap();
         zip.write_all(&nested).unwrap();
@@ -513,12 +519,13 @@ mod tests {
         let processed = workspace.path().join(".fabric/processedMods");
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if fs::read_dir(&processed).into_iter().flatten().flatten()
-                .any(|entry| fs::read(entry.path()).is_ok_and(|bytes| bytes == nested))
+            if host.client_brand().is_some()
+                && fs::read_dir(&processed).into_iter().flatten().flatten()
+                    .any(|entry| fs::read(entry.path()).is_ok_and(|bytes| bytes == nested))
             {
                 break;
             }
-            assert!(Instant::now() < deadline, "Fabric did not extract the nested JAR into the launch directory");
+            assert!(Instant::now() < deadline, "Fabric did not start without Pylon and extract the nested JAR into the launch directory");
             std::thread::sleep(Duration::from_millis(50));
         }
         host.stop();

@@ -171,7 +171,6 @@ impl ModHost {
         let mut cmd = java_command(&cfg.java);
         cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
-        let game_dir = staging.as_ref().map_or(cfg.game_dir.as_path(), |dir| dir.path());
         match &cfg.loader {
             Loader::Forge => {
                 cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
@@ -184,7 +183,7 @@ impl ModHost {
             Loader::Fabric { agent, names } => {
                 cmd.arg(prefixed("-javaagent:", agent))
                     .arg(prefixed("-Dferro.tiny=", names))
-                    .arg(prefixed("-Dferro.gameDir=", game_dir))
+                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
                     .args([
                         "-cp",
                         &cp,
@@ -193,7 +192,7 @@ impl ModHost {
             }
         }
         let child = cmd
-            .args(["--gameDir".as_ref(), game_dir.as_os_str()])
+            .args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
             .args(["--assetsDir".as_ref(), cfg.assets_dir.as_os_str()])
             .args(["--version", "1.8.9", "--accessToken", "x"])
             .stdout(Stdio::inherit())
@@ -1120,20 +1119,21 @@ while [ ! -f exit ]; do sleep 0.02; done
         std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
         let launch = |name: &str| {
             let dir = tempfile::tempdir_in(root.path()).unwrap();
-            let path = dir.path().to_path_buf();
-            std::fs::create_dir(path.join("mods")).unwrap();
+            let path = dir.path().join("game");
+            std::fs::create_dir_all(path.join("mods")).unwrap();
             std::fs::write(path.join("mods").join(name), name).unwrap();
             let cfg = Config {
                 loader: Loader::Fabric { agent: root.path().join("agent.jar"), names: root.path().join("names.tiny") },
                 java: java.clone(),
                 class_path: Vec::new(),
-                game_dir: root.path().to_path_buf(),
+                game_dir: path.clone(),
                 assets_dir: root.path().to_path_buf(),
             };
-            (ModHost::start_staged(&cfg, dir).unwrap(), path)
+            let owner = dir.path().to_path_buf();
+            (ModHost::start_staged(&cfg, dir).unwrap(), path, owner)
         };
-        let (_a, first) = launch("first.jar");
-        let (mut b, second) = launch("second.jar");
+        let (_a, first, first_owner) = launch("first.jar");
+        let (mut b, second, second_owner) = launch("second.jar");
         let wait_for = |ready: &dyn Fn() -> bool| {
             let until = Instant::now() + Duration::from_secs(5);
             while !ready() {
@@ -1144,10 +1144,10 @@ while [ ! -f exit ]; do sleep 0.02; done
         wait_for(&|| std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
             && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar"));
         std::fs::write(first.join("exit"), []).unwrap();
-        wait_for(&|| !first.exists());
+        wait_for(&|| !first_owner.exists());
         assert!(second.is_dir());
         b.stop();
-        assert!(!second.exists());
+        assert!(!second_owner.exists());
     }
 
     pub(super) fn link() -> Arc<Link> {

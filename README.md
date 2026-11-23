@@ -37,9 +37,10 @@ Other local accounts can see mod filenames, hashes, and profile paths if they ha
 Ornithe uses a temporary game directory for each launch. Changes that mods save there do not persist.
 Lunar Client and Badlion cannot start custom versions.
 
-Run `~/.ferrocraft/ferrocraft-engine` to start the standalone engine on Unix.
-Run `$HOME\.ferrocraft\ferrocraft-engine.exe` on Windows.
-Close OneClient before you uninstall Ferrocraft.
+For a OneClient install, run `~/.ferrocraft/ferrocraft-engine` on Unix.
+On Windows, run `& "$HOME\.ferrocraft\ferrocraft-engine.exe"` in PowerShell.
+For an official-only install with `--minecraft-dir DIR`, run the engine in `DIR/ferrocraft`.
+Close OneClient before you uninstall a OneClient mod.
 Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
 The uninstall command preserves OneClient and the profile's data.
 If OneClient still manages the bootstrap mod, the command stops before it removes any files.

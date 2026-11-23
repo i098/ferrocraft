@@ -13,6 +13,21 @@ pub use loader::{fabric_jars, is_bootstrap, loader, Loader};
 #[cfg(windows)]
 mod private_file;
 
+pub fn private_workspace(base: &Path) -> std::io::Result<tempfile::TempDir> {
+    std::fs::create_dir_all(base)?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("launch-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    let dir = builder.tempdir_in(base)?;
+    #[cfg(windows)]
+    private_file::restrict_directory(dir.path())?;
+    Ok(dir)
+}
+
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 

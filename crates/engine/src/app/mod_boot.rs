@@ -157,11 +157,13 @@ fn from_cluster(cluster: &Path) -> Option<ModHost> {
 }
 
 fn start_ornithe(cluster: &Path, loader: oneclient::Loader) -> Option<ModHost> {
-    let workspace = match provision_fabric::ornithe_workspace() {
+    let workspace = match provision_fabric::ornithe_dir()
+        .and_then(|base| oneclient::private_workspace(&base).map_err(Into::into))
+    {
         Ok(dir) => dir,
         Err(e) => return fail(&e),
     };
-    stage(cluster, loader, workspace.path())?;
+    stage(cluster, loader, &workspace.path().join("mods"))?;
     match Config::provision_ornithe(workspace.path()) {
         Ok(cfg) => started(ModHost::start_staged(&cfg, workspace)),
         Err(e) => fail(&e),
@@ -198,7 +200,9 @@ fn stage(cluster: &Path, loader: oneclient::Loader, mods: &Path) -> Option<()> {
         Err(oneclient::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => return fail(&e),
     };
-    prune(mods, &r.jars);
+    if loader != oneclient::Loader::Ornithe {
+        prune(mods, &r.jars);
+    }
     let twin = if r.no_forge.is_empty() {
         String::new()
     } else {

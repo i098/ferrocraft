@@ -6,11 +6,13 @@ use std::path::Path;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, GENERIC_READ, GENERIC_WRITE};
+use windows_sys::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    AddAccessAllowedAce, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
+    AddAccessAllowedAceEx, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
     SetSecurityDescriptorControl, SetSecurityDescriptorDacl, TokenUser, ACCESS_ALLOWED_ACE, ACL,
-    ACL_REVISION, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SECURITY_MAX_SID_SIZE,
-    SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+    ACL_REVISION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
+    PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
+    SECURITY_MAX_SID_SIZE, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetVolumeInformationByHandleW, CREATE_NEW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_NORMAL,
@@ -31,7 +33,7 @@ struct UserAcl {
     sid: [u8; SECURITY_MAX_SID_SIZE as usize],
 }
 
-fn user_acl() -> io::Result<UserAcl> {
+fn user_acl(flags: u32) -> io::Result<UserAcl> {
     unsafe {
         let mut token = null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
@@ -53,7 +55,7 @@ fn user_acl() -> io::Result<UserAcl> {
         let mut acl: UserAcl = std::mem::zeroed();
         let raw = (&mut acl as *mut UserAcl).cast();
         if InitializeAcl(raw, size_of::<UserAcl>() as u32, ACL_REVISION) == 0
-            || AddAccessAllowedAce(raw, ACL_REVISION, FILE_ALL_ACCESS, user.info.User.Sid) == 0
+            || AddAccessAllowedAceEx(raw, ACL_REVISION, flags, FILE_ALL_ACCESS, user.info.User.Sid) == 0
         {
             return Err(io::Error::last_os_error());
         }
@@ -62,7 +64,7 @@ fn user_acl() -> io::Result<UserAcl> {
 }
 
 pub(super) fn create(dir: &Path) -> io::Result<tempfile::NamedTempFile> {
-    let acl = user_acl()?;
+    let acl = user_acl(0)?;
     let mut descriptor: SECURITY_DESCRIPTOR = unsafe { std::mem::zeroed() };
     let sd = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
     let attributes = unsafe {
@@ -117,4 +119,25 @@ pub(super) fn create(dir: &Path) -> io::Result<tempfile::NamedTempFile> {
         return Err(io::Error::other("Mod staging requires a volume with persistent ACLs"));
     }
     Ok(staged)
+}
+
+pub(super) fn restrict_directory(path: &Path) -> io::Result<()> {
+    let acl = user_acl(CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE)?;
+    let path: Vec<u16> = path.canonicalize()?.as_os_str().encode_wide().chain([0]).collect();
+    let status = unsafe {
+        SetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            (&acl as *const UserAcl).cast(),
+            null(),
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(status as i32))
+    }
 }

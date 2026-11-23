@@ -171,9 +171,7 @@ impl ModHost {
         let mut cmd = java_command(&cfg.java);
         cmd.env("FERROCRAFT_BRIDGE_TOKEN", &token)
             .arg(format!("-Dferro.bridge=127.0.0.1:{port}"));
-        if let Some(dir) = &staging {
-            cmd.arg(prefixed("-Dfabric.modsFolder=", dir.path()));
-        }
+        let game_dir = staging.as_ref().map_or(cfg.game_dir.as_path(), |dir| dir.path());
         match &cfg.loader {
             Loader::Forge => {
                 cmd.args(["-cp", &cp, "net.minecraft.launchwrapper.Launch"])
@@ -186,7 +184,7 @@ impl ModHost {
             Loader::Fabric { agent, names } => {
                 cmd.arg(prefixed("-javaagent:", agent))
                     .arg(prefixed("-Dferro.tiny=", names))
-                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
+                    .arg(prefixed("-Dferro.gameDir=", game_dir))
                     .args([
                         "-cp",
                         &cp,
@@ -195,7 +193,7 @@ impl ModHost {
             }
         }
         let child = cmd
-            .args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
+            .args(["--gameDir".as_ref(), game_dir.as_os_str()])
             .args(["--assetsDir".as_ref(), cfg.assets_dir.as_os_str()])
             .args(["--version", "1.8.9", "--accessToken", "x"])
             .stdout(Stdio::inherit())
@@ -1111,18 +1109,20 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let java = root.path().join("java");
         std::fs::write(&java, r#"#!/bin/sh
-while [ "$#" -ne 0 ]; do
-    case "$1" in -Dfabric.modsFolder=*) cd "${1#*=}" || exit 1; break;; esac
+while [ "$#" -ne 0 ] && [ "$1" != --gameDir ]; do
+    case "$1" in -Dferro.gameDir=*) agent_dir="${1#*=}";; esac
     shift
 done
-[ "$#" -ne 0 ] && cat ./*.jar > loaded || exit 1
+[ "$#" -ge 2 ] && [ "$agent_dir" = "$2" ] && cd "$2" || exit 1
+cat mods/*.jar > loaded || exit 1
 while [ ! -f exit ]; do sleep 0.02; done
 "#).unwrap();
         std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
         let launch = |name: &str| {
             let dir = tempfile::tempdir_in(root.path()).unwrap();
             let path = dir.path().to_path_buf();
-            std::fs::write(path.join(name), name).unwrap();
+            std::fs::create_dir(path.join("mods")).unwrap();
+            std::fs::write(path.join("mods").join(name), name).unwrap();
             let cfg = Config {
                 loader: Loader::Fabric { agent: root.path().join("agent.jar"), names: root.path().join("names.tiny") },
                 java: java.clone(),

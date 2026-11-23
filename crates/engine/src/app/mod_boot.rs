@@ -473,8 +473,9 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn recovered_archive_read_error_schedules_reload() {
+    fn recovered_archive_errors_schedule_reload() {
         use std::fs;
+        use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!("fc-archive-read-{}", std::process::id()));
         let dir = root.join("mods");
@@ -483,7 +484,7 @@ mod tests {
         let jar = dir.join(&archive);
         fs::write(&jar, "mod").unwrap();
         let snapshot = scan(&dir, true).unwrap();
-        let mut watch = Watch {
+        let watch = || Watch {
             seen: Some(snapshot.clone()),
             dir: dir.clone(),
             forge: true,
@@ -503,25 +504,39 @@ mod tests {
             },
             plain: Some((dir.clone(), vec![archive.clone()])),
         };
-        let failed = prepared();
-        let mut boot = spawn_preparing(move || Ok(Some(failed)));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(host) = boot.poll(Some(&mut watch)) {
-                assert!(host.is_none(), "a failed archive read must prevent startup");
-                break;
+        let check_recovery = |restore: &dyn Fn()| {
+            let mut watch = watch();
+            let failed = prepared();
+            let mut boot = spawn_preparing(move || Ok(Some(failed)));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(host) = boot.poll(Some(&mut watch)) {
+                    assert!(host.is_none(), "a failed archive read must prevent startup");
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "boot did not report the archive error"
+                );
+                std::thread::sleep(Duration::from_millis(5));
             }
-            assert!(
-                Instant::now() < deadline,
-                "boot did not report the archive error"
-            );
-            std::thread::sleep(Duration::from_millis(5));
+            restore();
+            assert_eq!(scan(&dir, true).unwrap(), snapshot);
+            assert!(watch.poll(Instant::now() + SETTLE));
+        };
+        check_recovery(&|| {
+            fs::remove_dir(&jar).unwrap();
+            fs::rename(&parked, &jar).unwrap();
+        });
+
+        let permissions = fs::metadata(&jar).unwrap().permissions();
+        fs::set_permissions(&jar, fs::Permissions::from_mode(0o000)).unwrap();
+        if let Err(error) = fs::File::open(&jar) {
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            check_recovery(&|| fs::set_permissions(&jar, permissions.clone()).unwrap());
+        } else {
+            fs::set_permissions(&jar, permissions).unwrap();
         }
-        let t = Instant::now();
-        fs::remove_dir(&jar).unwrap();
-        fs::rename(&parked, &jar).unwrap();
-        assert_eq!(scan(&dir, true).unwrap(), snapshot);
-        assert!(watch.poll(t + SETTLE));
         prepared().start().unwrap().unwrap().stop();
         std::fs::remove_dir_all(root).unwrap();
     }

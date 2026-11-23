@@ -957,6 +957,7 @@ impl Renderer {
             generation: self.next_generation,
             center: self.blocks[&key].clone(),
             neighbors: AROUND.map(|(dx, dz)| get((cx + dx, cz + dz))),
+            has_skylight: self.environment.dimension.has_skylight(),
             biomes: std::array::from_fn(|i| {
                 let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
                 self.biomes.get(&(cx + dx, cz + dz)).cloned()
@@ -1422,6 +1423,9 @@ impl Renderer {
         let steps = from.map_or(0, |t| environment.ticks.saturating_sub(t).min(20));
         for _ in 0..steps {
             self.animate_atlas();
+        }
+        if self.environment.dimension.has_skylight() != environment.dimension.has_skylight() {
+            self.dirty.extend(self.blocks.keys().copied());
         }
         self.environment = environment;
     }

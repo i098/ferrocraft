@@ -30,6 +30,7 @@ pub struct Job {
     pub generation: u64,
     pub center: SharedBlocks,
     pub neighbors: [Option<SharedBlocks>; 8],
+    pub has_skylight: bool,
     /// Biomes of the chunk and its neighbours, as `Neighborhood::biomes`.
     pub biomes: [Option<SharedBiomes>; 9],
     /// Server light of the chunk and its neighbours, as `Neighborhood::lights`.
@@ -51,6 +52,7 @@ impl Job {
     pub fn run(self, atlas: &Atlas) -> Done {
         let hood = Neighborhood {
             origin: self.key,
+            has_skylight: self.has_skylight,
             center: &self.center,
             neighbors: std::array::from_fn(|i| self.neighbors[i].as_deref().map(Vec::as_slice)),
             biomes: std::array::from_fn(|i| self.biomes[i].as_deref()),

@@ -74,6 +74,7 @@ pub struct Neighborhood<'a> {
     pub origin: (i32, i32),
     pub center: &'a Blocks,
     pub neighbors: [Option<&'a Blocks>; 8],
+    pub has_skylight: bool,
     /// Biome ids of the columns (index `z * 16 + x`) of the chunk and its neighbours, row by row over
     /// `dz` then `dx` in `-1..=1`; a missing column counts as plains.
     pub biomes: [Option<&'a [u8; 256]>; 9],
@@ -939,6 +940,7 @@ mod tests {
         mesh_chunk(
             &Neighborhood {
                 origin: (0, 0),
+                has_skylight: true,
                 center: c,
                 neighbors,
                 biomes: [None; 9],
@@ -986,6 +988,7 @@ mod tests {
         let leaves = |fancy| {
             let hood = Neighborhood {
                 origin: (0, 0),
+                has_skylight: true,
                 center: &c,
                 neighbors: [None; 8],
                 biomes: [None; 9],
@@ -1123,6 +1126,7 @@ mod tests {
         });
         let hood = Neighborhood {
             origin: (0, 0),
+            has_skylight: true,
             center: &c,
             neighbors: [None; 8],
             biomes: [None; 9],
@@ -1224,24 +1228,30 @@ mod tests {
 
     #[test]
     fn lower_stone_slab_side_uses_vanillas_neighbor_order_for_blocked_diagonals() {
-        let c = flat(|x, y, z| match (x, y, z) {
-            (_, 69, _) | (3, 70, 2) => 1 << 4,
-            (3, 70, 6) => 30 << 4,
-            (4, 70, 4) => 44 << 4,
-            _ => 0,
-        });
-        let mesh = mesh_smooth(&c, [None; 8], true);
-        for (z, ao) in [(4.0, 0.6), (5.0, 0.8)] {
-            let corner = mesh
-                .opaque
-                .vertices
-                .chunks_exact(4)
-                .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == z))
-                .unwrap()
-                .iter()
-                .find(|v| v.pos == [4.0, 70.0, z])
-                .unwrap();
-            assert!((corner.color[0] - 0.6 * SHADE[NORTH] * ao).abs() < 1e-6);
+        for (blocker, south_ao) in [
+            (30 << 4, 0.8),
+            (crate::flower_pot_state(38, 0), 0.6),
+            (crate::flower_pot_state(38, 8), 0.6),
+        ] {
+            let c = flat(|x, y, z| match (x, y, z) {
+                (_, 69, _) | (3, 70, 2) => 1 << 4,
+                (3, 70, 6) => blocker,
+                (4, 70, 4) => 44 << 4,
+                _ => 0,
+            });
+            let mesh = mesh_smooth(&c, [None; 8], true);
+            for (z, ao) in [(4.0, 0.6), (5.0, south_ao)] {
+                let corner = mesh
+                    .opaque
+                    .vertices
+                    .chunks_exact(4)
+                    .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == z))
+                    .unwrap()
+                    .iter()
+                    .find(|v| v.pos == [4.0, 70.0, z])
+                    .unwrap();
+                assert!((corner.color[0] - 0.6 * SHADE[NORTH] * ao).abs() < 1e-6);
+            }
         }
     }
 
@@ -1285,6 +1295,7 @@ mod tests {
             for (lights, level) in [([None; 9], flooded_level), (server, 15.0)] {
                 let hood = Neighborhood {
                     origin: (0, 0),
+                    has_skylight: true,
                     center: &c,
                     neighbors: [None, None, None, None, Some(&east), None, None, None],
                     biomes: [None; 9],
@@ -1301,6 +1312,39 @@ mod tests {
                     .find(|v| v.pos == [16.0, 70.0, 4.0])
                     .unwrap();
                 assert!((corner.light[1] - level / 15.0).abs() < 1e-6, "{corner:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn slab_sides_have_no_skylight_at_either_no_sky_world_limit() {
+        for (y, meta) in [(0, 0), (HEIGHT - 1, 8)] {
+            let c = flat(|x, row, z| match (x, row, z) {
+                (4, row, 4) if row == y => 44 << 4 | meta,
+                (5, row, 4) if row == y => 44 << 4 | (meta ^ 8),
+                _ => 0,
+            });
+            let dark = vec![0; c.len()];
+            let mut server = [None; 9];
+            server[4] = Some(dark.as_slice());
+            for lights in [[None; 9], server] {
+                let hood = Neighborhood {
+                    origin: (0, 0),
+                    center: &c,
+                    neighbors: [None; 8],
+                    has_skylight: false,
+                    biomes: [None; 9],
+                    lights,
+                };
+                let mesh = mesh_chunk(&hood, &Atlas::flat(), true, true);
+                let mut sides = 0;
+                for q in mesh.opaque.vertices.chunks_exact(4) {
+                    if q[0].pos[1] != q[2].pos[1] {
+                        sides += 1;
+                        assert!(q.iter().all(|v| v.light == [0.0, 0.0]), "{q:?}");
+                    }
+                }
+                assert_eq!(sides, 8);
             }
         }
     }

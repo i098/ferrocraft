@@ -245,6 +245,7 @@ pub fn held_mesh(state: u16, atlas: &Atlas, flat: bool) -> MeshData {
     blocks[crate::mesh::index(8, 128, 8)] = state;
     let hood = Neighborhood {
         origin: (0, 0),
+        has_skylight: true,
         center: &blocks,
         neighbors: [None; 8],
         biomes: [None; 9],

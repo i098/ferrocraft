@@ -25,8 +25,9 @@ static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
 pub struct Light {
     /// `sky << 4 | block` per cell, `x` and `z` in `-2..=17`, `y` below `height`.
     cells: Vec<u8>,
-    /// Layers computed; above them the air is sky 15 with no block light.
+    /// Layers computed; above them there is no block light.
     height: usize,
+    sky_default: u8,
 }
 
 fn idx(x: i32, y: usize, z: i32) -> usize {
@@ -46,8 +47,13 @@ impl Light {
             .max()
             .map_or(0, |i| i / 256 + 1);
         let height = (top + 15).min(HEIGHT);
+        let sky_default = if hood.has_skylight { 15 } else { 0 };
         if let Some(cells) = server_cells(hood, height) {
-            return Light { cells, height };
+            return Light {
+                cells,
+                height,
+                sky_default,
+            };
         }
         let n = height * W * W;
         let mut opacity = vec![0u8; n];
@@ -58,7 +64,7 @@ impl Light {
         for z in -OFF..W as i32 - OFF {
             for x in -OFF..W as i32 - OFF {
                 let known = loaded(x, z);
-                let mut level = 15u8;
+                let mut level = sky_default;
                 for y in (0..height).rev() {
                     let i = idx(x, y, z);
                     if !known {
@@ -80,25 +86,18 @@ impl Light {
             }
         }
         // Sky light that stays 15 straight down the column only needs to spread sideways where the neighbour is darker.
-        let sky_queue = darker_edges(&sky, height);
-        spread(&opacity, &mut sky, sky_queue, height);
+        if hood.has_skylight {
+            let sky_queue = darker_edges(&sky, height);
+            spread(&opacity, &mut sky, sky_queue, height);
+        }
         spread(&opacity, &mut block, queue, height);
 
-        let mut cells = vec![0u8; height * RING * RING];
-        for y in 0..height {
-            for z in -BORDER..16 + BORDER {
-                for x in -BORDER..16 + BORDER {
-                    let (sx, sz) = if loaded(x, z) {
-                        (x, z)
-                    } else {
-                        (x.clamp(0, 15), z.clamp(0, 15))
-                    };
-                    let from = idx(sx, y, sz);
-                    cells[ring_idx(x, y, z)] = sky[from] << 4 | block[from];
-                }
-            }
+        let cells = flood_ring(height, loaded, &sky, &block);
+        Light {
+            cells,
+            height,
+            sky_default,
         }
-        Light { cells, height }
     }
 
     /// `(sky, block)` light levels; `x` and `z` in `-1..=16`.
@@ -111,11 +110,29 @@ impl Light {
 
     pub(crate) fn sample(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
         if !(0..self.height as i32).contains(&y) {
-            return (15, 0);
+            return (self.sky_default, 0);
         }
         let c = self.cells[ring_idx(x, y as usize, z)];
         (c >> 4, c & 15)
     }
+}
+
+fn flood_ring(height: usize, loaded: impl Fn(i32, i32) -> bool, sky: &[u8], block: &[u8]) -> Vec<u8> {
+    let mut cells = vec![0u8; height * RING * RING];
+    for y in 0..height {
+        for z in -BORDER..16 + BORDER {
+            for x in -BORDER..16 + BORDER {
+                let (sx, sz) = if loaded(x, z) {
+                    (x, z)
+                } else {
+                    (x.clamp(0, 15), z.clamp(0, 15))
+                };
+                let from = idx(sx, y, sz);
+                cells[ring_idx(x, y, z)] = sky[from] << 4 | block[from];
+            }
+        }
+    }
+    cells
 }
 
 /// The light the server sent, as `Chunk.getLightFor`, for every ring cell; `None` unless the chunk and every loaded
@@ -131,6 +148,7 @@ fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
         }
     }
     slots[4]?;
+    let mask = if hood.has_skylight { 0xff } else { 0x0f };
     let mut cells = vec![0u8; height * RING * RING];
     for y in 0..height {
         for z in -BORDER..16 + BORDER {
@@ -142,7 +160,7 @@ fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
                     None => (4, x.clamp(0, 15), z.clamp(0, 15)),
                 };
                 let at = index(x.rem_euclid(16) as usize, y, z.rem_euclid(16) as usize);
-                cells[ring_idx(x, y, z)] = slots[slot]?[at];
+                cells[ring_idx(x, y, z)] = slots[slot]?[at] & mask;
             }
         }
     }
@@ -249,6 +267,7 @@ mod tests {
     fn hood_of(blocks: &[u16]) -> Neighborhood<'_> {
         Neighborhood {
             origin: (0, 0),
+            has_skylight: true,
             center: blocks,
             neighbors: [None; 8],
             biomes: [None; 9],
@@ -312,6 +331,7 @@ mod tests {
         });
         let hood = Neighborhood {
             origin: (0, 0),
+            has_skylight: true,
             center: &center,
             neighbors: [None, None, None, None, Some(&east), None, None, None],
             biomes: [None; 9],
@@ -332,6 +352,7 @@ mod tests {
         });
         let hood = Neighborhood {
             origin: (0, 0),
+            has_skylight: true,
             center: &center,
             neighbors: [
                 Some(&center),

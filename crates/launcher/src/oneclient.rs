@@ -9,6 +9,53 @@ use sha2::{Digest, Sha256};
 
 const VERSION: &str = "2.12.0";
 
+pub fn require_closed() -> Result<(), String> {
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("tasklist.exe");
+        command.args(["/FO", "CSV", "/NH"]);
+        command
+    } else {
+        let mut command = Command::new("/bin/ps");
+        command.args(["-A", "-o", "comm="]);
+        command
+    };
+    let output = command
+        .output()
+        .map_err(|e| format!("Cannot check if OneClient is running: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Cannot check if OneClient is running: {}",
+            output.status
+        ));
+    }
+    if String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| is_oneclient_process(line, cfg!(windows)))
+    {
+        return Err("Close OneClient and keep it closed until the command finishes.".into());
+    }
+    Ok(())
+}
+
+fn is_oneclient_process(line: &str, windows: bool) -> bool {
+    if windows {
+        return line
+            .strip_prefix('"')
+            .and_then(|line| line.split_once("\","))
+            .is_some_and(|(name, _)| {
+                name.eq_ignore_ascii_case("oneclient_app.exe")
+                    || name.eq_ignore_ascii_case("OneClient.exe")
+            });
+    }
+    Path::new(line.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(name, "oneclient_app" | "OneClient" | "OneClient.AppImage")
+                || name.starts_with("OneClient_")
+        })
+}
+
 pub fn data_dirs(app_data: &Path, include_previous: bool) -> io::Result<(PathBuf, Option<PathBuf>)> {
     if std::env::vars_os().any(|(key, _)| {
         key.to_str()
@@ -401,6 +448,21 @@ fn unpack(_: &Path, _: &Path, _: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_oneclient_process_images() {
+        for command in [
+            "oneclient_app",
+            "/Applications/OneClient.app/Contents/MacOS/oneclient_app",
+            "OneClient_2.12.0_amd64.AppImage",
+        ] {
+            assert!(is_oneclient_process(command, false), "{command}");
+        }
+        assert!(is_oneclient_process(r#""oneclient_app.exe","123","Console""#, true));
+        assert!(is_oneclient_process(r#""ONECLIENT.EXE","123","Console""#, true));
+        assert!(!is_oneclient_process(r#""not-OneClient.exe","123","Console""#, true));
+        assert!(!is_oneclient_process("oneclient_app-helper", false));
+    }
 
     #[test]
     fn modified_download_is_rejected() {

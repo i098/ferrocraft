@@ -1,6 +1,6 @@
 //! The mod loader of a OneClient cluster, and the jars of a Fabric cluster (used as they are: no twin lookup).
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -53,10 +53,14 @@ pub fn is_bootstrap(jar: impl std::io::Read + std::io::Seek) -> Result<bool, Err
         Err(ZipError::FileNotFound) => return Ok(false),
         Err(e) => return Err(invalid(e)),
     };
-    if entry.size() > 1024 * 1024 {
+    const LIMIT: u64 = 1024 * 1024;
+    let mut bytes = Vec::new();
+    entry.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
         return Err(Error::Format("fabric.mod.json exceeds 1 MiB".into()));
     }
-    let metadata: Value = serde_json::from_reader(entry)
+    let json = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+    let metadata: Value = serde_json::from_slice(json)
         .map_err(|e| Error::Format(format!("invalid fabric.mod.json: {e}")))?;
     metadata["id"]
         .as_str()
@@ -148,6 +152,10 @@ mod tests {
     }
 
     fn mod_jar(id: &str) -> Vec<u8> {
+        jar_with_metadata(format!(r#"{{"id":"{id}"}}"#).as_bytes())
+    }
+
+    fn jar_with_metadata(metadata: &[u8]) -> Vec<u8> {
         let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         jar.start_file(
             "fabric.mod.json",
@@ -155,7 +163,7 @@ mod tests {
                 .compression_method(zip::CompressionMethod::Deflated),
         )
         .unwrap();
-        write!(jar, r#"{{"id":"{id}"}}"#).unwrap();
+        jar.write_all(metadata).unwrap();
         jar.finish().unwrap().into_inner()
     }
 
@@ -165,9 +173,9 @@ mod tests {
         std::fs::create_dir_all(d.join("mods")).unwrap();
 
         let ordinary = d.join("mods/ferrocraft-fabric.jar");
-        let ordinary_bytes = mod_jar("ordinary");
+        let ordinary_bytes = jar_with_metadata(b"\xef\xbb\xbf{\"id\":\"ordinary\"}");
         std::fs::write(&ordinary, &ordinary_bytes).unwrap();
-        let bootstrap = mod_jar("ferrocraft");
+        let bootstrap = jar_with_metadata(b"\xef\xbb\xbf{\"id\":\"ferrocraft\"}");
         std::fs::write(d.join("mods/renamed.jar"), &bootstrap).unwrap();
         let manifest = |hash: &str| {
             format!(

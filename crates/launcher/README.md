@@ -4,13 +4,16 @@ Owner: fc-dropin.
 
 The installer supports Polyfrost OneClient and launchers that read a version JSON file.
 
+Close OneClient before you install or uninstall its Ferrocraft mod.
+Keep it closed until the command finishes.
+
 `ferrocraft-launcher install` downloads the pinned official OneClient release and verifies its SHA-256 digest.
 On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
 It installs the mod and engine for the Ornithe profile that Ferrocraft owns.
 It reuses a marked profile or chooses a folder and display name that do not conflict with other profiles.
 The default install does not add the mod to other OneClient profiles.
 It also installs Ferrocraft into the official Minecraft directory if that directory exists.
-Exit OneClient if it is running, then open it again to load the profile.
+Open OneClient after installation to load the profile.
 The installer reads the boot jar, mod jar, and engine next to its executable.
 The release installer reads both Fabric host JARs from that directory, even when you use `--engine`.
 An explicit `--minecraft-dir DIR` or `--oneclient-dir DIR` limits installation to the selected launchers and skips the download.

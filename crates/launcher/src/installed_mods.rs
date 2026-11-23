@@ -54,7 +54,6 @@ fn case_alias(dir: &Path, name: &std::ffi::OsStr, other: &std::ffi::OsStr) -> st
 
 fn check_links(
     root: &Path,
-    selected: impl Fn(&Path) -> bool,
     owns_destination: impl Fn(&Path) -> bool,
     refusal: impl Fn(&Path, bool) -> String,
 ) -> Result<(), String> {
@@ -76,9 +75,6 @@ fn check_links(
                 .join("clusters")
                 .join(row.get_ref(0)?.as_str()?)
                 .join("mods");
-            if !selected(&mods) {
-                continue;
-            }
             let target = mods.join(row.get_ref(1)?.as_str()?);
             if owns_destination(&target) {
                 return Err(refusal(&target, true).into());
@@ -127,21 +123,19 @@ pub fn check_uninstall(recorded: &[&Path], app_data: &Path) -> Result<(), String
 }
 
 fn check_uninstall_databases(recorded: &[&Path], app_data: &Path) -> Result<(), String> {
-    let (active, previous) = oneclient::data_dirs(app_data, true)
-        .map_err(|e| format!("OneClient data directory: {e}"))?;
-    let roots: BTreeSet<_> = recorded
+    let (active, previous) = storage_roots(app_data)?;
+    let recorded_roots: BTreeSet<_> = recorded
         .iter()
         .filter_map(|jar| data_root(jar.parent()?))
         .collect();
     let roots = std::iter::once(active.as_path())
         .chain(previous.as_deref().filter(|path| !same_dir(path, &active)))
-        .chain(roots.into_iter().filter(|root| {
+        .chain(recorded_roots.into_iter().filter(|root| {
             !same_dir(root, &active) && !previous.as_ref().is_some_and(|p| same_dir(root, p))
         }));
     for root in roots {
         check_links(
             root,
-            |_| true,
             |target| recorded.iter().any(|jar| same_destination(jar, target)),
             |target, exact| uninstall_refusal(root, &active, previous.as_deref(), target, exact),
         )?;
@@ -188,21 +182,30 @@ fn uninstall_refusal(
     format!("{issue} {}; {recovery}", target.display())
 }
 
-pub fn check_reinstall(mods: &[PathBuf], recorded: &[&Path]) -> Result<(), String> {
-    let profiles = || {
-        mods.iter()
-            .map(PathBuf::as_path)
-            .chain(recorded.iter().filter_map(|jar| jar.parent()))
-    };
-    let roots: BTreeSet<_> = profiles().filter_map(data_root).collect();
+fn storage_roots(app_data: &Path) -> Result<(PathBuf, Option<PathBuf>), String> {
+    oneclient::data_dirs(app_data, true).map_err(|e| format!("OneClient data directory: {e}"))
+}
+
+pub fn check_reinstall(mods: &[PathBuf], recorded: &[&Path], app_data: &Path) -> Result<(), String> {
+    let (active, previous) = storage_roots(app_data)?;
+    let roots: BTreeSet<_> = std::iter::once(active.as_path())
+        .chain(previous.as_deref())
+        .chain(mods.iter().map(PathBuf::as_path).filter_map(data_root))
+        .chain(recorded.iter().filter_map(|jar| data_root(jar.parent()?)))
+        .collect();
     for root in roots {
         check_links(
             root,
-            |dir| profiles().any(|profile| same_dir(profile, dir)),
             |target| mods.iter().any(|dir| matches_destination(dir, FABRIC_JAR.as_ref(), target)),
             |target, exact| {
                 let kind = if exact { "mod at the install destination" } else { "bootstrap" };
-                format!("{}: remove the existing {kind} in OneClient before reinstalling", target.display())
+                if previous.as_ref().is_some_and(|p| same_dir(root, p))
+                    && !same_dir(root, &active)
+                {
+                    format!("{}: clear {} in OneClient Storage before reinstalling", target.display(), root.display())
+                } else {
+                    format!("{}: remove the existing {kind} in OneClient before reinstalling", target.display())
+                }
             },
         )?;
     }

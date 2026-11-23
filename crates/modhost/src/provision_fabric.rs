@@ -38,23 +38,32 @@ const ORNITHE_UPGRADES: [(&str, &str); 8] = [
     ("https://libraries.minecraft.net/net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar", "4fdac2fbe92dfad86aa6e9301736f6b4342a3f5c"),
 ];
 /// LWJGL 3 core and its natives: Argentum, a perf mod of the bundles, allocates with `MemoryUtil` (`pylon` ships them; it is denied).
-#[cfg(target_os = "macos")]
-const LWJGL3_NATIVES: (&str, &str) = (
-    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos-arm64.jar",
-    "832e2964ce74e02e768814a29c06d60645115b9a",
+const LWJGL3_CORE: (&str, &str) = (
+    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6.jar",
+    "ce7721d30cfaf47feaed10213e0c43eb55c49d68",
 );
-#[cfg(not(target_os = "macos"))]
-const LWJGL3_NATIVES: (&str, &str) = (
-    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-linux.jar",
-    "dc7db8fc4f1e6563867f9155b9a42d9c73d8992f",
-);
-const LWJGL3: [(&str, &str); 2] = [
-    (
-        "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6.jar",
-        "ce7721d30cfaf47feaed10213e0c43eb55c49d68",
-    ),
-    LWJGL3_NATIVES,
-];
+
+fn lwjgl3_natives(os: &str, arch: &str) -> Result<(&'static str, &'static str), Error> {
+    match (os, arch) {
+        ("macos", "aarch64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos-arm64.jar",
+            "832e2964ce74e02e768814a29c06d60645115b9a",
+        )),
+        ("macos", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos.jar",
+            "f14e7a5289d2355822f4f83b3fd38d158c939acd",
+        )),
+        ("linux", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-linux.jar",
+            "dc7db8fc4f1e6563867f9155b9a42d9c73d8992f",
+        )),
+        ("windows", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-windows.jar",
+            "9a29b6a22fc5184604b8cb434ee5d5ecc4bfcbee",
+        )),
+        _ => Err(Error::Missing(format!("LWJGL 3 natives for {os}/{arch}"))),
+    }
+}
 /// Fabric Loader's dependency overrides: the three mods of the OneClient bundles that depend on `pylon` drop that dependency.
 const PYLON_DEPENDS_OVERRIDE: &str = r#"{"version":1,"overrides":{"oneconfig":{"-depends":{"pylon":""}},"forgecompat":{"-depends":{"pylon":""}},"packed_packs":{"-depends":{"pylon":""}}}}"#;
 /// `fabric.mod.json` of the mod that stands in for `legacy-lwjgl3` (`pylon` is denied: the host owns the window): SoundFix and
@@ -137,6 +146,7 @@ impl Config {
     /// the input, so `pylon` (the mod that opens an SDL window and reads the keyboard) never loads: `mods/` loses any
     /// `pylon` jar and gets a stand-in mod of that id, which keeps the mods that depend on it. Same inputs as `provision_fabric`.
     pub fn provision_ornithe() -> Result<Config, Error> {
+        let natives = lwjgl3_natives(std::env::consts::OS, std::env::consts::ARCH)?;
         let main = ornithe_dir()?;
         let profile = main
             .join("versions")
@@ -181,7 +191,7 @@ impl Config {
         let mut config = assemble(&main, game, &upgrades)?;
         // LWJGL 3 (core and the natives of this machine) for the mods that read its memory classes: the game's own LWJGL 2 stays.
         // They go right after the host jar and LaunchWrapper: LWJGL 2 has classes of the same names (`org.lwjgl.system.*`) that must lose.
-        for (i, (url, sha1)) in LWJGL3.iter().enumerate() {
+        for (i, (url, sha1)) in [LWJGL3_CORE, natives].into_iter().enumerate() {
             let dest = main
                 .join("upgrades")
                 .join(url.rsplit('/').next().unwrap_or(url));
@@ -409,6 +419,19 @@ fn find_jar(env: &str, name: &str, tree_dir: &str, how: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ornithe_selects_lwjgl_natives_for_release_targets() {
+        for (os, arch, classifier) in [
+            ("macos", "aarch64", "macos-arm64"),
+            ("macos", "x86_64", "macos"),
+            ("linux", "x86_64", "linux"),
+            ("windows", "x86_64", "windows"),
+        ] {
+            let (url, _) = lwjgl3_natives(os, arch).unwrap();
+            assert!(url.ends_with(&format!("-natives-{classifier}.jar")), "{url}");
+        }
+    }
 
     /// Needs the network, the JDK-built jars and a clean `HOME`; run by hand:
     /// `HOME=$(mktemp -d) FERROCRAFT_MODHOST_JAR=... FERROCRAFT_NAMES_JAR=... cargo test -p ferrocraft-modhost provision_fabric -- --ignored`.

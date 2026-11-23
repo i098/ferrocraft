@@ -94,8 +94,9 @@ fn install_fabric(
     fabric_jar: &Path,
     engine: &Path,
     home: &Path,
+    app_data: &Path,
     written: &mut Vec<PathBuf>,
-    runtime: Option<(&Path, bool)>,
+    runtime: (&Path, bool),
 ) -> Result<(), String> {
     let path = manifest_path(home);
     let manifest = or_gone(fs::read_to_string(&path), &path.display().to_string())?;
@@ -105,11 +106,10 @@ fn install_fabric(
         .lines()
         .filter_map(recorded_mod)
         .collect();
-    installed_mods::check_reinstall(mods_dirs, &recorded)?;
+    installed_mods::check_reinstall(mods_dirs, &recorded, app_data)?;
     let engine_dir = home.join(".ferrocraft");
-    if let Some((source, required)) = runtime {
-        install_fabric_runtime(source, &engine_dir, written, required)?;
-    }
+    let (source, required) = runtime;
+    install_fabric_runtime(source, &engine_dir, written, required)?;
     let engine_dst = engine_dir.join(engine_file_name(engine));
     written.push(engine_dst.clone());
     copy(engine, &engine_dst)?;
@@ -263,6 +263,9 @@ fn uninstall(manifest: &Path, app_data: &Path) -> Result<(Vec<String>, Vec<Strin
     let (mut removed, mut skipped) = (Vec::new(), Vec::new());
     let artifacts = || lines().filter(|l| !l.starts_with(ROOT_PREFIX));
     let mods: Vec<_> = artifacts().filter_map(recorded_mod).collect();
+    if !mods.is_empty() {
+        oneclient::require_closed()?;
+    }
     installed_mods::check_uninstall(&mods, app_data)?;
     for line in artifacts() {
         let found = match removable(line, &roots, &install_dir) {
@@ -514,6 +517,9 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
 fn install_from(o: &Opts, env: &Env, release: &Path) -> Result<(), String> {
     // Explicit paths do not download OneClient or create a new profile.
     let explicit = o.mc.is_some() || o.oneclient.is_some();
+    if !explicit || o.oneclient.is_some() {
+        oneclient::require_closed()?;
+    }
     let oneclient = if explicit {
         None
     } else {
@@ -538,7 +544,7 @@ fn install_from(o: &Opts, env: &Env, release: &Path) -> Result<(), String> {
     install_targets(o, env, mc, mods, release)?;
     if let Some((app, (_, name))) = oneclient {
         println!(
-            "Exit OneClient if it is running. Open OneClient at {} and select {name} after signing in.",
+            "Open OneClient at {} and select {name} after signing in.",
             app.display()
         );
         if cfg!(target_os = "linux") {
@@ -571,8 +577,9 @@ fn install_targets(
                 &f.fabric,
                 &f.engine,
                 &env.home,
+                &env.data,
                 &mut written,
-                Some((release, o.oneclient.is_none())),
+                (release, o.oneclient.is_none()),
             )?;
             for m in &mods {
                 println!(
@@ -833,6 +840,7 @@ mod tests {
         let new_engine = tmp.path().join("incoming-engine");
         write_fabric_jar(&incoming, "ferrocraft", "2.0.0");
         fs::write(&new_engine, b"new engine").unwrap();
+        let app_data = tmp.path().join("app-data");
         let old_jar = fs::read(&cached).unwrap();
         fs::write(&jar, &old_jar).unwrap();
         for manifest in [None, Some("invalid"), Some(r#"{"version":1,"cluster_id":2,"entries":[]}"#)] {
@@ -844,8 +852,9 @@ mod tests {
                 &incoming,
                 &new_engine,
                 &home,
+                &app_data,
                 &mut Vec::new(),
-                None,
+                (tmp.path(), false),
             )
             .is_err());
             assert_eq!(fs::read(&engine).unwrap(), b"engine");
@@ -858,8 +867,9 @@ mod tests {
             &cached,
             &new_engine,
             &home,
+            &app_data,
             &mut Vec::new(),
-            None,
+            (tmp.path(), false),
         )
         .is_err());
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
@@ -868,15 +878,15 @@ mod tests {
         let renamed = mods.join("renamed-bootstrap.jar");
         fs::write(&renamed, &old_jar).unwrap();
         let other_mods = tmp.path().join("other/clusters/new-profile/mods");
-        let app_data = tmp.path().join("app-data");
         let reinstall = || {
             install_fabric(
                 std::slice::from_ref(&other_mods),
                 &incoming,
                 &new_engine,
                 &home,
+                &app_data,
                 &mut Vec::new(),
-                None,
+                (tmp.path(), false),
             )
             .unwrap_err()
         };
@@ -928,8 +938,9 @@ mod tests {
             &incoming,
             &new_engine,
             &home,
+            &app_data,
             &mut Vec::new(),
-            None,
+            (tmp.path(), false),
         )
         .unwrap_err();
         assert!(err.contains("mod at the install destination"), "{err}");
@@ -942,7 +953,6 @@ mod tests {
         fs::write(&cached, &old_jar).unwrap();
 
         drop(db);
-        let app_data = tmp.path().join("app-data");
         let moved = app_data.join("Polyfrost/OneClient");
         fs::create_dir_all(&moved).unwrap();
         fs::copy(data.join("user_data.db"), moved.join("user_data.db")).unwrap();
@@ -950,6 +960,13 @@ mod tests {
         let db = rusqlite::Connection::open(moved.join("user_data.db")).unwrap();
         db.execute("UPDATE cluster_artifacts SET cluster_file_name='renamed.jar'", [])
             .unwrap();
+        let previous = tmp.path().join("intermediate-root");
+        fs::rename(&data, &previous).unwrap();
+        let err = reinstall();
+        assert!(err.contains(&moved.join("clusters").display().to_string()), "{err}");
+        assert_eq!(fs::read(&engine).unwrap(), b"engine");
+        assert!(!other_mods.exists());
+        fs::rename(&previous, &data).unwrap();
         let err = uninstall(&manifest, &app_data).unwrap_err();
         assert!(err.contains("renamed.jar") && err.contains("not at a recorded install path"));
         assert!(err.contains("remove it in OneClient"), "{err}");
@@ -959,13 +976,15 @@ mod tests {
         let err = uninstall(&manifest, &app_data).unwrap_err();
         assert!(err.contains("remove the mod from the OneClient installation"), "{err}");
         assert!(!err.contains("OneClient Storage"), "{err}");
-        let previous = tmp.path().join("intermediate-root");
         fs::rename(&data, &previous).unwrap();
         fs::write(
             moved.join("settings.json"),
             json!({ "previous_data_dir": previous }).to_string(),
         )
         .unwrap();
+        let err = reinstall();
+        assert!(err.contains(&previous.join("clusters").display().to_string()), "{err}");
+        assert_eq!(fs::read(&engine).unwrap(), b"engine");
         let err = uninstall(&manifest, &app_data).unwrap_err();
         let recovery = format!("clear {} in OneClient Storage", previous.display());
         assert!(err.contains(&recovery), "{err}");
@@ -1010,8 +1029,9 @@ mod tests {
             &incoming,
             &engine,
             &home,
+            &tmp.path().join("app-data"),
             &mut written,
-            None,
+            (tmp.path(), false),
         )
         .unwrap();
         assert_eq!(fs::read(&cached).unwrap(), b"cached");
@@ -1099,8 +1119,9 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
+            &tmp.join("app-data"),
             &mut written,
-            None,
+            (&tmp, false),
         )
         .unwrap();
         let manifest = manifest_path(&tmp.join("home"));
@@ -1167,8 +1188,9 @@ mod tests {
             &tmp.join("mod.jar"),
             &engine,
             &home,
+            &tmp.join("app-data"),
             &mut Vec::new(),
-            None,
+            (&tmp, false),
         )
         .unwrap();
         assert_eq!(fs::read(&engine).unwrap(), b"bin");
@@ -1189,8 +1211,9 @@ mod tests {
             &tmp.join("mod.jar"),
             &tmp.join("engine"),
             &tmp.join("home"),
+            &tmp.join("app-data"),
             &mut written,
-            None,
+            (&tmp, false),
         );
         assert!(res.is_err());
         assert!(written.contains(&good.join(FABRIC_JAR)));

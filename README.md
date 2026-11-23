@@ -9,6 +9,8 @@ In development. The engine joins 1.8.9 servers in offline mode and online mode (
 
 No Rust toolchain needed. The installer downloads the release archive for your OS and runs it.
 
+Close OneClient before you install Ferrocraft. Keep it closed until the installer finishes.
+
 macOS and Linux (x86_64, or Apple silicon):
 
     curl -fsSL https://github.com/i098/ferrocraft/releases/latest/download/install.sh | sh
@@ -20,7 +22,6 @@ Windows (PowerShell):
 The installer downloads and verifies Polyfrost OneClient 2.12.0.
 On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
 It installs the `Ferrocraft 1.8.9` Ornithe profile in the active OneClient data directory.
-Exit OneClient if it is running.
 Open OneClient from the path that the installer prints.
 Keep the default data directory if OneClient asks where to store its data.
 Sign in once with a Microsoft account that owns Minecraft: Java Edition.

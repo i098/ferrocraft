@@ -33,6 +33,19 @@ jobs:
           java/launcher/build.sh stage/ferrocraft-boot.jar
           curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
           FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh stage/ferrocraft-fabric.jar
+          export FERRO_JAVA_HOME="$JAVA_HOME" FERRO_LIB="$PWD/host-libs"
+          mkdir "$FERRO_LIB"
+          fetch() {
+            curl -fsSL "$1" -o "$FERRO_LIB/$2"
+            [ "$(openssl dgst -sha256 -r "$FERRO_LIB/$2" | cut -d' ' -f1)" = "$3" ]
+          }
+          fetch https://libraries.minecraft.net/net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar lw.jar 57f402b626d16cc2705bf2a37add7adbb074f0ca3b3102fa6e23aa303dae682f
+          fetch https://repo.maven.apache.org/maven2/org/ow2/asm/asm-all/5.2/asm-all-5.2.jar asm-all-5.2.jar 7fbffbc1db3422e2101689fd88df8384b15817b52b9b2b267b9f6d2511dc198d
+          fetch https://maven.minecraftforge.net/net/minecraftforge/forge/1.8.9-11.15.1.2318-1.8.9/forge-1.8.9-11.15.1.2318-1.8.9-universal.jar forge.jar 596512ad5f12f95d8a3170321543d4455d23b8fe649c68580c5f828fe74f6668
+          fetch https://repo.maven.apache.org/maven2/com/google/guava/guava/17.0/guava-17.0.jar guava-17.0.jar 8c36a80ea613d0b6b8040a17cf837c5bbe3677bc1b06a058a6c174fdb787ebbc
+          FABRIC_LOADER_JAR="$PWD/fabric-loader.jar" java/modhost-fabric/build.sh
+          cp target/modhost-fabric/ferro-host-fabric.jar stage/
+          java/modhost-prepare/run.sh names stage
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

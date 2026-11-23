@@ -20,6 +20,8 @@ The Ferrocraft profile uses [Ornithe](https://ornithemc.net/).
 OneClient downloads the loader when the user starts the profile.
 Ferrocraft uses the [Fabric Loader API](https://github.com/FabricMC/fabric-loader/blob/0.16.10/LICENSE) under Apache License 2.0 to build its mod.
 The Ferrocraft mod jar does not contain Fabric Loader.
+The `ferro-names.jar` file includes [Mapping IO 0.9.2](https://repo.maven.apache.org/maven2/net/fabricmc/mapping-io/0.9.2/mapping-io-0.9.2-sources.jar).
+Copyright (c) 2021 FabricMC. The Apache License 2.0 text is below.
 
 ## Launcher dependencies
 

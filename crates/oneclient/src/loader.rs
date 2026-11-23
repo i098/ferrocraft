@@ -43,16 +43,25 @@ pub fn loader(cluster: &Path) -> Result<Loader, Error> {
     }
 }
 
-pub fn is_bootstrap(jar: impl std::io::Read + std::io::Seek) -> bool {
-    let Ok(mut zip) = zip::ZipArchive::new(jar) else {
-        return false;
+pub fn is_bootstrap(jar: impl std::io::Read + std::io::Seek) -> Result<bool, Error> {
+    use zip::result::ZipError;
+
+    let invalid = |e: ZipError| Error::Format(e.to_string());
+    let mut zip = zip::ZipArchive::new(jar).map_err(invalid)?;
+    let entry = match zip.by_name("fabric.mod.json") {
+        Ok(entry) => entry,
+        Err(ZipError::FileNotFound) => return Ok(false),
+        Err(e) => return Err(invalid(e)),
     };
-    let Ok(entry) = zip.by_name("fabric.mod.json") else {
-        return false;
-    };
-    entry.size() <= 1024 * 1024
-        && serde_json::from_reader::<_, Value>(entry)
-            .is_ok_and(|metadata| metadata["id"] == "ferrocraft")
+    if entry.size() > 1024 * 1024 {
+        return Err(Error::Format("fabric.mod.json exceeds 1 MiB".into()));
+    }
+    let metadata: Value = serde_json::from_reader(entry)
+        .map_err(|e| Error::Format(format!("invalid fabric.mod.json: {e}")))?;
+    metadata["id"]
+        .as_str()
+        .map(|id| id == "ferrocraft")
+        .ok_or_else(|| Error::Format("fabric.mod.json has no mod ID".into()))
 }
 
 /// Copy the jars of a Fabric or Ornithe cluster into `out_dir`, each checked against its manifest sha1.
@@ -79,7 +88,7 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
                 actual,
             });
         }
-        if is_bootstrap(std::io::Cursor::new(&bytes)) {
+        if is_bootstrap(std::io::Cursor::new(&bytes))? {
             continue;
         }
         let dest: PathBuf = out_dir.join(file_name(&path));
@@ -89,6 +98,9 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
                 file_name(&path)
             )));
         }
+        #[cfg(windows)]
+        let mut staged = crate::private_file::create(out_dir)?;
+        #[cfg(not(windows))]
         let mut staged = tempfile::NamedTempFile::new_in(out_dir)?;
         staged.write_all(&bytes)?;
         staged.persist(&dest).map_err(|e| e.error)?;
@@ -130,23 +142,27 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
-    #[test]
-    fn fabric_jars_are_copied_with_no_network_and_checked() {
-        let d = temp("jars");
-        std::fs::create_dir_all(d.join("mods")).unwrap();
-        use std::io::{Cursor, Write};
-
-        let ordinary = d.join("mods/ferrocraft-fabric.jar");
-        std::fs::write(&ordinary, b"jar a").unwrap();
-        let mut jar = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    fn mod_jar(id: &str) -> Vec<u8> {
+        let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         jar.start_file(
             "fabric.mod.json",
             zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated),
         )
         .unwrap();
-        jar.write_all(br#"{"id":"ferrocraft"}"#).unwrap();
-        let bootstrap = jar.finish().unwrap().into_inner();
+        write!(jar, r#"{{"id":"{id}"}}"#).unwrap();
+        jar.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn fabric_jars_are_copied_with_no_network_and_checked() {
+        let d = temp("jars");
+        std::fs::create_dir_all(d.join("mods")).unwrap();
+
+        let ordinary = d.join("mods/ferrocraft-fabric.jar");
+        let ordinary_bytes = mod_jar("ordinary");
+        std::fs::write(&ordinary, &ordinary_bytes).unwrap();
+        let bootstrap = mod_jar("ferrocraft");
         std::fs::write(d.join("mods/renamed.jar"), &bootstrap).unwrap();
         let manifest = |hash: &str| {
             format!(
@@ -165,12 +181,12 @@ mod tests {
         }
         std::fs::write(
             d.join(".oneclient-mods.json"),
-            manifest(&sha1_hex(b"jar a")),
+            manifest(&sha1_hex(&ordinary_bytes)),
         )
         .unwrap();
         let r = fabric_jars(&d, &out).unwrap();
         assert_eq!(r.jars, vec![out.join("ferrocraft-fabric.jar")]);
-        assert_eq!(std::fs::read(&r.jars[0]).unwrap(), b"jar a");
+        assert_eq!(std::fs::read(&r.jars[0]).unwrap(), ordinary_bytes);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -188,13 +204,14 @@ mod tests {
     #[test]
     fn fabric_jars_with_one_base_name_fail() {
         let d = temp("dup");
+        let jar = mod_jar("ordinary");
         let mut entries = vec![];
         for dir in ["a", "b"] {
             std::fs::create_dir_all(d.join("mods").join(dir)).unwrap();
-            std::fs::write(d.join("mods").join(dir).join("x.jar"), b"jar").unwrap();
+            std::fs::write(d.join("mods").join(dir).join("x.jar"), &jar).unwrap();
             entries.push(format!(
                 r#"{{"path":"mods/{dir}/x.jar","hash":"{}"}}"#,
-                sha1_hex(b"jar")
+                sha1_hex(&jar)
             ));
         }
         std::fs::write(

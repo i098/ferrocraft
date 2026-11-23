@@ -931,7 +931,6 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "ferrocraft-oneclient",
- "libc",
  "rusqlite",
  "serde_json",
  "sha2",
@@ -980,6 +979,7 @@ dependencies = [
  "sha1 0.10.7",
  "tempfile",
  "ureq",
+ "windows-sys 0.61.2",
  "zip 2.6.1",
 ]
 

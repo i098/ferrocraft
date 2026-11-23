@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 mod loader;
 pub use loader::{fabric_jars, is_bootstrap, loader, Loader};
+#[cfg(windows)]
+mod private_file;
 
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};

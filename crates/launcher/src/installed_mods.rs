@@ -24,19 +24,32 @@ fn same_dir(a: &Path, b: &Path) -> bool {
             .is_some_and(|(a, b)| a == b)
 }
 
-#[cfg(target_os = "macos")]
-fn ignores_case(dir: &Path) -> bool {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    CString::new(dir.as_os_str().as_bytes()).map_or(true, |path| unsafe {
-        libc::pathconf(path.as_ptr(), libc::_PC_CASE_SENSITIVE) != 1
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ignores_case(_: &Path) -> bool {
-    cfg!(windows)
+fn case_alias(dir: &Path, name: &std::ffi::OsStr, other: &std::ffi::OsStr) -> std::io::Result<bool> {
+    let exists = |name: &std::ffi::OsStr| match fs::symlink_metadata(dir.join(name)) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    };
+    match (exists(name)?, exists(other)?) {
+        (true, true) => {
+            let mut distinct = 0;
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?.file_name();
+                distinct += usize::from(entry == name || entry == other);
+            }
+            Ok(distinct < 2)
+        }
+        (false, false) => {
+            let probe = match tempfile::Builder::new().prefix("Fc-case-").tempfile_in(dir) {
+                Ok(probe) => probe,
+                Err(e) if e.kind() == ErrorKind::NotFound => return Ok(true),
+                Err(e) => return Err(e),
+            };
+            let name = probe.path().file_name().unwrap().to_str().unwrap();
+            exists(std::ffi::OsStr::new(&name.replacen("Fc-case-", "fC-case-", 1)))
+        }
+        _ => Ok(false),
+    }
 }
 
 fn check_links(
@@ -71,7 +84,9 @@ fn check_links(
                 return Err(refusal(&target, true).into());
             }
             let cached = root.join(row.get_ref(2)?.as_str()?);
-            if ferrocraft_oneclient::is_bootstrap(File::open(&cached)?) {
+            let bootstrap = ferrocraft_oneclient::is_bootstrap(File::open(&cached)?)
+                .map_err(|e| format!("cannot identify the mod at {} using {}: {e}", target.display(), cached.display()))?;
+            if bootstrap {
                 return Err(refusal(&target, false).into());
             }
         }
@@ -135,8 +150,9 @@ fn matches_destination(dir: &Path, name: &std::ffi::OsStr, target: &Path) -> boo
         .file_name()
         .zip(target.parent())
         .is_some_and(|(other, parent)| {
-            (name == other || name.eq_ignore_ascii_case(other) && ignores_case(dir))
-                && same_dir(dir, parent)
+            same_dir(dir, parent)
+                && (name == other
+                    || name.eq_ignore_ascii_case(other) && case_alias(dir, name, other).unwrap_or(true))
         })
 }
 

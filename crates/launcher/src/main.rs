@@ -17,6 +17,7 @@ const BOOT_COORD: &str = "net.ferrocraft:boot:0.1.0";
 const FABRIC_JAR: &str = "ferrocraft-fabric.jar";
 const BOOT_MAIN: &str = "net.ferrocraft.boot.Main";
 const ENGINE_NAMES: [&str; 2] = ["ferrocraft-engine", "ferrocraft-engine.exe"];
+const FABRIC_RUNTIME: [&str; 2] = ["ferro-host-fabric.jar", "ferro-names.jar"];
 const ROOT_PREFIX: &str = "root ";
 const PROFILE_MARKER: &str = ".ferrocraft-profile";
 
@@ -94,24 +95,56 @@ fn install_fabric(
     engine: &Path,
     home: &Path,
     written: &mut Vec<PathBuf>,
+    require_runtime: bool,
 ) -> Result<(), String> {
     installed_mods::check_reinstall(mods_dirs)?;
-    let engine_dst = home.join(".ferrocraft").join(engine_file_name(engine));
+    let engine_dir = home.join(".ferrocraft");
+    install_fabric_runtime(engine, &engine_dir, written, require_runtime)?;
+    let engine_dst = engine_dir.join(engine_file_name(engine));
     written.push(engine_dst.clone());
     copy(engine, &engine_dst)?;
     for dir in mods_dirs {
         let dst = dir.join(FABRIC_JAR);
         written.push(dst.clone());
-        let stage = || -> std::io::Result<()> {
-            fs::create_dir_all(dir)?;
-            let mut temp = tempfile::NamedTempFile::new_in(dir)?;
-            std::io::copy(&mut fs::File::open(fabric_jar)?, &mut temp)?;
-            temp.persist(&dst)?;
-            Ok(())
-        };
-        stage().map_err(|e| format!("{}: {e}", dst.display()))?;
+        stage_jar(fabric_jar, &dst)?;
     }
     Ok(())
+}
+
+fn install_fabric_runtime(
+    engine: &Path,
+    dest: &Path,
+    written: &mut Vec<PathBuf>,
+    required: bool,
+) -> Result<(), String> {
+    let source = engine.parent().unwrap_or(Path::new("."));
+    let jars = FABRIC_RUNTIME.map(|name| source.join(name));
+    if !required && !jars.iter().any(|jar| jar.exists()) {
+        return Ok(());
+    }
+    for jar in &jars {
+        if !jar.is_file() {
+            return Err(format!("Missing Fabric host runtime: {}", jar.display()));
+        }
+    }
+    for jar in &jars {
+        let dst = dest.join(jar.file_name().unwrap());
+        written.push(dst.clone());
+        stage_jar(jar, &dst)?;
+    }
+    Ok(())
+}
+
+fn stage_jar(source: &Path, dest: &Path) -> Result<(), String> {
+    let stage = || -> std::io::Result<()> {
+        let dir = dest.parent().unwrap();
+        fs::create_dir_all(dir)?;
+        let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+        std::io::copy(&mut fs::File::open(source)?, &mut temp)?;
+        temp.persist(dest)?;
+        Ok(())
+    };
+    stage().map_err(|e| format!("{}: {e}", dest.display()))
 }
 
 fn manifest_path(home: &Path) -> PathBuf {
@@ -153,6 +186,12 @@ fn is_artifact(path: &Path, is_dir: bool, roots: &[PathBuf]) -> bool {
         ];
         let candidates: &[PathBuf] = if is_dir { &dirs } else { &files };
         candidates.iter().any(|c| c == path)
+            || !is_dir
+                && r.ends_with(".ferrocraft")
+                && path.parent() == Some(r)
+                && path.file_name().is_some_and(|name| {
+                    FABRIC_RUNTIME.iter().any(|jar| name == *jar)
+                })
     })
 }
 
@@ -514,7 +553,14 @@ fn install_targets(
             );
         }
         if !mods.is_empty() {
-            install_fabric(&mods, &f.fabric, &f.engine, &env.home, &mut written)?;
+            install_fabric(
+                &mods,
+                &f.fabric,
+                &f.engine,
+                &env.home,
+                &mut written,
+                o.oneclient.is_none(),
+            )?;
             for m in &mods {
                 println!(
                     "fabric launcher: installed {FABRIC_JAR} into {}",
@@ -648,8 +694,21 @@ mod tests {
         assert!(fs::read_dir(personal).unwrap().next().is_none());
         assert!(!manifest_path(&env.home).exists());
         fs::remove_file(profile.join("mods")).unwrap();
+        assert!(install(&opts, &env).unwrap_err().contains("Missing Fabric host runtime"));
+        assert!(!profile.join("mods").join(FABRIC_JAR).exists());
+        for name in FABRIC_RUNTIME {
+            fs::write(tmp.path().join(name), name.as_bytes()).unwrap();
+        }
         install(&opts, &env).unwrap();
         assert_eq!(fs::read(profile.join("mods").join(FABRIC_JAR)).unwrap(), b"bootstrap");
+        let engine_dir = env.home.join(".ferrocraft");
+        for name in FABRIC_RUNTIME {
+            assert_eq!(fs::read(engine_dir.join(name)).unwrap(), name.as_bytes());
+        }
+        uninstall(&manifest_path(&env.home), &env.data).unwrap();
+        for name in FABRIC_RUNTIME {
+            assert!(!engine_dir.join(name).exists());
+        }
     }
 
     #[test]
@@ -755,6 +814,7 @@ mod tests {
                 &new_engine,
                 &home,
                 &mut Vec::new(),
+                false,
             )
             .is_err());
             assert_eq!(fs::read(&engine).unwrap(), b"engine");
@@ -768,10 +828,31 @@ mod tests {
             &new_engine,
             &home,
             &mut Vec::new(),
+            false,
         )
         .is_err());
         assert_eq!(fs::read(&engine).unwrap(), b"engine");
         assert_eq!(fs::read(&jar).unwrap(), old_jar);
+
+        let renamed = mods.join("renamed-bootstrap.jar");
+        fs::write(&renamed, &old_jar).unwrap();
+        fs::write(&cached, b"truncated archive").unwrap();
+        let err = install_fabric(
+            std::slice::from_ref(&mods),
+            &incoming,
+            &new_engine,
+            &home,
+            &mut Vec::new(),
+            false,
+        )
+        .unwrap_err();
+        assert!(err.contains("cannot identify the mod"), "{err}");
+        let err = uninstall(&manifest, &tmp.path().join("app-data")).unwrap_err();
+        assert!(err.contains("cannot identify the mod"), "{err}");
+        assert_eq!(fs::read(&engine).unwrap(), b"engine");
+        assert_eq!(fs::read(&renamed).unwrap(), old_jar);
+        fs::remove_file(renamed).unwrap();
+        fs::write(&cached, &old_jar).unwrap();
 
         for materialized in [true, false] {
             if materialized {
@@ -801,6 +882,7 @@ mod tests {
             &new_engine,
             &home,
             &mut Vec::new(),
+            false,
         )
         .unwrap_err();
         assert!(err.contains("mod at the install destination"), "{err}");
@@ -882,6 +964,7 @@ mod tests {
             &engine,
             &home,
             &mut written,
+            false,
         )
         .unwrap();
         assert_eq!(fs::read(&cached).unwrap(), b"cached");
@@ -970,6 +1053,7 @@ mod tests {
             &tmp.join("engine"),
             &tmp.join("home"),
             &mut written,
+            false,
         )
         .unwrap();
         let manifest = manifest_path(&tmp.join("home"));
@@ -1037,6 +1121,7 @@ mod tests {
             &engine,
             &home,
             &mut Vec::new(),
+            false,
         )
         .unwrap();
         assert_eq!(fs::read(&engine).unwrap(), b"bin");
@@ -1058,6 +1143,7 @@ mod tests {
             &tmp.join("engine"),
             &tmp.join("home"),
             &mut written,
+            false,
         );
         assert!(res.is_err());
         assert!(written.contains(&good.join(FABRIC_JAR)));

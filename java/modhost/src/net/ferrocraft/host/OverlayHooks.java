@@ -57,6 +57,10 @@ public final class OverlayHooks {
         return active() ? Sink.mark(GlState.saveDrawState(), glCache == null ? null : glCache.save()) : null;
     }
 
+    public static void crosshairCompleted(Sink.Mark mark) {
+        if (mark != null) Sink.crosshairDrawn(mark.textures);
+    }
+
     public static void mixinFailed(Exception failure, Object callback, Sink.Mark mark) throws Exception {
         if (mark == null) throw failure;
         if (callback != null) R.set(callback, "cancelled", false);
@@ -137,8 +141,8 @@ public final class OverlayHooks {
     private static Set<String> hudRoots(String name) {
         if (name.equals(RENDERER)) return new HashSet<>(Arrays.asList("func_181560_a(FJ)V", "func_78478_c()V"));
         if (name.equals(FORGE_GUI)) return new HashSet<>(Arrays.asList("func_175180_a(F)V", "renderGameOverlay(F)V"));
-        return new HashSet<>(Arrays.asList("func_175180_a(F)V", "func_175183_b()Z", "func_180476_e",
-                "func_180480_a", "func_175264_a", "func_180479_a", "func_73828_d", "func_180475_a"));
+        return new HashSet<>(Arrays.asList("func_175183_b()Z", "func_180476_e",
+                "func_180480_a", "func_180479_a", "func_73828_d", "func_180475_a"));
     }
 
     private static List<MethodInsnNode> localCalls(String owner, MethodNode method) {
@@ -160,6 +164,16 @@ public final class OverlayHooks {
             MethodNode wrapper = wrappers.computeIfAbsent(handler, h -> wrap(owner, h));
             if (wrapper != null) call.name = wrapper.name;
         }
+    }
+
+    private static boolean drawsPolyCrosshair(MethodNode handler) {
+        for (AbstractInsnNode insn : handler.instructions.toArray()) {
+            if (!(insn instanceof MethodInsnNode)) continue;
+            MethodInsnNode call = (MethodInsnNode) insn;
+            if (call.owner.equals("org/polyfrost/crosshair/render/CrosshairRenderer") && call.name.equals("drawCrosshair")
+                    && call.desc.equals("(Lnet/minecraft/client/renderer/EntityRenderer;)V")) return true;
+        }
+        return false;
     }
 
     private static MethodNode wrap(String owner, MethodNode handler) {
@@ -193,6 +207,11 @@ public final class OverlayHooks {
         wrapper.visitMethodInsn(isStatic ? Opcodes.INVOKESTATIC : Opcodes.INVOKESPECIAL,
                 owner, handler.name, handler.desc, false);
         wrapper.visitLabel(end);
+        if (drawsPolyCrosshair(handler)) {
+            wrapper.visitVarInsn(Opcodes.ALOAD, mark);
+            wrapper.visitMethodInsn(Opcodes.INVOKESTATIC, "net/ferrocraft/host/OverlayHooks", "crosshairCompleted",
+                    "(L" + MARK + ";)V", false);
+        }
         wrapper.visitInsn(Opcodes.RETURN);
         wrapper.visitLabel(caught);
         Object[] locals = handlerLocals(owner, isStatic, args);

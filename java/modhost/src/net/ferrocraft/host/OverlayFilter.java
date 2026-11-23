@@ -29,7 +29,6 @@ public final class OverlayFilter {
     public void pre(RenderGameOverlayEvent.Pre e) {
         boolean modChat = e.type == ElementType.CHAT && ChatGui.owned();
         if (e.type == ElementType.ALL) {
-            Sink.crosshairDrawn(0);
             if (e.isCanceled()) Sink.hud(EVERY_BIT);
             return;
         }
@@ -70,11 +69,6 @@ public final class OverlayFilter {
                 text.right.addAll(right);
             }
             OverlayHooks.failed(failure, mark);
-            return;
-        }
-        ElementType type = ((RenderGameOverlayEvent) event).type;
-        if (type == ElementType.CROSSHAIRS) {
-            Sink.crosshairDrawn(mark.textures);
         }
     }
 

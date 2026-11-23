@@ -22,16 +22,19 @@ import org.objectweb.asm.Opcodes;
 public final class OverlayHooksTest implements Opcodes {
     private static final String RENDERER = "net/minecraft/client/renderer/EntityRenderer";
     private static final String CALLBACK = "org/spongepowered/asm/mixin/injection/callback/CallbackInfo";
+    private static final String CROSSHAIR_RENDERER = "org/polyfrost/crosshair/render/CrosshairRenderer";
     private static final String TEST = "net/ferrocraft/host/OverlayHooksTest";
     private static final String DESC = "(FJL" + CALLBACK + ";D[I)V";
     private static final String FAILED = "failed HUD draw";
     private static final String LATER = "later HUD draw";
+    private static boolean drawSucceeds;
 
     public static void main(String[] args) throws Exception {
         Loader loader = new Loader();
         loader.define(CALLBACK, callbackBytes());
         byte[] renderer = new OverlayHooks.HudTransformer().transform(RENDERER, RENDERER.replace('/', '.'), rendererBytes());
         Class<?> cls = loader.define(RENDERER, renderer);
+        loader.define(CROSSHAIR_RENDERER, crosshairRendererBytes());
         GlState.bindTexture(3553, GlState.genTexture());
         GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
         GlState.color(1, 1, 1, 1);
@@ -40,8 +43,17 @@ public final class OverlayHooksTest implements Opcodes {
 
         OverlayHooks.begin(null);
         try {
-            cls.getMethod("func_181560_a", float.class, long.class).invoke(null, 0f, 0L);
-            assertFrame();
+            Method render = cls.getMethod("func_181560_a", float.class, long.class);
+            render.invoke(null, 0f, 0L);
+            assertCrosshairOwnership(false);
+            drawSucceeds = true;
+            try {
+                render.invoke(null, 0f, 0L);
+                assertCrosshairOwnership(true);
+            } finally {
+                drawSucceeds = false;
+            }
+            assertScissorRollback();
             assertClippedCrosshair();
             assertPostImageDoesNotClaimCrosshair();
             assertEventPayloadRollback();
@@ -94,6 +106,59 @@ public final class OverlayHooksTest implements Opcodes {
         }
     }
 
+    private static void assertCrosshairOwnership(boolean drawn) throws IOException {
+        OverlayFilter filter = new OverlayFilter();
+        RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
+        RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(parent, ElementType.ALL);
+        RenderGameOverlayEvent.Pre crosshair = new RenderGameOverlayEvent.Pre(parent, ElementType.CROSSHAIRS) {
+            @Override
+            public boolean isCancelable() {
+                return true;
+            }
+        };
+        OverlayFilter.invoke(event -> drawCrosshair(), all);
+        OverlayFilter.invoke(event -> filter.pre(all), all);
+        OverlayFilter.invoke(event -> {
+            drawCrosshair();
+            event.setCanceled(true);
+        }, crosshair);
+        OverlayFilter.invoke(event -> filter.pre(crosshair), crosshair);
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        if (frame.hud != (drawn ? 1 << 4 : 0) || frame.images.size() != (drawn ? 4 : 3)) {
+            throw new AssertionError("only the completed PolyCrosshair callback may validate ownership");
+        }
+        if (!drawn) assertRecoveredDraw(frame);
+        if (drawn && frame.images.get(0).x0 != 4) throw new AssertionError("the replacement draw did not reach the frame");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertScissorRollback() throws IOException {
+        List<Object[]> scissors = (List<Object[]>) R.get(Nvg.class, "SCISSORS");
+        Object outer = new Object(), inner = new Object(), failed = new Object();
+        float[] box = {0, 0, 10, 10};
+        scissors.add(new Object[] {outer, box});
+        scissors.add(new Object[] {inner, new float[] {1, 1, 5, 5}});
+        Nvg.resetScissor(1L, new Object());
+        RenderGameOverlayEvent.Post post = new RenderGameOverlayEvent.Post(new RenderGameOverlayEvent(0, null), ElementType.ALL);
+        OverlayFilter.invoke(event -> {
+            Nvg.resetScissor(1L, outer);
+            Nvg.clearScissors(1L);
+            scissors.add(new Object[] {failed, new float[] {20, 20, 30, 30}});
+            Nvg.resetScissor(1L, inner);
+            throw new IllegalStateException("test scissor listener failed");
+        }, post);
+        drawCrosshair();
+        Nvg.resetScissor(1L, inner);
+        drawCrosshair();
+        Nvg.clearScissors(1L);
+        drawCrosshair();
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        if (!Arrays.equals(frame.images.get(0).clip, new float[] {1, 1, 5, 5})
+                || !Arrays.equals(frame.images.get(1).clip, box) || frame.images.get(2).clip != null) {
+            throw new AssertionError("failed handler changed the next draw's scissor stack");
+        }
+    }
+
     private static void assertEventPayloadRollback() {
         RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
         RenderGameOverlayEvent.Chat chat = new RenderGameOverlayEvent.Chat(parent, 2, 3);
@@ -120,9 +185,8 @@ public final class OverlayHooksTest implements Opcodes {
         }
     }
 
-    private static void assertFrame() throws IOException {
-        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
-        if (frame.texts.contains(FAILED) || !frame.texts.contains(LATER) || frame.hud != 0 || frame.images.size() != 1) {
+    private static void assertRecoveredDraw(MirrorHudTest.Frame frame) {
+        if (frame.texts.contains(FAILED) || !frame.texts.contains(LATER)) {
             throw new AssertionError("failed HUD draw survived or the later HUD draw was lost");
         }
         MirrorHudTest.Image image = frame.images.get(0);
@@ -142,6 +206,7 @@ public final class OverlayHooksTest implements Opcodes {
 
     public static void fail(Object callback, int error) throws IOException {
         if (error != 0) throw new AssertionError("fatal HUD error");
+        if (drawSucceeds) return;
         R.set(callback, "cancelled", true);
         Sink.hud(2);
         Sink.text(FAILED, 0, 0, -1, false);
@@ -160,6 +225,23 @@ public final class OverlayHooksTest implements Opcodes {
         GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
     }
 
+    public static void drawCrosshair() {
+        GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
+    }
+
+    public static void drawReplacement() {
+        GlState.quadSized(4, 5, 0, 0, 1, 1, 1, 1);
+    }
+
+    private static byte[] crosshairRendererBytes() {
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        cw.visit(V1_8, ACC_PUBLIC, CROSSHAIR_RENDERER, null, "java/lang/Object", null);
+        MethodVisitor draw = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "drawCrosshair", "(L" + RENDERER + ";)V", null, null);
+        draw.visitMethodInsn(INVOKESTATIC, TEST, "drawReplacement", "()V", false);
+        finish(draw);
+        return cw.toByteArray();
+    }
+
     private static byte[] rendererBytes() {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cw.visit(V1_8, ACC_PUBLIC, RENDERER, null, "java/lang/Object", null);
@@ -171,6 +253,8 @@ public final class OverlayHooksTest implements Opcodes {
         entry(cw, "func_78478_c", 1);
         MethodVisitor handler = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "handler$test", DESC, null, null);
         handler.visitAnnotation("Lorg/spongepowered/asm/mixin/transformer/meta/MixinMerged;", true).visitEnd();
+        handler.visitInsn(ACONST_NULL);
+        handler.visitMethodInsn(INVOKESTATIC, CROSSHAIR_RENDERER, "drawCrosshair", "(L" + RENDERER + ";)V", false);
         handler.visitVarInsn(ALOAD, 3);
         handler.visitVarInsn(DLOAD, 4);
         handler.visitInsn(D2I);

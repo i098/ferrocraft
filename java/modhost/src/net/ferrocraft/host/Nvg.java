@@ -256,6 +256,17 @@ public final class Nvg {
         applyScissors();
     }
 
+    static Object[][] saveScissors() {
+        return SCISSORS.isEmpty() ? null : SCISSORS.toArray(new Object[SCISSORS.size()][]);
+    }
+
+    static void restoreScissors(Object[][] scissors) {
+        SCISSORS.clear();
+        if (scissors != null) {
+            for (Object[] scissor : scissors) SCISSORS.add(scissor);
+        }
+    }
+
     private static void applyScissors() {
         if (SCISSORS.isEmpty()) {
             Sink.clip(null);

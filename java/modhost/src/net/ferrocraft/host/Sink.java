@@ -22,7 +22,7 @@ import java.util.Set;
  * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
-    /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
+    /** The wire bit of the crosshair (crates/modhost/src/hud.rs). */
     private static final int CROSSHAIR = 1 << 4;
     private static int hudBits;
     private static int textured;
@@ -62,6 +62,7 @@ public final class Sink {
         final float[] matrix = new float[(matrixTop + 1) * 3];
         final GlState.DrawState gl;
         final int[] cache;
+        final Object[][] scissors = Nvg.saveScissors();
 
         Mark(GlState.DrawState gl, int[] cache) {
             this.gl = gl;
@@ -270,6 +271,7 @@ public final class Sink {
         textured = mark.textures;
         crosshairDrawn = mark.crosshair;
         clipped = mark.clip;
+        Nvg.restoreScissors(mark.scissors);
         top = mark.matrixTop;
         mode = mark.matrixMode;
         for (int i = 0; i <= top; i++) System.arraycopy(mark.matrix, i * 3, STACK[i], 0, 3);

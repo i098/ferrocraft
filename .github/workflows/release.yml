@@ -33,6 +33,16 @@ jobs:
           java/launcher/build.sh stage/ferrocraft-boot.jar
           curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
           FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh stage/ferrocraft-fabric.jar
+          mkdir host-libs
+          libs=https://libraries.minecraft.net
+          forge=https://maven.minecraftforge.net
+          version=1.8.9-11.15.1.2318-1.8.9
+          curl -fsSL -o host-libs/lw.jar "$libs/net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar"
+          curl -fsSL -o host-libs/guava-17.0.jar "$libs/com/google/guava/guava/17.0/guava-17.0.jar"
+          curl -fsSL -o host-libs/asm-all-5.2.jar "$forge/org/ow2/asm/asm-all/5.2/asm-all-5.2.jar"
+          curl -fsSL -o host-libs/forge.jar "$forge/net/minecraftforge/forge/$version/forge-$version-universal.jar"
+          FERRO_JAVA_HOME="$JAVA_HOME" FERRO_LIB="$PWD/host-libs" java/modhost/build.sh
+          cp java/modhost/ferro-host.jar stage/
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

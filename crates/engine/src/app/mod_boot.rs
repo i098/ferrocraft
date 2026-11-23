@@ -1,6 +1,3 @@
-//! Starts the mod host with no `FERROCRAFT_MODHOST_*` variables: the OneClient cluster gives the mods and
-//! `Config::provision` gives Java 8, Forge and the host jar.
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -11,8 +8,6 @@ use ferrocraft_oneclient as oneclient;
 
 use crate::log;
 
-/// The variables win when set. Otherwise the cluster is `FERROCRAFT_CLUSTER` (the Fabric shim sets it from
-/// `fabric.modsFolder`) or `--gameDir`. A folder with no `.oneclient-mods.json` is not a cluster: no mods then.
 /// Runs on its own thread: Modrinth, jar downloads and the first-run Java 8 and Forge install take long.
 pub fn spawn(game_dir: PathBuf) -> Receiver<Option<ModHost>> {
     let (tx, rx) = channel();
@@ -44,12 +39,18 @@ const SCAN_EVERY: Duration = Duration::from_millis(500);
 const SETTLE: Duration = Duration::from_secs(1);
 
 impl Watch {
-    /// The folder is the one `start` reads the mods from: `FERROCRAFT_MODHOST_GAMEDIR` or the cluster, then `mods/`.
     pub fn new(game_dir: &Path) -> Self {
-        let root = std::env::var_os("FERROCRAFT_MODHOST_GAMEDIR").map_or_else(
-            || cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir),
-            PathBuf::from,
-        );
+        let root = if let Some(cfg) = Config::from_env() {
+            cfg.game_dir
+        } else if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
+            if cluster.is_file() {
+                cluster.parent().unwrap_or(game_dir).to_path_buf()
+            } else {
+                cluster
+            }
+        } else {
+            game_dir.to_path_buf()
+        };
         let dir = root.join("mods");
         Self {
             seen: scan(&dir),
@@ -83,16 +84,21 @@ impl Watch {
     }
 }
 
-fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
-    let mut jars: Vec<_> = std::fs::read_dir(dir)
+fn mod_jars(dir: &Path) -> impl Iterator<Item = (std::fs::DirEntry, std::fs::Metadata)> {
+    std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "jar"))
+        .filter(|e| Path::new(&e.file_name()).extension().is_some_and(|x| x == "jar"))
         .filter_map(|e| {
-            let m = e.metadata().ok()?;
-            Some((e.file_name(), m.modified().ok()?, m.len()))
+            let m = e.path().metadata().ok()?;
+            m.is_file().then_some((e, m))
         })
+}
+
+fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
+    let mut jars: Vec<_> = mod_jars(dir)
+        .filter_map(|(e, m)| Some((e.file_name(), m.modified().ok()?, m.len())))
         .collect();
     jars.sort();
     jars
@@ -101,7 +107,15 @@ fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
 fn start(game_dir: &Path) -> Option<ModHost> {
     let cfg = match Config::from_env() {
         Some(cfg) => cfg,
-        None => from_cluster(&cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir))?,
+        None => match cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
+            Some(cluster) => from_cluster(&cluster)?,
+            None if mod_jars(&game_dir.join("mods")).next().is_some() => {
+                let mut cfg = Config::provision().map_err(|e| fail::<Config>(&e)).ok()?;
+                cfg.game_dir = game_dir.to_path_buf();
+                cfg
+            }
+            None => return None,
+        },
     };
     match ModHost::start(&cfg) {
         Ok(host) => Some(host),
@@ -112,9 +126,13 @@ fn start(game_dir: &Path) -> Option<ModHost> {
     }
 }
 
-fn cluster(env: Option<std::ffi::OsString>, game_dir: &Path) -> PathBuf {
-    env.filter(|v| !v.is_empty())
-        .map_or_else(|| game_dir.to_path_buf(), PathBuf::from)
+fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
+    env.filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| {
+        game_dir
+            .join(".oneclient-mods.json")
+            .is_file()
+            .then(|| game_dir.to_path_buf())
+    })
 }
 
 fn from_cluster(cluster: &Path) -> Option<Config> {
@@ -218,11 +236,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cluster_is_env_then_game_dir() {
+    fn explicit_cluster_wins() {
         let gd = Path::new("/g");
-        assert_eq!(cluster(Some("/c".into()), gd), Path::new("/c"));
-        assert_eq!(cluster(Some("".into()), gd), gd);
-        assert_eq!(cluster(None, gd), gd);
+        assert_eq!(cluster(Some("/c".into()), gd), Some(PathBuf::from("/c")));
     }
 
     #[test]
@@ -273,10 +289,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_without_manifest_starts_no_mods() {
+    fn game_dir_is_a_cluster_only_with_a_manifest() {
         let d = std::env::temp_dir().join(format!("fc-modboot-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        assert!(from_cluster(&d).is_none());
+        assert!(cluster(None, &d).is_none());
+        assert!(cluster(Some("".into()), &d).is_none());
+        std::fs::write(d.join(".oneclient-mods.json"), "{}").unwrap();
+        assert_eq!(cluster(None, &d).as_deref(), Some(d.as_path()));
         std::fs::remove_dir_all(&d).unwrap();
     }
 

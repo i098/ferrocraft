@@ -13,6 +13,7 @@ const BASE_VERSION: &str = "1.8.9";
 const VERSION_ID: &str = "ferrocraft-1.8.9";
 const BOOT_COORD: &str = "net.ferrocraft:boot:0.1.0";
 const FABRIC_JAR: &str = "ferrocraft-fabric.jar";
+const HOST_JAR: &str = "ferro-host.jar";
 const BOOT_MAIN: &str = "net.ferrocraft.boot.Main";
 const ENGINE_NAMES: [&str; 2] = ["ferrocraft-engine", "ferrocraft-engine.exe"];
 const ROOT_PREFIX: &str = "root ";
@@ -62,6 +63,23 @@ fn copy(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn copy_engine(
+    engine: &Path,
+    dst: &Path,
+    written: Option<&mut Vec<PathBuf>>,
+) -> Result<(), String> {
+    copy(engine, dst)?;
+    let host = engine.with_file_name(HOST_JAR);
+    if host.is_file() {
+        let host_dst = dst.with_file_name(HOST_JAR);
+        if let Some(written) = written {
+            written.push(host_dst.clone());
+        }
+        copy(&host, &host_dst)?;
+    }
+    Ok(())
+}
+
 /// Official launcher: the version json, the boot jar library and the engine.
 /// Each path goes into `written` before it is touched, so a failed install still records it.
 fn install_official(
@@ -81,7 +99,7 @@ fn install_official(
     let json = serde_json::to_string_pretty(&version_json()).unwrap();
     fs::write(vdir.join(format!("{VERSION_ID}.json")), json).map_err(|e| e.to_string())?;
     copy(boot_jar, &jar_dst)?;
-    copy(engine, &engine_dir.join(engine_file_name(engine)))
+    copy_engine(engine, &engine_dir.join(engine_file_name(engine)), None)
 }
 
 /// OneClient: the mod jar in each mods dir, one shared engine. Paths go into `written` first.
@@ -94,7 +112,7 @@ fn install_fabric(
 ) -> Result<(), String> {
     let engine_dst = home.join(".ferrocraft").join(engine_file_name(engine));
     written.push(engine_dst.clone());
-    copy(engine, &engine_dst)?;
+    copy_engine(engine, &engine_dst, Some(written))?;
     for dir in mods_dirs {
         let dst = dir.join(FABRIC_JAR);
         written.push(dst.clone());
@@ -136,6 +154,7 @@ fn is_artifact(path: &Path, is_dir: bool, roots: &[PathBuf]) -> bool {
         let dirs = [r.join("ferrocraft"), r.join("versions").join(VERSION_ID)];
         let files = [
             r.join(FABRIC_JAR),
+            r.join(HOST_JAR),
             r.join(ENGINE_NAMES[0]),
             r.join(ENGINE_NAMES[1]),
             r.join(library_path(BOOT_COORD)),
@@ -435,6 +454,7 @@ mod tests {
         }
         let mods = tmp.join("cluster/mods");
         let mut written = Vec::new();
+        fs::write(tmp.join(HOST_JAR), b"forge host").unwrap();
         install_official(
             &tmp.join("mc"),
             &tmp.join("boot.jar"),
@@ -450,6 +470,9 @@ mod tests {
             &mut written,
         )
         .unwrap();
+        for dir in [tmp.join("mc/ferrocraft"), tmp.join("home/.ferrocraft")] {
+            assert_eq!(fs::read(dir.join(HOST_JAR)).unwrap(), b"forge host");
+        }
         let manifest = manifest_path(&tmp.join("home"));
         let roots = [
             tmp.join("mc"),
@@ -467,6 +490,7 @@ mod tests {
         let (removed, skipped) = uninstall(&manifest).unwrap();
         assert_eq!(removed.len(), written.len());
         assert!(skipped.is_empty());
+        assert!(!tmp.join("home/.ferrocraft").join(HOST_JAR).exists());
         assert!(
             !mods.join(FABRIC_JAR).exists() && !tmp.join("mc/versions/ferrocraft-1.8.9").exists()
         );

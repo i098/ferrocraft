@@ -10,25 +10,24 @@ use sha2::{Digest, Sha256};
 const VERSION: &str = "2.12.0";
 
 // Digests from https://github.com/Polyfrost/OneLauncher/releases/tag/oneclient-2.12.0.
-const fn release_asset(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    // Match the architecture of the Ferrocraft release, not the host process environment.
-    match (os.as_bytes(), arch.as_bytes()) {
-        (b"linux", b"x86_64") => Some((
+fn release_asset(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match (os, arch) {
+        ("linux", "x86_64") => Some((
             "linux_x86_64.AppImage",
             "5cdbc52cd1b67a72e08e3eca49001ac7e185b27657722fc286bda53a66d5cf63",
             "OneClient.AppImage",
         )),
-        (b"macos", b"aarch64") => Some((
+        ("macos", "aarch64") => Some((
             "darwin_aarch64.app.tar.gz",
             "d1bd1255dfa353dbf3c88bf332d9cf52547d01cef2969ab4181cbf853414925d",
             "OneClient.app/Contents/MacOS/oneclient_app",
         )),
-        (b"macos", b"x86_64") => Some((
+        ("macos", "x86_64") => Some((
             "darwin_x86_64.app.tar.gz",
             "e6c5f9d19a2213c9329837ef17219089b7afed3ca328169c83fe25aba4133c02",
             "OneClient.app/Contents/MacOS/oneclient_app",
         )),
-        (b"windows", b"x86_64") => Some((
+        ("windows", "x86_64") => Some((
             "windows_x86_64.exe",
             "86cf2fbfc131251026a7aef5033c0f9614e82607b8724d7165a865ef2c8d9dc3",
             "oneclient_app.exe",

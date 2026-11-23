@@ -22,16 +22,35 @@ The Ferrocraft mod jar does not contain Fabric Loader.
 
 ## Launcher dependencies
 
-The installer uses `sha2` (RustCrypto) to verify the download and `tempfile` to stage the files.
-`tempfile` uses `fastrand` to generate temporary names.
-The MIT license below applies to `sha2`, `tempfile`, and `fastrand`.
+The Ferrocraft launcher uses these dependencies under the MIT license:
+
+- `bitflags`, `block-buffer`, `cfg-if`, `const-oid`, `cpufeatures`, `crypto-common`, `digest`, `errno`
+- `fastrand`, `getrandom`, `hybrid-array`, `itoa`, `libc`, `linux-raw-sys`, `memchr`, `once_cell`
+- `rustix`, `serde_core`, `serde_json`, `sha2`, `tempfile`, `typenum`, `windows-link`, `windows-sys`, `zmij`
+
+The upstream MIT files for some of these crates, including `fastrand`, do not contain a copyright line.
+The `rustix` and `linux-raw-sys` contributors retain their copyrights.
 
 ```text
+Copyright (c) 2014 The Rust Project Developers (bitflags, getrandom)
+Copyright (c) 2018-2025 The RustCrypto Project Developers (block-buffer)
+Copyright (c) 2014 Alex Crichton (cfg-if)
+Copyright (c) 2020-2026 The RustCrypto Project Developers (const-oid, cpufeatures)
+Copyright (c) 2021-2026 RustCrypto Developers (crypto-common)
+Copyright (c) 2017-2025 RustCrypto Developers (digest)
+Copyright (c) 2017 Artyom Pavlov (digest)
+Copyright (c) 2014 Chris Wong (errno)
+Copyright (c) 2018-2026 The rust-random Project Developers (getrandom)
+Copyright (c) 2022-2026 The RustCrypto Project Developers (hybrid-array)
+Copyright (c) The Rust Project Developers (libc)
+Copyright (c) 2015 Andrew Gallant (memchr)
 Copyright (c) 2016-2026 The RustCrypto Project Developers (sha2)
 Copyright (c) 2016 Artyom Pavlov (sha2)
 Copyright (c) 2009-2013 Mozilla Foundation (sha2)
 Copyright (c) 2006-2009 Graydon Hoare (sha2)
 Copyright (c) 2015 Steven Allen (tempfile)
+Copyright (c) 2014 Paho Lurie-Gregg (typenum)
+Copyright (c) Microsoft Corporation. (windows-link, windows-sys)
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated

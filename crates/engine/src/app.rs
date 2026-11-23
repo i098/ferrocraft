@@ -1597,7 +1597,7 @@ impl ApplicationHandler for App {
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
-        self.mods_watch = Some(mod_boot::Watch::new(&self.args.game_dir));
+        self.mods_watch = mod_boot::Watch::new(&self.args.game_dir);
         self.mods_boot = Some(mod_boot::spawn(self.args.game_dir.clone()));
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();

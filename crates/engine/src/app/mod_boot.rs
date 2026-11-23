@@ -72,16 +72,19 @@ const SCAN_EVERY: Duration = Duration::from_millis(500);
 const SETTLE: Duration = Duration::from_secs(1);
 
 impl Watch {
-    pub fn new(game_dir: &Path) -> Self {
-        let (root, forge) = if let Some(cfg) = Config::from_env() {
-            (cfg.game_dir, false)
-        } else if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
-            (cluster, false)
-        } else {
-            (game_dir.to_path_buf(), true)
+    pub fn new(game_dir: &Path) -> Option<Self> {
+        Self::for_source(host_source(game_dir))
+    }
+
+    fn for_source(source: HostSource) -> Option<Self> {
+        let (root, forge) = match source {
+            HostSource::Explicit(cfg) => (cfg.game_dir, false),
+            HostSource::Cluster(root) => (root, false),
+            HostSource::PlainForge(root) => (root, true),
+            HostSource::None => return None,
         };
         let dir = root.join("mods");
-        Self {
+        Some(Self {
             seen: scan(&dir, forge)
                 .map_err(|e| log::line(&e.to_string()))
                 .ok(),
@@ -89,7 +92,7 @@ impl Watch {
             dir,
             last_scan: None,
             changed_at: None,
-        }
+        })
     }
 
     fn retry_after_archive_error(&mut self, now: Instant) {
@@ -202,14 +205,52 @@ impl Prepared {
     }
 }
 
+enum HostSource {
+    Explicit(Config),
+    Cluster(PathBuf),
+    PlainForge(PathBuf),
+    None,
+}
+
+fn host_source(game_dir: &Path) -> HostSource {
+    select_source(
+        game_dir,
+        Config::from_env(),
+        std::env::var_os("FERROCRAFT_CLUSTER"),
+        std::env::var_os("FERROCRAFT_FABRIC_LAUNCH").is_some_and(|value| value == "1"),
+    )
+}
+
+fn select_source(
+    game_dir: &Path,
+    explicit: Option<Config>,
+    cluster_env: Option<OsString>,
+    fabric: bool,
+) -> HostSource {
+    if let Some(cfg) = explicit {
+        HostSource::Explicit(cfg)
+    } else if let Some(root) = cluster(cluster_env, game_dir) {
+        HostSource::Cluster(root)
+    } else if fabric {
+        HostSource::None
+    } else {
+        HostSource::PlainForge(game_dir.to_path_buf())
+    }
+}
+
 fn prepare(game_dir: &Path) -> std::io::Result<Option<Prepared>> {
-    if let Some(cfg) = Config::from_env() {
-        return Ok(Some(Prepared { cfg, plain: None }));
-    }
-    if let Some(cluster) = cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir) {
-        return Ok(from_cluster(&cluster).map(|cfg| Prepared { cfg, plain: None }));
-    }
-    let src = game_dir.join("mods");
+    prepare_source(host_source(game_dir))
+}
+
+fn prepare_source(source: HostSource) -> std::io::Result<Option<Prepared>> {
+    let src = match source {
+        HostSource::Explicit(cfg) => return Ok(Some(Prepared { cfg, plain: None })),
+        HostSource::Cluster(root) => {
+            return Ok(from_cluster(&root).map(|cfg| Prepared { cfg, plain: None }));
+        }
+        HostSource::PlainForge(root) => root.join("mods"),
+        HostSource::None => return Ok(None),
+    };
     let mods = scan(&src, true)?;
     if mods.is_empty() {
         return Ok(None);
@@ -342,10 +383,28 @@ mod tests {
     }
 
     #[test]
+    fn manual_fabric_launch_does_not_start_or_watch_forge() {
+        let root = std::env::temp_dir().join(format!("fc-fabric-launch-{}", std::process::id()));
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("ferrocraft-fabric.jar"), "shim").unwrap();
+        assert!(prepare_source(select_source(&root, None, None, true))
+            .unwrap()
+            .is_none());
+        assert!(Watch::for_source(select_source(&root, None, None, true)).is_none());
+        std::fs::write(root.join(".oneclient-mods.json"), "{}").unwrap();
+        assert!(matches!(
+            select_source(&root, None, None, true),
+            HostSource::Cluster(path) if path == root
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn watch_fires_once_after_a_versioned_zip_settles() {
         let d = std::env::temp_dir().join(format!("fc-watch-{}", std::process::id()));
         std::fs::create_dir_all(d.join("mods/1.8.9")).unwrap();
-        let mut w = Watch::new(&d);
+        let mut w = Watch::for_source(select_source(&d, None, None, false)).unwrap();
         let t0 = Instant::now();
         assert!(!w.poll(t0));
         std::fs::write(d.join("mods/1.8.9/a.zip"), "x").unwrap();

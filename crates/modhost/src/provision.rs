@@ -78,6 +78,11 @@ impl Config {
         lock.lock()?;
         discard_partial_version(&main, &format!("forge-{FORGE}"))?;
         discard_partial_version(&main, "1.8.9")?;
+        fetch(
+            "https://launchermeta.mojang.com/v1/packages/f6ad102bcaa53b1a58358f16e376d548d44933ec/1.8.json",
+            &main.join("assets/indexes/1.8.json"),
+            "f6ad102bcaa53b1a58358f16e376d548d44933ec",
+        )?;
         let mut installer =
             forge::Installer::new(forge::Loader::Forge, forge::Version::Name(FORGE.into()));
         let moj = installer.mojang_mut();
@@ -107,9 +112,6 @@ impl Config {
             .find(|(flag, _)| matches!(flag.as_str(), "-cp" | "-classpath"))
             .map(|(_, cp)| cp)
             .ok_or_else(|| Error::Missing("the Forge version has no class path".into()))?;
-        let libs = std::env::split_paths(cp)
-            .filter(|p| p.file_name().is_none_or(|name| name != "asm-all-5.0.3.jar"));
-
         let lib = lib_dir()?;
         fs::create_dir_all(&lib)?;
         match fs::remove_file(lib.join("asm-all-5.0.3.jar")) {
@@ -134,7 +136,7 @@ impl Config {
             fetch(url, &path, sha1)?;
             class_path.push(path);
         }
-        for jar in libs {
+        for jar in std::env::split_paths(cp) {
             link(&jar, &lib.join(lib_name(&jar, &main.join("versions"))))?;
             class_path.push(jar);
         }
@@ -176,6 +178,11 @@ impl forge::Handler for LegacyLibraries {
         if let forge::Event::Mojang(moj::Event::Base(base::Event::FilterLibraries { libraries })) =
             event
         {
+            libraries.retain(|lib| {
+                !(lib.name.group() == "org.ow2.asm"
+                    && lib.name.artifact() == "asm-all"
+                    && lib.name.version() == "5.0.3")
+            });
             for lib in libraries {
                 let Some(download) = lib.download.as_mut() else {
                     continue;

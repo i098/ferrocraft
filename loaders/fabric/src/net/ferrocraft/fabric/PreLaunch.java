@@ -53,6 +53,7 @@ public final class PreLaunch implements PreLaunchEntrypoint {
         System.out.println("ferrocraft-fabric: starting " + cmd);
         long start = System.currentTimeMillis();
         ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
+        pb.environment().put("FERROCRAFT_FABRIC_LAUNCH", "1");
         String fallback = pb.environment().remove("FERROCRAFT_ACCESS_TOKEN");
         if (token == null) token = fallback;
         // The mod folder of a OneClient cluster sits in the cluster directory, which holds .oneclient-mods.json.

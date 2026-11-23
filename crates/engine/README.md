@@ -20,6 +20,7 @@ The `FERROCRAFT_SERVER` variable is the fallback for `--server`. When `--server`
 The engine runs the mod host in the background.
 It uses a complete `FERROCRAFT_MODHOST_*` configuration first.
 Otherwise, it uses the OneClient cluster from `FERROCRAFT_CLUSTER` or the manifest in `--gameDir`.
+A Fabric launch with neither configuration does not start a mod host.
 For a plain game folder, the engine checks `mods/` and `mods/1.8.9/` for JAR and ZIP files.
 The engine installs Java 8 and Forge in its cache.
 It copies the archives to a separate game folder for each JVM and removes that folder after the JVM exits.

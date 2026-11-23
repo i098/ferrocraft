@@ -49,7 +49,7 @@ pub fn quads(
             .flat_map(|q| {
                 std::array::from_fn::<_, 4, _>(|i| Vertex {
                     pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
-                    uv: q.uv[i],
+                    uv: face_uv(q.face, q.pos[i]),
                     color: COLOR,
                     light: [1.0; 2],
                 })

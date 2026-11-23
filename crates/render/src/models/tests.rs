@@ -318,7 +318,8 @@ fn glass_pane_pack_models(case: &str) -> Models {
             "east=false,north=false,south=true,west=false":{"model":"empty"},
             "east=false,north=false,south=false,west=true":{"model":"broken_parent"},
             "east=true,north=true,south=false,west=false":{"model":"no_elements"},
-            "east=false,north=false,south=true,west=true":{"model":"unknown_builtin"}
+            "east=false,north=false,south=true,west=true":{"model":"unknown_builtin"},
+            "east=false,north=true,south=true,west=false":{"model":"two_sources"}
         }}"#,
     );
     write(
@@ -329,12 +330,12 @@ fn glass_pane_pack_models(case: &str) -> Models {
     write(
         "pack",
         "models/block/decor/glass_pane_nsew.json",
-        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/glass_pane_top"},"elements":[]}"#,
+        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/decor/glass_pane_top"},"elements":[]}"#,
     );
     write(
         "base",
         "models/block/pane_nsew.json",
-        r##"{"textures":{"edge":"blocks/glass"},"elements":[
+        r##"{"parent":"","textures":{"edge":"blocks/glass"},"elements":[
             {"from":[0,0,0],"to":[16,16,16],"shade":false,"faces":{
                 "up":{"texture":"#edge"},
                 "down":{"texture":"#edge"},
@@ -344,7 +345,7 @@ fn glass_pane_pack_models(case: &str) -> Models {
                 "east":{"texture":"#edge"}
             }},
             {"from":[7,0,7],"to":[9,16,9],"shade":false,"faces":{
-                "north":{"texture":"#edge"},
+                "north":{"texture":"#edge","uv":[0,0,16,16]},
                 "south":{"texture":"#edge","cullface":"down"}
             }}
         ]}"##,
@@ -361,6 +362,11 @@ fn glass_pane_pack_models(case: &str) -> Models {
         "models/block/unknown_builtin.json",
         r#"{"parent":"minecraft:builtin/unknown"}"#,
     );
+    write(
+        "base",
+        "models/block/two_sources.json",
+        r#"{"parent":"block/pane_nsew","elements":[{"from":[7,0,7],"to":[9,16,9],"faces":{"north":{"texture":"blocks/glass"}}}]}"#,
+    );
     let models = Models::load(&mut AssetSource::Layers(vec![
         AssetSource::Dir(dir.join("pack")),
         AssetSource::Dir(dir.join("base")),
@@ -373,7 +379,10 @@ fn glass_pane_pack_models(case: &str) -> Models {
 fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
     let models = glass_pane_pack_models("variants");
     let pane = 102 << 4;
-    assert_eq!(&*models.quads(pane, NB).unwrap()[0].tex, "glass_pane_top");
+    assert_eq!(
+        &*models.quads(pane, NB).unwrap()[0].tex,
+        "decor/glass_pane_top"
+    );
     for id in [18, 102, 161] {
         let east = [((1, 0), id << 4)];
         assert_eq!(&*models.quads(pane, &world(&east)).unwrap()[0].tex, "glass");
@@ -384,6 +393,7 @@ fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
         &[(0, 1)],
         &[(1, 0), (0, -1)],
         &[(0, 1), (-1, 0)],
+        &[(0, -1), (0, 1)],
     ] {
         let blocks: Vec<_> = neighbours.iter().map(|&p| (p, pane)).collect();
         assert!(models.quads(pane, &world(&blocks)).is_none());
@@ -454,9 +464,11 @@ fn glass_pane_cracks_follow_pack_geometry_and_hide_shared_faces() {
         let nb = |x, y, z| if (x, y, z) == (4, 69, 4) { below } else { 0 };
         let vertices = crate::crack::quads(at, pane, &nb, &models, fancy);
         assert_eq!(vertices.len(), count);
-        assert!(vertices.chunks_exact(4).any(|quad| quad
+        let edge = vertices
             .iter()
-            .all(|v| { (4.4375..=4.5625).contains(&v.pos[0]) && v.pos[2] == 4.4375 })));
+            .find(|v| v.pos == [4.5625, 71.0, 4.4375])
+            .unwrap();
+        assert_eq!(edge.uv, [7.0 / 16.0, 0.0]);
         assert_eq!(vertices.iter().any(|v| v.pos[2] == 4.5625), below == 0);
     }
 }

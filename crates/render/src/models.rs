@@ -118,7 +118,7 @@ struct Element {
     faces: [Option<Face>; 6],
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Model {
     textures: HashMap<String, String>,
     elements: std::rc::Rc<Vec<Element>>,
@@ -203,9 +203,21 @@ impl Loader<'_> {
         let path = format!("assets/minecraft/models/{name}.json");
         let json: serde_json::Map<String, Value> =
             serde_json::from_slice(&self.source.read(&path)?).ok()?;
-        let mut model = match json.get("parent") {
-            Some(parent) => self.model(parent.as_str()?, depth + 1)?,
-            None => Model::default(),
+        let parent = json.get("parent").map_or(Some(""), Value::as_str)?;
+        let elements = json
+            .get("elements")
+            .map_or(Some(&[][..]), |list| list.as_array().map(Vec::as_slice))?;
+        let mut model = match (parent.is_empty(), elements.is_empty()) {
+            (false, true) => self.model(parent, depth + 1)?,
+            (true, false) => Model {
+                textures: HashMap::new(),
+                elements: elements
+                    .iter()
+                    .map(parse_element)
+                    .collect::<Option<Vec<_>>>()?
+                    .into(),
+            },
+            _ => return None,
         };
         if let Some(t) = json.get("textures").and_then(Value::as_object) {
             for (k, v) in t {
@@ -213,19 +225,6 @@ impl Loader<'_> {
                     model.textures.insert(k.clone(), v.to_owned());
                 }
             }
-        }
-        if let Some(list) = json.get("elements") {
-            let list = list.as_array()?;
-            if !list.is_empty() {
-                model.elements = list
-                    .iter()
-                    .map(parse_element)
-                    .collect::<Option<Vec<_>>>()?
-                    .into();
-            }
-        }
-        if model.elements.is_empty() {
-            return None;
         }
         self.models.insert(name.to_owned(), model.clone());
         Some(model)
@@ -244,7 +243,11 @@ impl Loader<'_> {
             return None;
         }
         let r = r.strip_prefix("minecraft:").unwrap_or(r);
-        let name = r.rsplit('/').next()?;
+        let name = r.strip_prefix("blocks/").unwrap_or(r);
+        if name.contains(['\\', ':']) || name.split('/').any(|part| matches!(part, "" | "." | ".."))
+        {
+            return None;
+        }
         if let Some(known) = self.names.iter().find(|n| &***n == name) {
             return Some(known.clone());
         }

@@ -13,6 +13,7 @@ const BASE_VERSION: &str = "1.8.9";
 const VERSION_ID: &str = "ferrocraft-1.8.9";
 const BOOT_COORD: &str = "net.ferrocraft:boot:0.1.0";
 const FABRIC_JAR: &str = "ferrocraft-fabric.jar";
+const HOST_JAR: &str = "ferro-host.jar";
 const BOOT_MAIN: &str = "net.ferrocraft.boot.Main";
 const ENGINE_NAMES: [&str; 2] = ["ferrocraft-engine", "ferrocraft-engine.exe"];
 const ROOT_PREFIX: &str = "root ";
@@ -81,7 +82,12 @@ fn install_official(
     let json = serde_json::to_string_pretty(&version_json()).unwrap();
     fs::write(vdir.join(format!("{VERSION_ID}.json")), json).map_err(|e| e.to_string())?;
     copy(boot_jar, &jar_dst)?;
-    copy(engine, &engine_dir.join(engine_file_name(engine)))
+    copy(engine, &engine_dir.join(engine_file_name(engine)))?;
+    let host = engine.with_file_name(HOST_JAR);
+    if host.is_file() {
+        copy(&host, &engine_dir.join(HOST_JAR))?;
+    }
+    Ok(())
 }
 
 /// OneClient: the mod jar in each mods dir, one shared engine. Paths go into `written` first.
@@ -296,8 +302,16 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     } else {
         Vec::new()
     };
+    // No launcher at all: install into the default `.minecraft`, which `install_official` creates.
+    let mc = if mc.is_none() && mods.is_empty() && !explicit {
+        let d = env.minecraft_dir();
+        println!("no launcher found: creating {}", d.display());
+        Some(d)
+    } else {
+        mc
+    };
     if mc.is_none() && mods.is_empty() {
-        return Err("no launcher found. Start your launcher once, or pass --minecraft-dir or --oneclient-dir".into());
+        return Err("no launcher found in the given dir. Pass --minecraft-dir or --oneclient-dir with a valid folder".into());
     }
     let mut written = Vec::new();
     let res: Result<(), String> = (|| {
@@ -427,6 +441,7 @@ mod tests {
         }
         let mods = tmp.join("cluster/mods");
         let mut written = Vec::new();
+        fs::write(tmp.join("ferro-host.jar"), b"forge host").unwrap();
         install_official(
             &tmp.join("mc"),
             &tmp.join("boot.jar"),
@@ -442,6 +457,11 @@ mod tests {
             &mut written,
         )
         .unwrap();
+        assert_eq!(
+            fs::read(tmp.join("mc/ferrocraft/ferro-host.jar")).unwrap(),
+            b"forge host"
+        );
+        assert!(!tmp.join("home/.ferrocraft/ferro-host.jar").exists());
         let manifest = manifest_path(&tmp.join("home"));
         let roots = [
             tmp.join("mc"),
@@ -459,6 +479,7 @@ mod tests {
         let (removed, skipped) = uninstall(&manifest).unwrap();
         assert_eq!(removed.len(), written.len());
         assert!(skipped.is_empty());
+        assert!(!tmp.join("mc/ferrocraft/ferro-host.jar").exists());
         assert!(
             !mods.join(FABRIC_JAR).exists() && !tmp.join("mc/versions/ferrocraft-1.8.9").exists()
         );

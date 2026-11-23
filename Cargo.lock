@@ -923,9 +923,11 @@ dependencies = [
  "portablemc",
  "render",
  "resvg",
+ "serde_json",
  "sha1 0.10.7",
  "ureq",
  "winit",
+ "zip 9.5.1",
 ]
 
 [[package]]

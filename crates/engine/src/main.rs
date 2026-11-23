@@ -18,16 +18,20 @@ mod x11_focus;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() {
-    log::install_panic_hook();
     let started = std::time::Instant::now();
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let args = match args::parse(&argv, std::env::var("FERROCRAFT_SERVER").ok()) {
+    let fallback = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
+    std::env::remove_var("FERROCRAFT_ACCESS_TOKEN");
+    let args = match args::launch_token(&argv, std::io::stdin().lock(), fallback)
+        .and_then(|token| args::parse(&argv, std::env::var("FERROCRAFT_SERVER").ok(), token))
+    {
         Ok(a) => a,
         Err(e) => {
             eprintln!("ferrocraft-engine: {e}");
             std::process::exit(2);
         }
     };
+    log::install_panic_hook();
 
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);

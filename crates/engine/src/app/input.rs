@@ -11,6 +11,14 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 impl App {
     pub(super) fn route_window_event(&mut self, event: &WindowEvent) {
+        // F8 reloads the mods now (not a vanilla key).
+        if let WindowEvent::KeyboardInput { event: k, .. } = event {
+            if k.physical_key == PhysicalKey::Code(KeyCode::F8) && k.state.is_pressed() && !k.repeat
+            {
+                self.reload_mods();
+                return;
+            }
+        }
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
@@ -40,6 +48,20 @@ impl App {
         } else {
             self.input.on_window_event(event);
         }
+    }
+
+    /// Hot reload: kills the JVM, then starts a new host with a fresh config. The world and the server link stay; no
+    /// mod draws or answers until the new hello. A start in progress finishes, then reloads again.
+    pub(super) fn reload_mods(&mut self) {
+        if self.mods_boot.is_some() {
+            self.mods_reload_pending = true;
+            return;
+        }
+        if let Some(mut old) = self.mods.take() {
+            old.stop();
+        }
+        crate::log::line("mods changed: reloading the mod host");
+        self.mods_boot = Some(super::mod_boot::spawn(self.args.game_dir.clone()));
     }
 
     fn drag_container(&mut self) {

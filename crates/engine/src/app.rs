@@ -91,6 +91,10 @@ pub struct App {
     mods: Option<ferrocraft_modhost::ModHost>,
     /// The mod host while it starts on its thread.
     mods_boot: Option<std::sync::mpsc::Receiver<Option<ferrocraft_modhost::ModHost>>>,
+    /// A reload asked while the host starts: runs when the start ends.
+    mods_reload_pending: bool,
+    /// Hot reload of the mods folder.
+    mods_watch: Option<mod_boot::Watch>,
     /// The resource pack the server sent (S48): on top of the selected packs until the world is left.
     server_pack: Option<std::path::PathBuf>,
     /// `host:port` of the server last connected to, for the mod host's mirror.
@@ -203,6 +207,8 @@ impl App {
             hud: gui::Hud::default(),
             mods: None,
             mods_boot: None,
+            mods_reload_pending: false,
+            mods_watch: None,
             server_pack: None,
             server: String::new(),
             pack_mode: None,
@@ -1592,6 +1598,7 @@ impl ApplicationHandler for App {
         self.load_assets();
         self.load_sound();
         self.mods_boot = Some(mod_boot::spawn(self.args.game_dir.clone()));
+        self.mods_watch = Some(mod_boot::Watch::new(&self.args.game_dir));
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
@@ -1636,6 +1643,16 @@ impl ApplicationHandler for App {
         if let Some(done) = self.mods_boot.as_ref().and_then(mod_boot::poll) {
             self.mods = done;
             self.mods_boot = None;
+            if std::mem::take(&mut self.mods_reload_pending) {
+                self.reload_mods();
+            }
+        }
+        if self
+            .mods_watch
+            .as_mut()
+            .is_some_and(|w| w.poll(std::time::Instant::now()))
+        {
+            self.reload_mods();
         }
         if let Some(w) = &self.window {
             self.x11_focus.poll(w);

@@ -1,8 +1,10 @@
 //! Starts the mod host with no `FERROCRAFT_MODHOST_*` variables: the OneClient cluster gives the mods and
 //! `Config::provision` gives Java 8, Forge and the host jar.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::time::{Duration, Instant, SystemTime};
 
 use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost};
 use ferrocraft_oneclient as oneclient;
@@ -27,6 +29,73 @@ pub fn poll<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
         Err(TryRecvError::Empty) => None,
         Err(TryRecvError::Disconnected) => Some(None),
     }
+}
+
+/// Hot reload: sees jars come, go or change in the mods folder and says when the folder has been still for `SETTLE`.
+pub struct Watch {
+    dir: PathBuf,
+    seen: Vec<(OsString, SystemTime, u64)>,
+    last_scan: Option<Instant>,
+    changed_at: Option<Instant>,
+}
+
+const SCAN_EVERY: Duration = Duration::from_millis(500);
+/// A copy of a jar takes time: reload only after the folder stopped changing.
+const SETTLE: Duration = Duration::from_secs(1);
+
+impl Watch {
+    /// The folder is the one `start` reads the mods from: `FERROCRAFT_MODHOST_GAMEDIR` or the cluster, then `mods/`.
+    pub fn new(game_dir: &Path) -> Self {
+        let root = std::env::var_os("FERROCRAFT_MODHOST_GAMEDIR").map_or_else(
+            || cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir),
+            PathBuf::from,
+        );
+        let dir = root.join("mods");
+        Self {
+            seen: scan(&dir),
+            dir,
+            last_scan: None,
+            changed_at: None,
+        }
+    }
+
+    /// True once per change, after the change has settled.
+    pub fn poll(&mut self, now: Instant) -> bool {
+        if self
+            .last_scan
+            .is_some_and(|t| now.duration_since(t) < SCAN_EVERY)
+        {
+            return false;
+        }
+        self.last_scan = Some(now);
+        let jars = scan(&self.dir);
+        if jars != self.seen {
+            self.seen = jars;
+            self.changed_at = Some(now);
+        }
+        match self.changed_at {
+            Some(t) if now.duration_since(t) >= SETTLE => {
+                self.changed_at = None;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
+    let mut jars: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jar"))
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((e.file_name(), m.modified().ok()?, m.len()))
+        })
+        .collect();
+    jars.sort();
+    jars
 }
 
 fn start(game_dir: &Path) -> Option<ModHost> {
@@ -154,6 +223,20 @@ mod tests {
         assert_eq!(cluster(Some("/c".into()), gd), Path::new("/c"));
         assert_eq!(cluster(Some("".into()), gd), gd);
         assert_eq!(cluster(None, gd), gd);
+    }
+
+    #[test]
+    fn watch_fires_once_after_a_jar_settles() {
+        let d = std::env::temp_dir().join(format!("fc-watch-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("mods")).unwrap();
+        let mut w = Watch::new(&d);
+        let t0 = Instant::now();
+        assert!(!w.poll(t0));
+        std::fs::write(d.join("mods/a.jar"), "x").unwrap();
+        assert!(!w.poll(t0 + Duration::from_secs(1)));
+        assert!(w.poll(t0 + Duration::from_secs(3)));
+        assert!(!w.poll(t0 + Duration::from_secs(5)));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

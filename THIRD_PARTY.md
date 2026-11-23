@@ -37,7 +37,7 @@ The launcher reads OneClient’s database with `rusqlite` and `libsqlite3-sys` u
 The bundled [SQLite](https://www.sqlite.org/copyright.html) engine is in the public domain.
 The database reader also uses `fallible-iterator`, `fallible-streaming-iterator`, and `hashlink` under the Apache License 2.0 below.
 The launcher uses these ZIP and database dependencies under the MIT license below:
-`zip`, `crc32fast`, `flate2`, `indexmap`, `hashbrown`, `equivalent`, `crossbeam-utils`, `miniz_oxide`, `adler2`, and `simd-adler32`.
+`zip`, `crc32fast`, `flate2`, `indexmap`, `hashbrown`, `equivalent`, `crossbeam-utils`, `miniz_oxide`, `adler2`, `simd-adler32`, and `smallvec`.
 
 The upstream MIT files for some of these crates, including `fastrand`, do not contain a copyright line.
 The `rustix` and `linux-raw-sys` contributors retain their copyrights.
@@ -78,6 +78,7 @@ Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC (miniz_oxide)
 Copyright (c) 2017 Frommi (miniz_oxide)
 Copyright (c) 2017-2024 oyvindln (miniz_oxide)
 Copyright (c) [2021] [Marvin Countryman] (simd-adler32)
+Copyright (c) 2018 The Servo Project Developers (smallvec)
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated

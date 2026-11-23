@@ -1,5 +1,6 @@
 //! The mod loader of a OneClient cluster, and the jars of a Fabric cluster (used as they are: no twin lookup).
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -88,7 +89,9 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
                 file_name(&path)
             )));
         }
-        std::fs::write(&dest, bytes)?;
+        let mut staged = tempfile::NamedTempFile::new_in(out_dir)?;
+        staged.write_all(&bytes)?;
+        staged.persist(&dest).map_err(|e| e.error)?;
         out.jars.push(dest);
     }
     Ok(out)
@@ -152,6 +155,14 @@ mod tests {
             )
         };
         let out = d.join("out");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir(&out).unwrap();
+            let staged = out.join("ferrocraft-fabric.jar");
+            std::fs::write(&staged, b"old copy").unwrap();
+            std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
         std::fs::write(
             d.join(".oneclient-mods.json"),
             manifest(&sha1_hex(b"jar a")),
@@ -160,6 +171,11 @@ mod tests {
         let r = fabric_jars(&d, &out).unwrap();
         assert_eq!(r.jars, vec![out.join("ferrocraft-fabric.jar")]);
         assert_eq!(std::fs::read(&r.jars[0]).unwrap(), b"jar a");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&r.jars[0]).unwrap().permissions().mode() & 0o077, 0);
+        }
         assert!(!out.join("renamed.jar").exists());
 
         std::fs::write(d.join(".oneclient-mods.json"), manifest(&"0".repeat(40))).unwrap();

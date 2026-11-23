@@ -24,8 +24,19 @@ fn same_dir(a: &Path, b: &Path) -> bool {
             .is_some_and(|(a, b)| a == b)
 }
 
-fn same_name(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
-    a == b || cfg!(windows) && a.eq_ignore_ascii_case(b)
+#[cfg(target_os = "macos")]
+fn ignores_case(dir: &Path) -> bool {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    CString::new(dir.as_os_str().as_bytes()).map_or(true, |path| unsafe {
+        libc::pathconf(path.as_ptr(), libc::_PC_CASE_SENSITIVE) != 1
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ignores_case(_: &Path) -> bool {
+    cfg!(windows)
 }
 
 fn check_links(
@@ -91,7 +102,7 @@ pub fn check_uninstall(recorded: &[&Path], app_data: &Path) -> Result<(), String
 }
 
 fn check_uninstall_databases(recorded: &[&Path], app_data: &Path) -> Result<(), String> {
-    let (active, previous) = oneclient::data_dirs(app_data)
+    let (active, previous) = oneclient::data_dirs(app_data, true)
         .map_err(|e| format!("OneClient data directory: {e}"))?;
     let roots: BTreeSet<_> = recorded
         .iter()
@@ -113,11 +124,20 @@ fn check_uninstall_databases(recorded: &[&Path], app_data: &Path) -> Result<(), 
     Ok(())
 }
 
-fn same_destination(a: &Path, b: &Path) -> bool {
-    a.file_name()
-        .zip(b.file_name())
-        .is_some_and(|(a, b)| same_name(a, b))
-        && a.parent().zip(b.parent()).is_some_and(|(a, b)| same_dir(a, b))
+fn same_destination(jar: &Path, target: &Path) -> bool {
+    jar.parent()
+        .zip(jar.file_name())
+        .is_some_and(|(dir, name)| matches_destination(dir, name, target))
+}
+
+fn matches_destination(dir: &Path, name: &std::ffi::OsStr, target: &Path) -> bool {
+    target
+        .file_name()
+        .zip(target.parent())
+        .is_some_and(|(other, parent)| {
+            (name == other || name.eq_ignore_ascii_case(other) && ignores_case(dir))
+                && same_dir(dir, parent)
+        })
 }
 
 fn uninstall_refusal(
@@ -148,7 +168,7 @@ pub fn check_reinstall(mods: &[PathBuf]) -> Result<(), String> {
         check_links(
             root,
             |dir| mods.iter().any(|m| same_dir(m, dir)),
-            |target| target.file_name().is_some_and(|name| same_name(name, FABRIC_JAR.as_ref())),
+            |target| mods.iter().any(|dir| matches_destination(dir, FABRIC_JAR.as_ref(), target)),
             |target, exact| {
                 let kind = if exact { "mod at the install destination" } else { "bootstrap" };
                 format!("{}: remove the existing {kind} in OneClient before reinstalling", target.display())

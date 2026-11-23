@@ -464,8 +464,8 @@ fn install(o: &Opts, env: &Env) -> Result<(), String> {
     let oneclient = if explicit {
         None
     } else {
-        let (data, _) =
-            oneclient::data_dirs(&env.data).map_err(|e| format!("OneClient data directory: {e}"))?;
+        let (data, _) = oneclient::data_dirs(&env.data, false)
+            .map_err(|e| format!("OneClient data directory: {e}"))?;
         let app = oneclient::install(&env.home.join(".ferrocraft"))
             .map_err(|e| format!("OneClient install failed: {e}"))?;
         Some((app, default_oneclient_profile(&data)?))
@@ -695,6 +695,15 @@ mod tests {
         jar.finish().unwrap();
     }
 
+    fn managed_jar_name(mods: &Path) -> &'static str {
+        let alias = "FERROCRAFT-FABRIC.jar";
+        if mods.join(alias).is_file() {
+            alias
+        } else {
+            FABRIC_JAR
+        }
+    }
+
     #[test]
     fn uninstall_refuses_database_owned_mod_before_removing_anything() {
         let tmp = tempfile::tempdir().unwrap();
@@ -736,7 +745,7 @@ mod tests {
         fs::write(&new_engine, b"new engine").unwrap();
         let old_jar = fs::read(&cached).unwrap();
         fs::write(&jar, &old_jar).unwrap();
-        for manifest in [None, Some("invalid"), Some(r#"{"version":1,"cluster_id":2,"files":[]}"#)] {
+        for manifest in [None, Some("invalid"), Some(r#"{"version":1,"cluster_id":2,"entries":[]}"#)] {
             if let Some(contents) = manifest {
                 fs::write(profile.join(".oneclient-mods.json"), contents).unwrap();
             }
@@ -748,6 +757,8 @@ mod tests {
                 &mut Vec::new(),
             )
             .is_err());
+            assert_eq!(fs::read(&engine).unwrap(), b"engine");
+            assert_eq!(fs::read(&jar).unwrap(), old_jar);
         }
         db.execute("UPDATE cluster_artifacts SET enabled = 0", []).unwrap();
         fs::remove_file(profile.join(".oneclient-mods.json")).unwrap();
@@ -775,12 +786,15 @@ mod tests {
             assert!(version.is_dir());
             assert!(manifest.is_file());
         }
-        db.execute("UPDATE cluster_artifacts SET cluster_file_name = 'ferrocraft-fabric.jar'", [])
-            .unwrap();
-
         write_fabric_jar(&cached, "unrelated", "1.0.0");
         let unrelated = fs::read(&cached).unwrap();
         fs::write(&jar, &unrelated).unwrap();
+        db.execute(
+            "UPDATE cluster_artifacts SET cluster_file_name = ?",
+            [managed_jar_name(&mods)],
+        )
+        .unwrap();
+
         let err = install_fabric(
             std::slice::from_ref(&mods),
             &incoming,

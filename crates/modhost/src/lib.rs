@@ -183,12 +183,16 @@ impl ModHost {
             Loader::Fabric { agent, names } => {
                 cmd.arg(prefixed("-javaagent:", agent))
                     .arg(prefixed("-Dferro.tiny=", names))
-                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
-                    .args([
-                        "-cp",
-                        &cp,
-                        "net.fabricmc.loader.impl.launch.knot.KnotClient",
-                    ]);
+                    .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir));
+                if let Some(workspace) = &staging {
+                    cmd.arg(prefixed("-Dferro.workspace=", workspace.path()))
+                        .current_dir(&cfg.game_dir);
+                }
+                cmd.args([
+                    "-cp",
+                    &cp,
+                    "net.fabricmc.loader.impl.launch.knot.KnotClient",
+                ]);
             }
         }
         let child = cmd
@@ -1106,34 +1110,40 @@ mod tests {
         use std::time::Instant;
 
         let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("profile");
+        std::fs::create_dir(&profile).unwrap();
         let java = root.path().join("java");
         std::fs::write(&java, r#"#!/bin/sh
 while [ "$#" -ne 0 ] && [ "$1" != --gameDir ]; do
-    case "$1" in -Dferro.gameDir=*) agent_dir="${1#*=}";; esac
+    case "$1" in
+        -Dferro.gameDir=*) agent_dir="${1#*=}";;
+        -Dferro.workspace=*) stage="${1#*=}";;
+    esac
     shift
 done
-[ "$#" -ge 2 ] && [ "$agent_dir" = "$2" ] && cd "$2" || exit 1
-cat mods/*.jar > loaded || exit 1
-while [ ! -f exit ]; do sleep 0.02; done
+[ "$#" -ge 2 ] && [ "$agent_dir" = "$2" ] && [ . -ef "$2" ] && [ -n "$stage" ] || exit 1
+cat "$stage"/mods/*.jar > "$stage/loading" || exit 1
+mkdir -p config && cp "$stage/loading" "config/$(cat "$stage/loading").txt" || exit 1
+mv "$stage/loading" "$stage/loaded" || exit 1
+while [ ! -f "$stage/exit" ]; do sleep 0.02; done
 "#).unwrap();
         std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
         let launch = |name: &str| {
             let dir = tempfile::tempdir_in(root.path()).unwrap();
-            let path = dir.path().join("game");
-            std::fs::create_dir_all(path.join("mods")).unwrap();
-            std::fs::write(path.join("mods").join(name), name).unwrap();
+            std::fs::create_dir(dir.path().join("mods")).unwrap();
+            std::fs::write(dir.path().join("mods").join(name), name).unwrap();
             let cfg = Config {
                 loader: Loader::Fabric { agent: root.path().join("agent.jar"), names: root.path().join("names.tiny") },
                 java: java.clone(),
                 class_path: Vec::new(),
-                game_dir: path.clone(),
+                game_dir: profile.clone(),
                 assets_dir: root.path().to_path_buf(),
             };
             let owner = dir.path().to_path_buf();
-            (ModHost::start_staged(&cfg, dir).unwrap(), path, owner)
+            (ModHost::start_staged(&cfg, dir).unwrap(), owner)
         };
-        let (_a, first, first_owner) = launch("first.jar");
-        let (mut b, second, second_owner) = launch("second.jar");
+        let (_a, first) = launch("first.jar");
+        let (mut b, second) = launch("second.jar");
         let wait_for = |ready: &dyn Fn() -> bool| {
             let until = Instant::now() + Duration::from_secs(5);
             while !ready() {
@@ -1144,10 +1154,11 @@ while [ ! -f exit ]; do sleep 0.02; done
         wait_for(&|| std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
             && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar"));
         std::fs::write(first.join("exit"), []).unwrap();
-        wait_for(&|| !first_owner.exists());
+        wait_for(&|| !first.exists());
+        assert_eq!(std::fs::read(profile.join("config/first.jar.txt")).unwrap(), b"first.jar");
         assert!(second.is_dir());
         b.stop();
-        assert!(!second_owner.exists());
+        assert!(!second.exists());
     }
 
     pub(super) fn link() -> Arc<Link> {

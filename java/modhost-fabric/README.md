@@ -31,8 +31,9 @@ Start `Config::provision_fabric()` with the jar, `ferro-names.jar` (`java/modhos
 It checks mod entry points, Mixin errors, and the host handshake.
 It uses `java/modhost-accept/mods-fabric.txt` by default.
 Set `FERRO_MODS_LIST` to `java/modhost-accept/mods-ornithe.txt` to test Ornithe mods.
-Set `FERRO_JAVA_HOME`, `FERRO_LIB`, and `FABRIC_LOADER_JAR` as for `build.sh`.
-Set `FERRO_FABRIC_CONFIG` to the file with the Java path, game directory, class path, and runtime directory.
+Set `FERRO_JAVA_HOME` as for `build.sh`.
+Set `FERRO_FABRIC_CONFIG` to the file from the provisioning test.
+The file lists the Java path, game directory, class path, runtime directory, and Ornithe staging fixture.
 Set `FERRO_FABRIC_CONFIG_OUT` to write this file from the ignored provisioning tests.
 Set `HOME` to an empty directory and set `FERROCRAFT_MODHOST_JAR` and `FERROCRAFT_NAMES_JAR`.
 Run `cargo test -p ferrocraft-modhost clean_home_gives_config_and_name_table -- --ignored` for Legacy Fabric.

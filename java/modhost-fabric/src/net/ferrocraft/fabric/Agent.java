@@ -19,6 +19,8 @@ import net.ferrocraft.host.BridgeTransformer;
 import net.ferrocraft.host.HookIndex;
 import net.ferrocraft.host.MinecraftBridgeTransformer;
 import net.ferrocraft.host.ShellTransformer;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -43,6 +45,12 @@ public final class Agent {
         names.toFile().deleteOnExit();
         flatten(Paths.get(System.getProperty("ferro.tiny")), names);
         System.setProperty("ferro.names", names.toString());
+        String workspace = System.getProperty("ferro.workspace");
+        if (workspace != null) {
+            Path stage = Paths.get(workspace).toAbsolutePath();
+            System.setProperty("fabric.modsFolder", stage.resolve("mods").toString());
+            inst.addTransformer(new WorkspacePaths(stage), false);
+        }
         // Loader 0.20 lets Knot read only the class path jars it knows; this jar holds the host classes the swapped Main starts.
         try {
             String self = Paths.get(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
@@ -78,6 +86,46 @@ public final class Agent {
                 w.write(from + "\t" + to);
                 w.newLine();
             }
+        }
+    }
+
+    private static final class WorkspacePaths implements ClassFileTransformer {
+        private final Path stage;
+
+        WorkspacePaths(Path stage) {
+            this.stage = stage;
+        }
+
+        @Override
+        public byte[] transform(ClassLoader loader, String cn, Class<?> redefined, ProtectionDomain pd, byte[] bytes) {
+            if ("net/fabricmc/loader/impl/FabricLoaderImpl".equals(cn)) {
+                return redirect(bytes, "setup", ".fabric", stage.resolve(".fabric"));
+            }
+            if ("net/fabricmc/loader/impl/metadata/DependencyOverrides".equals(cn)) {
+                String file = "fabric_loader_dependencies.json";
+                return redirect(bytes, "<init>", file, stage.resolve("config").resolve(file));
+            }
+            return null;
+        }
+
+        private static byte[] redirect(byte[] bytes, String method, String original, Path replacement) {
+            ClassReader reader = new ClassReader(bytes);
+            ClassWriter writer = new ClassWriter(reader, 0);
+            String path = replacement.toString();
+            reader.accept(new ClassVisitor(Opcodes.ASM5, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, desc, sig, exceptions);
+                    if (!method.equals(name)) return mv;
+                    return new MethodVisitor(Opcodes.ASM5, mv) {
+                        @Override
+                        public void visitLdcInsn(Object value) {
+                            super.visitLdcInsn(original.equals(value) ? path : value);
+                        }
+                    };
+                }
+            }, 0);
+            return writer.toByteArray();
         }
     }
 

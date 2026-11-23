@@ -121,9 +121,6 @@ fn install_fabric(
     installed_mods::check_reinstall(mods_dirs, &recorded, storage.as_ref())?;
     let (source, required) = runtime;
     let jars = fabric_runtime(source, required)?;
-    if let Some((path, name)) = new_profile {
-        publish_oneclient_profile(path, name).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
     for jar in jars.iter().flatten() {
         let dst = engine_dir.join(jar.file_name().unwrap());
         stage_file(jar, &dst)?;
@@ -132,6 +129,11 @@ fn install_fabric(
     let engine_dst = engine_dir.join(engine_file_name(engine));
     stage_file(engine, &engine_dst)?;
     written.push(engine_dst);
+    if let Some((path, name)) = new_profile {
+        publish_oneclient_profile(path, name, fabric_jar)?;
+        written.push(path.join("mods").join(FABRIC_JAR));
+        return Ok(());
+    }
     for dir in mods_dirs {
         let dst = dir.join(FABRIC_JAR);
         stage_file(fabric_jar, &dst)?;
@@ -503,10 +505,22 @@ fn choose_oneclient_profile(data: &Path) -> Result<(PathBuf, String, bool), Stri
     prepare().map_err(|e| format!("{}: {e}", data.display()))
 }
 
-fn publish_oneclient_profile(profile: &Path, name: &str) -> std::io::Result<()> {
+fn publish_oneclient_profile(profile: &Path, name: &str, fabric_jar: &Path) -> Result<(), String> {
     let clusters = profile.parent().unwrap();
-    fs::create_dir_all(clusters)?;
-    let stage = tempfile::tempdir_in(clusters.parent().unwrap())?;
+    let prepare = || -> std::io::Result<_> {
+        fs::create_dir_all(clusters.parent().unwrap())?;
+        let stage = tempfile::tempdir_in(clusters.parent().unwrap())?;
+        write_profile_metadata(stage.path(), name)?;
+        Ok(stage)
+    };
+    let error = |e| format!("{}: {e}", profile.display());
+    let stage = prepare().map_err(error)?;
+    stage_file(fabric_jar, &stage.path().join("mods").join(FABRIC_JAR))?;
+    fs::create_dir_all(clusters).map_err(error)?;
+    fs::rename(stage.path(), profile).map_err(error)
+}
+
+fn write_profile_metadata(profile: &Path, name: &str) -> std::io::Result<()> {
     let identity = json!({
         "name": name,
         "mc_version": BASE_VERSION,
@@ -514,9 +528,8 @@ fn publish_oneclient_profile(profile: &Path, name: &str) -> std::io::Result<()> 
         "kind": "modded",
         "user_created": true
     });
-    fs::write(stage.path().join(".instance.json"), identity.to_string())?;
-    fs::write(stage.path().join(PROFILE_MARKER), b"1\n")?;
-    fs::rename(stage.path(), profile)
+    fs::write(profile.join(".instance.json"), identity.to_string())?;
+    fs::write(profile.join(PROFILE_MARKER), b"1\n")
 }
 
 fn owned_mods_dir(profile: &Path) -> Result<PathBuf, String> {
@@ -706,7 +719,8 @@ mod tests {
     fn default_oneclient_profile(data: &Path) -> Result<(PathBuf, String), String> {
         let (path, name, fresh) = choose_oneclient_profile(data)?;
         if fresh {
-            publish_oneclient_profile(&path, &name).map_err(|e| e.to_string())?;
+            fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            write_profile_metadata(&path, &name).map_err(|e| e.to_string())?;
         }
         Ok((path, name))
     }
@@ -1375,6 +1389,24 @@ mod tests {
         );
         assert!(res.is_err());
         assert_eq!(written, [runtime_dir.join(FABRIC_RUNTIME[0])]);
+        fs::remove_dir(blocked).unwrap();
+        let profile = tmp.join("data/clusters/ferrocraft-1.8.9");
+        let mods = profile.join("mods");
+        written.clear();
+        let err = install_fabric(
+            std::slice::from_ref(&mods),
+            &tmp.join("missing.jar"),
+            &tmp.join("engine"),
+            &tmp.join("home"),
+            |_| Ok(None),
+            &mut written,
+            (&tmp, true),
+            Some((&profile, "Ferrocraft 1.8.9")),
+        )
+        .unwrap_err();
+        assert!(err.contains(FABRIC_JAR), "{err}");
+        assert!(!profile.exists());
+        assert!(!written.contains(&mods.join(FABRIC_JAR)));
         fs::remove_dir_all(&tmp).unwrap();
     }
 

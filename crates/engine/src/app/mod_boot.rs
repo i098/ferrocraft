@@ -164,7 +164,7 @@ fn start_ornithe(cluster: &Path, loader: oneclient::Loader) -> Option<ModHost> {
         Err(e) => return fail(&e),
     };
     stage(cluster, loader, &workspace.path().join("mods"))?;
-    match Config::provision_ornithe(workspace.path()) {
+    match Config::provision_ornithe(cluster, workspace.path()) {
         Ok(cfg) => started(ModHost::start_staged(&cfg, workspace)),
         Err(e) => fail(&e),
     }

@@ -15,7 +15,7 @@ pub fn require_closed() -> Result<(), String> {
         command.args(["/FO", "CSV", "/NH"]);
         command
     } else {
-        let mut command = Command::new("/bin/ps");
+        let mut command = Command::new("ps");
         command.args(["-A", "-o", "comm="]);
         command
     };
@@ -448,7 +448,6 @@ fn registered_windows() -> io::Result<(Option<PathBuf>, bool)> {
             Err(e) => return Err(io::Error::other(format!("Cannot read {subkey}: {e}"))),
         };
         let protocol = subkey == WINDOWS_PROTOCOL_COMMAND;
-        registered |= !protocol;
         let dir = match key.get_string(value) {
             Ok(dir) => dir,
             Err(e) if e.code().0 == FILE_NOT_FOUND => continue,

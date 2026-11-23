@@ -169,11 +169,22 @@ fn run(command: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
-pub fn install(base: &Path) -> io::Result<PathBuf> {
+pub fn prepare(base: &Path, app_data: &Path) -> io::Result<(PathBuf, PathBuf)> {
     #[cfg(windows)]
-    if let Some(app) = installed_windows(&base.join(format!("oneclient-{VERSION}")))? {
-        return Ok(app);
-    }
+    let installed = installed_windows(&base.join(format!("oneclient-{VERSION}")))?;
+    #[cfg(not(windows))]
+    let installed: Option<PathBuf> = None;
+    let (data, _) = data_dirs(app_data, false)
+        .map_err(|e| io::Error::new(e.kind(), format!("OneClient data directory: {e}")))?;
+    let app = match installed {
+        Some(app) => app,
+        None => install(base)
+            .map_err(|e| io::Error::new(e.kind(), format!("OneClient install failed: {e}")))?,
+    };
+    Ok((app, data))
+}
+
+fn install(base: &Path) -> io::Result<PathBuf> {
     let Some((asset, digest, executable)) =
         release_asset(std::env::consts::OS, std::env::consts::ARCH)
     else {

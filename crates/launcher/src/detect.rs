@@ -54,8 +54,12 @@ fn is_fabric_189(dir: &Path) -> bool {
         };
         if instance.get("mc_loader").is_some() {
             let loader = &instance["mc_loader"];
-            return instance["mc_version"] == "1.8.9"
-                && (loader == 4 || loader == "Ornithe" || loader == 5);
+            if loader != 4 {
+                return instance["mc_version"] == "1.8.9" && loader == "Ornithe";
+            }
+            if instance["mc_version"] != "1.8.9" {
+                return false;
+            }
         }
     }
     let mut text = dir
@@ -125,6 +129,7 @@ mod tests {
             ("ornithe", "1.8.9", serde_json::json!("Ornithe")),
             ("ornithe-numeric", "1.8.9", serde_json::json!(5)),
             ("fabric-numeric", "1.8.9", serde_json::json!(4)),
+            ("pvp", "1.8.9", serde_json::json!(4)),
             ("fabric-string", "1.8.9", serde_json::json!("Fabric")),
             ("forge", "1.8.9", serde_json::json!(1)),
             ("other-version", "1.21", serde_json::json!("Ornithe")),
@@ -135,7 +140,7 @@ mod tests {
                 serde_json::json!({
                     "mc_version": version,
                     "mc_loader": loader,
-                    "description": "1.8.9 Ornithe Fabric"
+                    "description": if name == "fabric-numeric" { "Fabric" } else { "PvP" }
                 })
                 .to_string(),
             )
@@ -147,8 +152,7 @@ mod tests {
             found,
             [
                 c.join("fabric-numeric/mods"),
-                c.join("ornithe/mods"),
-                c.join("ornithe-numeric/mods")
+                c.join("ornithe/mods")
             ]
         );
         fs::remove_dir_all(root).unwrap();

@@ -92,12 +92,7 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
             continue;
         }
         let dest: PathBuf = out_dir.join(file_name(&path));
-        if out.jars.contains(&dest) {
-            return Err(Error::Format(format!(
-                "two mods named {}",
-                file_name(&path)
-            )));
-        }
+        check_staging_destination(&out.jars, &dest)?;
         #[cfg(windows)]
         let mut staged = crate::private_file::create(out_dir)?;
         #[cfg(not(windows))]
@@ -107,6 +102,16 @@ pub fn fabric_jars(cluster: &Path, out_dir: &Path) -> Result<Resolved, Error> {
         out.jars.push(dest);
     }
     Ok(out)
+}
+
+fn check_staging_destination(staged: &[PathBuf], dest: &Path) -> Result<(), Error> {
+    let exists = !staged.is_empty() && dest.try_exists()?;
+    for previous in staged {
+        if previous == dest || (exists && same_file::is_same_file(previous, dest)?) {
+            return Err(Error::Format(format!("two mods target {}", dest.display())));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -198,6 +203,40 @@ mod tests {
         assert!(matches!(fabric_jars(&d, &out), Err(Error::Sha1 { .. })));
         std::fs::remove_file(ordinary).unwrap();
         assert!(matches!(fabric_jars(&d, &out), Err(Error::Format(_))));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn fabric_jars_follow_destination_case_rules() {
+        let d = temp("case-alias");
+        let out = d.join("out");
+        std::fs::create_dir(&out).unwrap();
+        std::fs::write(out.join("Probe"), []).unwrap();
+        let aliases = out.join("probe").exists();
+        std::fs::remove_file(out.join("Probe")).unwrap();
+        std::fs::create_dir_all(d.join("mods/a")).unwrap();
+        std::fs::create_dir_all(d.join("mods/b")).unwrap();
+        let first = mod_jar("first");
+        let second = mod_jar("second");
+        std::fs::write(d.join("mods/a/Hud.jar"), &first).unwrap();
+        std::fs::write(d.join("mods/b/hud.jar"), &second).unwrap();
+        std::fs::write(
+            d.join(".oneclient-mods.json"),
+            format!(
+                r#"{{"entries":[{{"path":"mods/a/Hud.jar","hash":"{}"}},{{"path":"mods/b/hud.jar","hash":"{}"}}]}}"#,
+                sha1_hex(&first),
+                sha1_hex(&second),
+            ),
+        )
+        .unwrap();
+        let result = fabric_jars(&d, &out);
+        if aliases {
+            assert!(matches!(result, Err(Error::Format(_))));
+        } else {
+            assert_eq!(result.unwrap().jars.len(), 2);
+            assert_eq!(std::fs::read(out.join("hud.jar")).unwrap(), second);
+        }
+        assert_eq!(std::fs::read(out.join("Hud.jar")).unwrap(), first);
         std::fs::remove_dir_all(d).unwrap();
     }
 

@@ -84,8 +84,7 @@ fn check_links(
                 return Err(refusal(&target, true).into());
             }
             let cached = root.join(row.get_ref(2)?.as_str()?);
-            let bootstrap = ferrocraft_oneclient::is_bootstrap(File::open(&cached)?)
-                .map_err(|e| format!("cannot identify the mod at {} using {}: {e}", target.display(), cached.display()))?;
+            let bootstrap = cached_bootstrap(&cached, &target)?;
             if bootstrap {
                 return Err(refusal(&target, false).into());
             }
@@ -93,6 +92,17 @@ fn check_links(
         Ok(())
     };
     inspect().map_err(|e| format!("OneClient database {}: {e}", database.display()))
+}
+
+fn cached_bootstrap(cached: &Path, target: &Path) -> Result<bool, String> {
+    let identify = || ferrocraft_oneclient::is_bootstrap(File::open(cached)?);
+    identify().map_err(|e| {
+        format!(
+            "cannot identify the mod at {} using {}: {e}",
+            target.display(),
+            cached.display()
+        )
+    })
 }
 
 pub fn check_uninstall(recorded: &[&Path], app_data: &Path) -> Result<(), String> {
@@ -178,12 +188,17 @@ fn uninstall_refusal(
     format!("{issue} {}; {recovery}", target.display())
 }
 
-pub fn check_reinstall(mods: &[PathBuf]) -> Result<(), String> {
-    let roots: BTreeSet<_> = mods.iter().filter_map(|dir| data_root(dir)).collect();
+pub fn check_reinstall(mods: &[PathBuf], recorded: &[&Path]) -> Result<(), String> {
+    let profiles = || {
+        mods.iter()
+            .map(PathBuf::as_path)
+            .chain(recorded.iter().filter_map(|jar| jar.parent()))
+    };
+    let roots: BTreeSet<_> = profiles().filter_map(data_root).collect();
     for root in roots {
         check_links(
             root,
-            |dir| mods.iter().any(|m| same_dir(m, dir)),
+            |dir| profiles().any(|profile| same_dir(profile, dir)),
             |target| mods.iter().any(|dir| matches_destination(dir, FABRIC_JAR.as_ref(), target)),
             |target, exact| {
                 let kind = if exact { "mod at the install destination" } else { "bootstrap" };

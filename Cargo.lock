@@ -975,6 +975,7 @@ name = "ferrocraft-oneclient"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "same-file",
  "serde_json",
  "sha1 0.10.7",
  "tempfile",

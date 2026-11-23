@@ -12,9 +12,10 @@ The default install does not add the mod to other OneClient profiles.
 It also installs Ferrocraft into the official Minecraft directory if that directory exists.
 Exit OneClient if it is running, then open it again to load the profile.
 The installer reads the boot jar, mod jar, and engine next to its executable.
+The release installer reads both Fabric host JARs from that directory, even when you use `--engine`.
 An explicit `--minecraft-dir DIR` or `--oneclient-dir DIR` limits installation to the selected launchers and skips the download.
 Use `--fabric-jar JAR` to select a different mod jar.
-Before you reinstall, remove the bootstrap mod in OneClient if OneClient already manages it.
+Before reinstalling, remove the bootstrap mod from each profile where OneClient already manages a Ferrocraft install.
 
 The installer records Ferrocraft files in `~/.ferrocraft/install-manifest.txt` and copies itself to `~/.ferrocraft`.
 The uninstall command removes those files, but leaves OneClient and the profile data.

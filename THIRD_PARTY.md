@@ -23,6 +23,9 @@ The Ferrocraft mod jar does not contain Fabric Loader.
 The `ferro-names.jar` file includes [Mapping IO 0.9.2](https://repo.maven.apache.org/maven2/net/fabricmc/mapping-io/0.9.2/mapping-io-0.9.2-sources.jar).
 Copyright (c) 2021 FabricMC. The Apache License 2.0 text is below.
 
+The engine uses `same-file` and, on Windows, `winapi-util` under the MIT license below.
+Copyright (c) 2017 Andrew Gallant.
+
 ## Launcher dependencies
 
 The Ferrocraft launcher uses these dependencies under the MIT license.

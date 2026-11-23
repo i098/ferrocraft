@@ -90,7 +90,7 @@ pub struct Quad {
     pub face: usize,
     /// `cullface` after the blockstate rotation: hidden when that neighbour is opaque.
     pub cull: Option<usize>,
-    /// The element's `shade`: false draws at full brightness.
+    pub on_boundary: bool,
     pub shade: bool,
     /// The face has a `tintindex`: the block's biome or fixed tint multiplies the texel.
     pub tint: bool,
@@ -188,19 +188,25 @@ struct Loader<'a> {
 }
 
 impl Loader<'_> {
-    fn json(&mut self, path: &str) -> Option<Value> {
-        serde_json::from_slice(&self.source.read(&format!("assets/minecraft/{path}.json"))?).ok()
-    }
-
     /// `ModelBlock` with its `parent` chain: the child's textures win, its elements replace the parent's.
     fn model(&mut self, name: &str, depth: u8) -> Option<Model> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        if depth != 0 && name.starts_with("builtin/") {
+            return Some(Model::default());
+        }
+        if depth > 16 {
+            return None;
+        }
         if let Some(m) = self.models.get(name) {
             return Some(m.clone());
         }
-        let json = self.json(&format!("models/{}", with_prefix(name)))?;
-        let mut model = match json.get("parent").and_then(Value::as_str) {
-            Some(p) if depth < 16 && !p.starts_with("builtin/") => self.model(p, depth + 1)?,
-            _ => Model::default(),
+        let prefix = if name.contains('/') { "" } else { "block/" };
+        let path = format!("assets/minecraft/models/{prefix}{name}.json");
+        let json: serde_json::Map<String, Value> =
+            serde_json::from_slice(&self.source.read(&path)?).ok()?;
+        let mut model = match json.get("parent") {
+            Some(parent) => self.model(parent.as_str()?, depth + 1)?,
+            None => Model::default(),
         };
         if let Some(t) = json.get("textures").and_then(Value::as_object) {
             for (k, v) in t {
@@ -209,11 +215,12 @@ impl Loader<'_> {
                 }
             }
         }
-        if let Some(list) = json.get("elements").and_then(Value::as_array) {
+        if let Some(list) = json.get("elements") {
             model.elements = list
+                .as_array()?
                 .iter()
-                .filter_map(parse_element)
-                .collect::<Vec<_>>()
+                .map(parse_element)
+                .collect::<Option<Vec<_>>>()?
                 .into();
         }
         self.models.insert(name.to_owned(), model.clone());
@@ -232,6 +239,7 @@ impl Loader<'_> {
         if r.starts_with('#') {
             return None;
         }
+        let r = r.strip_prefix("minecraft:").unwrap_or(r);
         let name = r.rsplit('/').next()?;
         if let Some(known) = self.names.iter().find(|n| &***n == name) {
             return Some(known.clone());
@@ -241,14 +249,8 @@ impl Loader<'_> {
         Some(new)
     }
 
-    fn bake(&mut self, spec: &Value) -> Vec<Quad> {
-        let Some(model) = spec
-            .get("model")
-            .and_then(Value::as_str)
-            .and_then(|m| self.model(m, 0))
-        else {
-            return Vec::new();
-        };
+    fn bake(&mut self, spec: &Value) -> Option<Vec<Quad>> {
+        let model = self.model(spec.get("model")?.as_str()?, 0)?;
         let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
         let (x, y) = (turn("x"), turn("y"));
         let uvlock = spec.get("uvlock").and_then(Value::as_bool) == Some(true);
@@ -256,21 +258,11 @@ impl Loader<'_> {
         for el in model.elements.iter() {
             for (f, face) in el.faces.iter().enumerate() {
                 let Some(face) = face else { continue };
-                let Some(tex) = self.texture(&model, &face.tex) else {
-                    continue;
-                };
+                let tex = self.texture(&model, &face.tex)?;
                 quads.push(bake_quad(el, f, face, tex, (x, y), uvlock));
             }
         }
-        quads
-    }
-}
-
-fn with_prefix(name: &str) -> String {
-    if name.contains('/') {
-        name.to_owned()
-    } else {
-        format!("block/{name}")
+        Some(quads)
     }
 }
 
@@ -336,12 +328,21 @@ fn bake_quad(
     if uvlock {
         lock_uv(&mut uv, &pos, face_after_turn, face.turns);
     }
+    let axis = [1, 2, 0][face_after_turn / 2];
+    let plane = pos[0][axis];
+    let reaches_boundary = if NORMALS[face_after_turn][axis] < 0.0 {
+        plane < 0.0001
+    } else {
+        plane > 0.9999
+    };
+    let on_boundary = reaches_boundary && pos[1..].iter().all(|p| p[axis] == plane);
     Quad {
         pos,
         uv,
         tex,
         face: face_after_turn,
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
+        on_boundary,
         shade: el.shade,
         tint: face.tint,
     }
@@ -369,19 +370,29 @@ impl Models {
             .chain(&variants::STAIRS)
             .chain(&variants::GATES)
         {
-            let Some(json) = loader.json(&format!("blockstates/{name}")) else {
-                continue;
-            };
-            let Some(variants) = json.get("variants").and_then(Value::as_object) else {
-                continue;
-            };
+            let mut variants = serde_json::Map::new();
+            for bytes in loader
+                .source
+                .read_all(&format!("assets/minecraft/blockstates/{name}.json"))
+            {
+                let Ok(Value::Object(mut json)) = serde_json::from_slice(&bytes) else {
+                    continue;
+                };
+                if let Some(Value::Object(layer)) = json.remove("variants") {
+                    variants.extend(layer);
+                }
+            }
             let mut baked = HashMap::new();
             for (key, spec) in variants {
                 // A list is a weighted random choice; the first entry stands for it.
-                let spec = spec.as_array().and_then(|a| a.first()).unwrap_or(spec);
-                baked.insert(key.clone(), loader.bake(spec));
+                let spec = spec.as_array().and_then(|a| a.first()).unwrap_or(&spec);
+                if let Some(quads) = loader.bake(spec) {
+                    baked.insert(key, quads);
+                }
             }
-            states.insert((*name).to_owned(), baked);
+            if !baked.is_empty() {
+                states.insert((*name).to_owned(), baked);
+            }
         }
         Models {
             states,

@@ -749,7 +749,8 @@ impl Mesher<'_> {
             }) {
                 continue;
             }
-            let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));
+            let light_face = q.cull.or(q.on_boundary.then_some(q.face));
+            let light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
             let k = if q.shade {
                 self.lit(SHADE[q.face])
             } else {

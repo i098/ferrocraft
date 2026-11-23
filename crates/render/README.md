@@ -7,7 +7,8 @@ wgpu renderer for the 1.8.9 client: face-culled chunk meshes, block textures fro
 `gui` crate lays out.
 
 Clear glass panes use the 1.8.9 blockstate models and their separate edge texture.
-Without model assets, the renderer uses its box shapes.
+Resource packs override individual blockstate variants and leave other variants in place.
+If a pane model fails to load, the renderer uses the shared pane box shapes.
 
 Entry points: `Renderer::new` (window), `Renderer::new_offscreen` (tests, screenshots),
 `upload_chunk`, `remove_chunk`, `set_block`, `set_selection`, `resize`, `render`, `render_to_rgba`, `font`.

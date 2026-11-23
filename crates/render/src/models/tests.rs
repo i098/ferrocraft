@@ -17,7 +17,7 @@ fn bake(model: &str, spec: &str) -> Vec<Quad> {
     let spec = serde_json::from_str(spec).unwrap();
     let quads = loader.bake(&spec);
     std::fs::remove_dir_all(dir).ok();
-    quads
+    quads.unwrap()
 }
 
 fn sorted(mut v: Vec<([i32; 3], [i32; 2])>) -> Vec<([i32; 3], [i32; 2])> {
@@ -300,6 +300,127 @@ const NORTH: usize = 2;
 const SOUTH: usize = 3;
 const WEST: usize = 4;
 const EAST: usize = 5;
+
+fn glass_pane_pack_models(case: &str) -> Models {
+    let dir = std::env::temp_dir().join(format!("fc-pane-pack-{}-{case}", std::process::id()));
+    let write = |layer: &str, path: &str, json: &str| {
+        let file = dir.join(layer).join("assets/minecraft").join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, json).unwrap();
+    };
+    write(
+        "base",
+        "blockstates/glass_pane.json",
+        r#"{"variants":{
+            "east=false,north=false,south=false,west=false":{"model":"pane_nsew"},
+            "east=true,north=false,south=false,west=false":[{"model":"pane_nsew"}],
+            "east=false,north=true,south=false,west=false":{"model":"missing"},
+            "east=false,north=false,south=true,west=false":{"model":"empty"},
+            "east=false,north=false,south=false,west=true":{"model":"broken_parent"}
+        }}"#,
+    );
+    write(
+        "pack",
+        "blockstates/glass_pane.json",
+        r#"{"variants":{"east=false,north=false,south=false,west=false":{"model":"minecraft:glass_pane_nsew"}}}"#,
+    );
+    write(
+        "pack",
+        "models/block/glass_pane_nsew.json",
+        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/glass_pane_top"}}"#,
+    );
+    write(
+        "base",
+        "models/block/pane_nsew.json",
+        r##"{"textures":{"edge":"blocks/glass"},"elements":[
+            {"from":[0,0,0],"to":[16,16,16],"shade":false,"faces":{
+                "up":{"texture":"#edge"},
+                "down":{"texture":"#edge"},
+                "north":{"texture":"#edge","cullface":"north"},
+                "south":{"texture":"#edge"},
+                "west":{"texture":"#edge"},
+                "east":{"texture":"#edge"}
+            }},
+            {"from":[7,0,7],"to":[9,16,9],"shade":false,"faces":{
+                "north":{"texture":"#edge"},
+                "south":{"texture":"#edge","cullface":"down"}
+            }}
+        ]}"##,
+    );
+    write("base", "models/block/empty.json", r#"{"elements":[]}"#);
+    write(
+        "base",
+        "models/block/broken_parent.json",
+        r#"{"parent":"minecraft:block/missing"}"#,
+    );
+    let models = Models::load(&mut AssetSource::Layers(vec![
+        AssetSource::Dir(dir.join("pack")),
+        AssetSource::Dir(dir.join("base")),
+    ]));
+    std::fs::remove_dir_all(dir).unwrap();
+    models
+}
+
+#[test]
+fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
+    let models = glass_pane_pack_models("variants");
+    let pane = 102 << 4;
+    assert_eq!(&*models.quads(pane, NB).unwrap()[0].tex, "glass_pane_top");
+    for id in [18, 102, 161] {
+        let east = [((1, 0), id << 4)];
+        assert_eq!(&*models.quads(pane, &world(&east)).unwrap()[0].tex, "glass");
+    }
+    for direction in [(0, -1), (-1, 0)] {
+        assert!(models.quads(pane, &world(&[(direction, pane)])).is_none());
+    }
+    assert_eq!(models.quads(pane, &world(&[((0, 1), pane)])), Some(&[][..]));
+}
+
+#[test]
+fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
+    let atlas = Atlas {
+        models: glass_pane_pack_models("light"),
+        ..Atlas::flat()
+    };
+    let mut center = vec![0; 16 * 16 * HEIGHT];
+    center[index(4, 70, 4)] = 102 << 4;
+    let mut light = vec![0; center.len()];
+    light[index(4, 70, 4)] = 0xaf;
+    light[index(4, 71, 4)] = 0x11;
+    light[index(4, 69, 4)] = 0x22;
+    light[index(4, 70, 3)] = 0x33;
+    light[index(4, 70, 5)] = 0x44;
+    light[index(3, 70, 4)] = 0x55;
+    light[index(5, 70, 4)] = 0x66;
+    let mut lights: [Option<&[u8]>; 9] = [None; 9];
+    lights[4] = Some(&light);
+    let meshes = mesh_chunk(
+        &Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [None; 8],
+            biomes: [None; 9],
+            lights,
+        },
+        &atlas,
+        true,
+        true,
+    );
+    let quads = meshes.opaque.vertices.chunks_exact(4);
+    let expected = [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [6, 6], [2, 2]];
+    assert_eq!(quads.len(), expected.len());
+    for (quad, levels) in quads.zip(expected) {
+        assert!(quad
+            .iter()
+            .all(|v| v.light == levels.map(|n| n as f32 / 15.0)));
+        assert!(quad
+            .iter()
+            .all(|v| v.color == meshes.opaque.vertices[0].color));
+    }
+}
 
 #[test]
 fn jar_isolated_glass_pane_draws_unshaded_vertical_edges() {

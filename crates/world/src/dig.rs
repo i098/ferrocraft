@@ -116,12 +116,12 @@ pub fn opaque_cube(id: u16) -> bool {
     )
 }
 
-/// `BlockPane.canPaneConnectToBlock`: any opaque-cube block (`isFullBlock`), glass or a pane.
+/// `BlockPane.canPaneConnectToBlock`: any full block (`isFullBlock`), glass or a pane.
 pub fn pane_joins(id: u16) -> bool {
     opaque_cube(id)
         || matches!(
             id,
-            20 | 46 | 86 | 89 | 91 | 95 | 101 | 102 | 103 | 160 | 169
+            18 | 20 | 46 | 86 | 89 | 91 | 95 | 101 | 102 | 103 | 160 | 161 | 169
         )
 }
 

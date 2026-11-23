@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost};
+use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost, StagedStartError};
 use ferrocraft_oneclient as oneclient;
 
 use crate::log;
@@ -24,7 +24,7 @@ fn spawn_preparing(
         let prepared = prepare();
         let closed = gate.lock().unwrap();
         if !*closed {
-            let _ = tx.send(prepared.map(|p| p.and_then(Prepared::start)));
+            let _ = tx.send(prepared.and_then(|p| p.map_or(Ok(None), Prepared::start)));
         }
     });
     Boot { result, closed }
@@ -85,7 +85,7 @@ impl Watch {
         }
     }
 
-    pub fn retry_after_failed_scan(&mut self, now: Instant) {
+    pub fn retry_after_archive_error(&mut self, now: Instant) {
         self.changed_at = Some(now);
     }
 
@@ -117,19 +117,34 @@ impl Watch {
 }
 
 fn scan(dir: &Path, forge: bool) -> std::io::Result<Vec<(PathBuf, SystemTime, u64)>> {
-    let mut jars = Vec::new();
-    scan_folder(dir, Path::new(""), forge, &mut jars)?;
-    if forge {
-        scan_folder(dir, Path::new("1.8.9"), true, &mut jars)?;
+    if !forge {
+        return Ok(scan_legacy(dir));
     }
+    let mut jars = Vec::new();
+    scan_folder(dir, Path::new(""), &mut jars)?;
+    scan_folder(dir, Path::new("1.8.9"), &mut jars)?;
     jars.sort();
     Ok(jars)
+}
+
+fn scan_legacy(dir: &Path) -> Vec<(PathBuf, SystemTime, u64)> {
+    let mut jars: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jar"))
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((e.file_name().into(), m.modified().ok()?, m.len()))
+        })
+        .collect();
+    jars.sort();
+    jars
 }
 
 fn scan_folder(
     dir: &Path,
     folder: &Path,
-    forge: bool,
     jars: &mut Vec<(PathBuf, SystemTime, u64)>,
 ) -> std::io::Result<()> {
     let entries = match std::fs::read_dir(dir.join(folder)) {
@@ -146,8 +161,7 @@ fn scan_folder(
         let entry = entry?;
         let name = entry.file_name();
         match Path::new(&name).extension().and_then(|ext| ext.to_str()) {
-            Some("jar") => {}
-            Some("zip") if forge => {}
+            Some("jar" | "zip") => {}
             _ => continue,
         }
         let m = match std::fs::metadata(entry.path()) {
@@ -168,12 +182,16 @@ struct Prepared {
 }
 
 impl Prepared {
-    fn start(self) -> Option<ModHost> {
+    fn start(self) -> std::io::Result<Option<ModHost>> {
         let result = match self.plain {
             Some((src, paths)) => ModHost::start_staged(self.cfg, &src, paths),
-            None => ModHost::start(&self.cfg),
+            None => ModHost::start(&self.cfg).map_err(StagedStartError::Start),
         };
-        result.map_err(|e| fail::<ModHost>(&e)).ok()
+        match result {
+            Ok(host) => Ok(Some(host)),
+            Err(StagedStartError::Archive(e)) => Err(e),
+            Err(StagedStartError::Start(e)) => Ok(fail(&e)),
+        }
     }
 }
 
@@ -358,9 +376,80 @@ mod tests {
         std::fs::rename(parked, versioned).unwrap();
         assert!(!watch.poll(t + Duration::from_secs(4)));
         assert!(!watch.poll(t + Duration::from_secs(6)));
-        watch.retry_after_failed_scan(t + Duration::from_secs(6));
+        watch.retry_after_archive_error(t + Duration::from_secs(6));
         assert!(watch.poll(t + Duration::from_secs(7)));
         assert!(!watch.poll(t + Duration::from_secs(9)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_watch_notices_edits_beside_a_looping_symlink() {
+        let dir = std::env::temp_dir().join(format!("fc-legacy-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("good.jar");
+        std::fs::write(&jar, "mod").unwrap();
+        std::os::unix::fs::symlink("old.jar", dir.join("old.jar")).unwrap();
+        let mut watch = Watch {
+            seen: Some(scan(&dir, false).unwrap()),
+            dir: dir.clone(),
+            forge: false,
+            last_scan: None,
+            changed_at: None,
+        };
+        let t = Instant::now();
+        assert!(!watch.poll(t));
+        std::fs::write(jar, "updated mod").unwrap();
+        assert!(!watch.poll(t + SCAN_EVERY));
+        assert!(watch.poll(t + SCAN_EVERY + SETTLE));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restored_archive_permissions_allow_a_pending_reload() {
+        use std::fs::{self, File, Permissions};
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("fc-archive-permission-{}", std::process::id()));
+        let dir = root.join("mods");
+        fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("mod.jar");
+        fs::write(&jar, "mod").unwrap();
+        fs::set_permissions(&jar, Permissions::from_mode(0o000)).unwrap();
+        if File::open(&jar).is_ok() {
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        let snapshot = scan(&dir, true).unwrap();
+        let mut watch = Watch {
+            seen: Some(snapshot.clone()),
+            dir: dir.clone(),
+            forge: true,
+            last_scan: None,
+            changed_at: None,
+        };
+        let prepared = || Prepared {
+            cfg: Config {
+                loader: ferrocraft_modhost::Loader::Forge,
+                java: "/bin/true".into(),
+                class_path: Vec::new(),
+                game_dir: root.clone(),
+                assets_dir: root.clone(),
+            },
+            plain: Some((dir.clone(), vec!["mod.jar".into()])),
+        };
+        let Err(error) = prepared().start() else {
+            panic!("unreadable archive must produce a retryable failure");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        let t = Instant::now();
+        watch.retry_after_archive_error(t);
+        fs::set_permissions(&jar, Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(scan(&dir, true).unwrap(), snapshot);
+        assert!(watch.poll(t + SETTLE));
+        prepared().start().unwrap().unwrap().stop();
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -453,7 +542,8 @@ mod tests {
             PathBuf::from(std::env::var_os("FERRO_LIVE_CLUSTER").expect("FERRO_LIVE_CLUSTER"));
         let mut host = prepare(&cluster)
             .unwrap()
-            .and_then(Prepared::start)
+            .map_or(Ok(None), Prepared::start)
+            .unwrap()
             .expect("the cluster started no host");
         let end = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while host.client_brand().is_none() {

@@ -1646,7 +1646,7 @@ impl ApplicationHandler for App {
                 Err(e) => {
                     crate::log::line(&format!("mod host did not start: {e}"));
                     if let Some(watch) = &mut self.mods_watch {
-                        watch.retry_after_failed_scan(std::time::Instant::now());
+                        watch.retry_after_archive_error(std::time::Instant::now());
                     }
                 }
             }

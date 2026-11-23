@@ -233,6 +233,18 @@ pub struct ModHost {
     staging: Option<Arc<Mutex<Option<StagingDir>>>>,
 }
 
+#[derive(Debug)]
+pub enum StagedStartError {
+    Archive(io::Error),
+    Start(io::Error),
+}
+
+impl From<io::Error> for StagedStartError {
+    fn from(error: io::Error) -> Self {
+        Self::Start(error)
+    }
+}
+
 impl ModHost {
     /// Start the JVM and return at once. A worker thread waits for it to connect, which is after FML
     /// has loaded the mods, and gives up when the process exits first.
@@ -244,7 +256,7 @@ impl ModHost {
         mut cfg: Config,
         mods: &Path,
         archives: impl IntoIterator<Item = PathBuf>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self, StagedStartError> {
         let staging = StagingDir::new(&cfg.game_dir, "plain")?;
         for path in archives {
             use std::path::Component::Normal;
@@ -253,23 +265,20 @@ impl ModHost {
                 || !matches!(components.next(), None | Some(Normal(_)))
                 || components.next().is_some()
             {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid mod path",
-                ));
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid mod path").into());
             }
             let mut source = match std::fs::File::open(mods.join(&path)) {
                 Ok(source) => source,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
                 Err(e) if e.kind() == io::ErrorKind::NotADirectory => continue,
-                Err(e) => return Err(e),
+                Err(e) => return Err(StagedStartError::Archive(e)),
             };
             let dest = staging.0.join("mods").join(&path);
             std::fs::create_dir_all(dest.parent().unwrap())?;
             io::copy(&mut source, &mut std::fs::File::create(dest)?)?;
         }
         cfg.game_dir.clone_from(&staging.0);
-        Self::spawn(&cfg, Some(staging))
+        Self::spawn(&cfg, Some(staging)).map_err(StagedStartError::Start)
     }
 
     fn spawn(cfg: &Config, staging: Option<StagingDir>) -> io::Result<Self> {
@@ -320,7 +329,7 @@ impl ModHost {
         };
         let (child, link) = (Arc::clone(&host.child), Arc::clone(&host.link));
         thread::spawn(move || {
-            run(&listener, &child, &link, &token);
+            run(&listener, &child, &link, &token, staging.is_some());
             if let Some(staging) = staging {
                 let mut child = child.lock().unwrap();
                 stop_child(&mut child, Some(&staging));
@@ -725,8 +734,9 @@ fn transition(event: &WindowEvent) -> Option<Event> {
 }
 
 /// Connect, then serve frames until the JVM goes away; then leave no stale commands behind.
-fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str) {
-    let result = connect(listener, child, link, token).and_then(|stream| pump(stream, child, link));
+fn run(listener: &TcpListener, child: &Mutex<Child>, link: &Link, token: &str, staged: bool) {
+    let result = connect(listener, child, link, token)
+        .and_then(|stream| pump(stream, staged.then_some(child), link));
     let mut s = link.state.lock().unwrap();
     if let (Err(e), false) = (result, s.phase == Phase::Done) {
         eprintln!("mod host stopped: {e}");
@@ -793,7 +803,7 @@ fn hello(mut stream: TcpStream, token: &str) -> io::Result<(TcpStream, String, h
 }
 
 fn wait_for_request<'a>(
-    child: &Mutex<Child>,
+    child: Option<&Mutex<Child>>,
     link: &'a Link,
 ) -> io::Result<Option<std::sync::MutexGuard<'a, Shared>>> {
     let mut s = link.state.lock().unwrap();
@@ -807,6 +817,10 @@ fn wait_for_request<'a>(
         {
             return Ok(Some(s));
         }
+        let Some(child) = child else {
+            s = link.view.wait(s).unwrap();
+            continue;
+        };
         let (state, timeout) = link.view.wait_timeout(s, Duration::from_secs(1)).unwrap();
         s = state;
         if timeout.timed_out() && child.lock().unwrap().try_wait()?.is_some() {
@@ -817,7 +831,7 @@ fn wait_for_request<'a>(
 }
 
 /// One frame per `set_view`: send the input and the events since the last frame, read the commands.
-fn pump(mut stream: TcpStream, child: &Mutex<Child>, link: &Link) -> io::Result<()> {
+fn pump(mut stream: TcpStream, child: Option<&Mutex<Child>>, link: &Link) -> io::Result<()> {
     loop {
         let (input, mirror, lists, events) = {
             let Some(mut s) = wait_for_request(child, link)? else {
@@ -1335,7 +1349,7 @@ printf '%s\n' "$PWD" > "$0.result"
         host.set_view(854, 480, 2, false, false, (5, 6));
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
 
         let mut stream = jvm(port, TOKEN);
@@ -1390,7 +1404,7 @@ printf '%s\n' "$PWD" > "$0.result"
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
         let mut stream = jvm(port, TOKEN);
         wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
@@ -1421,7 +1435,7 @@ printf '%s\n' "$PWD" > "$0.result"
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
         let mut stream = jvm(port, TOKEN);
         wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
@@ -1469,7 +1483,7 @@ printf '%s\n' "$PWD" > "$0.result"
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
         let mut stream = jvm(port, TOKEN);
         wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
@@ -1505,7 +1519,7 @@ printf '%s\n' "$PWD" > "$0.result"
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
         let mut stream = jvm(port, TOKEN);
         wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);
@@ -1555,7 +1569,7 @@ printf '%s\n' "$PWD" > "$0.result"
         };
         let worker = {
             let (child, link) = (Arc::clone(&child), Arc::clone(&link));
-            thread::spawn(move || run(&l, &child, &link, TOKEN))
+            thread::spawn(move || run(&l, &child, &link, TOKEN, false))
         };
         let mut stream = jvm(port, TOKEN);
         wait_until("live", || link.state.lock().unwrap().phase == Phase::Live);

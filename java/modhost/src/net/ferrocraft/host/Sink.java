@@ -26,7 +26,7 @@ public final class Sink {
     private static final int CROSSHAIR = 1 << 4;
     private static int hudBits;
     private static int textured;
-    private static int centeredImages;
+    private static int centeredDraws;
     private static Mark crosshairListener;
     private static boolean crosshairDrawn;
     private static final int MODELVIEW = 5888;
@@ -56,21 +56,24 @@ public final class Sink {
         final int commands = count;
         final int owned = hudBits;
         final int textures = textured;
-        final int centered = centeredImages;
+        final int centered = centeredDraws;
         final boolean crosshair = crosshairDrawn;
         final float[] clip = Sink.clip;
         int centerX, centerY;
+        float pixel;
         final int definitions = newDefinitions.size();
         final int matrixTop = top;
         final int matrixMode = mode;
         final float[] matrix = new float[(matrixTop + 1) * 3];
         final GlState.DrawState gl;
         final int[] cache;
+        final boolean tessellating;
         final Object[][] scissors = Nvg.saveScissors();
 
-        Mark(GlState.DrawState gl, int[] cache) {
+        Mark(GlState.DrawState gl, int[] cache, boolean tessellating) {
             this.gl = gl;
             this.cache = cache;
+            this.tessellating = tessellating;
             for (int i = 0; i <= matrixTop; i++) System.arraycopy(STACK[i], 0, matrix, i * 3, 3);
         }
     }
@@ -126,6 +129,7 @@ public final class Sink {
             quad(m, x0, y0, x1, y1);
             out.writeInt(argb);
             count++;
+            if (crosshairListener != null && (argb >>> 24) != 0) centeredBox(m, x0, y0, x1, y1, argb, argb);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -141,6 +145,7 @@ public final class Sink {
             for (float r : radii) out.writeFloat(r * m[0]);
             out.writeInt(argb);
             count++;
+            if (crosshairListener != null && (argb >>> 24) != 0) centeredRound(m, x0, y0, x1, y1, radii);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -159,6 +164,7 @@ public final class Sink {
             out.writeFloat(width * m[0]);
             out.writeInt(argb);
             count++;
+            if (crosshairListener != null && (argb >>> 24) != 0) centeredLine(m, x0, y0, x1, y1, width);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -172,9 +178,66 @@ public final class Sink {
             out.writeInt(top);
             out.writeInt(bottom);
             count++;
+            if (crosshairListener != null) centeredBox(m, x0, y0, x1, y1, top, bottom);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    private static void centeredBox(float[] m, float x0, float y0, float x1, float y1, int top, int bottom) {
+        x0 = wireRound(m[0] * x0 + m[1]);
+        y0 = wireRound(m[0] * y0 + m[2]);
+        x1 = wireRound(m[0] * x1 + m[1]);
+        y1 = wireRound(m[0] * y1 + m[2]);
+        if (!coversCenter(Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1))) return;
+        float fraction = (crosshairListener.centerY - y0) / (y1 - y0);
+        if ((top >>> 24) * (1 - fraction) + (bottom >>> 24) * fraction > 0) centeredDraws++;
+    }
+
+    private static int wireRound(float value) {
+        return value < 0 ? -Math.round(-value) : Math.round(value);
+    }
+
+    private static void centeredRound(float[] m, float x0, float y0, float x1, float y1, float[] radii) {
+        x0 = m[0] * x0 + m[1];
+        y0 = m[0] * y0 + m[2];
+        x1 = m[0] * x1 + m[1];
+        y1 = m[0] * y1 + m[2];
+        if (!coversCenter(x0, y0, x1, y1)) return;
+        float tl = Math.max(0, radii[0] * m[0]), tr = Math.max(0, radii[1] * m[0]);
+        float br = Math.max(0, radii[2] * m[0]), bl = Math.max(0, radii[3] * m[0]);
+        float fit = Math.min(1, Math.min((x1 - x0) / Math.max(tl + tr, bl + br),
+                (y1 - y0) / Math.max(tl + bl, tr + br)));
+        float x = crosshairListener.centerX, y = crosshairListener.centerY;
+        if (insideCorner(x - x0, y - y0, tl * fit) && insideCorner(x1 - x, y - y0, tr * fit)
+                && insideCorner(x1 - x, y1 - y, br * fit) && insideCorner(x - x0, y1 - y, bl * fit)) centeredDraws++;
+    }
+
+    private static boolean insideCorner(float x, float y, float radius) {
+        if (x >= radius || y >= radius) return true;
+        float dx = radius - x, dy = radius - y;
+        return dx * dx + dy * dy < radius * radius;
+    }
+
+    private static void centeredLine(float[] m, float x0, float y0, float x1, float y1, float width) {
+        float ax = m[0] * x0 + m[1], ay = m[0] * y0 + m[2];
+        float dx = m[0] * x1 + m[1] - ax, dy = m[0] * y1 + m[2] - ay;
+        float x = crosshairListener.centerX - ax, y = crosshairListener.centerY - ay;
+        float lengthSq = dx * dx + dy * dy, along = x * dx + y * dy;
+        float half = Math.max(width * m[0], crosshairListener.pixel) * 0.5f;
+        float across = x * dy - y * dx;
+        if (centerInClip() && lengthSq > 0 && along >= 0 && along <= lengthSq
+                && across * across < half * half * lengthSq) centeredDraws++;
+    }
+
+    private static boolean coversCenter(float x0, float y0, float x1, float y1) {
+        int x = crosshairListener.centerX, y = crosshairListener.centerY;
+        return x0 <= x && x < x1 && y0 <= y && y < y1 && centerInClip();
+    }
+
+    private static boolean centerInClip() {
+        int x = crosshairListener.centerX, y = crosshairListener.centerY;
+        return clip == null || (clip[0] <= x && x < clip[2] && clip[1] <= y && y < clip[3]);
     }
 
     public static synchronized void text(String s, float x, float y, int argb, boolean shadow) {
@@ -241,17 +304,11 @@ public final class Sink {
             out.writeByte(recolor ? 1 : 0);
             out.writeByte(blend);
             count++;
-            if (clip != null) {
-                x0 = Math.max(x0, clip[0]);
-                y0 = Math.max(y0, clip[1]);
-                x1 = Math.min(x1, clip[2]);
-                y1 = Math.min(y1, clip[3]);
-            }
-            if (x0 < x1 && y0 < y1 && (argb >>> 24) != 0) {
-                if (texturedQuad) textured++;
-                Mark listener = crosshairListener;
-                if (listener != null && x0 <= listener.centerX && listener.centerX < x1
-                        && y0 <= listener.centerY && listener.centerY < y1) centeredImages++;
+            if ((argb >>> 24) != 0) {
+                if (crosshairListener != null && coversCenter(x0, y0, x1, y1)) centeredDraws++;
+                if (texturedQuad && (clip == null ? x0 < x1 && y0 < y1
+                        : Math.max(x0, clip[0]) < Math.min(x1, clip[2])
+                        && Math.max(y0, clip[1]) < Math.min(y1, clip[3]))) textured++;
             }
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -283,8 +340,8 @@ public final class Sink {
         hudBits |= bits;
     }
 
-    static synchronized Mark mark(GlState.DrawState gl, int[] cache) {
-        return new Mark(gl, cache);
+    static synchronized Mark mark(GlState.DrawState gl, int[] cache, boolean tessellating) {
+        return new Mark(gl, cache, tessellating);
     }
 
     static synchronized void rollback(Mark mark) {
@@ -292,7 +349,7 @@ public final class Sink {
         count = mark.commands;
         hudBits = mark.owned;
         textured = mark.textures;
-        centeredImages = mark.centered;
+        centeredDraws = mark.centered;
         crosshairDrawn = mark.crosshair;
         clip = mark.clip;
         Nvg.restoreScissors(mark.scissors);
@@ -308,21 +365,22 @@ public final class Sink {
         crosshairDrawn |= textured > before;
     }
 
-    static synchronized Mark trackCrosshair(Mark mark, int x, int y) {
+    static synchronized Mark trackCrosshair(Mark mark, int x, int y, int factor) {
         Mark previous = crosshairListener;
         mark.centerX = x;
         mark.centerY = y;
+        mark.pixel = 1f / Math.max(1, factor);
         crosshairListener = mark;
         return previous;
     }
 
     static synchronized void stopTrackingCrosshair(Mark mark, Mark previous) {
-        centeredImages = mark.centered;
+        centeredDraws = mark.centered;
         crosshairListener = previous;
     }
 
     static synchronized void centeredCrosshairDrawn(Mark mark) {
-        crosshairDrawn |= centeredImages > mark.centered;
+        crosshairDrawn |= centeredDraws > mark.centered;
     }
 
     private static void writeHud(int bits) {
@@ -355,7 +413,7 @@ public final class Sink {
         hudBits = 0;
         crosshairDrawn = false;
         textured = 0;
-        centeredImages = 0;
+        centeredDraws = 0;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {

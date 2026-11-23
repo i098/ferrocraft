@@ -39,7 +39,9 @@ boot MirrorTest
 boot HookIndexTest
 # ShellTest needs no FML: it transforms a class of the same shape as Minecraft after Mixin and runs it.
 "$J/java" -cp "$cp" net.ferrocraft.host.ShellTest
-printf 'func_78326_a\ta\nfunc_78328_b\tb\n' > overlay-names.tsv
+printf '%b\n' 'func_78326_a\ta' 'func_78328_b\tb' 'func_78325_e\te' \
+    'net.minecraft.client.renderer.Tessellator\tbfx' 'func_178181_a\ta' 'func_178180_c\tc' \
+    'field_179010_r\tn' 'func_178977_d\te' 'func_178965_a\tb' > overlay-names.tsv
 "$J/java" -Xverify:all -Dferro.names=overlay-names.tsv -cp "$cp" net.ferrocraft.host.OverlayHooksTest
 # GlStateTest needs no FML: the GL calls of a mod that draws a DynamicTexture quad (PolyCrosshair) become one image command.
 "$J/java" -cp "$cp" net.ferrocraft.host.GlStateTest

@@ -60,7 +60,7 @@ public final class OverlayFilter {
         if (crosshair) {
             Object size = R.get(event, "resolution");
             previous = Sink.trackCrosshair(mark, (Integer) R.call(size, "func_78326_a") / 2,
-                    (Integer) R.call(size, "func_78328_b") / 2);
+                    (Integer) R.call(size, "func_78328_b") / 2, (Integer) R.call(size, "func_78325_e"));
         }
         try {
             listener.invoke(event);

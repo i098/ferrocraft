@@ -1,5 +1,6 @@
 package net.ferrocraft.host;
 
+import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,6 +31,20 @@ public final class OverlayHooks {
     private static Thread overlayThread;
     private static GlCache glCache;
 
+    private static final class Tessellator {
+        static final Object RENDERER = R.call(R.call(R.cls("net.minecraft.client.renderer.Tessellator"),
+                "func_178181_a"), "func_178180_c");
+        static final Field DRAWING = R.field(RENDERER, "field_179010_r");
+
+        static boolean drawing() {
+            try {
+                return DRAWING.getBoolean(RENDERER);
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
     private OverlayHooks() {}
 
     static void begin(GlCache cache) {
@@ -50,11 +65,16 @@ public final class OverlayHooks {
         Sink.rollback(mark);
         GlState.restoreDrawState(mark.gl);
         if (glCache != null) glCache.restore(mark.cache);
+        if (!mark.tessellating && Tessellator.drawing()) {
+            R.call(Tessellator.RENDERER, "func_178977_d");
+            R.call(Tessellator.RENDERER, "func_178965_a");
+        }
         failure.printStackTrace();
     }
 
     public static Sink.Mark checkpoint() {
-        return active() ? Sink.mark(GlState.saveDrawState(), glCache == null ? null : glCache.save()) : null;
+        return active() ? Sink.mark(GlState.saveDrawState(), glCache == null ? null : glCache.save(),
+                Tessellator.drawing()) : null;
     }
 
     public static void crosshairCompleted(Sink.Mark mark) {

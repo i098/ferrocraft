@@ -70,6 +70,18 @@ public final class OverlayHooksTest implements Opcodes {
             assertForgeCrosshair(214, 2, true, null);
             assertForgeCrosshair(214, 121, false, null);
             assertForgeCrosshair(214, 121, true, new float[] {220, 0, 208, 242});
+            assertShapeCrosshair(() -> Sink.rect(217, 122, 211, 120, -1), true);
+            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, -1), true);
+            assertShapeCrosshair(() -> Sink.gradient(212, 120, 216, 122, 0, 0), false);
+            assertShapeCrosshair(() -> Sink.roundRect(210, 117, 218, 125, new float[] {4, 4, 4, 4}, -1), true);
+            assertShapeCrosshair(() -> Sink.roundRect(214, 121, 222, 129, new float[] {4, 4, 4, 4}, -1), false);
+            assertShapeCrosshair(() -> Sink.line(218, 125, 210, 117, 0, -1), true);
+            assertShapeCrosshair(() -> Sink.line(210, 117, 218, 123, 1, -1), false);
+            assertShapeCrosshair(() -> {
+                Sink.clip(new float[] {220, 0, 208, 242});
+                Sink.rect(212, 120, 216, 122, -1);
+            }, false);
+            assertTessellatorRollback();
             assertForgeCrosshair(214, 121, true, new float[] {0, 127, 428, 115});
             assertScissorRollback();
             assertClippedCrosshair();
@@ -180,6 +192,33 @@ public final class OverlayHooksTest implements Opcodes {
         if (frame.hud != expected || frame.images.size() != 1) {
             throw new AssertionError("Forge crosshair ownership does not match the listener's draw and cancellation");
         }
+    }
+
+    private static void assertShapeCrosshair(Runnable draw, boolean owned) throws IOException {
+        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
+        OverlayFilter.invoke(event -> {
+            draw.run();
+            event.setCanceled(true);
+        }, crosshair);
+        new OverlayFilter().pre(crosshair);
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        if (frame.hud != (owned ? 1 << 4 : 0)) throw new AssertionError("incorrect shape crosshair ownership");
+    }
+
+    private static void assertTessellatorRollback() {
+        Object builder = R.call(R.call(R.cls("bfx"), "a"), "c");
+        Object format = R.get(R.cls("bms"), "e");
+        RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.ALL);
+        OverlayFilter.invoke(event -> {
+            R.call(builder, "a", 7, format);
+            throw new IllegalStateException("listener left a quad open");
+        }, all);
+        R.call(builder, "a", 7, format);
+        OverlayFilter.invoke(event -> {
+            throw new IllegalStateException("listener failed inside the caller's quad");
+        }, all);
+        R.call(builder, "e");
+        R.call(builder, "b");
     }
 
     @SuppressWarnings("unchecked")

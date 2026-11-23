@@ -20,7 +20,7 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
   Java sends wire command `H` (`crates/modhost/src/hud.rs`) to tell Rust not to draw that element.
   Cancellation of `ALL` claims all HUD elements, with the crosshair check below.
   `Minecraft.setOverlayKeys` mirrors the F3 and Tab keys so Forge posts the debug and player list events.
-  A Forge listener claims `CROSSHAIRS` when it draws an image over the screen center and cancels the event in the same call.
+  A Forge listener claims `CROSSHAIRS` when it draws a visible image or shape over the screen center and cancels the event.
   PolyCrosshair can cancel separately because the host checks its draw callback for completion.
   PolyCrosshair draws a `DynamicTexture` with `Gui.drawScaledCustomSizeModalRect`.
   `BridgeTransformer` routes the LWJGL calls and the two `Gui` textured quad methods to `GlState` through `GlPatch`.
@@ -59,6 +59,7 @@ On Forge, the host logs exceptions from overlay handlers and continues drawing.
 The host discards a failed handler's draw commands, cancellation, and changes to the event's chat position or text.
 The host keeps the results of completed handlers.
 The host restores the NanoVG scissor stack after a failed handler.
+The host discards an unfinished shared tessellator batch if the failed handler opened it.
 
 Set `FERRO_PREPARE_OUT` to the folder `java/modhost-prepare/run.sh` wrote, and both boots run on `ferro-mc-1.8.9.jar` and `ferro-forge.jar` instead of the player's client and Forge jars. The generated Minecraft jar is unsigned, so the test passes `-Dfml.ignoreInvalidMinecraftCertificates=true`.
 

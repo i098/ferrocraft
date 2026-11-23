@@ -25,11 +25,14 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 ## Build
 
 ```sh
-FERRO_JAVA_HOME=<Java 8 JDK> FERRO_LIB=<folder with lw.jar asm-all-5.2.jar forge.jar guava-17.0.jar vecmath-1.5.2.jar> java/modhost/build.sh
+FERRO_JAVA_HOME=<JDK> FERRO_LIB=<folder with lw.jar asm-all-5.2.jar forge.jar guava-17.0.jar> java/modhost/build.sh
 ```
 
-The class path of the JVM is `java/modhost/cls`, then the libraries, then the Forge jar and the Minecraft 1.8.9 jar.
-Set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_GAMEDIR` for the engine. Put the mod jars (for example Keystrokes) in `GAMEDIR/mods`.
+Use JDK 8 or newer. The build writes `java/modhost/ferro-host.jar` with Java 8 bytecode.
+The [launcher crate](../../crates/launcher/README.md) describes how the installer places the host jar.
+To run the host from compiled classes instead, set `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` and `FERROCRAFT_MODHOST_GAMEDIR`.
+Put `java/modhost/cls` first on the class path, before the libraries, Forge jar and Minecraft 1.8.9 jar.
+Put the mod jars in `GAMEDIR/mods`.
 
 ## Test
 

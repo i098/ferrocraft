@@ -63,7 +63,7 @@ pub struct Config {
     /// Class path: for Forge LaunchWrapper, Forge, the stand-in Minecraft jar, the host classes and the libraries; for Fabric
     /// the host jar, LaunchWrapper's classes, Knot and its libraries and the game jar.
     pub class_path: Vec<PathBuf>,
-    /// Vanilla game directory; mods are read from `mods/` below it.
+    /// Game directory for this JVM. Staged launches replace it before startup.
     pub game_dir: PathBuf,
     pub assets_dir: PathBuf,
 }
@@ -980,7 +980,7 @@ fn round_trip<T>(
 
 impl Config {
     /// Read `FERROCRAFT_MODHOST_JAVA`, `FERROCRAFT_MODHOST_CP` (a platform path list) and
-    /// `FERROCRAFT_MODHOST_GAMEDIR`. `None` when any of the three is unset: no mods then.
+    /// `FERROCRAFT_MODHOST_GAMEDIR`. Returns `None` when any of the three is unset.
     pub fn from_env() -> Option<Self> {
         let java = PathBuf::from(std::env::var_os("FERROCRAFT_MODHOST_JAVA")?);
         let class_path =

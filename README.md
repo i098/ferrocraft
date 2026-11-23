@@ -4,7 +4,7 @@ A Minecraft 1.8.9 client rewritten in Rust. Goal: vanilla behavior on PvP server
 
 ## Status
 In development. The engine joins 1.8.9 servers in offline and online modes.
-For online mode, the launcher sends the access token through stdin and passes `--uuid` as an argument.
+For online mode, sign in with your launcher.
 The engine renders the world, moves, breaks and places blocks, and chats.
 The mod host runs Forge mods that draw HUDs and screens (Keystrokes, OneConfig); see [Mod host](docs/mod-host.md).
 
@@ -41,12 +41,12 @@ Create the installation, then select it in the **Play** tab.
 
 ### Mods
 
-Put compatible Forge 1.8.9 mod JARs in `mods/` in the installation's **Game Directory**.
+Put compatible Forge 1.8.9 `.jar` or `.zip` files in `mods/` or `mods/1.8.9/` under the installation's **Game Directory**.
 Use the folder that the installer printed if the **Game Directory** is blank.
 Click **Play** to start the selected installation.
-The client installs Java 8 and Forge when it first starts the mod host.
-This first start needs an internet connection.
+The mod host downloads Java 8 and Forge if they are not in its cache.
 On Apple silicon, the Forge host needs Rosetta to run Java 8.
+Press F8 to reload mods without disconnecting.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

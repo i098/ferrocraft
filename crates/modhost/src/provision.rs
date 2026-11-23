@@ -1,6 +1,5 @@
-//! Gets what the JVM needs and builds the [`Config`]: Mojang's Java 8 (`jre-legacy`), Forge 1.8.9-11.15.1.2318, LaunchWrapper
-//! and the libraries, all installed by `portablemc` into `~/.ferrocraft/modhost` (the Minecraft main directory and the
-//! game directory of the host). Nothing is installed twice: `portablemc` skips what is there and checked.
+//! Prepares the shared Forge cache and builds the [`Config`].
+//! Plain Forge launches use a separate game directory for each host process.
 
 use std::path::{Path, PathBuf};
 use std::{fmt, fs, io};
@@ -63,8 +62,7 @@ pub fn lib_dir() -> Result<PathBuf, Error> {
 
 impl Config {
     /// Install Java 8, Forge and the libraries, and return the config to start the host with. Needs the network on the
-    /// first call, and `ferro-host.jar` from `java/modhost/build.sh`: `FERROCRAFT_MODHOST_JAR`, or next to this
-    /// executable, or in the source tree this was built from.
+    /// first call, and `ferro-host.jar` from the release archive or `java/modhost/build.sh`.
     pub fn provision() -> Result<Config, Error> {
         let main = main_dir()?;
         let host = host_jar()?;

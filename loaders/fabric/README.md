@@ -3,7 +3,9 @@
 Fabric mod jar for launchers that cannot start a custom version, such as OneClient. Its clusters take only a Minecraft version and a loader.
 
 Use it in a `1.8.9 Fabric` cluster (Legacy Fabric or Ornithe loader).
-The `preLaunch` entry point starts the engine with the game arguments and sends the access token through stdin.
+The `preLaunch` entry point starts the engine with the game arguments.
+It sends the access token separately through the [engine's stdin interface](../../crates/engine/README.md).
+It marks the launch as Fabric so the engine does not treat the cluster's mods as plain Forge mods.
 It sets `--assetsDir` to the vanilla 1.8.9 jar.
 The vanilla window does not open.
 

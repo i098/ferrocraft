@@ -20,8 +20,8 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
   Java sends wire command `H` (`crates/modhost/src/hud.rs`) to tell Rust not to draw that element.
   Cancellation of `ALL` claims all HUD elements, with the crosshair check below.
   `Minecraft.setOverlayKeys` mirrors the F3 and Tab keys so Forge posts the debug and player list events.
-  Crosshair cancellation suppresses the Rust crosshair only if PolyCrosshair's draw callback completes and emits a textured draw.
-  Other mods' texture draws do not validate the `CROSSHAIRS` claim.
+  A Forge listener claims `CROSSHAIRS` when it draws an image over the screen center and cancels the event in the same call.
+  PolyCrosshair can cancel separately because the host checks its draw callback for completion.
   PolyCrosshair draws a `DynamicTexture` with `Gui.drawScaledCustomSizeModalRect`.
   `BridgeTransformer` routes the LWJGL calls and the two `Gui` textured quad methods to `GlState` through `GlPatch`.
   A quad becomes an image command with its screen bounds, tint, and blend function.

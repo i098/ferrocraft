@@ -32,7 +32,8 @@ public final class OverlayHooks {
 
     private OverlayHooks() {}
 
-    static void begin(GlCache cache) {
+    static void begin(GlCache cache, int centerX, int centerY) {
+        Sink.center(centerX, centerY);
         glCache = cache;
         overlayThread = Thread.currentThread();
     }
@@ -140,9 +141,9 @@ public final class OverlayHooks {
 
     private static Set<String> hudRoots(String name) {
         if (name.equals(RENDERER)) return new HashSet<>(Arrays.asList("func_181560_a(FJ)V", "func_78478_c()V"));
-        if (name.equals(FORGE_GUI)) return new HashSet<>(Arrays.asList("func_175180_a(F)V", "renderGameOverlay(F)V"));
+        if (name.equals(FORGE_GUI)) return java.util.Collections.singleton("func_175180_a(F)V");
         return new HashSet<>(Arrays.asList("func_175183_b()Z", "func_180476_e",
-                "func_180480_a", "func_180479_a", "func_73828_d", "func_180475_a"));
+                "func_180480_a", "func_180479_a"));
     }
 
     private static List<MethodInsnNode> localCalls(String owner, MethodNode method) {

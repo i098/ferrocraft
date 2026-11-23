@@ -41,7 +41,7 @@ public final class OverlayHooksTest implements Opcodes {
         GlState.enable(3042);
         GlState.blendFunc(775, 769);
 
-        OverlayHooks.begin(null);
+        OverlayHooks.begin(null, 214, 121);
         try {
             Method render = cls.getMethod("func_181560_a", float.class, long.class);
             render.invoke(null, 0f, 0L);
@@ -53,12 +53,16 @@ public final class OverlayHooksTest implements Opcodes {
             } finally {
                 drawSucceeds = false;
             }
+            assertForgeCrosshair(true, true, false);
+            assertForgeCrosshair(false, true, false);
+            assertForgeCrosshair(true, false, false);
+            assertForgeCrosshair(true, true, true);
             assertScissorRollback();
             assertClippedCrosshair();
             assertPostImageDoesNotClaimCrosshair();
             assertEventPayloadRollback();
-            assertPropagates(cls.getMethod("unrelated"), IOException.class);
-            assertPropagates(cls.getMethod("func_78478_c"), AssertionError.class);
+            assertPropagates(cls.getMethod("unrelated", double.class), IOException.class, 0d);
+            assertPropagates(render, AssertionError.class, 1f, 0L);
         } finally {
             OverlayHooks.end();
         }
@@ -108,14 +112,8 @@ public final class OverlayHooksTest implements Opcodes {
 
     private static void assertCrosshairOwnership(boolean drawn) throws IOException {
         OverlayFilter filter = new OverlayFilter();
-        RenderGameOverlayEvent parent = new RenderGameOverlayEvent(0, null);
-        RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(parent, ElementType.ALL);
-        RenderGameOverlayEvent.Pre crosshair = new RenderGameOverlayEvent.Pre(parent, ElementType.CROSSHAIRS) {
-            @Override
-            public boolean isCancelable() {
-                return true;
-            }
-        };
+        RenderGameOverlayEvent.Pre all = new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.ALL);
+        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
         OverlayFilter.invoke(event -> drawCrosshair(), all);
         OverlayFilter.invoke(event -> filter.pre(all), all);
         OverlayFilter.invoke(event -> {
@@ -125,10 +123,37 @@ public final class OverlayHooksTest implements Opcodes {
         OverlayFilter.invoke(event -> filter.pre(crosshair), crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
         if (frame.hud != (drawn ? 1 << 4 : 0) || frame.images.size() != (drawn ? 4 : 3)) {
-            throw new AssertionError("only the completed PolyCrosshair callback may validate ownership");
+            throw new AssertionError("unrelated images must not validate cancellation after a failed replacement");
         }
         if (!drawn) assertRecoveredDraw(frame);
         if (drawn && frame.images.get(0).x0 != 4) throw new AssertionError("the replacement draw did not reach the frame");
+    }
+
+    private static RenderGameOverlayEvent.Pre crosshairEvent() {
+        return new RenderGameOverlayEvent.Pre(new RenderGameOverlayEvent(0, null), ElementType.CROSSHAIRS) {
+            @Override
+            public boolean isCancelable() {
+                return true;
+            }
+        };
+    }
+
+    private static void assertForgeCrosshair(boolean centered, boolean cancel, boolean clipped) throws IOException {
+        RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
+        OverlayFilter.invoke(event -> {
+            if (clipped) Sink.clip(new float[] {0, 0, 213, 121});
+            Sink.push();
+            Sink.translate(centered ? 214 : 2, 121);
+            GlState.quadSized(-1, -1, 0, 0, 2, 2, 1, 1);
+            Sink.pop();
+            if (cancel) event.setCanceled(true);
+        }, crosshair);
+        OverlayFilter.invoke(event -> new OverlayFilter().pre(crosshair), crosshair);
+        MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
+        int expected = centered && cancel && !clipped ? 1 << 4 : 0;
+        if (frame.hud != expected || frame.images.size() != 1) {
+            throw new AssertionError("Forge crosshair ownership does not match the listener's draw and cancellation");
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -246,11 +271,12 @@ public final class OverlayHooksTest implements Opcodes {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         cw.visit(V1_8, ACC_PUBLIC, RENDERER, null, "java/lang/Object", null);
         MethodVisitor hud = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "func_181560_a", "(FJ)V", null, null);
-        hud.visitMethodInsn(INVOKESTATIC, RENDERER, "hudHelper", "()V", false);
+        hud.visitVarInsn(FLOAD, 0);
+        hud.visitInsn(F2D);
+        hud.visitMethodInsn(INVOKESTATIC, RENDERER, "hudHelper", "(D)V", false);
         finish(hud);
-        entry(cw, "hudHelper", 0);
-        entry(cw, "unrelated", 0);
-        entry(cw, "func_78478_c", 1);
+        entry(cw, "hudHelper");
+        entry(cw, "unrelated");
         MethodVisitor handler = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "handler$test", DESC, null, null);
         handler.visitAnnotation("Lorg/spongepowered/asm/mixin/transformer/meta/MixinMerged;", true).visitEnd();
         handler.visitInsn(ACONST_NULL);
@@ -263,19 +289,19 @@ public final class OverlayHooksTest implements Opcodes {
         return cw.toByteArray();
     }
 
-    private static void entry(ClassWriter cw, String name, int error) {
-        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, name, "()V", null, null);
+    private static void entry(ClassWriter cw, String name) {
+        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, name, "(D)V", null, null);
         mv.visitTypeInsn(NEW, CALLBACK);
         mv.visitInsn(DUP);
         mv.visitMethodInsn(INVOKESPECIAL, CALLBACK, "<init>", "()V", false);
-        mv.visitVarInsn(ASTORE, 0);
+        mv.visitVarInsn(ASTORE, 2);
         mv.visitInsn(FCONST_0);
         mv.visitInsn(LCONST_0);
-        mv.visitVarInsn(ALOAD, 0);
-        mv.visitInsn(DCONST_0 + error);
+        mv.visitVarInsn(ALOAD, 2);
+        mv.visitVarInsn(DLOAD, 0);
         mv.visitInsn(ACONST_NULL);
         mv.visitMethodInsn(INVOKESTATIC, RENDERER, "handler$test", DESC, false);
-        mv.visitVarInsn(ALOAD, 0);
+        mv.visitVarInsn(ALOAD, 2);
         mv.visitMethodInsn(INVOKESTATIC, TEST, "later", "(Ljava/lang/Object;)V", false);
         finish(mv);
     }

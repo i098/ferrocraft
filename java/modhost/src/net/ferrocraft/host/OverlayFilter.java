@@ -69,6 +69,11 @@ public final class OverlayFilter {
                 text.right.addAll(right);
             }
             OverlayHooks.failed(failure, mark);
+            return;
+        }
+        if (((RenderGameOverlayEvent) event).type == ElementType.CROSSHAIRS
+                && event.isCancelable() && !canceled && event.isCanceled()) {
+            Sink.centeredCrosshairDrawn(mark);
         }
     }
 

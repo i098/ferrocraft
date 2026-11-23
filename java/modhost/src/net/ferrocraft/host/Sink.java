@@ -26,6 +26,9 @@ public final class Sink {
     private static final int CROSSHAIR = 1 << 4;
     private static int hudBits;
     private static int textured;
+    private static int centeredImages;
+    private static int centerX, centerY;
+    private static boolean centerClipped;
     private static boolean crosshairDrawn;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
@@ -54,8 +57,10 @@ public final class Sink {
         final int commands = count;
         final int owned = hudBits;
         final int textures = textured;
+        final int centered = centeredImages;
         final boolean crosshair = crosshairDrawn;
         final boolean clip = clipped;
+        final boolean clippedCenter = centerClipped;
         final int definitions = newDefinitions.size();
         final int matrixTop = top;
         final int matrixMode = mode;
@@ -230,6 +235,11 @@ public final class Sink {
             out.writeByte(recolor ? 1 : 0);
             out.writeByte(blend);
             count++;
+            if (!centerClipped && (argb >>> 24) != 0
+                    && covers(centerX, m[0] * x0 + m[1], m[0] * x1 + m[1])
+                    && covers(centerY, m[0] * y0 + m[2], m[0] * y1 + m[2])) {
+                centeredImages++;
+            }
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
@@ -249,6 +259,7 @@ public final class Sink {
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
             clipped = box != null;
+            centerClipped = clipped && (!covers(centerX, box[0], box[2]) || !covers(centerY, box[1], box[3]));
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -269,8 +280,10 @@ public final class Sink {
         count = mark.commands;
         hudBits = mark.owned;
         textured = mark.textures;
+        centeredImages = mark.centered;
         crosshairDrawn = mark.crosshair;
         clipped = mark.clip;
+        centerClipped = mark.clippedCenter;
         Nvg.restoreScissors(mark.scissors);
         top = mark.matrixTop;
         mode = mark.matrixMode;
@@ -282,6 +295,19 @@ public final class Sink {
 
     static synchronized void crosshairDrawn(int before) {
         crosshairDrawn |= textured > before;
+    }
+
+    static synchronized void center(int x, int y) {
+        centerX = x;
+        centerY = y;
+    }
+
+    static synchronized void centeredCrosshairDrawn(Mark mark) {
+        crosshairDrawn |= centeredImages > mark.centered;
+    }
+
+    private static boolean covers(int center, float a, float b) {
+        return (a <= center && center < b) || (b <= center && center < a);
     }
 
     private static void writeHud(int bits) {
@@ -314,6 +340,7 @@ public final class Sink {
         hudBits = 0;
         crosshairDrawn = false;
         textured = 0;
+        centeredImages = 0;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {
@@ -330,6 +357,7 @@ public final class Sink {
         top = 0;
         mode = MODELVIEW;
         clipped = false;
+        centerClipped = false;
         STACK[0][0] = 1;
         STACK[0][1] = 0;
         STACK[0][2] = 0;

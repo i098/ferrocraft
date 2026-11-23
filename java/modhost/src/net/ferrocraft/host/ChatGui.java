@@ -75,8 +75,7 @@ final class ChatGui {
      * The overlay as GuiIngameForge draws it. With the chat open, {@code currentScreen} is a GuiChat while the overlay
      * runs, which is what {@code GuiNewChat.getChatOpen} reads; and the HUD tick counter runs, which fades the lines.
      */
-    void render(Object mc, float partial) {
-        Glue glue = Glue.current();
+    void render(Glue glue, Object mc, float partial) {
         if (!owned()) {
             glue.renderOverlay(mc, partial);
             return;

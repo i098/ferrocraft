@@ -506,7 +506,7 @@ pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
     };
     let eyes = |skin| Layer {
         skin,
-        tint: [1.0; 3],
+        tint: [super::layer_light::EYES_BORDER_FACTOR; 3],
         parts: m.parts.clone(),
         bright: true,
         colors_when_damaged: false,

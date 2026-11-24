@@ -141,6 +141,9 @@ fn enderman_eyes_add_to_the_body_texture() {
         .filter(|p| p[0] > 230 && p[1] > 100 && p[2] > 230)
         .count();
     assert!(pale > 20, "pale pink eye pixels: {pale}");
+    // The eye layer's light map U is past the clamped edge: half the colour, so no pixel saturates to white.
+    let white = rgba.chunks(4).filter(|p| p[..3] == [255, 255, 255]).count();
+    assert_eq!(white, 0, "white eye pixels: {white}");
 }
 
 #[test]

@@ -25,7 +25,9 @@ final class ForgeGlue implements Glue {
 
     @Override
     public void registerOverlayFilter() {
-        register(new OverlayFilter());
+        boolean modArmor = (Boolean) R.call(R.cls("net.minecraftforge.fml.common.Loader"), "isModLoaded", "vanillahud");
+        R.set(R.cls("net.minecraftforge.client.GuiIngameForge"), "renderArmor", modArmor);
+        register(new OverlayFilter(modArmor));
     }
 
     @Override

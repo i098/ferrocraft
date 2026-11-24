@@ -24,15 +24,29 @@ public final class OverlayFilter {
     /** Index = bit number of crates/modhost/src/hud.rs. */
     private static final java.util.List<ElementType> OWNABLE = java.util.Arrays.asList(
             ElementType.HELMET, ElementType.HOTBAR, ElementType.DEBUG, ElementType.PLAYER_LIST, ElementType.CROSSHAIRS);
+    private static final int ARMOR_BIT = 1 << 5;
+    private final Object armorIcons;
+
+    OverlayFilter(boolean modArmor) {
+        armorIcons = modArmor ? R.neu("net.minecraft.util.ResourceLocation", "textures/gui/icons.png") : null;
+    }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void pre(RenderGameOverlayEvent.Pre e) {
         boolean modChat = e.type == ElementType.CHAT && ChatGui.owned();
         if (e.type == ElementType.ALL) {
-            if (e.isCanceled()) Sink.hud(EVERY_BIT);
+            if (e.isCanceled()) Sink.hud(EVERY_BIT | (armorIcons == null ? 0 : ARMOR_BIT));
             return;
         }
         if (modChat) return;
+        if (e.type == ElementType.ARMOR && armorIcons != null) {
+            if (!e.isCanceled()) {
+                Object mc = R.get(R.cls("net.minecraft.client.Minecraft"), "field_71432_P");
+                R.call(R.get(mc, "field_71446_o"), "func_110577_a", armorIcons);
+            }
+            Sink.hud(ARMOR_BIT);
+            return;
+        }
         int bit = bit(e.type);
         if (bit != 0 && e.isCanceled()) {
             Sink.hud(bit);

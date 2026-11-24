@@ -31,7 +31,7 @@ public final class Sink {
     private static FrameBytes bytes = new FrameBytes();
     private static DataOutputStream out = new DataOutputStream(bytes);
     private static int count;
-    private static float[] clip;
+    private static boolean clip;
     private static final Set<String> DEFINED = new HashSet<>();
     private static final List<String> newDefinitions = new ArrayList<>();
 
@@ -49,7 +49,7 @@ public final class Sink {
         final int size = bytes.size();
         final int commands = count;
         final int owned = hudBits;
-        final float[] clip = Sink.clip;
+        final boolean clip = Sink.clip;
         final int definitions = newDefinitions.size();
         final int matrixTop = top;
         final int matrixMode = mode;
@@ -209,11 +209,6 @@ public final class Sink {
 
     private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb,
             boolean recolor, int blend) {
-        float[] m = STACK[top];
-        x0 = m[0] * x0 + m[1];
-        y0 = m[0] * y0 + m[2];
-        x1 = m[0] * x1 + m[1];
-        y1 = m[0] * y1 + m[2];
         try {
             if (DEFINED.add(name)) {
                 newDefinitions.add(name);
@@ -225,10 +220,7 @@ public final class Sink {
             }
             out.writeByte('I');
             string(name);
-            out.writeFloat(x0);
-            out.writeFloat(y0);
-            out.writeFloat(x1);
-            out.writeFloat(y1);
+            quad(STACK[top], x0, y0, x1, y1);
             out.writeInt(argb);
             out.writeByte(recolor ? 1 : 0);
             out.writeByte(blend);
@@ -246,12 +238,12 @@ public final class Sink {
 
     /** Cuts what follows to {@code box} (x0 y0 x1 y1, already on the screen), or lifts the cut when null. */
     public static synchronized void clip(float[] box) {
-        if (box == null && clip == null) return;
+        if (box == null && !clip) return;
         try {
             out.writeByte('C');
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
-            clip = box;
+            clip = box != null;
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -324,7 +316,7 @@ public final class Sink {
         count = 0;
         top = 0;
         mode = MODELVIEW;
-        clip = null;
+        clip = false;
         STACK[0][0] = 1;
         STACK[0][1] = 0;
         STACK[0][2] = 0;

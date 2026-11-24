@@ -157,7 +157,7 @@ public final class GlState {
         Tex t = TEXTURES.get(bound);
         if (t == null || !drawable(uw, vh, w, h, tw, th)) return;
         float sx = u * t.w / tw, sy = v * t.h / th, sw = uw * t.w / tw, sh = vh * t.h / th;
-        int ow = Math.max(1, Math.round(sw)), oh = Math.max(1, Math.round(sh));
+        int ow = Math.max(1, Math.round(Math.abs(sw))), oh = Math.max(1, Math.round(Math.abs(sh)));
         if ((long) ow * oh > MAX_QUAD_PIXELS) return;
         String key = blend + "," + (blend ? 0 : alpha) + "," + sx + "," + sy + "," + sw + "," + sh;
         String name = t.names.get(key);
@@ -176,7 +176,7 @@ public final class GlState {
     }
 
     private static boolean drawable(int uw, int vh, int w, int h, float tw, float th) {
-        return tw > 0 && th > 0 && uw > 0 && vh > 0 && w != 0 && h != 0;
+        return tw > 0 && th > 0 && uw != 0 && vh != 0 && w != 0 && h != 0;
     }
 
     private static int[] region(Tex t, float sx, float sy, float sw, float sh, int ow, int oh, boolean blended, float a) {

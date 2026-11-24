@@ -1391,7 +1391,7 @@ impl App {
                         self.game.aim(eye, yaw, pitch, skip, vehicle)
                     },
                 ));
-            let mut frame = gui::Frame {
+            let frame = gui::Frame {
                 partial_ticks: frac as f32,
                 chat_input: self.input.chat_field(),
                 debug: debug.as_ref().map(|(l, r)| (&l[..], &r[..])),
@@ -1422,6 +1422,12 @@ impl App {
                 spectator_aim,
             };
             ferrocraft_modhost::ModHost::draw(self.mods.as_ref(), &mut g, &mut mod_textures, |g, owned| {
+                let mut frame = frame;
+                let without_armor;
+                if owned.has(ferrocraft_modhost::hud::Element::Armor) {
+                    without_armor = gui::Status { armor: 0, ..status };
+                    frame.status = Some(&without_armor);
+                }
                 owned.leave_out(&mut frame);
                 self.hud.draw(g, &frame);
             });

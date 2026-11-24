@@ -21,6 +21,9 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 public final class VanillaHudTest {
     private static final int CROSSHAIR = 1 << 4;
+    private static final int ARMOR = 1 << 5;
+    private static final int DIAMOND_HELMET = 310;
+    private static final int ARMOR_X = 32, ARMOR_Y = 40;
     private static final String OVERLAY_DONE = "VanillaHudTest: Post(ALL)";
     private static final String PARTIAL_DRAW = "VanillaHudTest: failed handler draw";
 
@@ -59,6 +62,14 @@ public final class VanillaHudTest {
             R.call(position, "setOffsetX", 0);
             R.call(position, "setOffsetY", 0);
             R.call(R.call(config, "getRenderConfig"), "setInvertColor", true);
+            Class<?> armorClass = R.cls("org.polyfrost.vanillahud.hud.Armor");
+            Object armor = R.get(armorClass, "hud");
+            R.set(armor, "enabled", true);
+            R.set(armor, "alignment", false);
+            R.set(armor, "scale", 1f);
+            R.set(armor.getClass(), "healthLink", false);
+            R.set(armor.getClass(), "mountLink", false);
+            R.call(R.get(armor, "position"), "setPosition", (float) ARMOR_X, (float) ARMOR_Y, 427f, 240f);
             BufferedImage icons;
             try (InputStream asset = configClass.getResourceAsStream("/assets/minecraft/textures/gui/icons.png")) {
                 if (asset == null) throw new IOException("missing Minecraft HUD texture");
@@ -81,7 +92,7 @@ public final class VanillaHudTest {
     }
 
     private int checkFrame(DataInputStream in, DataOutputStream out, BufferedImage icons) throws IOException {
-        out.write(MirrorHudTest.mirror());
+        out.write(MirrorHudTest.mirror(DIAMOND_HELMET));
         out.write(MirrorHudTest.frameRequest());
         out.flush();
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(in);
@@ -94,22 +105,57 @@ public final class VanillaHudTest {
             if (matchesCrosshair(image, icons)) matches++;
         }
         if (matches != 1) throw new AssertionError("expected one visible PolyCrosshair image, got " + matches);
+        if ((frame.hud & ARMOR) == 0) throw new AssertionError("missing VanillaHUD armor ownership");
+        checkArmor(frame, icons);
         if (fail && !hasRecoveryProbe(frame)) {
             throw new AssertionError("Minecraft's cached GL calls did not draw the recovery probe");
         }
         return frame.hud;
     }
 
+    private void checkArmor(MirrorHudTest.Frame frame, BufferedImage icons) throws IOException {
+        for (int slot = 0; slot < 10; slot++) {
+            int x = ARMOR_X + slot * 8;
+            int u = slot == 0 ? 34 : slot == 1 ? 25 : 16;
+            if (!hasArmorSprite(frame, icons, x, u)) {
+                throw new AssertionError("missing VanillaHUD armor sprite at " + x + ", " + ARMOR_Y);
+            }
+        }
+    }
+
+    private boolean hasArmorSprite(MirrorHudTest.Frame frame, BufferedImage icons, int x, int u) throws IOException {
+        for (MirrorHudTest.Image image : frame.images) {
+            if (image.x0 != x || image.y0 != ARMOR_Y || image.x1 != x + 9 || image.y1 != ARMOR_Y + 9
+                    || image.argb != -1 || image.recolor || image.blend != 0 || image.clip != null) continue;
+            if (sameArmorPixels(decodeTexture(image.name), icons, u)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameArmorPixels(BufferedImage actual, BufferedImage icons, int u) {
+        if (actual == null || actual.getWidth() != 9 || actual.getHeight() != 9) return false;
+        for (int dy = 0; dy < 9; dy++) {
+            for (int dx = 0; dx < 9; dx++) {
+                if (actual.getRGB(dx, dy) != icons.getRGB(u + dx, 9 + dy)) return false;
+            }
+        }
+        return true;
+    }
+
     private boolean hasRecoveryProbe(MirrorHudTest.Frame frame) throws IOException {
+        int matches = 0;
         for (MirrorHudTest.Image image : frame.images) {
             if (image.x0 != 2 || image.y0 != 3 || image.x1 != 3 || image.y1 != 4
                     || image.argb != 0x804080bf || image.blend != 3 || image.recolor) continue;
-            BufferedImage decoded = decodeTexture(image.name);
+            byte[] png = frame.definitions.get(image.name);
+            if (png == null) continue;
+            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
             if (decoded != null && decoded.getWidth() == 1 && decoded.getHeight() == 1 && decoded.getRGB(0, 0) == -1) {
-                return true;
+                matches++;
+                if (frame.images.stream().filter(other -> other.name.equals(image.name)).count() != 1) return false;
             }
         }
-        return false;
+        return matches == 1;
     }
 
     private boolean matchesCrosshair(MirrorHudTest.Image image, BufferedImage icons) throws IOException {
@@ -163,6 +209,7 @@ public final class VanillaHudTest {
             GlState.texImage(3553, 0, 6408, 1, 1, 0, 32993, 33639, IntBuffer.wrap(new int[] {-1}));
             GlState.restoreDrawState(beforeUpload);
             selectProbeState();
+            GlState.quadSized(2, 3, 0, 0, 1, 1, 1, 1);
             throw new IOException("VanillaHudTest: overlay handler failed after cancellation");
         }
     }

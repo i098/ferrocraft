@@ -160,6 +160,9 @@ public final class OverlayHooksTest implements Opcodes {
         if (frame.texts.contains(FAILED) || !frame.texts.contains(LATER)) {
             throw new AssertionError("failed HUD draw survived or the later HUD draw was lost");
         }
+        if (frame.images.size() != 1 || frame.definitions.size() != 1 || frame.hud != 0) {
+            throw new AssertionError("the failed draw left an image, a definition, or a HUD claim");
+        }
         MirrorHudTest.Image image = frame.images.get(0);
         if (image.argb != -1 || image.blend != 1 || image.x0 != 2 || image.y0 != 3) {
             throw new AssertionError("the failed callback changed the later image");
@@ -186,6 +189,7 @@ public final class OverlayHooksTest implements Opcodes {
         R.set(callback, "cancelled", true);
         Sink.hud(2);
         Sink.text(FAILED, 0, 0, -1, false);
+        drawImage();
         Sink.push();
         Sink.translate(50, 50);
         GlState.bindTexture(3553, 0);

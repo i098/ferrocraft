@@ -122,7 +122,6 @@ public final class MirrorHudTest {
         final List<Image> images = new ArrayList<>();
         final java.util.Map<String, byte[]> definitions = new java.util.HashMap<>();
         int hud;
-        final List<float[]> rects = new ArrayList<>();
     }
 
     static final class Image {
@@ -154,7 +153,7 @@ public final class MirrorHudTest {
             int tag = in.readUnsignedByte();
             switch (tag) {
                 case 'R':
-                    frame.rects.add(new float[] {in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat()});
+                    for (int k = 0; k < 4; k++) in.readFloat();
                     in.readInt();
                     break;
                 case 'S':

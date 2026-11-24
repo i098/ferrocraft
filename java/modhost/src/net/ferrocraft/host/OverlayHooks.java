@@ -157,8 +157,7 @@ public final class OverlayHooks {
     private static Set<String> hudRoots(String name) {
         if (name.equals(RENDERER)) return new HashSet<>(Arrays.asList("func_181560_a(FJ)V", "func_78478_c()V"));
         if (name.equals(FORGE_GUI)) return java.util.Collections.singleton("func_175180_a(F)V");
-        return new HashSet<>(Arrays.asList("func_175183_b()Z", "func_180476_e",
-                "func_180480_a", "func_180479_a"));
+        return new HashSet<>(Arrays.asList("func_175183_b()Z", "func_180480_a"));
     }
 
     private static List<MethodInsnNode> localCalls(String owner, MethodNode method) {

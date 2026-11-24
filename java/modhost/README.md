@@ -53,7 +53,9 @@ After `build.sh`, run `java/modhost/test.sh` with the same `FERRO_JAVA_HOME` and
 
 Set `FERRO_MODS` to a folder of mod jars to add the mod boot test, `ModBootTest`: the same FML boot, with FML loading those jars out of `GAMEDIR/mods`. It requires the 22 twins (the `oneconfig` loader plus 21 mods), Keystrokes and `mixinbooter` (the mod ids in `test.sh` as `ferro.mods`) to be loaded and in state `AVAILABLE`, which FML sets after the mod's init and complete events ran. It needs network on a cold cache, because the OneConfig bootstrap downloads its loader. It prints the jar the Minecraft classes load from. `java/modhost-accept/run.sh <cache>` downloads the acceptance mods into `<cache>/mods`. A cache from an earlier run holds the old EvergreenHUD, PolySprint and VanillaHUD jar names: clear it before `FERRO_MODS` points at it, or FML sees each of those mods twice. The mod boot needs `FERRO_LIB` to hold asm-all 5.2 (not Forge's 5.0.3) and maven-artifact 3.3.9, which MixinBooter uses. `FERRO_LIB` must hold only that one ASM jar, because `test.sh` puts every jar of the folder on the class path; `chatblock` requires MixinBooter.
 
-`VanillaHudTest` (also under `FERRO_MODS`) turns on fancy graphics, then checks overlay completion and the PolyCrosshair image and ownership.
+`VanillaHudTest` (also under `FERRO_MODS`) checks a moved VanillaHUD armor bar and the PolyCrosshair image and ownership.
+With VanillaHUD loaded, Forge draws the armor bar instead of Rust.
+The test enables fancy graphics to check the vignette path.
 `GuiIngame.renderVignette` reads the stand-in world's `worldBorder` when fancy graphics are on.
 On Forge, the host logs exceptions from overlay handlers and continues drawing.
 The host discards a failed handler's draw commands, cancellation, and changes to the event's chat position or text.

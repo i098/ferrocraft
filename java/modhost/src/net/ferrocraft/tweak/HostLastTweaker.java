@@ -30,6 +30,7 @@ public final class HostLastTweaker implements ITweaker {
         loader.registerTransformer("net.ferrocraft.host.HookIndex$Scanner");
         // After the scanner, which must see the hooks of the whole method before the shell drops the body.
         loader.registerTransformer("net.ferrocraft.host.ShellTransformer");
+        loader.registerTransformer("net.ferrocraft.host.OverlayHooks$HudTransformer");
         return new String[0];
     }
 }

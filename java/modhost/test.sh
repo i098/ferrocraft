@@ -39,6 +39,10 @@ boot MirrorTest
 boot HookIndexTest
 # ShellTest needs no FML: it transforms a class of the same shape as Minecraft after Mixin and runs it.
 "$J/java" -cp "$cp" net.ferrocraft.host.ShellTest
+printf '%b\n' \
+    'net.minecraft.client.renderer.Tessellator\tbfx' 'func_178181_a\ta' 'func_178180_c\tc' \
+    'field_179010_r\tn' 'func_178977_d\te' 'func_178965_a\tb' > overlay-names.tsv
+"$J/java" -Xverify:all -Dferro.names=overlay-names.tsv -cp "$cp" net.ferrocraft.host.OverlayHooksTest
 # GlStateTest needs no FML: the GL calls of a mod that draws a DynamicTexture quad (PolyCrosshair) become one image command.
 "$J/java" -cp "$cp" net.ferrocraft.host.GlStateTest
 # Optional: FERRO_MODS is a folder with the public mod jars listed in java/modhost-accept/mods.txt.
@@ -48,4 +52,6 @@ if [ -n "${FERRO_MODS:-}" ]; then
     boot HookIndexTest
     # MirrorHudTest is the engine's side of the bridge: it needs the token that Host sends in its hello.
     FERROCRAFT_BRIDGE_TOKEN=0123456789abcdef0123456789abcdef boot MirrorHudTest
+    # VanillaHudTest: fancy graphics on makes GuiIngame draw the vignette, which reads the stand-in world border.
+    FERROCRAFT_BRIDGE_TOKEN=0123456789abcdef0123456789abcdef boot VanillaHudTest
 fi

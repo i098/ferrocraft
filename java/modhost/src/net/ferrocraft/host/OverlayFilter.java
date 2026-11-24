@@ -1,8 +1,14 @@
 package net.ferrocraft.host;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.Chat;
 import net.minecraftforge.client.event.RenderGameOverlayEvent.ElementType;
+import net.minecraftforge.client.event.RenderGameOverlayEvent.Text;
+import net.minecraftforge.fml.common.eventhandler.Event;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
+import net.minecraftforge.fml.common.eventhandler.IEventListener;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 /**
@@ -18,20 +24,65 @@ public final class OverlayFilter {
     /** Index = bit number of crates/modhost/src/hud.rs. */
     private static final java.util.List<ElementType> OWNABLE = java.util.Arrays.asList(
             ElementType.HELMET, ElementType.HOTBAR, ElementType.DEBUG, ElementType.PLAYER_LIST, ElementType.CROSSHAIRS);
+    private static final int ARMOR_BIT = 1 << 5;
+    private final Object armorIcons;
+
+    OverlayFilter(boolean modArmor) {
+        armorIcons = modArmor ? R.neu("net.minecraft.util.ResourceLocation", "textures/gui/icons.png") : null;
+    }
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public void pre(RenderGameOverlayEvent.Pre e) {
         boolean modChat = e.type == ElementType.CHAT && ChatGui.owned();
         if (e.type == ElementType.ALL) {
-            if (e.isCanceled()) Sink.hud(EVERY_BIT);
+            if (e.isCanceled()) Sink.hud(EVERY_BIT | (armorIcons == null ? 0 : ARMOR_BIT));
             return;
         }
         if (modChat) return;
+        if (e.type == ElementType.ARMOR && armorIcons != null) {
+            if (!e.isCanceled()) {
+                Object mc = R.get(R.cls("net.minecraft.client.Minecraft"), "field_71432_P");
+                R.call(R.get(mc, "field_71446_o"), "func_110577_a", armorIcons);
+            }
+            Sink.hud(ARMOR_BIT);
+            return;
+        }
         int bit = bit(e.type);
         if (bit != 0 && e.isCanceled()) {
             Sink.hud(bit);
         } else {
             e.setCanceled(true);
+        }
+    }
+
+    public static void invoke(IEventListener listener, Event event) {
+        if (!OverlayHooks.active() || !(event instanceof RenderGameOverlayEvent) || listener instanceof EventPriority) {
+            listener.invoke(event);
+            return;
+        }
+        boolean canceled = event.isCancelable() && event.isCanceled();
+        Chat chat = event instanceof Chat ? (Chat) event : null;
+        int x = chat == null ? 0 : chat.posX;
+        int y = chat == null ? 0 : chat.posY;
+        Text text = event instanceof Text ? (Text) event : null;
+        List<String> left = text == null ? null : new ArrayList<>(text.left);
+        List<String> right = text == null ? null : new ArrayList<>(text.right);
+        Sink.Mark mark = OverlayHooks.checkpoint();
+        try {
+            listener.invoke(event);
+        } catch (Exception failure) {
+            if (event.isCancelable()) event.setCanceled(canceled);
+            if (chat != null) {
+                chat.posX = x;
+                chat.posY = y;
+            }
+            if (text != null) {
+                text.left.clear();
+                text.left.addAll(left);
+                text.right.clear();
+                text.right.addAll(right);
+            }
+            OverlayHooks.failed(failure, mark);
         }
     }
 

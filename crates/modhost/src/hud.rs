@@ -17,6 +17,7 @@ pub enum Element {
     PlayerList = 3,
     /// The crosshair (`ElementType.CROSSHAIRS`).
     Crosshair = 4,
+    Armor = 5,
 }
 
 /// The elements that Java owns in one frame.
@@ -26,7 +27,7 @@ pub struct Owned(u32);
 impl Owned {
     /// This set and the elements of a wire bit set; a bit that is no element is kept out.
     pub fn with(self, bits: u32) -> Self {
-        Self(self.0 | bits & ((1 << (Element::Crosshair as u32 + 1)) - 1))
+        Self(self.0 | bits & ((1 << (Element::Armor as u32 + 1)) - 1))
     }
 
     pub fn has(self, e: Element) -> bool {
@@ -80,7 +81,7 @@ mod tests {
 
     #[test]
     fn sets_add_up_and_unknown_bits_are_dropped() {
-        let o = Owned::default().with(0b1).with(0b10 | 1 << 31 | 0b100000);
+        let o = Owned::default().with(0b1).with(0b10 | 1 << 31 | 0b1000000);
         assert!(o.has(Element::Helmet) && o.has(Element::Hotbar));
         assert_eq!(o, Owned(0b11));
     }

@@ -66,6 +66,7 @@ final class Minecraft {
         R.set(mc, "field_71424_I", R.neu("net.minecraft.profiler.Profiler")); // mcProfiler
         Object world = R.alloc("net.minecraft.client.multiplayer.WorldClient");
         R.set(world, "field_96442_D", R.neu("net.minecraft.scoreboard.Scoreboard")); // worldScoreboard
+        R.set(world, "field_175728_M", R.neu("net.minecraft.world.border.WorldBorder")); // worldBorder: GuiIngame.renderVignette reads it when a mod turns fancy graphics on
         R.set(mc, "field_71441_e", world); // theWorld
         Object player = R.alloc("net.minecraft.client.entity.EntityPlayerSP");
         R.set(player, "field_146106_i", R.neu("com.mojang.authlib.GameProfile", java.util.UUID.nameUUIDFromBytes("ferrocraft".getBytes()), "Player")); // gameProfile

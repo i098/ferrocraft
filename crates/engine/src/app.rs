@@ -1205,13 +1205,6 @@ impl App {
         self.modal() || self.input.chat_input().is_some()
     }
 
-    /// Switch off in `frame` the vanilla HUD elements that a mod owns.
-    fn leave_out_mod_hud(&self, frame: &mut gui::Frame) {
-        if let Some(mods) = &self.mods {
-            mods.hud_owned().leave_out(frame);
-        }
-    }
-
     /// What HUD mods read from `Minecraft` and `EntityPlayerSP`, as the engine has it now. `None` without a player.
     fn mod_mirror(&self) -> Option<ferrocraft_modhost::Mirror> {
         use ferrocraft_modhost::mirror::{Effect, Stack, SLOTS};
@@ -1376,6 +1369,7 @@ impl App {
             tag_flags,
         );
         Self::tick_glint_clock(&mut self.icons);
+        let mut mod_textures = Vec::new();
         if show_hud {
             mod_world::draw_labels(&mut g, &self.mod_drawn, cam, (w, h), factor as f32);
             let debug = self.debug_lines(frac, cam, &draws[..entity_draws]);
@@ -1397,7 +1391,7 @@ impl App {
                         self.game.aim(eye, yaw, pitch, skip, vehicle)
                     },
                 ));
-            let mut frame = gui::Frame {
+            let frame = gui::Frame {
                 partial_ticks: frac as f32,
                 chat_input: self.input.chat_field(),
                 debug: debug.as_ref().map(|(l, r)| (&l[..], &r[..])),
@@ -1427,10 +1421,22 @@ impl App {
                 no_crosshair: false,
                 spectator_aim,
             };
-            self.leave_out_mod_hud(&mut frame);
-            self.hud.draw(&mut g, &frame);
+            ferrocraft_modhost::ModHost::draw(
+                self.mods.as_ref(),
+                &mut g,
+                &mut mod_textures,
+                |g, owned| {
+                    let mut frame = frame;
+                    let without_armor;
+                    if owned.has(ferrocraft_modhost::hud::Element::Armor) {
+                        without_armor = gui::Status { armor: 0, ..status };
+                        frame.status = Some(&without_armor);
+                    }
+                    owned.leave_out(&mut frame);
+                    self.hud.draw(g, &frame);
+                },
+            );
         }
-        let mut mod_textures = Vec::new();
         if let (Some(mods), Some(m)) = (&self.mods, self.mod_mirror()) {
             mods.set_mirror(m);
             mods.set_lists(self.mod_lists());
@@ -1445,9 +1451,6 @@ impl App {
                 self.mod_game_screen(),
                 (self.cursor.0 as i32, self.cursor.1 as i32),
             );
-            if show_hud {
-                mods.draw(&mut g, &mut mod_textures);
-            }
         }
         let hover = self.chat_hover(&m);
         let player = self.container_player(frac);
@@ -1476,7 +1479,7 @@ impl App {
         let mut textures = std::mem::take(&mut c.pending_textures);
         // On the main menu a mod screen draws over the menu.
         if let (Some(mods), false, true) = (&self.mods, show_hud, self.mod_screen()) {
-            mods.draw(&mut g, &mut mod_textures);
+            ferrocraft_modhost::ModHost::draw(Some(mods), &mut g, &mut mod_textures, |_, _| {});
         }
         textures.extend(mod_textures);
         let (entities, quads) = (g.take_entities(), g.into_quads());

@@ -25,7 +25,9 @@ final class ForgeGlue implements Glue {
 
     @Override
     public void registerOverlayFilter() {
-        register(new OverlayFilter());
+        boolean modArmor = (Boolean) R.call(R.cls("net.minecraftforge.fml.common.Loader"), "isModLoaded", "vanillahud");
+        R.set(R.cls("net.minecraftforge.client.GuiIngameForge"), "renderArmor", modArmor);
+        register(new OverlayFilter(modArmor));
     }
 
     @Override
@@ -43,6 +45,20 @@ final class ForgeGlue implements Glue {
             R.set(gui, flag, false);
         }
         return R.neu("net.minecraftforge.client.GuiIngameForge", mc);
+    }
+
+    private static final class OverlayCache {
+        static final GlCache INSTANCE = new GlCache(R.cls("net.minecraft.client.renderer.GlStateManager"));
+    }
+
+    @Override
+    public void renderOverlay(Object mc, float partial) {
+        OverlayHooks.begin(OverlayCache.INSTANCE);
+        try {
+            Minecraft.renderOverlay(mc, partial);
+        } finally {
+            OverlayHooks.end();
+        }
     }
 
     @Override

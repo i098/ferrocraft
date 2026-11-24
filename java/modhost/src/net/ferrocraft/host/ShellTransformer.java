@@ -458,7 +458,7 @@ public final class ShellTransformer implements IClassTransformer {
         return null;
     }
 
-    private static boolean isMerged(MethodNode m) {
+    static boolean isMerged(MethodNode m) {
         return contains(m.visibleAnnotations) || contains(m.invisibleAnnotations);
     }
 

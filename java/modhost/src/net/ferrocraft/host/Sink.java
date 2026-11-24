@@ -4,7 +4,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -20,20 +22,50 @@ import java.util.Set;
  * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
-    /** The wire bit of the crosshair (crates/modhost/src/hud.rs): Java owns it only when a mod's texture quad reached this frame. */
-    private static final int CROSSHAIR = 1 << 4;
-    private static boolean crosshair;
-    private static boolean textured;
+    private static int hudBits;
     private static final int MODELVIEW = 5888;
     private static final int DEPTH = 32;
     private static final float[][] STACK = new float[DEPTH][3];
     private static int top;
     private static int mode = MODELVIEW;
-    private static ByteArrayOutputStream bytes = new ByteArrayOutputStream(4096);
+    private static FrameBytes bytes = new FrameBytes();
     private static DataOutputStream out = new DataOutputStream(bytes);
     private static int count;
-    private static boolean clipped;
+    private static boolean clip;
     private static final Set<String> DEFINED = new HashSet<>();
+    private static final List<String> newDefinitions = new ArrayList<>();
+
+    private static final class FrameBytes extends ByteArrayOutputStream {
+        FrameBytes() {
+            super(4096);
+        }
+
+        void truncate(int size) {
+            count = size;
+        }
+    }
+
+    public static final class Mark {
+        final int size = bytes.size();
+        final int commands = count;
+        final int owned = hudBits;
+        final boolean clip = Sink.clip;
+        final int definitions = newDefinitions.size();
+        final int matrixTop = top;
+        final int matrixMode = mode;
+        final float[] matrix = new float[(matrixTop + 1) * 3];
+        final GlState.DrawState gl;
+        final int[] cache;
+        final boolean tessellating;
+        final Object[][] scissors = Nvg.saveScissors();
+
+        Mark(GlState.DrawState gl, int[] cache, boolean tessellating) {
+            this.gl = gl;
+            this.cache = cache;
+            this.tessellating = tessellating;
+            for (int i = 0; i <= matrixTop; i++) System.arraycopy(STACK[i], 0, matrix, i * 3, 3);
+        }
+    }
 
     private Sink() {
         throw new AssertionError();
@@ -172,14 +204,14 @@ public final class Sink {
 
     /** As above, with a blend code: 0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds (see {@link GlState}). */
     static synchronized void image(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
-        textured = true;
         emit(name, data, x0, y0, x1, y1, argb, recolor, blend);
     }
 
-    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb, boolean recolor, int blend) {
-        float[] m = STACK[top];
+    private static void emit(String name, byte[] data, float x0, float y0, float x1, float y1, int argb,
+            boolean recolor, int blend) {
         try {
             if (DEFINED.add(name)) {
+                newDefinitions.add(name);
                 out.writeByte('D');
                 string(name);
                 out.writeInt(data.length);
@@ -188,7 +220,7 @@ public final class Sink {
             }
             out.writeByte('I');
             string(name);
-            quad(m, x0, y0, x1, y1);
+            quad(STACK[top], x0, y0, x1, y1);
             out.writeInt(argb);
             out.writeByte(recolor ? 1 : 0);
             out.writeByte(blend);
@@ -206,12 +238,12 @@ public final class Sink {
 
     /** Cuts what follows to {@code box} (x0 y0 x1 y1, already on the screen), or lifts the cut when null. */
     public static synchronized void clip(float[] box) {
-        if (box == null && !clipped) return;
+        if (box == null && !clip) return;
         try {
             out.writeByte('C');
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
-            clipped = box != null;
+            clip = box != null;
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -220,12 +252,26 @@ public final class Sink {
 
     /** The vanilla HUD elements that Java owns this frame, as a bit set (see crates/modhost/src/hud.rs and {@link OverlayFilter}). */
     static synchronized void hud(int bits) {
-        if ((bits & CROSSHAIR) != 0) {
-            crosshair = true;
-            bits &= ~CROSSHAIR;
-            if (bits == 0) return;
+        hudBits |= bits;
+    }
+
+    static synchronized Mark mark(GlState.DrawState gl, int[] cache, boolean tessellating) {
+        return new Mark(gl, cache, tessellating);
+    }
+
+    static synchronized void rollback(Mark mark) {
+        bytes.truncate(mark.size);
+        count = mark.commands;
+        hudBits = mark.owned;
+        clip = mark.clip;
+        Nvg.restoreScissors(mark.scissors);
+        top = mark.matrixTop;
+        mode = mark.matrixMode;
+        for (int i = 0; i <= top; i++) System.arraycopy(mark.matrix, i * 3, STACK[i], 0, 3);
+        while (newDefinitions.size() > mark.definitions) {
+            String name = newDefinitions.remove(newDefinitions.size() - 1);
+            DEFINED.remove(name);
         }
-        writeHud(bits);
     }
 
     private static void writeHud(int bits) {
@@ -253,9 +299,8 @@ public final class Sink {
 
     /** Returns the frame's commands, led by whether a mod screen is open, and resets the buffer and the matrix. */
     static synchronized byte[] take(boolean modScreen) {
-        if (crosshair && textured) writeHud(CROSSHAIR);
-        crosshair = false;
-        textured = false;
+        if (hudBits != 0) writeHud(hudBits);
+        hudBits = 0;
         byte[] body = bytes.toByteArray();
         ByteArrayOutputStream framed = new ByteArrayOutputStream(body.length + 5);
         try {
@@ -265,12 +310,13 @@ public final class Sink {
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
-        bytes = new ByteArrayOutputStream(4096);
+        bytes = new FrameBytes();
         out = new DataOutputStream(bytes);
+        newDefinitions.clear();
         count = 0;
         top = 0;
         mode = MODELVIEW;
-        clipped = false;
+        clip = false;
         STACK[0][0] = 1;
         STACK[0][1] = 0;
         STACK[0][2] = 0;

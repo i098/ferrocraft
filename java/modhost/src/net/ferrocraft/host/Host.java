@@ -228,7 +228,7 @@ public final class Host {
         R.set(R.get(mc, "field_71428_T"), "field_74281_c", partial); // Timer.renderPartialTicks, read by the hooks of mods
         R.call(mc, "func_71411_J$head"); // Minecraft.runGameLoop is a shell: the hooks that mods put at its head and its return are two parts
         glue.renderTickStart(partial);
-        chat.renderOverlay(mc, partial);
+        chat.renderOverlay(glue, mc, partial);
         Object modScreen = Minecraft.modScreen(mc);
         if (modScreen != null) Minecraft.drawScreen(mc, modScreen, partial);
         R.call(mc, "func_71411_J$tail"); // the return hooks of Minecraft.runGameLoop, after the frame

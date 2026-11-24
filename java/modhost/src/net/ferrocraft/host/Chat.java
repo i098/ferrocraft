@@ -25,8 +25,8 @@ final class Chat {
     private final ChatGui gui = new ChatGui();
 
     /** The overlay of one frame, drawn through {@link ChatGui}. */
-    void renderOverlay(Object mc, float partial) {
-        gui.render(mc, partial);
+    void renderOverlay(Glue glue, Object mc, float partial) {
+        gui.render(glue, mc, partial);
     }
 
     void line(DataInputStream in, DataOutputStream out) throws IOException {

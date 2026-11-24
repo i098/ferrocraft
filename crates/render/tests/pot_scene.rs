@@ -29,10 +29,9 @@ impl ChunkBlocks for Flat {
 fn pot_scene() {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
     let mut r = Renderer::new_offscreen(960, 540, Some(Path::new(&jar)));
-    r.upload_chunk(&Flat);
     r.set_block(8, 64, 6, flower_pot_state(38, 0));
     r.set_block(10, 64, 6, flower_pot_state(37, 0));
-    // The server's chunk data holds only empty pots.
+    // The pot contents arrived before the chunk, whose data holds only empty pots.
     r.upload_chunk(&Flat);
     let cam = Camera {
         pos: [8.5, 66.0, 10.0],

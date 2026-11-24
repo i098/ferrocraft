@@ -296,6 +296,20 @@ impl Loader<'_> {
         }
         Some(quads)
     }
+
+    fn bake_variant(&mut self, spec: &Value, try_later_entries: bool) -> Option<Vec<Quad>> {
+        let entries = spec
+            .as_array()
+            .map_or(std::slice::from_ref(spec), Vec::as_slice);
+        let limit = if try_later_entries { entries.len() } else { 1 };
+        entries.iter().take(limit).find_map(|entry| {
+            let start = self.names.len();
+            self.bake(entry).or_else(|| {
+                self.names.truncate(start);
+                None
+            })
+        })
+    }
 }
 
 /// `FaceBakery.rotatePart`: rotates `p` (1/16 units) about the element's `origin`.
@@ -430,22 +444,13 @@ impl Models {
             .chain(&variants::STAIRS)
             .chain(&variants::GATES)
         {
-            let mut baked = HashMap::new();
-            for (key, spec) in blockstate_variants(loader.source, name) {
-                let entries = spec
-                    .as_array()
-                    .map_or(std::slice::from_ref(&spec), Vec::as_slice);
-                let quads = entries.iter().find_map(|entry| {
-                    let start = loader.names.len();
-                    loader.bake(entry).or_else(|| {
-                        loader.names.truncate(start);
-                        None
-                    })
-                });
-                if let Some(quads) = quads {
-                    baked.insert(key, quads);
-                }
-            }
+            let baked: HashMap<_, _> = blockstate_variants(loader.source, name)
+                .into_iter()
+                .filter_map(|(key, spec)| {
+                    let quads = loader.bake_variant(&spec, *name == "glass_pane")?;
+                    Some((key, quads))
+                })
+                .collect();
             if !baked.is_empty() {
                 states.insert((*name).to_owned(), baked);
             }

@@ -9,8 +9,8 @@ use crate::blocks::{
     tint_color, uses_neighbor_light, Kind, Look, Tint, DOWN, NORTH, SOUTH, UP, WEST,
 };
 use crate::light::Light;
-use crate::models::Quad;
-use crate::shapes::{boxes, Bx, BREWING_SPOKES};
+use crate::models::{Models, Quad};
+use crate::shapes::{bit, boxes, Bx, BREWING_SPOKES};
 use bytemuck::{Pod, Zeroable};
 
 mod flow;
@@ -197,6 +197,56 @@ pub(crate) fn model_face_visible(
     })
 }
 
+pub(crate) fn fallback_boxes(
+    state: u16,
+    nb: &dyn Fn(i32, i32, i32) -> u16,
+    models: &Models,
+) -> Vec<Bx> {
+    let mut boxes = boxes(state, nb);
+    if state >> 4 != 102 {
+        return boxes;
+    }
+    for (face, &[dx, dy, dz]) in DIRS.iter().enumerate().skip(2) {
+        let neighbour = nb(dx, dy, dz);
+        if neighbour >> 4 != 102 {
+            continue;
+        }
+        let adjacent = |x, y, z| nb(x + dx, y + dy, z + dz);
+        let quads = models.quads(neighbour, &adjacent);
+        for b in boxes.iter_mut().filter(|b| box_on_border(b, face)) {
+            if quads.is_none_or(|quads| quads.iter().any(|q| covers_cap(q, b, face ^ 1))) {
+                b.mask &= !bit(face);
+            }
+        }
+    }
+    boxes
+}
+
+pub(crate) fn box_on_border(b: &Bx, face: usize) -> bool {
+    let axis = [1, 2, 0][face / 2];
+    match face {
+        1 | 2 | 4 => b.min[axis] <= 0.0,
+        _ => b.max[axis] >= 1.0,
+    }
+}
+
+fn covers_cap(q: &Quad, b: &Bx, face: usize) -> bool {
+    let axis = if face < 4 { 2 } else { 0 };
+    let plane = if face & 1 == 0 { 0.0 } else { 1.0 };
+    if q.face != face || !q.pos.iter().all(|p| p[axis] == plane) {
+        return false;
+    }
+    let across = 2 - axis;
+    let rectangular = (0..4).all(|i| {
+        let [p, next] = [q.pos[i], q.pos[(i + 1) % 4]];
+        (p[1] == next[1]) != (p[across] == next[across])
+    });
+    rectangular
+        && [1, across].into_iter().all(|a| {
+            q.pos.iter().any(|p| p[a] <= b.min[a]) && q.pos.iter().any(|p| p[a] >= b.max[a])
+        })
+}
+
 fn is_leaves(state: u16) -> bool {
     matches!(state >> 4, 18 | 161)
 }
@@ -363,7 +413,7 @@ impl Mesher<'_> {
                     self.modelled(at, quads, &l, state);
                     return;
                 }
-                let list = boxes(state, &nb);
+                let list = fallback_boxes(state, &nb, &self.atlas.models);
                 // `waterlily.json`: four y turns picked by the position hash.
                 let orient = if state >> 4 == 111 {
                     self.orient_at(at, state)
@@ -857,14 +907,7 @@ impl Mesher<'_> {
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = [
-                b.max[1] >= 1.0,
-                b.min[1] <= 0.0,
-                b.min[2] <= 0.0,
-                b.max[2] >= 1.0,
-                b.min[0] <= 0.0,
-                b.max[0] >= 1.0,
-            ][f];
+            let on_border = box_on_border(b, f);
             if b.cull && on_border && self.opaque(self.st(at, DIRS[f])) {
                 continue;
             }

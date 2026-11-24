@@ -365,7 +365,10 @@ fn glass_pane_pack_models(case: &str) -> Models {
     write(
         "pack",
         "blockstates/lever.json",
-        r#"{"variants":{"facing=west,powered=false":{"model":"pane_nsew"}}}"#,
+        r#"{"variants":{
+            "facing=west,powered=false":{"model":"pane_nsew"},
+            "facing=south,powered=false":[{"model":"missing"},{"model":"pane_nsew"}]
+        }}"#,
     );
     write(
         "pack",
@@ -429,6 +432,7 @@ fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
     assert!(!models.textures().iter().any(|t| &**t == "rejected"));
     assert!(models.quads(69 << 4 | 1, NB).is_none());
     assert!(models.quads(69 << 4 | 2, NB).is_some());
+    assert!(models.quads(69 << 4 | 3, NB).is_none());
     let pane = 102 << 4;
     assert_eq!(
         &*models.quads(pane, NB).unwrap()[0].tex,
@@ -478,6 +482,35 @@ fn glass_pane_fallback_cracks_omit_shared_arm_caps() {
                 usize::from(cap)
             );
         }
+    }
+}
+
+#[test]
+fn glass_pane_fallback_keeps_cap_next_to_inset_model() {
+    let pane = 102 << 4;
+    let (_, key) = variant(pane, &world(&[((-1, 0), pane)])).unwrap();
+    let blocks = [((0, 0), pane), ((1, 0), pane)];
+    for (from_x, expected_caps) in [(0, 0), (1, 1)] {
+        let json = format!(
+            r#"{{"elements":[{{"from":[{from_x},0,7],"to":[9,16,9],
+                "faces":{{"west":{{"texture":"blocks/glass"}}}}}}]}}"#
+        );
+        let quads = bake(&json, r#"{"model":"m"}"#);
+        let models = Models {
+            states: HashMap::from([(
+                "glass_pane".to_owned(),
+                HashMap::from([(key.clone(), quads)]),
+            )]),
+            ..Models::default()
+        };
+        let vertices = crate::crack::quads([0; 3], pane, &world(&blocks), &models, true);
+        assert_eq!(
+            vertices
+                .chunks_exact(4)
+                .filter(|quad| quad.iter().all(|v| v.pos[0] == 1.0))
+                .count(),
+            expected_caps
+        );
     }
 }
 

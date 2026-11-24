@@ -6,7 +6,7 @@ use crate::mesh::{
     cross_quads, face_uv, model_face_visible, rot_uv, view_opaque, Vertex, CORNERS, DIRS,
 };
 use crate::models::Models;
-use crate::shapes::{boxes, Bx};
+use crate::shapes::Bx;
 
 /// Vanilla `color4f(1, 1, 1, 0.5)`.
 const COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
@@ -67,7 +67,7 @@ pub fn quads(
     };
     let list = match cached(state).kind {
         Kind::Opaque | Kind::Cutout => vec![unit],
-        Kind::Shape => boxes(state, &nb),
+        Kind::Shape => crate::mesh::fallback_boxes(state, &nb, models),
         Kind::Cross => return cross(at, state),
         _ => Vec::new(),
     };
@@ -86,14 +86,7 @@ fn box_vertices(
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = [
-                b.max[1] >= 1.0,
-                b.min[1] <= 0.0,
-                b.min[2] <= 0.0,
-                b.max[2] >= 1.0,
-                b.min[0] <= 0.0,
-                b.max[0] >= 1.0,
-            ][f];
+            let on_border = crate::mesh::box_on_border(b, f);
             let [dx, dy, dz] = DIRS[f];
             if b.cull && on_border && view_opaque(nb(dx, dy, dz), fancy) {
                 continue;

@@ -337,8 +337,9 @@ fn boxes_4(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
             let mut post = px([7.0, 0.0, 7.0], [9.0, 16.0, 9.0], t);
             post.tex[UP] = top;
             post.tex[DOWN] = top;
-            let neighbours = [(0, -1), (0, 1), (-1, 0), (1, 0)].map(|(dx, dz)| nb(dx, 0, dz) >> 4);
-            let any = neighbours.into_iter().any(world::dig::pane_joins);
+            let sides = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+                .map(|(dx, dz)| world::dig::pane_joins(nb(dx, 0, dz) >> 4));
+            let any = sides.into_iter().any(|joined| joined);
             if !any {
                 // Isolated pane: both axes, as vanilla.
                 out.push(px([7.0, 0.0, 0.0], [9.0, 16.0, 16.0], t));
@@ -355,13 +356,12 @@ fn boxes_4(state: u16, nb: &dyn Fn(i32, i32, i32) -> u16, l: &Look, out: &mut Ve
                     ([0.0, 0.0, 7.0], [7.0, 16.0, 9.0]),
                     ([9.0, 0.0, 7.0], [16.0, 16.0, 9.0]),
                 ];
-                for ((a, b), (face, neighbour)) in arms
+                for (a, b) in arms
                     .into_iter()
-                    .zip([NORTH, SOUTH, WEST, EAST].into_iter().zip(neighbours))
-                    .filter(|&(_, (_, neighbour))| world::dig::pane_joins(neighbour))
+                    .zip(sides)
+                    .filter_map(|(bounds, joined)| joined.then_some(bounds))
                 {
                     let mut b = px(a, b, t);
-                    b.mask &= !(bit(face) * u8::from(id == 102 && neighbour == 102));
                     b.tex[UP] = top;
                     b.tex[DOWN] = top;
                     out.push(b);

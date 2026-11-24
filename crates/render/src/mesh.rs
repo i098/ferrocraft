@@ -1212,7 +1212,9 @@ mod tests {
             let sides: Vec<_> = mesh
                 .opaque
                 .vertices
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|q| q[0].pos[1] == 70.0 && q[2].pos[1] == 70.5)
                 .collect();
             assert_eq!(sides.len(), 4);
@@ -1248,7 +1250,9 @@ mod tests {
                 let corner = mesh
                     .opaque
                     .vertices
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == z))
                     .unwrap()
                     .iter()
@@ -1272,7 +1276,9 @@ mod tests {
                 let corner = mesh
                     .opaque
                     .vertices
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .find(|q| q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[2] == 4.0))
                     .unwrap()
                     .iter()
@@ -1310,7 +1316,9 @@ mod tests {
                 let corner = mesh
                     .opaque
                     .vertices
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .find(|q| q.iter().all(|v| v.pos[0] == 16.0))
                     .unwrap()
                     .iter()
@@ -1345,7 +1353,9 @@ mod tests {
             let side = mesh
                 .opaque
                 .vertices
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .find(|q| {
                     q[0].pos[1] == 70.0 && q[2].pos[1] == 70.5 && q.iter().all(|v| v.pos[0] == 16.0)
                 })
@@ -1375,7 +1385,7 @@ mod tests {
                 };
                 let mesh = super::mesh(&hood, &Atlas::flat(), true, true, false, false);
                 let mut sides = 0;
-                for q in mesh.opaque.vertices.chunks_exact(4) {
+                for q in mesh.opaque.vertices.as_chunks::<4>().0 {
                     if q[0].pos[1] != q[2].pos[1] {
                         sides += 1;
                         assert!(q.iter().all(|v| v.light == [0.0, 0.0]), "{q:?}");

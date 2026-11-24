@@ -1886,7 +1886,8 @@ fn push_quad(
     // outside 0..1 wraps (a tiny negative one becomes almost 255) instead of clamping.
     let wrap = |c: f32| f32::from((c * 255.0) as i32 as u8) / 255.0;
     // Lava drips ask the light map for block light 257 (> 255). The light map texture is `GL_CLAMP` with a black
-    // border and linear filtering, so that coordinate blends the lit edge texel half-and-half with black.
+    // border and linear filtering, so that coordinate blends the lit edge texel half-and-half with the transparent
+    // black border: the colour and the alpha both halve (the real client draws a half-clear drop).
     let dim = if p.behavior == Behavior::DripLava {
         0.5
     } else {
@@ -1896,7 +1897,7 @@ fn push_quad(
         wrap(p.color[0]) * dim,
         wrap(p.color[1]) * dim,
         wrap(p.color[2]) * dim,
-        wrap(p.alpha),
+        wrap(p.alpha) * dim,
     ];
     for (dx, dy, u, v) in [
         (-1.0, -1.0, 0, 1),
@@ -2653,6 +2654,8 @@ mod tests {
         assert!(
             (c[0] - 0.5).abs() < 1e-3 && (c[1] - 0.5).abs() < 1e-3 && (c[2] - 0.25).abs() < 1e-2
         );
+        // The transparent black border halves the alpha too: the real client draws a half-clear drop.
+        assert!((c[3] - 0.5).abs() < 1e-2, "alpha {}", c[3]);
     }
 
     fn at(cell: [i32; 3], state: u16) -> impl Fn(i32, i32, i32) -> u16 {

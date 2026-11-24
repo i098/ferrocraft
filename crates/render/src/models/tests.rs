@@ -486,14 +486,16 @@ fn glass_pane_fallback_cracks_omit_shared_arm_caps() {
 }
 
 #[test]
-fn glass_pane_fallback_keeps_cap_next_to_inset_model() {
+fn glass_pane_fallback_cap_depends_on_coverage_not_facing() {
     let pane = 102 << 4;
     let (_, key) = variant(pane, &world(&[((-1, 0), pane)])).unwrap();
     let blocks = [((0, 0), pane), ((1, 0), pane)];
-    for (from_x, expected_caps) in [(0, 0), (1, 1)] {
+    for (from_x, to_x, face, expected_caps) in
+        [(0, 9, "west", 0), (1, 9, "west", 1), (-1, 0, "east", 0)]
+    {
         let json = format!(
-            r#"{{"elements":[{{"from":[{from_x},0,7],"to":[9,16,9],
-                "faces":{{"west":{{"texture":"blocks/glass"}}}}}}]}}"#
+            r#"{{"elements":[{{"from":[{from_x},0,7],"to":[{to_x},16,9],
+                "faces":{{"{face}":{{"texture":"blocks/glass"}}}}}}]}}"#
         );
         let quads = bake(&json, r#"{"model":"m"}"#);
         let models = Models {

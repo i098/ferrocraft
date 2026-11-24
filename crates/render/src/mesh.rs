@@ -233,7 +233,7 @@ pub(crate) fn box_on_border(b: &Bx, face: usize) -> bool {
 fn covers_cap(q: &Quad, b: &Bx, face: usize) -> bool {
     let axis = if face < 4 { 2 } else { 0 };
     let plane = if face & 1 == 0 { 0.0 } else { 1.0 };
-    if q.face != face || !q.pos.iter().all(|p| p[axis] == plane) {
+    if !q.pos.iter().all(|p| p[axis] == plane) {
         return false;
     }
     let across = 2 - axis;

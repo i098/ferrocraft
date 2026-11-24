@@ -51,10 +51,15 @@ impl AssetSource {
                 Some(bytes)
             }
             AssetSource::Dir(dir) => {
-                let stripped = name.strip_prefix("assets/").unwrap_or(name);
-                std::fs::read(dir.join(name))
-                    .or_else(|_| std::fs::read(dir.join(stripped)))
-                    .ok()
+                let root = dir.canonicalize().ok()?;
+                let read = |name: &str| {
+                    let path = root.join(name).canonicalize().ok()?;
+                    if !path.starts_with(&root) {
+                        return None;
+                    }
+                    std::fs::read(path).ok()
+                };
+                read(name).or_else(|| read(name.strip_prefix("assets/")?))
             }
             AssetSource::Layers(layers) => layers.iter_mut().find_map(|l| l.read(name)),
         }

@@ -190,11 +190,35 @@ struct Loader<'a> {
     names: Vec<Arc<str>>,
 }
 
+fn valid_resource_path(name: &str) -> bool {
+    !name.contains(['\\', ':']) && name.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+fn blockstate_variants(source: &mut AssetSource, name: &str) -> serde_json::Map<String, Value> {
+    let path = format!("assets/minecraft/blockstates/{name}.json");
+    let decode = |bytes: Vec<u8>| {
+        let mut json = serde_json::from_slice::<serde_json::Map<String, Value>>(&bytes).ok()?;
+        match json.remove("variants")? {
+            Value::Object(variants) => Some(variants),
+            _ => None,
+        }
+    };
+    if name != "glass_pane" {
+        return source.read(&path).and_then(decode).unwrap_or_default();
+    }
+    source
+        .read_all(&path)
+        .into_iter()
+        .filter_map(decode)
+        .flatten()
+        .collect()
+}
+
 impl Loader<'_> {
     /// `ModelBlock` with its `parent` chain: the child's textures win, its elements replace the parent's.
     fn model(&mut self, name: &str, depth: u8) -> Option<Model> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
-        if depth > 16 || name.starts_with("builtin/") {
+        if depth > 16 || name.starts_with("builtin/") || !valid_resource_path(name) {
             return None;
         }
         if let Some(m) = self.models.get(name) {
@@ -241,8 +265,7 @@ impl Loader<'_> {
         }
         let r = r.strip_prefix("minecraft:").unwrap_or(r);
         let name = r.strip_prefix("blocks/")?;
-        if name.contains(['\\', ':']) || name.split('/').any(|part| matches!(part, "" | "." | ".."))
-        {
+        if !valid_resource_path(name) {
             return None;
         }
         if let Some(known) = self.names.iter().find(|n| &***n == name) {
@@ -257,8 +280,11 @@ impl Loader<'_> {
         let name = spec.get("model")?.as_str()?;
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let model = self.model(&format!("block/{name}"), 0)?;
-        let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
-        let (x, y) = (turn("x"), turn("y"));
+        let turn = |k| {
+            let angle = spec.get(k).map_or(Some(0), Value::as_i64)?.rem_euclid(360);
+            (angle % 90 == 0).then_some((angle / 90) as u8)
+        };
+        let (x, y) = (turn("x")?, turn("y")?);
         let uvlock = spec.get("uvlock").and_then(Value::as_bool) == Some(true);
         let mut quads = Vec::new();
         for el in model.elements.iter() {
@@ -355,7 +381,7 @@ fn bake_quad(
         shade_face
     };
     if uvlock {
-        lock_uv(&mut uv, &pos, geometric_face, face.turns);
+        lock_uv(&mut uv, &pos, shade_face, face.turns);
     }
     let on_boundary = on_boundary(&pos, geometric_face);
     Quad {
@@ -404,20 +430,8 @@ impl Models {
             .chain(&variants::STAIRS)
             .chain(&variants::GATES)
         {
-            let mut variants = serde_json::Map::new();
-            for bytes in loader
-                .source
-                .read_all(&format!("assets/minecraft/blockstates/{name}.json"))
-            {
-                let Ok(Value::Object(mut json)) = serde_json::from_slice(&bytes) else {
-                    continue;
-                };
-                if let Some(Value::Object(layer)) = json.remove("variants") {
-                    variants.extend(layer);
-                }
-            }
             let mut baked = HashMap::new();
-            for (key, spec) in variants {
+            for (key, spec) in blockstate_variants(loader.source, name) {
                 let entries = spec
                     .as_array()
                     .map_or(std::slice::from_ref(&spec), Vec::as_slice);

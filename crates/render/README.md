@@ -7,7 +7,8 @@ wgpu renderer for the 1.8.9 client: face-culled chunk meshes, block textures fro
 `gui` crate lays out.
 
 Clear glass panes use the 1.8.9 blockstate models and their separate edge texture.
-Resource packs override individual blockstate variants and leave other variants in place.
+Resource packs override individual clear-pane variants and leave other pane variants in place.
+Other blocks use the highest-priority blockstate file.
 Clear panes use the same geometry and face culling for the world mesh and the mining overlay.
 If a pane model fails to load, both use the shared pane box shapes.
 

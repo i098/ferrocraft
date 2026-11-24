@@ -142,9 +142,17 @@ fn repeater_door_and_piston_faces_follow_vanilla_uv_rules() {
 #[test]
 fn blockstate_turn_of_270_degrees_turns_the_face() {
     let json = r##"{"textures": {"t": "blocks/stone"}, "elements": [{"from": [0,0,0], "to": [16,16,16],
-        "faces": {"north": {"texture": "#t"}}}]}"##;
+        "faces": {"north": {"texture": "#t", "cullface": "north"}}}]}"##;
     assert_eq!(bake(json, r#"{"model": "m", "y": 270}"#)[0].face, 4);
     assert_eq!(bake(json, r#"{"model": "m", "x": 270}"#)[0].face, 0);
+    assert_eq!(
+        bake(json, r#"{"model": "m", "y": -270, "uvlock": true}"#),
+        bake(json, r#"{"model": "m", "y": 90, "uvlock": true}"#)
+    );
+    assert_eq!(
+        bake(json, r#"{"model": "m", "x": -90, "uvlock": true}"#),
+        bake(json, r#"{"model": "m", "x": 270, "uvlock": true}"#)
+    );
 }
 
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
@@ -160,17 +168,25 @@ fn element_rotation_leans_the_wall_torch() {
 }
 
 #[test]
-fn rotated_east_face_projects_uv_lock_from_above() {
+fn rotated_east_face_projects_cracks_from_above_without_changing_material_uv() {
     let json = r#"{"elements":[{"from":[7,0,7],"to":[8,8,9],
-        "rotation":{"origin":[8,0,8],"axis":"z","angle":45},
+        "rotation":{"origin":[8,0,8],"axis":"z","angle":45,"rescale":true},
         "faces":{"east":{"texture":"blocks/glass","cullface":"east"}}}]}"#;
     let quads = bake(json, r#"{"model":"m","uvlock":true}"#);
     let quad = &quads[0];
     assert_eq!(quad.face, UP);
-    assert_eq!(quad.uv[1], [0.5, 9.0 / 16.0]);
+    assert_eq!(quad.uv[1], [7.0 / 16.0, 1.0]);
     assert_eq!(quad.cull, Some(EAST));
     assert_eq!(quad.shade_face, EAST);
     assert!(!quad.on_boundary);
+    let pane = 102 << 4;
+    let (name, key) = variant(pane, NB).unwrap();
+    let models = Models {
+        states: HashMap::from([(name.to_owned(), HashMap::from([(key, quads)]))]),
+        ..Models::default()
+    };
+    let cracks = crate::crack::quads([0; 3], pane, NB, &models, true);
+    assert_eq!(cracks[1].uv, [0.5, 9.0 / 16.0]);
 }
 
 fn jar() -> Option<AssetSource> {
@@ -342,6 +358,16 @@ fn glass_pane_pack_models(case: &str) -> Models {
         r#"{"variants":{"east=false,north=false,south=false,west=false":{"model":"minecraft:decor/glass_pane_nsew"}}}"#,
     );
     write(
+        "base",
+        "blockstates/lever.json",
+        r#"{"variants":{"facing=east,powered=false":{"model":"pane_nsew"}}}"#,
+    );
+    write(
+        "pack",
+        "blockstates/lever.json",
+        r#"{"variants":{"facing=west,powered=false":{"model":"pane_nsew"}}}"#,
+    );
+    write(
         "pack",
         "models/block/decor/glass_pane_nsew.json",
         r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/decor/glass_pane_top"},"elements":[]}"#,
@@ -401,6 +427,8 @@ fn glass_pane_pack_models(case: &str) -> Models {
 fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
     let models = glass_pane_pack_models("variants");
     assert!(!models.textures().iter().any(|t| &**t == "rejected"));
+    assert!(models.quads(69 << 4 | 1, NB).is_none());
+    assert!(models.quads(69 << 4 | 2, NB).is_some());
     let pane = 102 << 4;
     assert_eq!(
         &*models.quads(pane, NB).unwrap()[0].tex,

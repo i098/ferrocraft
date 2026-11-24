@@ -2,19 +2,30 @@
 
 Owner: fc-dropin.
 
-Drop-in install for the official launcher (and any launcher that reads a version json).
+The installer supports Polyfrost OneClient and launchers that read a version JSON file.
 
-Run `ferrocraft-launcher install` from the extracted release archive so it can find the required files next to it.
-See [Install](../../README.md#install) for automatic launcher detection and the default folder.
-The installer records its output paths in `~/.ferrocraft/install-manifest.txt`, even if an install fails halfway.
-It copies itself to `~/.ferrocraft` so `uninstall` works afterwards.
-`ferrocraft-launcher uninstall` removes the recorded paths, including extra files in the recorded version and engine folders.
-It skips invalid manifest entries with a warning and exits with a nonzero status.
-An entry is invalid if it is a symlink or is not a Ferrocraft path in a recorded launcher folder.
-The installer detects OneClient by name in the app-data folder.
-Use `--oneclient-dir DIR` if OneClient is elsewhere.
-The `--minecraft-dir` and `--oneclient-dir` flags limit the install to the specified launchers.
-Use `--fabric-jar JAR` to select the Fabric mod jar.
+Close OneClient before you install or uninstall its Ferrocraft mod.
+Keep it closed until the command finishes.
+
+`ferrocraft-launcher install` downloads the pinned official OneClient release and verifies its SHA-256 digest.
+On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
+It installs the mod and engine for the Ornithe profile that Ferrocraft owns.
+It reuses a marked profile or chooses a folder and display name that do not conflict with other profiles.
+The default install does not add the mod to other OneClient profiles.
+It also installs Ferrocraft into the official Minecraft directory if that directory exists.
+Open OneClient after installation to load the profile.
+The installer reads the boot jar, mod jar, and engine next to its executable.
+The release installer reads both Fabric host JARs from that directory, even when you use `--engine`.
+An explicit `--minecraft-dir DIR` or `--oneclient-dir DIR` limits installation to the selected launchers and skips the download.
+Use `--fabric-jar JAR` to select a different mod jar.
+Before reinstalling, remove the bootstrap mod from each profile where OneClient already manages a Ferrocraft install.
+
+The installer records Ferrocraft files in `~/.ferrocraft/install-manifest.txt` and copies itself to `~/.ferrocraft`.
+The uninstall command removes those files, but leaves OneClient and the profile data.
+If OneClient still manages the bootstrap mod, the command stops before it removes any files.
+Remove the bootstrap mod in OneClient before you retry.
+If the message identifies an old data folder after a move, clear that folder in OneClient Storage before you retry.
+It warns and exits with an error if a manifest entry is not a permitted Ferrocraft path.
 
 - `ferrocraft-launcher install --minecraft-dir DIR --boot-jar JAR --engine BIN` writes, for the official launcher:
   - `versions/ferrocraft-1.8.9/ferrocraft-1.8.9.json` (`inheritsFrom` `1.8.9`, `mainClass` `net.ferrocraft.boot.Main`)

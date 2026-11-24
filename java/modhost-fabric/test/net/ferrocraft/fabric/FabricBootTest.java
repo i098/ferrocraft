@@ -19,8 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * place of the engine, and checks the log: every expected mod id has its entrypoint called, the JVM sends the hello, and no
  * Mixin error is in the output. A JVM that stops before the hello is a FAIL, never a PASS.
  *
- * <p>Arguments: java, class path, host jar, name table, game dir, assets dir, then the expected mod ids (the ids of the
- * entrypoint providers, one per argument).
+ * <p>Arguments: java, class path, workspace (empty for Legacy Fabric), name table, game dir, assets dir, then expected mod ids.
  */
 public final class FabricBootTest {
     private static final long HELLO_MILLIS = 240_000;
@@ -30,7 +29,9 @@ public final class FabricBootTest {
     private FabricBootTest() {}
 
     public static void main(String[] a) throws Exception {
-        String java = a[0], cp = a[1], jar = a[2], tiny = a[3], game = a[4], assets = a[5];
+        String java = a[0], cp = a[1], stage = a[2], tiny = a[3], game = a[4], assets = a[5];
+        int separator = cp.indexOf(File.pathSeparatorChar);
+        String jar = separator < 0 ? cp : cp.substring(0, separator);
         List<String> expect = Arrays.asList(a).subList(6, a.length);
         String token = Long.toHexString(System.nanoTime()) + Long.toHexString(System.currentTimeMillis());
         List<String> log = new CopyOnWriteArrayList<>();
@@ -40,7 +41,9 @@ public final class FabricBootTest {
                     "-javaagent:" + jar, "-Dferro.tiny=" + tiny, "-Dferro.gameDir=" + game, "-cp", cp,
                     "net.fabricmc.loader.impl.launch.knot.KnotClient", "--gameDir", game, "--assetsDir", assets,
                     "--version", "1.8.9", "--accessToken", "x"));
+            if (!stage.isEmpty()) cmd.add(1, "-Dferro.workspace=" + stage);
             ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+            if (!stage.isEmpty()) pb.directory(new File(game));
             pb.environment().put("FERROCRAFT_BRIDGE_TOKEN", token);
             Process p = pb.start();
             Thread pump = pump(p.getInputStream(), log);

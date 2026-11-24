@@ -164,7 +164,7 @@ fn host_command(java: &Path) -> Command {
     cmd
 }
 
-fn jvm_command(cfg: &Config, port: u16, token: &str) -> Command {
+fn jvm_command(cfg: &Config, port: u16, token: &str, workspace: Option<&Path>) -> Command {
     let sep = if cfg!(windows) { ";" } else { ":" };
     let cp = cfg
         .class_path
@@ -187,12 +187,15 @@ fn jvm_command(cfg: &Config, port: u16, token: &str) -> Command {
         Loader::Fabric { agent, names } => {
             cmd.arg(prefixed("-javaagent:", agent))
                 .arg(prefixed("-Dferro.tiny=", names))
-                .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir))
-                .args([
-                    "-cp",
-                    &cp,
-                    "net.fabricmc.loader.impl.launch.knot.KnotClient",
-                ]);
+                .arg(prefixed("-Dferro.gameDir=", &cfg.game_dir));
+            if let Some(workspace) = workspace {
+                cmd.arg(prefixed("-Dferro.workspace=", workspace));
+            }
+            cmd.args([
+                "-cp",
+                &cp,
+                "net.fabricmc.loader.impl.launch.knot.KnotClient",
+            ]);
         }
     }
     cmd.args(["--gameDir".as_ref(), cfg.game_dir.as_os_str()])
@@ -226,11 +229,28 @@ impl Drop for StagingDir {
     }
 }
 
+/// Private mod folder for one JVM: plain Forge staging, or the caller's Ornithe workspace.
+enum Staging {
+    /// Kept alive here so `Drop` removes the folder after the JVM exits.
+    #[allow(dead_code)]
+    Plain(StagingDir),
+    Workspace(tempfile::TempDir),
+}
+
+impl Staging {
+    fn workspace(&self) -> Option<&Path> {
+        match self {
+            Staging::Plain(_) => None,
+            Staging::Workspace(dir) => Some(dir.path()),
+        }
+    }
+}
+
 /// A running JVM and the last frame of draw commands it sent.
 pub struct ModHost {
     child: Arc<Mutex<Child>>,
     link: Arc<Link>,
-    staging: Option<Arc<Mutex<Option<StagingDir>>>>,
+    staging: Option<Arc<Mutex<Option<Staging>>>>,
 }
 
 #[derive(Debug)]
@@ -284,6 +304,11 @@ impl ModHost {
         Self::spawn(cfg, None)
     }
 
+    /// Start the JVM with the caller's private Ornithe workspace.
+    pub fn start_workspace(cfg: &Config, workspace: tempfile::TempDir) -> io::Result<Self> {
+        Self::spawn(cfg, Some(Staging::Workspace(workspace)))
+    }
+
     pub fn start_staged(
         mut cfg: Config,
         mods: &Path,
@@ -310,16 +335,20 @@ impl ModHost {
             stage_archive(mods, &target, &path, &mut buffer)?;
         }
         cfg.game_dir.clone_from(&staging.0);
-        Self::spawn(&cfg, Some(staging)).map_err(StagedStartError::Start)
+        Self::spawn(&cfg, Some(Staging::Plain(staging))).map_err(StagedStartError::Start)
     }
 
-    fn spawn(cfg: &Config, staging: Option<StagingDir>) -> io::Result<Self> {
+    fn spawn(cfg: &Config, staging: Option<Staging>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
+        let workspace = staging
+            .as_ref()
+            .and_then(Staging::workspace)
+            .map(Path::to_path_buf);
         let staging = staging.map(|dir| Arc::new(Mutex::new(Some(dir))));
         let token = token();
-        let mut cmd = jvm_command(cfg, port, &token);
+        let mut cmd = jvm_command(cfg, port, &token, workspace.as_deref());
         if staging.is_some() {
             cmd.current_dir(&cfg.game_dir);
         }
@@ -719,7 +748,7 @@ impl Drop for ModHost {
     }
 }
 
-fn stop_child(child: &mut Child, staging: Option<&Mutex<Option<StagingDir>>>) {
+fn stop_child(child: &mut Child, staging: Option<&Mutex<Option<Staging>>>) {
     let _ = child.kill();
     if child.wait().is_ok() {
         if let Some(staging) = staging {
@@ -1292,6 +1321,126 @@ printf '%s\n' "$PWD" > "$0.result"
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;
+
+    #[test]
+    fn mod_host_does_not_inherit_minecraft_access_token() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let name = "tests::mod_host_does_not_inherit_minecraft_access_token";
+        if std::env::var_os("FERROCRAFT_TEST_HOST_ENV").is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env("FERROCRAFT_TEST_HOST_ENV", "1")
+                .env("FERROCRAFT_ACCESS_TOKEN", "test-session")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}"
+            );
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let java = tmp.path().join("java");
+        std::fs::write(
+            &java,
+            "#!/bin/sh\n[ -z \"${FERROCRAFT_ACCESS_TOKEN+x}\" ] && [ -n \"$FERROCRAFT_BRIDGE_TOKEN\" ]\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for loader in [
+            Loader::Forge,
+            Loader::Fabric {
+                agent: tmp.path().join("agent.jar"),
+                names: tmp.path().join("names.tiny"),
+            },
+        ] {
+            let host = ModHost::start(&Config {
+                loader,
+                java: java.clone(),
+                class_path: Vec::new(),
+                game_dir: tmp.path().to_path_buf(),
+                assets_dir: tmp.path().to_path_buf(),
+            })
+            .unwrap();
+            assert!(host.child.lock().unwrap().wait().unwrap().success());
+        }
+        assert_eq!(
+            std::env::var("FERROCRAFT_ACCESS_TOKEN").unwrap(),
+            "test-session"
+        );
+    }
+
+    #[test]
+    fn staged_hosts_keep_separate_mods_until_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("profile");
+        std::fs::create_dir(&profile).unwrap();
+        let java = root.path().join("java");
+        std::fs::write(
+            &java,
+            r#"#!/bin/sh
+while [ "$#" -ne 0 ] && [ "$1" != --gameDir ]; do
+    case "$1" in
+        -Dferro.gameDir=*) agent_dir="${1#*=}";;
+        -Dferro.workspace=*) stage="${1#*=}";;
+    esac
+    shift
+done
+[ "$#" -ge 2 ] && [ "$agent_dir" = "$2" ] && [ . -ef "$2" ] && [ -n "$stage" ] || exit 1
+cat "$stage"/mods/*.jar > "$stage/loading" || exit 1
+mkdir -p config && cp "$stage/loading" "config/$(cat "$stage/loading").txt" || exit 1
+mv "$stage/loading" "$stage/loaded" || exit 1
+while [ ! -f "$stage/exit" ]; do sleep 0.02; done
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let launch = |name: &str| {
+            let dir = tempfile::tempdir_in(root.path()).unwrap();
+            std::fs::create_dir(dir.path().join("mods")).unwrap();
+            std::fs::write(dir.path().join("mods").join(name), name).unwrap();
+            let cfg = Config {
+                loader: Loader::Fabric {
+                    agent: root.path().join("agent.jar"),
+                    names: root.path().join("names.tiny"),
+                },
+                java: java.clone(),
+                class_path: Vec::new(),
+                game_dir: profile.clone(),
+                assets_dir: root.path().to_path_buf(),
+            };
+            let owner = dir.path().to_path_buf();
+            (ModHost::start_workspace(&cfg, dir).unwrap(), owner)
+        };
+        let (_a, first) = launch("first.jar");
+        let (mut b, second) = launch("second.jar");
+        let wait_for = |ready: &dyn Fn() -> bool| {
+            let until = Instant::now() + Duration::from_secs(5);
+            while !ready() {
+                assert!(Instant::now() < until);
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        wait_for(&|| {
+            std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
+                && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar")
+        });
+        std::fs::write(first.join("exit"), []).unwrap();
+        wait_for(&|| !first.exists());
+        assert_eq!(
+            std::fs::read(profile.join("config/first.jar.txt")).unwrap(),
+            b"first.jar"
+        );
+        assert!(second.is_dir());
+        b.stop();
+        assert!(!second.exists());
+    }
 
     pub(super) fn link() -> Arc<Link> {
         Arc::new(Link {

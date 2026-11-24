@@ -9,4 +9,16 @@ name = "ferrocraft-launcher"
 path = "src/main.rs"
 
 [dependencies]
+ferrocraft-oneclient = { path = "../oneclient" }
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+dirs = "6"
+windows-registry = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+zip = { version = "2", default-features = false }

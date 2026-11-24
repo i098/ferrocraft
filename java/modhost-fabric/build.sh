@@ -8,12 +8,21 @@ here=$(cd "$(dirname "$0")" && pwd)
 J=${FERRO_JAVA_HOME:?set FERRO_JAVA_HOME to a Java 8 JDK}/bin
 L=${FERRO_LIB:?set FERRO_LIB to the library folder}
 F=${FABRIC_LOADER_JAR:?set FABRIC_LOADER_JAR to a fabric-loader jar}
+J=$(cd "$J" && pwd)
+L=$(cd "$L" && pwd)
+F=$(cd "$(dirname "$F")" && pwd)/$(basename "$F")
 out=$here/../../target/modhost-fabric
 rm -rf "$out" && mkdir -p "$out/cls"
 asm=$(ls "$L"/asm-all-*.jar)
-find "$here/src" "$here/stubs" "$here/../modhost/src" -name '*.java' ! -path '*/net/minecraft/*' > "$out/sources.txt"
-"$J/javac" -nowarn -source 8 -target 8 -Xlint:-options \
-    -cp "$L/lw.jar:$asm:$L/forge.jar:$L/guava-17.0.jar:$F" \
-    -d "$out/cls" @"$out/sources.txt"
+cp="$L/lw.jar:$asm:$L/forge.jar:$L/guava-17.0.jar:$F"
+if [ "${OS:-}" = Windows_NT ]; then
+    cp=$(cygpath -wp "$cp")
+fi
+(
+    cd "$here"
+    find src stubs ../modhost/src -name '*.java' ! -path '*/net/minecraft/*' > "$out/sources.txt"
+    "$J/javac" -nowarn -source 8 -target 8 -Xlint:-options \
+        -cp "$cp" -d "$out/cls" @../../target/modhost-fabric/sources.txt
+)
 printf 'Premain-Class: net.ferrocraft.fabric.Agent\n' > "$out/manifest.mf"
 "$J/jar" cfm "$out/ferro-host-fabric.jar" "$out/manifest.mf" -C "$out/cls" net -C "$out/cls" io -C "$out/cls" pl -C "$out/cls" org/lwjgl/opengl/Display.class -C "$out/cls" org/lwjgl/opengl/GL.class -C "$out/cls" org/lwjgl/opengl/GLCapabilities.class

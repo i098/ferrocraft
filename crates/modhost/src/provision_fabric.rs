@@ -7,7 +7,6 @@
 //! it needs LaunchWrapper's classes, which the loader does not ship.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::{fmt, fs, io};
 
 use portablemc::{base, fabric, moj};
@@ -38,23 +37,32 @@ const ORNITHE_UPGRADES: [(&str, &str); 8] = [
     ("https://libraries.minecraft.net/net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar", "4fdac2fbe92dfad86aa6e9301736f6b4342a3f5c"),
 ];
 /// LWJGL 3 core and its natives: Argentum, a perf mod of the bundles, allocates with `MemoryUtil` (`pylon` ships them; it is denied).
-#[cfg(target_os = "macos")]
-const LWJGL3_NATIVES: (&str, &str) = (
-    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos-arm64.jar",
-    "832e2964ce74e02e768814a29c06d60645115b9a",
+const LWJGL3_CORE: (&str, &str) = (
+    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6.jar",
+    "ce7721d30cfaf47feaed10213e0c43eb55c49d68",
 );
-#[cfg(not(target_os = "macos"))]
-const LWJGL3_NATIVES: (&str, &str) = (
-    "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-linux.jar",
-    "dc7db8fc4f1e6563867f9155b9a42d9c73d8992f",
-);
-const LWJGL3: [(&str, &str); 2] = [
-    (
-        "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6.jar",
-        "ce7721d30cfaf47feaed10213e0c43eb55c49d68",
-    ),
-    LWJGL3_NATIVES,
-];
+
+fn lwjgl3_natives(os: &str, arch: &str) -> Result<(&'static str, &'static str), Error> {
+    match (os, arch) {
+        ("macos", "aarch64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos-arm64.jar",
+            "832e2964ce74e02e768814a29c06d60645115b9a",
+        )),
+        ("macos", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-macos.jar",
+            "f14e7a5289d2355822f4f83b3fd38d158c939acd",
+        )),
+        ("linux", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-linux.jar",
+            "dc7db8fc4f1e6563867f9155b9a42d9c73d8992f",
+        )),
+        ("windows", "x86_64") => Ok((
+            "https://repo1.maven.org/maven2/org/lwjgl/lwjgl/3.3.6/lwjgl-3.3.6-natives-windows.jar",
+            "9a29b6a22fc5184604b8cb434ee5d5ecc4bfcbee",
+        )),
+        _ => Err(Error::Missing(format!("LWJGL 3 natives for {os}/{arch}"))),
+    }
+}
 /// Fabric Loader's dependency overrides: the three mods of the OneClient bundles that depend on `pylon` drop that dependency.
 const PYLON_DEPENDS_OVERRIDE: &str = r#"{"version":1,"overrides":{"oneconfig":{"-depends":{"pylon":""}},"forgecompat":{"-depends":{"pylon":""}},"packed_packs":{"-depends":{"pylon":""}}}}"#;
 /// `fabric.mod.json` of the mod that stands in for `legacy-lwjgl3` (`pylon` is denied: the host owns the window): SoundFix and
@@ -128,16 +136,17 @@ impl Config {
         moj.base_mut().set_main_dir(&main);
         moj.base_mut().set_jvm_policy(base::JvmPolicy::Mojang);
         let game = installer.install(())?;
+        fs::create_dir_all(main.join("mods"))?;
         assemble(&main, game, &[])
     }
 
     /// The Ornithe profile: Java 25 (Mojang's `java-runtime-epsilon`), Fabric Loader 0.20.1 on Ornithe's gen2 intermediary
     /// (the names of the public OneClient 1.8.9 bundles), and Ornithe's library upgrades for 1.8.9 in place of the old
-    /// log4j, gson and jopt-simple of the game. Everything lives in `~/.ferrocraft/modhost-ornithe`. The host owns the window and
-    /// the input, so `pylon` (the mod that opens an SDL window and reads the keyboard) never loads: `mods/` loses any
-    /// `pylon` jar and gets a stand-in mod of that id, which keeps the mods that depend on it. Same inputs as `provision_fabric`.
-    pub fn provision_ornithe() -> Result<Config, Error> {
+    /// log4j, gson and jopt-simple of the game. The runtime cache lives in `~/.ferrocraft/modhost-ornithe`.
+    pub fn provision_ornithe(game_dir: &Path, workspace: &Path) -> Result<Config, Error> {
+        let natives = lwjgl3_natives(std::env::consts::OS, std::env::consts::ARCH)?;
         let main = ornithe_dir()?;
+        let _cache = lock_runtime(&main)?;
         let profile = main
             .join("versions")
             .join(ORNITHE_ID)
@@ -156,10 +165,8 @@ impl Config {
                     "{ORNITHE_PROFILE_URL}: unexpected profile"
                 )));
             }
-            let part = profile.with_extension("json.part");
-            fs::create_dir_all(part.parent().unwrap_or(&main))?;
-            fs::write(&part, json)?;
-            fs::rename(&part, &profile)?;
+            fs::create_dir_all(profile.parent().unwrap())?;
+            publish(&profile, json.as_bytes())?;
         }
         let mut installer = moj::Installer::new(ORNITHE_ID);
         installer.base_mut().set_main_dir(&main);
@@ -181,7 +188,7 @@ impl Config {
         let mut config = assemble(&main, game, &upgrades)?;
         // LWJGL 3 (core and the natives of this machine) for the mods that read its memory classes: the game's own LWJGL 2 stays.
         // They go right after the host jar and LaunchWrapper: LWJGL 2 has classes of the same names (`org.lwjgl.system.*`) that must lose.
-        for (i, (url, sha1)) in LWJGL3.iter().enumerate() {
+        for (i, (url, sha1)) in [LWJGL3_CORE, natives].into_iter().enumerate() {
             let dest = main
                 .join("upgrades")
                 .join(url.rsplit('/').next().unwrap_or(url));
@@ -189,7 +196,9 @@ impl Config {
             config.class_path.insert(2 + i, dest);
         }
 
-        let mods = main.join("mods");
+        config.game_dir = std::path::absolute(game_dir)?;
+        let mods = workspace.join("mods");
+        fs::create_dir_all(&mods)?;
         for entry in fs::read_dir(&mods)? {
             let path = entry?.path();
             if file_name(&path).to_lowercase().starts_with("pylon")
@@ -204,18 +213,35 @@ impl Config {
             fs::write(&stub, jar)?;
         }
         // The mods that depend on `pylon` need not have it: the host owns the window and the input. A file the player wrote stays.
-        let overrides = main.join("config").join("fabric_loader_dependencies.json");
-        if !overrides.exists() {
-            fs::create_dir_all(main.join("config"))?;
-            fs::write(&overrides, PYLON_DEPENDS_OVERRIDE)?;
-        }
+        let relative = Path::new("config/fabric_loader_dependencies.json");
+        let overrides = match fs::read(main.join(relative)) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                PYLON_DEPENDS_OVERRIDE.as_bytes().to_vec()
+            }
+            Err(e) => return Err(e.into()),
+        };
+        fs::create_dir_all(workspace.join("config"))?;
+        fs::write(workspace.join(relative), overrides)?;
         Ok(config)
     }
 }
 
-/// `~/.ferrocraft/modhost-ornithe`: the Minecraft main directory and the game directory of the Ornithe profile.
+/// The shared Minecraft runtime cache for the Ornithe profile.
 pub fn ornithe_dir() -> Result<PathBuf, Error> {
     Ok(main_dir()?.with_file_name("modhost-ornithe"))
+}
+
+fn lock_runtime(main: &Path) -> io::Result<fs::File> {
+    fs::create_dir_all(main)?;
+    let lock = fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(main.join("provision.lock"))?;
+    lock.lock()?;
+    Ok(lock)
 }
 
 /// What both profiles share after the installer ran: the name table (from the intermediary jar on the class path), the host jar
@@ -250,14 +276,12 @@ fn assemble(main: &Path, game: base::Game, upgrades: &[PathBuf]) -> Result<Confi
         "target/modhost-fabric",
         "java/modhost-fabric/build.sh",
     )?;
-    let host_dst = main.join(HOST_JAR);
-    fs::copy(&host, &host_dst)?;
+    let host_dst = cache_agent(main, &host)?;
     let lw = main.join("launchwrapper-1.12.jar");
     fetch(LW_URL, LW_SHA1, &lw)?;
     let mut class_path = vec![host_dst.clone(), lw];
     class_path.extend_from_slice(upgrades);
     class_path.extend(libs);
-    fs::create_dir_all(main.join("mods"))?;
     Ok(Config {
         loader: Loader::Fabric {
             agent: host_dst,
@@ -268,6 +292,15 @@ fn assemble(main: &Path, game: base::Game, upgrades: &[PathBuf]) -> Result<Confi
         assets_dir: main.join("assets"),
         game_dir: main.to_path_buf(),
     })
+}
+
+fn cache_agent(main: &Path, source: &Path) -> io::Result<PathBuf> {
+    let bytes = fs::read(source)?;
+    let dest = main.join(format!("ferro-host-fabric-{}.jar", sha1_hex(&bytes)));
+    if !dest.try_exists()? {
+        publish(&dest, bytes.as_slice())?;
+    }
+    Ok(dest)
 }
 
 /// The artifact of a library file: `log4j-api-2.0-beta9.jar` and `log4j-api-2.19.0.jar` are both `log4j-api`.
@@ -340,8 +373,9 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
     )?;
     let srg = main.join("mcp-1.8.9-srg.zip");
     fetch(SRG_URL, SRG_SHA1, &srg)?;
-    let tmp = table.with_extension("tiny.part");
-    let out = Command::new(java)
+    let staged = tempfile::tempdir_in(main)?;
+    let tmp = staged.path().join("names.tiny");
+    let out = crate::host_command(java)
         .arg("-cp")
         .arg(&names_jar)
         .arg("net.ferrocraft.prepare.NameTable")
@@ -350,7 +384,6 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
         .arg(&tmp)
         .output()?;
     if !out.status.success() {
-        let _ = fs::remove_file(&tmp);
         return Err(Error::Missing(format!(
             "NameTable failed: {}{}",
             String::from_utf8_lossy(&out.stdout),
@@ -375,7 +408,15 @@ fn fetch(url: &str, sha1: &str, dest: &Path) -> Result<(), Error> {
             "sha1 of {url} is {actual}, expected {sha1}"
         )));
     }
-    Ok(fs::write(dest, bytes)?)
+    Ok(publish(dest, bytes.as_slice())?)
+}
+
+fn publish(dest: &Path, mut contents: impl io::Read) -> io::Result<()> {
+    let mut staged = tempfile::NamedTempFile::new_in(dest.parent().unwrap())?;
+    io::copy(&mut contents, &mut staged)?;
+    drop(contents);
+    staged.persist(dest)?;
+    Ok(())
 }
 
 fn sha1_hex(bytes: &[u8]) -> String {
@@ -409,6 +450,23 @@ fn find_jar(env: &str, name: &str, tree_dir: &str, how: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn ornithe_selects_lwjgl_natives_for_release_targets() {
+        for (os, arch, classifier) in [
+            ("macos", "aarch64", "macos-arm64"),
+            ("macos", "x86_64", "macos"),
+            ("linux", "x86_64", "linux"),
+            ("windows", "x86_64", "windows"),
+        ] {
+            let (url, _) = lwjgl3_natives(os, arch).unwrap();
+            assert!(
+                url.ends_with(&format!("-natives-{classifier}.jar")),
+                "{url}"
+            );
+        }
+    }
 
     /// Needs the network, the JDK-built jars and a clean `HOME`; run by hand:
     /// `HOME=$(mktemp -d) FERROCRAFT_MODHOST_JAR=... FERROCRAFT_NAMES_JAR=... cargo test -p ferrocraft-modhost provision_fabric -- --ignored`.
@@ -425,17 +483,25 @@ mod tests {
         assert!(table.lines().any(|l| l.starts_with(
             "\tf\tLnet/minecraft/client/entity/EntityPlayerSP;\tfield_71439_g\tfield_"
         )));
-        write_config(&config);
+        write_config(&config, None);
     }
 
     /// As above for the Ornithe profile: Java 25, the upgraded libraries first, gen2 names, `pylon` replaced by the stand-in.
     #[test]
     #[ignore]
     fn clean_home_gives_ornithe_config() {
-        let mods = ornithe_dir().unwrap().join("mods");
+        let game_dir = ornithe_dir().unwrap().join("fixture");
+        let workspace = game_dir.with_file_name("fixture-stage");
+        let mods = workspace.join("mods");
         fs::create_dir_all(&mods).unwrap();
         fs::write(mods.join("pylon-0.2.8.jar"), b"the real pylon").unwrap();
-        let config = Config::provision_ornithe().expect("provision");
+        let second = tempfile::tempdir().unwrap();
+        let config = std::thread::scope(|scope| {
+            let other = scope.spawn(|| Config::provision_ornithe(&game_dir, second.path()));
+            let config = Config::provision_ornithe(&game_dir, &workspace).expect("provision");
+            assert_eq!(other.join().unwrap().unwrap().class_path, config.class_path);
+            config
+        });
         let version = Command::new(&config.java).arg("-version").output().unwrap();
         assert!(String::from_utf8_lossy(&version.stderr).contains("\"25."));
         let names: Vec<String> = config.class_path.iter().map(|j| file_name(j)).collect();
@@ -447,28 +513,96 @@ mod tests {
             .starts_with("\tf\tLnet/minecraft/client/entity/EntityPlayerSP;\tfield_71439_g\tf_")));
         assert!(!mods.join("pylon-0.2.8.jar").exists());
         assert!(mods.join("ferro-pylon-stand-in.jar").is_file());
-        let overrides = fs::read_to_string(
-            ornithe_dir()
-                .unwrap()
-                .join("config/fabric_loader_dependencies.json"),
+        let overrides: serde_json::Value = serde_json::from_slice(
+            &fs::read(workspace.join("config/fabric_loader_dependencies.json")).unwrap(),
         )
         .unwrap();
-        assert!(overrides.contains("\"-depends\""));
-        write_config(&config);
+        assert_eq!(overrides["version"], 1);
+        for id in ["oneconfig", "forgecompat", "packed_packs"] {
+            assert_eq!(overrides["overrides"][id]["-depends"]["pylon"], "");
+        }
+        assert!(!ornithe_dir().unwrap().join("mods").exists());
+        write_config(&config, Some(&workspace));
     }
 
-    /// The config file of java/modhost-fabric/test.sh: java, main dir, class path.
-    fn write_config(config: &Config) {
+    #[test]
+    #[ignore]
+    fn ornithe_extracts_nested_jar_inside_launch_directory() {
+        use std::io::{Cursor, Write};
+        use std::time::{Duration, Instant};
+
+        let profile = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mods = workspace.path().join("mods");
+        fs::create_dir(&mods).unwrap();
+        let nested = stored_jar(
+            "fabric.mod.json",
+            br#"{"schemaVersion":1,"id":"nested_fixture","version":"1.0.0"}"#,
+        );
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("fabric.mod.json", options).unwrap();
+        zip.write_all(br#"{"schemaVersion":1,"id":"oneconfig","version":"1.0.0","depends":{"pylon":"*","nested_fixture":"*"},"jars":[{"file":"nested.jar"}]}"#)
+            .unwrap();
+        zip.start_file("nested.jar", options).unwrap();
+        zip.write_all(&nested).unwrap();
+        fs::write(mods.join("outer.jar"), zip.finish().unwrap().into_inner()).unwrap();
+
+        let config = Config::provision_ornithe(profile.path(), workspace.path()).unwrap();
+        let processed = workspace.path().join(".fabric/processedMods");
+        let owner = workspace.path().to_path_buf();
+        let mut host = crate::ModHost::start_workspace(&config, workspace).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if host.client_brand().is_some()
+                && fs::read_dir(&processed)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .any(|entry| fs::read(entry.path()).is_ok_and(|bytes| bytes == nested))
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "Fabric did not start without Pylon and extract the nested JAR into the launch directory");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        host.stop();
+        assert!(!owner.exists());
+        assert!(profile.path().is_dir());
+        assert!(!profile.path().join(".fabric/processedMods").exists());
+    }
+
+    /// The config file for java/modhost-fabric/test.sh.
+    fn write_config(config: &Config, workspace: Option<&Path>) {
         if let Some(out) = std::env::var_os("FERRO_FABRIC_CONFIG_OUT") {
             let cp = std::env::join_paths(&config.class_path).unwrap();
             let text = format!(
-                "{}\n{}\n{}\n",
+                "{}\n{}\n{}\n{}\n{}\n",
                 config.java.display(),
                 config.game_dir.display(),
-                cp.to_string_lossy()
+                cp.to_string_lossy(),
+                config.assets_dir.parent().unwrap().display(),
+                workspace.map_or_else(String::new, |p| p.display().to_string()),
             );
             fs::write(out, text).unwrap();
         }
+    }
+
+    #[test]
+    fn fabric_agent_updates_do_not_replace_a_running_hosts_jar() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("release.jar");
+        fs::write(&source, b"old agent").unwrap();
+        let first = cache_agent(dir.path(), &source).unwrap();
+        let open = fs::File::open(&first).unwrap();
+        assert_eq!(cache_agent(dir.path(), &source).unwrap(), first);
+        fs::write(&source, b"new agent").unwrap();
+        let next = cache_agent(dir.path(), &source).unwrap();
+        assert_ne!(next, first);
+        assert_eq!(fs::read(first).unwrap(), b"old agent");
+        assert_eq!(fs::read(next).unwrap(), b"new agent");
+        drop(open);
     }
 
     #[test]

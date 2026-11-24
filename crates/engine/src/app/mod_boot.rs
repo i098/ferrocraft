@@ -152,6 +152,16 @@ fn scan_legacy(dir: &Path) -> Vec<(PathBuf, SystemTime, u64)> {
     jars
 }
 
+fn started(result: std::io::Result<ModHost>) -> Option<ModHost> {
+    match result {
+        Ok(host) => Some(host),
+        Err(e) => {
+            log::line(&format!("mod host did not start: {e}"));
+            None
+        }
+    }
+}
+
 fn scan_folder(
     dir: &Path,
     folder: &Path,
@@ -187,15 +197,19 @@ fn scan_folder(
 }
 
 struct Prepared {
-    cfg: Config,
+    cfg: Option<Config>,
     plain: Option<(PathBuf, Vec<PathBuf>)>,
+    host: Option<ModHost>,
 }
 
 impl Prepared {
     fn start(self) -> std::io::Result<Option<ModHost>> {
+        let Some(cfg) = self.cfg else {
+            return Ok(self.host);
+        };
         let result = match self.plain {
-            Some((src, paths)) => ModHost::start_staged(self.cfg, &src, paths),
-            None => ModHost::start(&self.cfg).map_err(StagedStartError::Start),
+            Some((src, paths)) => ModHost::start_staged(cfg, &src, paths),
+            None => ModHost::start(&cfg).map_err(StagedStartError::Start),
         };
         match result {
             Ok(host) => Ok(Some(host)),
@@ -244,9 +258,19 @@ fn prepare(game_dir: &Path) -> std::io::Result<Option<Prepared>> {
 
 fn prepare_source(source: HostSource) -> std::io::Result<Option<Prepared>> {
     let src = match source {
-        HostSource::Explicit(cfg) => return Ok(Some(Prepared { cfg, plain: None })),
+        HostSource::Explicit(cfg) => {
+            return Ok(Some(Prepared {
+                cfg: Some(cfg),
+                plain: None,
+                host: None,
+            }));
+        }
         HostSource::Cluster(root) => {
-            return Ok(from_cluster(&root).map(|cfg| Prepared { cfg, plain: None }));
+            return Ok(from_cluster(&root).map(|host| Prepared {
+                cfg: None,
+                plain: None,
+                host: Some(host),
+            }));
         }
         HostSource::PlainForge(root) => root.join("mods"),
         HostSource::None => return Ok(None),
@@ -260,8 +284,9 @@ fn prepare_source(source: HostSource) -> std::io::Result<Option<Prepared>> {
     };
     let paths = mods.into_iter().map(|(path, _, _)| path).collect();
     Ok(Some(Prepared {
-        cfg,
+        cfg: Some(cfg),
         plain: Some((src, paths)),
+        host: None,
     }))
 }
 
@@ -276,7 +301,7 @@ fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
         })
 }
 
-fn from_cluster(cluster: &Path) -> Option<Config> {
+fn from_cluster(cluster: &Path) -> Option<ModHost> {
     let loader = match oneclient::loader(cluster) {
         Ok(l) => l,
         Err(e) => return fail(&e),
@@ -288,13 +313,42 @@ fn from_cluster(cluster: &Path) -> Option<Config> {
         ));
         return None;
     };
-    stage(cluster, loader, host)?;
+    if host == Host::Ornithe {
+        return start_ornithe(cluster, loader);
+    }
+    let main = match host {
+        Host::Forge => provision::main_dir().map_err(|e| e.to_string()),
+        Host::Fabric => provision_fabric::main_dir().map_err(|e| e.to_string()),
+        Host::Ornithe => unreachable!(),
+    };
+    let main = match main {
+        Ok(main) => main,
+        Err(e) => return fail(&e),
+    };
+    stage(cluster, loader, &main.join("mods"))?;
     let cfg = match host {
         Host::Forge => Config::provision().map_err(|e| e.to_string()),
         Host::Fabric => Config::provision_fabric().map_err(|e| e.to_string()),
-        Host::Ornithe => Config::provision_ornithe().map_err(|e| e.to_string()),
+        Host::Ornithe => unreachable!(),
     };
-    cfg.map_err(|e| fail::<Config>(&e)).ok()
+    match cfg {
+        Ok(cfg) => started(ModHost::start(&cfg)),
+        Err(e) => fail(&e),
+    }
+}
+
+fn start_ornithe(cluster: &Path, loader: oneclient::Loader) -> Option<ModHost> {
+    let workspace = match provision_fabric::ornithe_dir()
+        .and_then(|base| oneclient::private_workspace(&base).map_err(Into::into))
+    {
+        Ok(dir) => dir,
+        Err(e) => return fail(&e),
+    };
+    stage(cluster, loader, &workspace.path().join("mods"))?;
+    match Config::provision_ornithe(cluster, workspace.path()) {
+        Ok(cfg) => started(ModHost::start_workspace(&cfg, workspace)),
+        Err(e) => fail(&e),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,27 +370,20 @@ fn host_for(loader: oneclient::Loader) -> Option<Host> {
 }
 
 /// Puts the cluster's jars in the host's mods folder. `None` when there is no cluster or it failed.
-fn stage(cluster: &Path, loader: oneclient::Loader, host: Host) -> Option<()> {
-    let main = match host {
-        Host::Forge => provision::main_dir().map_err(|e| e.to_string()),
-        Host::Fabric => provision_fabric::main_dir().map_err(|e| e.to_string()),
-        Host::Ornithe => provision_fabric::ornithe_dir().map_err(|e| e.to_string()),
-    };
-    let mods = match main {
-        Ok(main) => main.join("mods"),
-        Err(e) => return fail(&e),
-    };
-    let resolved = if host == Host::Forge {
-        oneclient::resolve(cluster, &mods)
+fn stage(cluster: &Path, loader: oneclient::Loader, mods: &Path) -> Option<()> {
+    let resolved = if loader == oneclient::Loader::Forge {
+        oneclient::resolve(cluster, mods)
     } else {
-        oneclient::fabric_jars(cluster, &mods)
+        oneclient::fabric_jars(cluster, mods)
     };
     let r = match resolved {
         Ok(r) => r,
         Err(oneclient::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => return fail(&e),
     };
-    prune(&mods, &r.jars);
+    if loader != oneclient::Loader::Ornithe {
+        prune(mods, &r.jars);
+    }
     let twin = if r.no_forge.is_empty() {
         String::new()
     } else {
@@ -495,14 +542,15 @@ mod tests {
         fs::rename(&jar, &parked).unwrap();
         fs::create_dir(&jar).unwrap();
         let prepared = || Prepared {
-            cfg: Config {
+            cfg: Some(Config {
                 loader: ferrocraft_modhost::Loader::Forge,
                 java: "/bin/true".into(),
                 class_path: Vec::new(),
                 game_dir: root.clone(),
                 assets_dir: root.clone(),
-            },
+            }),
             plain: Some((dir.clone(), vec![archive.clone()])),
+            host: None,
         };
         let check_recovery = |restore: &dyn Fn()| {
             let mut watch = watch();

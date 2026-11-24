@@ -13,8 +13,8 @@ if [ "${1:-}" = names ]; then
     out=$(cd "$2" && pwd)
     mio=0.9.2
     sha=43d03303c07f35fffd938ad14f639ceb69893369
-    curl -fsSL -o "$out/mapping-io.jar" "https://repo1.maven.org/maven2/net/fabricmc/mapping-io/$mio/mapping-io-$mio.jar"
-    [ "$(sha1sum "$out/mapping-io.jar" | cut -d' ' -f1)" = "$sha" ] || { echo "mapping-io sha1 differs" >&2; exit 1; }
+    curl -fsSL -o "$out/mapping-io.jar" "https://repo.maven.apache.org/maven2/net/fabricmc/mapping-io/$mio/mapping-io-$mio.jar"
+    [ "$(openssl dgst -sha1 -r "$out/mapping-io.jar" | cut -d' ' -f1)" = "$sha" ] || { echo "mapping-io sha1 differs" >&2; exit 1; }
     rm -rf "$out/names-cls" && mkdir "$out/names-cls"
     ( cd "$out/names-cls" && "$J/jar" xf ../mapping-io.jar && rm -rf META-INF )
     "$J/javac" -nowarn -source 8 -target 8 -Xlint:-options -cp "$out/mapping-io.jar" -d "$out/names-cls" "$here/src/net/ferrocraft/prepare/NameTable.java"

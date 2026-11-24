@@ -1,7 +1,7 @@
 use std::{env, fs, process::Command};
 
 #[test]
-fn install_without_flags_creates_the_default_game_folder() {
+fn install_to_default_path_creates_version_descriptor() {
     let root = env::temp_dir().join(format!("fc-fresh-install-{}", std::process::id()));
     let home = root.join("home");
     let appdata = root.join("appdata");
@@ -18,13 +18,6 @@ fn install_without_flags_creates_the_default_game_folder() {
         "ferrocraft-engine"
     };
     fs::write(package.join(engine), b"engine").unwrap();
-    let output = Command::new(launcher)
-        .arg("install")
-        .env("HOME", &home)
-        .env("APPDATA", &appdata)
-        .env("XDG_DATA_HOME", &appdata)
-        .output()
-        .unwrap();
     let game = if cfg!(target_os = "macos") {
         home.join("Library/Application Support/minecraft")
     } else if cfg!(windows) {
@@ -32,6 +25,15 @@ fn install_without_flags_creates_the_default_game_folder() {
     } else {
         home.join(".minecraft")
     };
+    let output = Command::new(launcher)
+        .arg("install")
+        .arg("--minecraft-dir")
+        .arg(&game)
+        .env("HOME", &home)
+        .env("APPDATA", &appdata)
+        .env("XDG_DATA_HOME", &appdata)
+        .output()
+        .unwrap();
     let descriptor = fs::read(game.join("versions/ferrocraft-1.8.9/ferrocraft-1.8.9.json"));
     fs::remove_dir_all(root).unwrap();
     assert!(output.status.success(), "{:?}", output);

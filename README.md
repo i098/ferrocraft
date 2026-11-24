@@ -12,6 +12,8 @@ The mod host runs Forge mods that draw HUDs and screens (Keystrokes, OneConfig);
 
 No Rust toolchain needed. The installer downloads the release archive for your OS and runs it.
 
+Close OneClient before you install Ferrocraft. Keep it closed until the installer finishes.
+
 macOS and Linux (x86_64, or Apple silicon):
 
     curl -fsSL https://github.com/i098/ferrocraft/releases/latest/download/install.sh | sh
@@ -20,19 +22,33 @@ Windows (PowerShell):
 
     irm https://github.com/i098/ferrocraft/releases/latest/download/install.ps1 | iex
 
-The installer installs into every launcher it finds:
+The installer downloads and verifies Polyfrost OneClient 2.12.0.
+On Windows it reuses a compatible OneClient installation and stops if you must update an older one.
+It installs the `Ferrocraft 1.8.9` Ornithe profile in the active OneClient data directory.
+Open OneClient from the path that the installer prints.
+Keep the default data directory if OneClient asks where to store its data.
+Sign in once with a Microsoft account that owns Minecraft: Java Edition.
+Select the profile name that the installer prints.
+OneClient downloads the game and loader when you start the profile.
+On Linux without FUSE, run the AppImage with `--appimage-extract-and-run`.
 
-- Official launcher: the `ferrocraft-1.8.9` version.
-- OneClient clusters that run 1.8.9 with Fabric: the Fabric mod jar. The engine goes to `~/.ferrocraft`.
-- No launcher found: the installer creates the default game folder and installs the `ferrocraft-1.8.9` version there.
-  The installer prints the folder path.
-  - Linux: `~/.minecraft`
-  - macOS: `~/Library/Application Support/minecraft`
-  - Windows: `%APPDATA%\.minecraft`, or `<home>\AppData\Roaming\.minecraft` if `APPDATA` is not set.
-    The installer reads `<home>` from `HOME` or, if `HOME` is not set, `USERPROFILE`.
-- Lunar Client and Badlion cannot start custom versions, so the installer skips them.
+To use an existing launcher without a OneClient download, extract the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases).
+Run `./ferrocraft-launcher install --minecraft-dir DIR` for the official launcher.
+Use `./ferrocraft-launcher install --oneclient-dir DIR` with the OneClient data directory to target its 1.8.9 Fabric or Ornithe profiles.
+Before reinstalling, remove the bootstrap mod from each profile where OneClient already manages a Ferrocraft install.
+Other local accounts can see mod filenames, hashes, and profile paths if they have access to the staging paths or logs.
+Ornithe keeps mod settings, saves, and options in the OneClient profile.
+Each launch stages and extracts mod JARs in a private temporary directory.
+Lunar Client and Badlion cannot start custom versions.
 
-The installer prints what it did and the uninstall command: `~/.ferrocraft/ferrocraft-launcher uninstall`. If your launcher is in a custom folder, download the archive for your OS from the [release page](https://github.com/i098/ferrocraft/releases), extract it, and run `./ferrocraft-launcher install --minecraft-dir DIR` (or `--oneclient-dir DIR`) from the extracted folder.
+To run a OneClient install, open OneClient and launch the Ferrocraft profile.
+For an official-only install, start the `ferrocraft-1.8.9` version in the official launcher.
+Close OneClient before you uninstall a OneClient mod.
+Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
+The uninstall command preserves OneClient and the profile's data.
+If OneClient still manages the bootstrap mod, the command stops before it removes any files.
+Remove the bootstrap mod in OneClient before you retry.
+If the message identifies an old data folder after a move, clear that folder in OneClient Storage before you retry.
 
 For an official launcher install, open the [Minecraft Launcher](https://www.minecraft.net/download).
 Install it first if you do not have it.
@@ -49,6 +65,12 @@ On Apple silicon, the Forge host needs Rosetta to run Java 8.
 Press F8 to reload mods without disconnecting.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
+
+## Credits
+
+Thanks to [Polyfrost](https://polyfrost.org/projects/oneclient/) and the OneLauncher contributors for OneClient.
+Thanks to the [Ornithe](https://ornithemc.net/) and [Fabric](https://fabricmc.net/) contributors for the mod platform.
+See [third-party credits and notices](THIRD_PARTY.md).
 
 ## Documentation
 

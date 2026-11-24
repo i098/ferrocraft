@@ -1100,11 +1100,21 @@ impl App {
         lines.extend(draws.iter().flat_map(render::bobber_line));
         r.set_lines(lines);
         r.set_cracks(self.game.cracks());
-        let verts =
-            self.particles
-                .vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, frac as f32, |p| {
-                    r.light_at(p)
-                });
+        // `MobAppearanceParticle` follows the render view entity, which third person moves off the camera.
+        let viewer = self
+            .view_ray(frac)
+            .map_or((cam.eye(), [cam.yaw, cam.pitch]), |(eye, yaw, pitch, ..)| {
+                (eye, [yaw, pitch])
+            });
+        let verts = self.particles.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            viewer,
+            frac as f32,
+            |p| r.light_at(p),
+        );
         r.set_particles(verts);
         r.render(&cam, &quads);
         if let Some(shot) = r.take_screenshot() {

@@ -53,11 +53,15 @@ fn block_ambient_effects_change_the_frame() {
     };
     let feet = [5, 61, 4];
     let mut frame = |ps: &Particles| {
-        r.set_particles(
-            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
-                r.light_at(p)
-            }),
-        );
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (cam.eye(), [cam.yaw, cam.pitch]),
+            0.0,
+            |p| r.light_at(p),
+        ));
         r.render_to_rgba(&cam, &[]).2
     };
     let before = frame(&Particles::new());

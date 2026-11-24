@@ -29,10 +29,12 @@ pub struct Curse {
     pub tail: f32,
     /// Tick fraction of the frame, the whole `ticksExisted + partial` of the frozen entity.
     pub partial: f32,
-    /// Camera yaw and pitch in degrees.
+    /// Yaw and pitch in degrees of the render view entity (`MobAppearanceParticle` reads the entity, not the camera).
     pub view: [f32; 2],
     /// World position of the viewer's eyes, the target the guardian's eye looks at.
     pub target: [f64; 3],
+    /// Viewer's eyes minus camera: zero in first person, the third-person camera distance otherwise.
+    pub origin: [f32; 3],
 }
 
 /// Spike orientation in half turns, and offset from the head in model pixels.
@@ -160,8 +162,12 @@ fn place(p: V3, c: &Curse) -> V3 {
         [0.0, (180.0 - c.view[0]).to_radians(), 0.0],
     );
     // The particle pass starts at the viewer's feet, `RenderManager` draws entities relative to them;
-    // the result is the offset from the camera, which sits one eye height higher.
-    [m[0], m[1] + 1.8 - PLAYER_EYE, m[2]]
+    // the result is the offset from the camera, which `origin` places from the eyes one eye height higher.
+    [
+        m[0] + c.origin[0],
+        m[1] + 1.8 - PLAYER_EYE + c.origin[1],
+        m[2] + c.origin[2],
+    ]
 }
 
 /// The quads of the guardian, camera-relative, full bright and faded by `0.05 + 0.5 sin(pi t)`.
@@ -225,6 +231,7 @@ mod tests {
             partial: 0.0,
             view: [0.0, 0.0],
             target: [0.0, 70.0, 0.0],
+            origin: [0.0; 3],
         };
         let mesh = build(&[at(0.5)], &skins);
         // 5 head boxes, 12 spikes, eye and 4 tail boxes make 22 boxes of 24 vertices.
@@ -236,5 +243,21 @@ mod tests {
         let mean_z: f32 =
             mesh.vertices.iter().map(|v| v.pos[2]).sum::<f32>() / mesh.vertices.len() as f32;
         assert!(mean_z > 0.5, "{mean_z}");
+    }
+
+    #[test]
+    fn third_person_origin_moves_the_model_with_the_viewer() {
+        let at = |origin| Curse {
+            progress: 0.5,
+            tail: 0.5,
+            partial: 0.0,
+            view: [0.0, 0.0],
+            target: [0.0, 70.0, 0.0],
+            origin,
+        };
+        let skins = Skins::flat();
+        let a = build(&[at([0.0; 3])], &skins);
+        let b = build(&[at([0.0, 0.0, -4.0])], &skins);
+        assert!((a.vertices[0].pos[2] - b.vertices[0].pos[2] - 4.0).abs() < 1e-4);
     }
 }

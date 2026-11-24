@@ -1610,6 +1610,7 @@ impl Particles {
         cam_yaw: f32,
         cam_pitch: f32,
         cam_pos: [f64; 3],
+        viewer: ([f64; 3], [f32; 2]),
         partial: f32,
         light: impl Fn([f64; 3]) -> [f32; 2],
     ) -> Quads {
@@ -1641,8 +1642,9 @@ impl Particles {
                         progress: (p.age as f32 + partial) / guardian::LIFETIME as f32,
                         tail,
                         partial,
-                        view: [cam_yaw, cam_pitch],
-                        target: cam_pos,
+                        view: viewer.1,
+                        target: viewer.0,
+                        origin: [0, 1, 2].map(|i| (viewer.0[i] - cam_pos[i]) as f32),
                     });
                 }
                 continue;
@@ -2635,7 +2637,15 @@ mod tests {
         ps.spawn(Kind::DripLava, [0.5, 100.0, 0.5], [0.0; 3], 0);
         ps.tick(|_, _, _| 0);
         let atlas = crate::assets::Atlas::flat();
-        let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, |_| [0.0, 1.0]);
+        let q = ps.vertices(
+            &atlas,
+            0.0,
+            0.0,
+            [0.0; 3],
+            ([0.0; 3], [0.0; 2]),
+            0.0,
+            |_| [0.0, 1.0],
+        );
         // Age 0 colour is (1, 1, 0.5).
         let c = q.sheet[0].color;
         assert!(
@@ -2750,7 +2760,15 @@ mod tests {
         assert_eq!(ps.list[0].pos, [0.0, 5.0, 0.0]);
         let atlas = crate::assets::Atlas::flat();
         let fresh = ps
-            .vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, |_| [1.0; 2])
+            .vertices(
+                &atlas,
+                0.0,
+                0.0,
+                [0.0; 3],
+                ([0.0; 3], [0.0; 2]),
+                0.0,
+                |_| [1.0; 2],
+            )
             .footprint;
         assert_eq!(fresh.len(), 4);
         assert!(fresh.iter().all(|v| v.color[3] < 0.05 && v.pos[1] == 5.0));
@@ -2764,7 +2782,7 @@ mod tests {
         let light = |p: [f64; 3]| if p[1] < 6.0 { [0.0; 2] } else { [0.5, 0.25] };
         let atlas = crate::assets::Atlas::flat();
         let lights = |ps: &Particles| {
-            let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], 0.0, light);
+            let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], ([0.0; 3], [0.0; 2]), 0.0, light);
             let mut v: Vec<[f32; 2]> = [q.sheet, q.block, q.explosion]
                 .into_iter()
                 .flatten()

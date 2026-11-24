@@ -706,9 +706,9 @@ impl Mesher<'_> {
         let light = self.light_at(at, [0; 3]);
         for (tip, i) in BREWING_SPOKES {
             let (u_centre, u_tip) = if bottles >> i & 1 == 1 {
-                (0.0, 0.5)
+                (0.5, 0.0)
             } else {
-                (1.0, 0.5)
+                (0.5, 1.0)
             };
             let ends = [([8.0, 8.0], u_centre), (tip, u_tip)];
             let corner = |(xz, u): ([f32; 2], f32), y: f32| Vertex {

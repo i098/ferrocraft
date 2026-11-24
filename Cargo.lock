@@ -954,7 +954,7 @@ dependencies = [
  "tempfile",
  "ureq",
  "winit",
- "zip 2.6.1",
+ "zip 9.5.1",
 ]
 
 [[package]]

@@ -75,8 +75,8 @@ fn a_mod_crosshair_is_drawn_and_the_vanilla_one_is_not() {
                 .spawn()
                 .unwrap(),
         )),
-        link: tests::link(),
         staging: None,
+        link: tests::link(),
     };
     let mut none = Vec::new();
     let before = quads(&r, None, &mut none);

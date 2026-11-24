@@ -90,7 +90,7 @@ pub struct App {
     /// The Java 8 mod host (Forge mods), when `FERROCRAFT_MODHOST_*` is set or the game dir is a OneClient cluster.
     mods: Option<ferrocraft_modhost::ModHost>,
     /// The mod host while it starts on its thread.
-    mods_boot: Option<std::sync::mpsc::Receiver<Option<ferrocraft_modhost::ModHost>>>,
+    mods_boot: Option<mod_boot::Boot>,
     /// A reload asked while the host starts: runs when the start ends.
     mods_reload_pending: bool,
     /// Hot reload of the mods folder.
@@ -1597,8 +1597,8 @@ impl ApplicationHandler for App {
         self.renderer = Some(Renderer::new(window.clone(), self.asset_source()));
         self.load_assets();
         self.load_sound();
+        self.mods_watch = mod_boot::Watch::new(&self.args.game_dir);
         self.mods_boot = Some(mod_boot::spawn(self.args.game_dir.clone()));
-        self.mods_watch = Some(mod_boot::Watch::new(&self.args.game_dir));
         // A child process (loader, terminal) starts unfocused on macOS: no keys until focused.
         window.focus_window();
         self.window = Some(window);
@@ -1640,7 +1640,11 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        if let Some(done) = self.mods_boot.as_ref().and_then(mod_boot::poll) {
+        if let Some(done) = self
+            .mods_boot
+            .as_mut()
+            .and_then(|boot| boot.poll(self.mods_watch.as_mut()))
+        {
             self.mods = done;
             self.mods_boot = None;
             if std::mem::take(&mut self.mods_reload_pending) {
@@ -1970,6 +1974,7 @@ mod tests {
                 "--assetsDir".to_string(),
                 mc.join("assets").display().to_string(),
             ],
+            None,
             None,
         )
         .unwrap();

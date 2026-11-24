@@ -1,12 +1,13 @@
 //! Vanilla launch arguments, as the boot jar passes them.
 
 use ferrocraft_net_client::Auth;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 pub struct Args {
     pub username: String,
-    /// `--accessToken` (or `FERROCRAFT_ACCESS_TOKEN`) with `--uuid`: needed for online-mode servers.
+    /// Launcher token and `--uuid`, for online-mode servers.
     pub auth: Option<Auth>,
     pub assets_dir: Option<PathBuf>,
     /// The folder that holds `--assetsDir` (`assets/indexes` and `assets/objects` sit under it).
@@ -39,19 +40,48 @@ impl Default for Args {
     }
 }
 
-/// Parse `--username`, `--uuid`, `--accessToken`, `--assetsDir`, `--gameDir`, `--version`,
-/// `--server` and `--port`; other vanilla flags are ignored. The Fabric mod hands the token over
-/// in `FERROCRAFT_ACCESS_TOKEN`, so it stays out of the process list. A flag takes the next token as its value
-/// unless that token is another `--flag`, so `--demo` and `--fullscreen` need no value.
+pub fn launch_token(
+    args: &[String],
+    input: impl Read,
+    fallback: Option<String>,
+) -> Result<Option<String>, String> {
+    reject_token_argument(args)?;
+    if !args.iter().any(|arg| arg == "--access-token-stdin") {
+        return Ok(fallback);
+    }
+    let mut token = String::new();
+    input
+        .take(8193)
+        .read_to_string(&mut token)
+        .map_err(|_| "could not read the launcher token".to_string())?;
+    if token.len() > 8192 {
+        return Err("launcher token exceeds 8192 bytes".into());
+    }
+    Ok(Some(token))
+}
+
+fn reject_token_argument(args: &[String]) -> Result<(), String> {
+    if args
+        .iter()
+        .any(|arg| arg == "--accessToken" || arg.starts_with("--accessToken="))
+    {
+        return Err("pass the access token through stdin, not argv".into());
+    }
+    Ok(())
+}
+
 /// `env_server` is the `FERROCRAFT_SERVER` fallback. `--server` accepts `host` or `host:port`.
-pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String> {
+pub fn parse(
+    args: &[String],
+    env_server: Option<String>,
+    token: Option<String>,
+) -> Result<Args, String> {
     let d = Args::default();
     let mut username = d.username;
     let mut assets_dir = None;
     let mut game_dir = None;
     let mut version = None;
     let mut uuid = None;
-    let mut token = std::env::var("FERROCRAFT_ACCESS_TOKEN").ok();
     let mut host = None;
     let mut port = None;
     let (mut width, mut height, mut fullscreen) = (d.width, d.height, d.fullscreen);
@@ -71,7 +101,6 @@ pub fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String
         match flag.as_str() {
             "--username" => username = need()?.clone(),
             "--uuid" => uuid = Some(need()?.clone()),
-            "--accessToken" => token = Some(need()?.clone()),
             "--assetsDir" => assets_dir = Some(PathBuf::from(need()?)),
             "--gameDir" => game_dir = Some(PathBuf::from(need()?)),
             "--version" => version = Some(need()?.clone()),
@@ -152,6 +181,10 @@ fn resolve_assets(
 mod tests {
     use super::*;
 
+    fn parse(args: &[String], env_server: Option<String>) -> Result<Args, String> {
+        super::parse(args, env_server, None)
+    }
+
     fn v(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
     }
@@ -229,11 +262,9 @@ mod tests {
 
     #[test]
     fn auth_needs_token_and_uuid_and_never_prints_the_token() {
-        let a = parse(
-            &v("--accessToken sekrit --uuid 12345678-1234-1234-1234-123456789abc"),
-            None,
-        )
-        .unwrap();
+        let argv = v("--access-token-stdin --uuid 12345678-1234-1234-1234-123456789abc");
+        let token = launch_token(&argv, &b"sekrit"[..], Some("fallback".into())).unwrap();
+        let a = super::parse(&argv, None, token).unwrap();
         assert_eq!(
             a.auth,
             Some(Auth::new(
@@ -243,5 +274,7 @@ mod tests {
         );
         assert!(!format!("{a:?}").contains("sekrit"));
         assert_eq!(parse(&v("--uuid abc"), None).unwrap().auth, None);
+        assert!(reject_token_argument(&v("--accessToken sekrit --uuid abc")).is_err());
+        assert!(reject_token_argument(&v("--accessToken=sekrit --uuid abc")).is_err());
     }
 }

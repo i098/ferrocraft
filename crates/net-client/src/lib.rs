@@ -560,7 +560,7 @@ fn login(
             }
             Login::EncryptionRequest(r) => {
                 let auth = auth.ok_or_else(|| {
-                    invalid("server requires online mode: start with --accessToken and --uuid")
+                    invalid("server requires online mode: sign in with your launcher and restart")
                 })?;
                 let h =
                     auth::answer_request(auth, &r.server_id, &r.public_key.0, &r.verify_token.0)?;

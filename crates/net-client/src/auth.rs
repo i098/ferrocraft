@@ -10,7 +10,7 @@ use std::io;
 
 const JOIN_URL: &str = "https://sessionserver.mojang.com/session/minecraft/join";
 
-/// The account that the launcher passes with `--accessToken` and `--uuid`.
+/// The access token and profile UUID for an online-mode session.
 #[derive(Clone, PartialEq)]
 pub struct Auth {
     access_token: String,

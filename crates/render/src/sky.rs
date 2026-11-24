@@ -48,6 +48,10 @@ impl Dimension {
         self == Dimension::Overworld
     }
 
+    pub(crate) fn has_skylight(self) -> bool {
+        self == Dimension::Overworld
+    }
+
     /// `Dimension.isFogThick`: true in the Nether and the End.
     pub fn is_fog_thick(self) -> bool {
         !self.is_natural()

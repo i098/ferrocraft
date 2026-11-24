@@ -373,7 +373,7 @@ fn build_names(java: &Path, intermediary: &Path, main: &Path, table: &Path) -> R
     fetch(SRG_URL, SRG_SHA1, &srg)?;
     let staged = tempfile::tempdir_in(main)?;
     let tmp = staged.path().join("names.tiny");
-    let out = crate::java_command(java)
+    let out = crate::host_command(java)
         .arg("-cp")
         .arg(&names_jar)
         .arg("net.ferrocraft.prepare.NameTable")
@@ -547,7 +547,7 @@ mod tests {
         let config = Config::provision_ornithe(profile.path(), workspace.path()).unwrap();
         let processed = workspace.path().join(".fabric/processedMods");
         let owner = workspace.path().to_path_buf();
-        let mut host = crate::ModHost::start_staged(&config, workspace).unwrap();
+        let mut host = crate::ModHost::start_workspace(&config, workspace).unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if host.client_brand().is_some()

@@ -26,6 +26,7 @@ Food crumbs: the engine calls `Particles::eat_crumbs(count, feet, eye, (yaw, pit
 Weather: precipitation falls as rain, snow, or nothing per column biome and height, as vanilla 1.8.9 `renderRainSnow` (radius 10 columns, 5 on Fast graphics); sky and fog colors follow the biome.
 Fog: `Environment::sky_state(temperature, look)` blends the sunrise/sunset glow into the fog toward the sun, as vanilla `updateFogColor` (render distance 4 or more), then rain and thunder darken it.
 Third person: the engine pushes the local player through `set_entities`. The renderer culls no entity.
+Creeper bodies and charge shells share the 1.8.9 `ModelCreeper` pivots.
 Entity shadows use `textures/misc/shadow.png`, each renderer's shadow size, and vanilla light, height, and distance fades.
 `set_fancy_graphics` applies the Graphics option: Fast makes leaves solid cubes that hide shared faces.
 `set_entity_shadows` applies the Entity Shadows option; vanilla does not gate these shadows on Fancy Graphics.
@@ -37,7 +38,12 @@ Invisible entities draw their bodies at alpha 0.15 (`Look::ghost`) when the view
 The engine disables that overlay in third-person views and spectator mode.
 Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post` chain from the jar, as vanilla `PostChain`; the GLSL 1.20 programs are rewritten to 4.50 for naga (`glsl.rs`). The effect runs after the hand and before the GUI. A failed load returns `Err` and switches effects off; `toggle_post` is F4. `SHADERS` is the "Super Secret Settings..." cycle.
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.
+With Smooth Lighting on, the sides of upper and lower slabs receive light and ambient occlusion per corner.
+The top and bottom faces of these slabs still use flat lighting.
+Chunk lighting uses no sky light in the Nether or the End, even when Smooth Lighting is off.
 `render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame; the eight surrounding chunks remesh on the workers because light crosses chunk edges and corners.
+Plant models and their block damage overlays use the same offsets as the vanilla standard renderer.
+These offsets depend on world X and Z, not block height.
 Offscreen renderers wait for every mesh, so `render_to_rgba` shows the whole world.
 Translucent quads (water) draw far to near, as vanilla `sortVertexData`; once the camera moves a block, the 15 nearest chunks are sorted again (`sort.rs`).
 End portals draw the 16-layer star field of `TileEntityEndPortalRenderer` (`blockent/portal.rs`); the texture transform is applied per corner on the CPU and the camera is assumed to be at the view entity.

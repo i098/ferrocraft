@@ -1,40 +1,68 @@
-//! Starts the mod host with no `FERROCRAFT_MODHOST_*` variables: the OneClient cluster gives the mods and
-//! `Config::provision` gives Java 8, Forge and the host jar.
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost};
+use ferrocraft_modhost::{provision, provision_fabric, Config, ModHost, StagedStartError};
 use ferrocraft_oneclient as oneclient;
 
 use crate::log;
 
-/// The variables win when set. Otherwise the cluster is `FERROCRAFT_CLUSTER` (the Fabric shim sets it from
-/// `fabric.modsFolder`) or `--gameDir`. A folder with no `.oneclient-mods.json` is not a cluster: no mods then.
 /// Runs on its own thread: Modrinth, jar downloads and the first-run Java 8 and Forge install take long.
-pub fn spawn(game_dir: PathBuf) -> Receiver<Option<ModHost>> {
-    let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(start(&game_dir));
-    });
-    rx
+pub fn spawn(game_dir: PathBuf) -> Boot {
+    spawn_preparing(move || prepare(&game_dir))
 }
 
-/// `Some(Some(host))` once the host is up; `Some(None)` when it will never come (no mods, an error, a dead thread).
-pub fn poll<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
-    match rx.try_recv() {
-        Ok(host) => Some(host),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(None),
+fn spawn_preparing(
+    prepare: impl FnOnce() -> std::io::Result<Option<Prepared>> + Send + 'static,
+) -> Boot {
+    let (tx, result) = mpsc::channel();
+    let closed = Arc::new(Mutex::new(false));
+    let gate = Arc::clone(&closed);
+    std::thread::spawn(move || {
+        let prepared = prepare();
+        let closed = gate.lock().unwrap();
+        if !*closed {
+            let _ = tx.send(prepared.and_then(|p| p.map_or(Ok(None), Prepared::start)));
+        }
+    });
+    Boot { result, closed }
+}
+
+pub struct Boot {
+    result: Receiver<std::io::Result<Option<ModHost>>>,
+    closed: Arc<Mutex<bool>>,
+}
+
+impl Boot {
+    pub fn poll(&mut self, watch: Option<&mut Watch>) -> Option<Option<ModHost>> {
+        match self.result.try_recv() {
+            Ok(Ok(host)) => Some(host),
+            Ok(Err(e)) => {
+                log::line(&format!("mod host did not start: {e}"));
+                if let Some(watch) = watch {
+                    watch.retry_after_archive_error(Instant::now());
+                }
+                Some(None)
+            }
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(None),
+        }
+    }
+}
+
+impl Drop for Boot {
+    fn drop(&mut self) {
+        *self.closed.lock().unwrap_or_else(|e| e.into_inner()) = true;
     }
 }
 
 /// Hot reload: sees jars come, go or change in the mods folder and says when the folder has been still for `SETTLE`.
 pub struct Watch {
     dir: PathBuf,
-    seen: Vec<(OsString, SystemTime, u64)>,
+    forge: bool,
+    seen: Option<Vec<(PathBuf, SystemTime, u64)>>,
     last_scan: Option<Instant>,
     changed_at: Option<Instant>,
 }
@@ -44,19 +72,31 @@ const SCAN_EVERY: Duration = Duration::from_millis(500);
 const SETTLE: Duration = Duration::from_secs(1);
 
 impl Watch {
-    /// The folder is the one `start` reads the mods from: `FERROCRAFT_MODHOST_GAMEDIR` or the cluster, then `mods/`.
-    pub fn new(game_dir: &Path) -> Self {
-        let root = std::env::var_os("FERROCRAFT_MODHOST_GAMEDIR").map_or_else(
-            || cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir),
-            PathBuf::from,
-        );
+    pub fn new(game_dir: &Path) -> Option<Self> {
+        Self::for_source(host_source(game_dir))
+    }
+
+    fn for_source(source: HostSource) -> Option<Self> {
+        let (root, forge) = match source {
+            HostSource::Explicit(cfg) => (cfg.game_dir, false),
+            HostSource::Cluster(root) => (root, false),
+            HostSource::PlainForge(root) => (root, true),
+            HostSource::None => return None,
+        };
         let dir = root.join("mods");
-        Self {
-            seen: scan(&dir),
+        Some(Self {
+            seen: scan(&dir, forge)
+                .map_err(|e| log::line(&e.to_string()))
+                .ok(),
+            forge,
             dir,
             last_scan: None,
             changed_at: None,
-        }
+        })
+    }
+
+    fn retry_after_archive_error(&mut self, now: Instant) {
+        self.changed_at = Some(now);
     }
 
     /// True once per change, after the change has settled.
@@ -68,9 +108,12 @@ impl Watch {
             return false;
         }
         self.last_scan = Some(now);
-        let jars = scan(&self.dir);
-        if jars != self.seen {
-            self.seen = jars;
+        let Ok(jars) = scan(&self.dir, self.forge) else {
+            self.changed_at = self.changed_at.map(|_| now);
+            return false;
+        };
+        if self.seen.as_ref() != Some(&jars) {
+            self.seen = Some(jars);
             self.changed_at = Some(now);
         }
         match self.changed_at {
@@ -83,7 +126,18 @@ impl Watch {
     }
 }
 
-fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
+fn scan(dir: &Path, forge: bool) -> std::io::Result<Vec<(PathBuf, SystemTime, u64)>> {
+    if !forge {
+        return Ok(scan_legacy(dir));
+    }
+    let mut jars = Vec::new();
+    scan_folder(dir, Path::new(""), &mut jars)?;
+    scan_folder(dir, Path::new("1.8.9"), &mut jars)?;
+    jars.sort();
+    Ok(jars)
+}
+
+fn scan_legacy(dir: &Path) -> Vec<(PathBuf, SystemTime, u64)> {
     let mut jars: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -91,18 +145,11 @@ fn scan(dir: &Path) -> Vec<(OsString, SystemTime, u64)> {
         .filter(|e| e.path().extension().is_some_and(|x| x == "jar"))
         .filter_map(|e| {
             let m = e.metadata().ok()?;
-            Some((e.file_name(), m.modified().ok()?, m.len()))
+            Some((e.file_name().into(), m.modified().ok()?, m.len()))
         })
         .collect();
     jars.sort();
     jars
-}
-
-fn start(game_dir: &Path) -> Option<ModHost> {
-    if let Some(cfg) = Config::from_env() {
-        return started(ModHost::start(&cfg));
-    }
-    from_cluster(&cluster(std::env::var_os("FERROCRAFT_CLUSTER"), game_dir))
 }
 
 fn started(result: std::io::Result<ModHost>) -> Option<ModHost> {
@@ -115,9 +162,143 @@ fn started(result: std::io::Result<ModHost>) -> Option<ModHost> {
     }
 }
 
-fn cluster(env: Option<std::ffi::OsString>, game_dir: &Path) -> PathBuf {
+fn scan_folder(
+    dir: &Path,
+    folder: &Path,
+    jars: &mut Vec<(PathBuf, SystemTime, u64)>,
+) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir.join(folder)) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e)
+            if !folder.as_os_str().is_empty() && e.kind() == std::io::ErrorKind::NotADirectory =>
+        {
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        match Path::new(&name).extension().and_then(|ext| ext.to_str()) {
+            Some("jar" | "zip") => {}
+            _ => continue,
+        }
+        let m = match std::fs::metadata(entry.path()) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        if m.is_file() {
+            jars.push((folder.join(name), m.modified()?, m.len()));
+        }
+    }
+    Ok(())
+}
+
+struct Prepared {
+    cfg: Option<Config>,
+    plain: Option<(PathBuf, Vec<PathBuf>)>,
+    host: Option<ModHost>,
+}
+
+impl Prepared {
+    fn start(self) -> std::io::Result<Option<ModHost>> {
+        let Some(cfg) = self.cfg else {
+            return Ok(self.host);
+        };
+        let result = match self.plain {
+            Some((src, paths)) => ModHost::start_staged(cfg, &src, paths),
+            None => ModHost::start(&cfg).map_err(StagedStartError::Start),
+        };
+        match result {
+            Ok(host) => Ok(Some(host)),
+            Err(StagedStartError::Archive(e)) => Err(e),
+            Err(StagedStartError::Start(e)) => Ok(fail(&e)),
+        }
+    }
+}
+
+enum HostSource {
+    Explicit(Config),
+    Cluster(PathBuf),
+    PlainForge(PathBuf),
+    None,
+}
+
+fn host_source(game_dir: &Path) -> HostSource {
+    select_source(
+        game_dir,
+        Config::from_env(),
+        std::env::var_os("FERROCRAFT_CLUSTER"),
+        std::env::var_os("FERROCRAFT_FABRIC_LAUNCH").is_some_and(|value| value == "1"),
+    )
+}
+
+fn select_source(
+    game_dir: &Path,
+    explicit: Option<Config>,
+    cluster_env: Option<OsString>,
+    fabric: bool,
+) -> HostSource {
+    if let Some(cfg) = explicit {
+        HostSource::Explicit(cfg)
+    } else if let Some(root) = cluster(cluster_env, game_dir) {
+        HostSource::Cluster(root)
+    } else if fabric {
+        HostSource::None
+    } else {
+        HostSource::PlainForge(game_dir.to_path_buf())
+    }
+}
+
+fn prepare(game_dir: &Path) -> std::io::Result<Option<Prepared>> {
+    prepare_source(host_source(game_dir))
+}
+
+fn prepare_source(source: HostSource) -> std::io::Result<Option<Prepared>> {
+    let src = match source {
+        HostSource::Explicit(cfg) => {
+            return Ok(Some(Prepared {
+                cfg: Some(cfg),
+                plain: None,
+                host: None,
+            }));
+        }
+        HostSource::Cluster(root) => {
+            return Ok(from_cluster(&root).map(|host| Prepared {
+                cfg: None,
+                plain: None,
+                host: Some(host),
+            }));
+        }
+        HostSource::PlainForge(root) => root.join("mods"),
+        HostSource::None => return Ok(None),
+    };
+    let mods = scan(&src, true)?;
+    if mods.is_empty() {
+        return Ok(None);
+    }
+    let Some(cfg) = Config::provision().map_err(|e| fail::<Config>(&e)).ok() else {
+        return Ok(None);
+    };
+    let paths = mods.into_iter().map(|(path, _, _)| path).collect();
+    Ok(Some(Prepared {
+        cfg: Some(cfg),
+        plain: Some((src, paths)),
+        host: None,
+    }))
+}
+
+fn cluster(env: Option<OsString>, game_dir: &Path) -> Option<PathBuf> {
     env.filter(|v| !v.is_empty())
-        .map_or_else(|| game_dir.to_path_buf(), PathBuf::from)
+        .map(PathBuf::from)
+        .or_else(|| {
+            game_dir
+                .join(".oneclient-mods.json")
+                .is_file()
+                .then(|| game_dir.to_path_buf())
+        })
 }
 
 fn from_cluster(cluster: &Path) -> Option<ModHost> {
@@ -165,7 +346,7 @@ fn start_ornithe(cluster: &Path, loader: oneclient::Loader) -> Option<ModHost> {
     };
     stage(cluster, loader, &workspace.path().join("mods"))?;
     match Config::provision_ornithe(cluster, workspace.path()) {
-        Ok(cfg) => started(ModHost::start_staged(&cfg, workspace)),
+        Ok(cfg) => started(ModHost::start_workspace(&cfg, workspace)),
         Err(e) => fail(&e),
     }
 }
@@ -243,37 +424,217 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cluster_is_env_then_game_dir() {
+    fn explicit_cluster_wins() {
         let gd = Path::new("/g");
-        assert_eq!(cluster(Some("/c".into()), gd), Path::new("/c"));
-        assert_eq!(cluster(Some("".into()), gd), gd);
-        assert_eq!(cluster(None, gd), gd);
+        assert_eq!(cluster(Some("/c".into()), gd), Some(PathBuf::from("/c")));
     }
 
     #[test]
-    fn watch_fires_once_after_a_jar_settles() {
+    fn manual_fabric_launch_does_not_start_or_watch_forge() {
+        let root = std::env::temp_dir().join(format!("fc-fabric-launch-{}", std::process::id()));
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("ferrocraft-fabric.jar"), "shim").unwrap();
+        assert!(prepare_source(select_source(&root, None, None, true))
+            .unwrap()
+            .is_none());
+        assert!(Watch::for_source(select_source(&root, None, None, true)).is_none());
+        std::fs::write(root.join(".oneclient-mods.json"), "{}").unwrap();
+        assert!(matches!(
+            select_source(&root, None, None, true),
+            HostSource::Cluster(path) if path == root
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn watch_fires_once_after_a_versioned_zip_settles() {
         let d = std::env::temp_dir().join(format!("fc-watch-{}", std::process::id()));
-        std::fs::create_dir_all(d.join("mods")).unwrap();
-        let mut w = Watch::new(&d);
+        std::fs::create_dir_all(d.join("mods/1.8.9")).unwrap();
+        let mut w = Watch::for_source(select_source(&d, None, None, false)).unwrap();
         let t0 = Instant::now();
         assert!(!w.poll(t0));
-        std::fs::write(d.join("mods/a.jar"), "x").unwrap();
+        std::fs::write(d.join("mods/1.8.9/a.zip"), "x").unwrap();
         assert!(!w.poll(t0 + Duration::from_secs(1)));
         assert!(w.poll(t0 + Duration::from_secs(3)));
         assert!(!w.poll(t0 + Duration::from_secs(5)));
         std::fs::remove_dir_all(&d).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
-    fn poll_reports_host_error_and_dead_thread() {
-        let (tx, rx) = channel();
-        assert!(poll::<u8>(&rx).is_none());
-        tx.send(Some(7u8)).unwrap();
-        assert_eq!(poll(&rx), Some(Some(7)));
-        tx.send(None).unwrap();
-        assert_eq!(poll::<u8>(&rx), Some(None));
-        drop(tx);
-        assert_eq!(poll::<u8>(&rx), Some(None));
+    fn failed_scan_does_not_replace_the_watch_snapshot() {
+        let root = std::env::temp_dir().join(format!("fc-plain-{}", std::process::id()));
+        let mods = root.join("mods");
+        let versioned = mods.join("1.8.9");
+        let parked = root.join("parked");
+        std::fs::create_dir_all(&versioned).unwrap();
+        std::fs::write(mods.join("top.jar"), "top").unwrap();
+        std::fs::write(versioned.join("nested.zip"), "nested").unwrap();
+        let mut watch = Watch {
+            seen: Some(scan(&mods, true).unwrap()),
+            dir: mods.clone(),
+            forge: true,
+            last_scan: None,
+            changed_at: None,
+        };
+        std::fs::rename(&versioned, &parked).unwrap();
+        std::os::unix::fs::symlink("1.8.9", &versioned).unwrap();
+        assert!(scan(&mods, true).is_err());
+        assert_eq!(scan(&mods, false).unwrap().len(), 1);
+        let t = Instant::now();
+        assert!(!watch.poll(t));
+        assert!(!watch.poll(t + Duration::from_secs(2)));
+        std::fs::remove_file(&versioned).unwrap();
+        std::fs::rename(parked, versioned).unwrap();
+        assert!(!watch.poll(t + Duration::from_secs(4)));
+        assert!(!watch.poll(t + Duration::from_secs(6)));
+        watch.retry_after_archive_error(t + Duration::from_secs(6));
+        assert!(watch.poll(t + Duration::from_secs(7)));
+        assert!(!watch.poll(t + Duration::from_secs(9)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_watch_notices_edits_beside_a_looping_symlink() {
+        let dir = std::env::temp_dir().join(format!("fc-legacy-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("good.jar");
+        std::fs::write(&jar, "mod").unwrap();
+        std::os::unix::fs::symlink("old.jar", dir.join("old.jar")).unwrap();
+        let mut watch = Watch {
+            seen: Some(scan(&dir, false).unwrap()),
+            dir: dir.clone(),
+            forge: false,
+            last_scan: None,
+            changed_at: None,
+        };
+        let t = Instant::now();
+        assert!(!watch.poll(t));
+        std::fs::write(jar, "updated mod").unwrap();
+        assert!(!watch.poll(t + SCAN_EVERY));
+        assert!(watch.poll(t + SCAN_EVERY + SETTLE));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovered_archive_errors_schedule_reload() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("fc-archive-read-{}", std::process::id()));
+        let dir = root.join("mods");
+        fs::create_dir_all(dir.join("1.8.9")).unwrap();
+        let archive = PathBuf::from("1.8.9/mod.zip");
+        let jar = dir.join(&archive);
+        fs::write(&jar, "mod").unwrap();
+        let snapshot = scan(&dir, true).unwrap();
+        let watch = || Watch {
+            seen: Some(snapshot.clone()),
+            dir: dir.clone(),
+            forge: true,
+            last_scan: None,
+            changed_at: None,
+        };
+        let parked = root.join("parked.zip");
+        fs::rename(&jar, &parked).unwrap();
+        fs::create_dir(&jar).unwrap();
+        let prepared = || Prepared {
+            cfg: Some(Config {
+                loader: ferrocraft_modhost::Loader::Forge,
+                java: "/bin/true".into(),
+                class_path: Vec::new(),
+                game_dir: root.clone(),
+                assets_dir: root.clone(),
+            }),
+            plain: Some((dir.clone(), vec![archive.clone()])),
+            host: None,
+        };
+        let check_recovery = |restore: &dyn Fn()| {
+            let mut watch = watch();
+            let failed = prepared();
+            let mut boot = spawn_preparing(move || Ok(Some(failed)));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(host) = boot.poll(Some(&mut watch)) {
+                    assert!(host.is_none(), "a failed archive read must prevent startup");
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "boot did not report the archive error"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            restore();
+            assert_eq!(scan(&dir, true).unwrap(), snapshot);
+            assert!(watch.poll(Instant::now() + SETTLE));
+        };
+        check_recovery(&|| {
+            fs::remove_dir(&jar).unwrap();
+            fs::rename(&parked, &jar).unwrap();
+        });
+
+        let permissions = fs::metadata(&jar).unwrap().permissions();
+        fs::set_permissions(&jar, fs::Permissions::from_mode(0o000)).unwrap();
+        if let Err(error) = fs::File::open(&jar) {
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            check_recovery(&|| fs::set_permissions(&jar, permissions.clone()).unwrap());
+        } else {
+            fs::set_permissions(&jar, permissions).unwrap();
+        }
+        prepared().start().unwrap().unwrap().stop();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_archives_do_not_hide_valid_mods() {
+        let root = std::env::temp_dir().join(format!("fc-dangling-{}", std::process::id()));
+        let versioned = root.join("1.8.9");
+        std::fs::create_dir_all(&versioned).unwrap();
+        std::fs::write(root.join("valid.jar"), "mod").unwrap();
+        std::os::unix::fs::symlink("missing", root.join("dangling.jar")).unwrap();
+        std::os::unix::fs::symlink("missing", versioned.join("dangling.zip")).unwrap();
+        let mods = scan(&root, true).unwrap();
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].0, Path::new("valid.jar"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn optional_version_path_can_be_a_file() {
+        let root = std::env::temp_dir().join(format!("fc-version-file-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("1.8.9"), "file").unwrap();
+        std::fs::write(root.join("valid.jar"), "mod").unwrap();
+        let mods = scan(&root, true).unwrap();
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].0, Path::new("valid.jar"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn closing_boot_does_not_wait_for_preparation() {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let boot = spawn_preparing(move || {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+            Ok(None)
+        });
+        started_rx.recv().unwrap();
+        let (closed_tx, closed_rx) = mpsc::channel();
+        let closer = std::thread::spawn(move || {
+            drop(boot);
+            closed_tx.send(()).unwrap();
+        });
+        let closed = closed_rx.recv_timeout(Duration::from_secs(5));
+        release_tx.send(()).unwrap();
+        closer.join().unwrap();
+        closed.expect("closing the engine must not wait for provisioning");
     }
 
     #[test]
@@ -298,10 +659,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_without_manifest_starts_no_mods() {
+    fn game_dir_is_a_cluster_only_with_a_manifest() {
         let d = std::env::temp_dir().join(format!("fc-modboot-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        assert!(from_cluster(&d).is_none());
+        assert!(cluster(None, &d).is_none());
+        assert!(cluster(Some("".into()), &d).is_none());
+        std::fs::write(d.join(".oneclient-mods.json"), "{}").unwrap();
+        assert_eq!(cluster(None, &d).as_deref(), Some(d.as_path()));
         std::fs::remove_dir_all(&d).unwrap();
     }
 
@@ -312,7 +676,11 @@ mod tests {
     fn live_cluster_starts_its_host_and_gets_the_hello() {
         let cluster =
             PathBuf::from(std::env::var_os("FERRO_LIVE_CLUSTER").expect("FERRO_LIVE_CLUSTER"));
-        let mut host = start(&cluster).expect("the cluster started no host");
+        let mut host = prepare(&cluster)
+            .unwrap()
+            .map_or(Ok(None), Prepared::start)
+            .unwrap()
+            .expect("the cluster started no host");
         let end = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while host.client_brand().is_none() {
             assert!(

@@ -3,7 +3,10 @@
 A Minecraft 1.8.9 client rewritten in Rust. Goal: vanilla behavior on PvP servers like Hypixel, and original Forge mod packs run through a Java 8 mod host.
 
 ## Status
-In development. The engine joins 1.8.9 servers in offline mode and online mode (`--accessToken` and `--uuid` from the launcher, or `FERROCRAFT_ACCESS_TOKEN`), renders the world, moves, breaks and places blocks, and chats. The mod host runs Forge mods that draw HUDs and screens (Keystrokes, OneConfig); see [Mod host](docs/mod-host.md).
+In development. The engine joins 1.8.9 servers in offline and online modes.
+For online mode, sign in with your launcher.
+The engine renders the world, moves, breaks and places blocks, and chats.
+The mod host runs Forge mods that draw HUDs and screens (Keystrokes, OneConfig); see [Mod host](docs/mod-host.md).
 
 ## Install
 
@@ -47,6 +50,20 @@ The uninstall command preserves OneClient and the profile's data.
 If OneClient still manages the bootstrap mod, the command stops before it removes any files.
 Remove the bootstrap mod in OneClient before you retry.
 If the message identifies an old data folder after a move, clear that folder in OneClient Storage before you retry.
+
+For an official launcher install, open the [Minecraft Launcher](https://www.minecraft.net/download).
+Install it first if you do not have it.
+Open **Installations**, select **New installation**, and select `ferrocraft-1.8.9` in the **Version** list.
+Create the installation, then select it in the **Play** tab.
+
+### Mods
+
+Put compatible Forge 1.8.9 `.jar` or `.zip` files in `mods/` or `mods/1.8.9/` under the installation's **Game Directory**.
+Use the folder that the installer printed if the **Game Directory** is blank.
+Click **Play** to start the selected installation.
+The mod host downloads Java 8 and Forge if they are not in its cache.
+On Apple silicon, the Forge host needs Rosetta to run Java 8.
+Press F8 to reload mods without disconnecting.
 
 To build from source instead, see [crates/launcher](crates/launcher/README.md). Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 

@@ -499,7 +499,7 @@ fn enderman(d: &EntityDraw) -> Model {
     model(Skin::Enderman, parts)
 }
 
-/// Second passes of the mob drawn by `m`: wool before, eyes after (they draw full-bright).
+/// Second passes of the mob drawn by `m`: wool before, eyes after (they take `EYES_LIGHT`).
 pub(super) fn layers(d: &EntityDraw, m: &Model) -> Vec<Layer> {
     let super::Class::Mob(id) = d.class else {
         return Vec::new();

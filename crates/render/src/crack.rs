@@ -67,7 +67,7 @@ pub fn quads(
     };
     let list = match cached(state).kind {
         Kind::Opaque | Kind::Cutout => vec![unit],
-        Kind::Shape => crate::mesh::fallback_boxes(state, &nb, models, fancy),
+        Kind::Shape => crate::mesh::fallback_boxes(state, &nb, models),
         Kind::Cross => return cross(at, state),
         _ => Vec::new(),
     };

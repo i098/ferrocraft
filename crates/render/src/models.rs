@@ -466,6 +466,10 @@ impl Models {
         &self.textures
     }
 
+    pub(crate) fn has_glass_panes(&self) -> bool {
+        self.states.contains_key("glass_pane")
+    }
+
     /// The model quads of `state`, or `None` when this block is not drawn from a model (or none was loaded).
     pub fn quads(&self, state: u16, nb: &dyn Fn(i32, i32, i32) -> u16) -> Option<&[Quad]> {
         let (name, key) = variant(state, nb)?;

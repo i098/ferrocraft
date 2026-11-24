@@ -11,6 +11,7 @@ Resource packs override individual clear-pane variants and leave other pane vari
 Other blocks use the highest-priority blockstate file.
 Clear panes use the same geometry and face culling for the world mesh and the mining overlay.
 If a pane model fails to load, both use the shared pane box shapes.
+The fallback keeps its arm caps next to baked panes.
 
 Entry points: `Renderer::new` (window), `Renderer::new_offscreen` (tests, screenshots),
 `upload_chunk`, `remove_chunk`, `set_block`, `set_selection`, `resize`, `render`, `render_to_rgba`, `font`.

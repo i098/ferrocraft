@@ -456,77 +456,73 @@ fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
 }
 
 #[test]
-fn glass_pane_fallback_cracks_omit_shared_arm_caps() {
-    let models = Models::default();
+fn glass_pane_fallback_caps_remain_beside_baked_panes() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
     let pane = 102 << 4;
-    for (dx, dz, axis, boundary) in [
-        (0, -1, 2, 0.0),
-        (0, 1, 2, 1.0),
-        (-1, 0, 0, 0.0),
-        (1, 0, 0, 1.0),
+    for (dx, dz, axis, boundary, face) in [
+        (0, -1, 2, 4.0, "south"),
+        (0, 1, 2, 5.0, "north"),
+        (-1, 0, 0, 4.0, "east"),
+        (1, 0, 0, 5.0, "west"),
     ] {
-        for (neighbour, cap) in [(pane, false), (101 << 4, true)] {
-            let nb = |x, y, z| {
-                if (x, y, z) == (dx, 0, dz) {
-                    neighbour
-                } else {
-                    0
-                }
-            };
-            let vertices = crate::crack::quads([0; 3], pane, &nb, &models, true);
-            assert_eq!(
-                vertices
-                    .chunks_exact(4)
-                    .filter(|quad| quad.iter().all(|v| v.pos[axis] == boundary))
-                    .count(),
-                usize::from(cap)
-            );
-        }
+        let (_, key) = variant(pane, &world(&[((-dx, -dz), pane)])).unwrap();
+        let json = format!(
+            r#"{{"elements":[{{"from":[0,0,0],"to":[16,16,16],
+                "faces":{{"{face}":{{"texture":"blocks/glass"}}}}}}]}}"#
+        );
+        let atlas = Atlas {
+            models: Models {
+                states: HashMap::from([(
+                    "glass_pane".to_owned(),
+                    HashMap::from([(key, bake(&json, r#"{"model":"m"}"#))]),
+                )]),
+                ..Models::default()
+            },
+            ..Atlas::flat()
+        };
+        let mut center = vec![0; 16 * 16 * HEIGHT];
+        center[index(4, 70, 4)] = pane;
+        center[index((4 + dx) as usize, 70, (4 + dz) as usize)] = pane;
+        let meshes = mesh_chunk(
+            &Neighborhood {
+                origin: (0, 0),
+                center: &center,
+                neighbors: [None; 8],
+                biomes: [None; 9],
+                lights: [None; 9],
+            },
+            &atlas,
+            true,
+            true,
+        );
+        let blocks = [((4, 4), pane), ((4 + dx, 4 + dz), pane)];
+        let cracks = crate::crack::quads([4, 0, 4], pane, &world(&blocks), &atlas.models, true);
+        let caps = |vertices: &[crate::mesh::Vertex]| {
+            vertices
+                .chunks_exact(4)
+                .filter(|quad| quad.iter().all(|v| v.pos[axis] == boundary))
+                .count()
+        };
+        assert_eq!(caps(&meshes.opaque.vertices), 2, "{face}");
+        assert_eq!(caps(&cracks), 1, "{face}");
     }
 }
 
 #[test]
-fn glass_pane_fallback_cap_depends_on_visible_coverage() {
+fn glass_pane_fallback_caps_omit_shared_faces_without_models() {
     let pane = 102 << 4;
-    let (_, key) = variant(pane, &world(&[((-1, 0), pane)])).unwrap();
-    let blocks = [((0, 0), pane), ((1, 0), pane)];
-    for (from_x, to_x, face, below, fancy, expected_caps) in [
-        (0, 9, "west", 0, true, 0),
-        (1, 9, "west", 0, true, 1),
-        (-1, 0, "east", 0, true, 0),
-        (0, 9, "west", 1 << 4, true, 1),
-        (0, 9, "west", 18 << 4, false, 1),
-        (0, 9, "west", 18 << 4, true, 0),
-    ] {
-        let json = format!(
-            r#"{{"elements":[{{"from":[{from_x},0,7],"to":[{to_x},16,9],
-                "faces":{{"{face}":{{"texture":"blocks/glass","cullface":"down"}}}}}}]}}"#
-        );
-        let quads = bake(&json, r#"{"model":"m"}"#);
-        let models = Models {
-            states: HashMap::from([(
-                "glass_pane".to_owned(),
-                HashMap::from([(key.clone(), quads)]),
-            )]),
-            ..Models::default()
-        };
-        let at = world(&blocks);
-        let nb = |x, y, z| {
-            if (x, y, z) == (1, -1, 0) {
-                below
-            } else {
-                at(x, y, z)
-            }
-        };
-        let vertices = crate::crack::quads([0; 3], pane, &nb, &models, fancy);
-        assert_eq!(
-            vertices
-                .chunks_exact(4)
-                .filter(|quad| quad.iter().all(|v| v.pos[0] == 1.0))
-                .count(),
-            expected_caps
-        );
-    }
+    let vertices = crate::crack::quads(
+        [0; 3],
+        pane,
+        &world(&[((1, 0), pane)]),
+        &Models::default(),
+        true,
+    );
+    assert!(!vertices
+        .chunks_exact(4)
+        .any(|quad| quad.iter().all(|v| v.pos[0] == 1.0)));
 }
 
 #[test]

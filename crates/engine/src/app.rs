@@ -285,7 +285,7 @@ impl App {
             return;
         };
         self.icons = Some(Icons::new(|name| {
-            src.read(&format!("assets/minecraft/{name}"))
+            src.read_model_asset(&format!("assets/minecraft/{name}"))
         }));
     }
 

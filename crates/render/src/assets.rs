@@ -44,14 +44,29 @@ impl AssetSource {
 
     /// `name` is a jar path such as `assets/minecraft/textures/font/ascii.png`.
     pub fn read(&mut self, name: &str) -> Option<Vec<u8>> {
+        let model_json = name
+            .strip_prefix("assets/")
+            .unwrap_or(name)
+            .split_once('/')
+            .is_some_and(|(_, path)| path.starts_with("models/"));
+        self.read_asset(name, model_json)
+    }
+
+    pub fn read_model_asset(&mut self, name: &str) -> Option<Vec<u8>> {
+        self.read_asset(name, true)
+    }
+
+    fn read_asset(&mut self, name: &str, contained: bool) -> Option<Vec<u8>> {
         match self {
             AssetSource::Jar(zip) => {
                 let mut bytes = Vec::new();
                 zip.by_name(name).ok()?.read_to_end(&mut bytes).ok()?;
                 Some(bytes)
             }
-            AssetSource::Dir(dir) => read_folder(dir, name),
-            AssetSource::Layers(layers) => layers.iter_mut().find_map(|l| l.read(name)),
+            AssetSource::Dir(dir) => read_folder(dir, name, contained),
+            AssetSource::Layers(layers) => layers
+                .iter_mut()
+                .find_map(|l| l.read_asset(name, contained)),
         }
     }
 
@@ -68,12 +83,8 @@ impl AssetSource {
     }
 }
 
-fn read_folder(dir: &Path, name: &str) -> Option<Vec<u8>> {
+fn read_folder(dir: &Path, name: &str, contained: bool) -> Option<Vec<u8>> {
     let stripped = name.strip_prefix("assets/").unwrap_or(name);
-    let contained = stripped
-        .split_once('/')
-        .and_then(|(_, path)| path.split_once('/'))
-        .is_some_and(|(kind, _)| matches!(kind, "models" | "textures"));
     let root = if contained {
         Some(dir.canonicalize().ok()?)
     } else {
@@ -179,7 +190,7 @@ impl Atlas {
         let mut images: Vec<Image> = Vec::with_capacity(names.len());
         for name in &names {
             let path = format!("assets/minecraft/textures/blocks/{name}.png");
-            let image = source.read(&path).and_then(|b| decode_png(&b));
+            let image = source.read_model_asset(&path).and_then(|b| decode_png(&b));
             images.push(image.unwrap_or_else(|| Image {
                 width: 0,
                 height: 0,
@@ -205,7 +216,7 @@ impl Atlas {
                 blit(&mut rgba, w, tile, cell, &missing_tile());
             } else {
                 blit(&mut rgba, w, tile, cell, image);
-                let meta = source.read(&format!(
+                let meta = source.read_model_asset(&format!(
                     "assets/minecraft/textures/blocks/{name}.png.mcmeta"
                 ));
                 animations.extend(meta.and_then(|m| Animation::new(cell as u32, image, tile, &m)));
@@ -449,18 +460,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn folder_pack_reads_shared_metadata_icon_and_language() {
+    fn folder_pack_only_contains_model_asset_paths() {
         let root = std::env::temp_dir().join(format!("assets_shared_{}", std::process::id()));
         let pack = root.join("pack");
         let shared = root.join("shared");
-        std::fs::create_dir_all(pack.join("minecraft/lang")).unwrap();
+        for dir in [
+            "minecraft/lang",
+            "minecraft/models/block",
+            "minecraft/textures/blocks",
+            "minecraft/textures/items",
+            "minecraft/textures/font",
+            "minecraft/textures/gui",
+        ] {
+            std::fs::create_dir_all(pack.join(dir)).unwrap();
+        }
         std::fs::write(&shared, b"shared").unwrap();
-        for name in ["pack.mcmeta", "pack.png", "minecraft/lang/en_US.lang"] {
+        let fixed = [
+            "pack.mcmeta",
+            "pack.png",
+            "minecraft/textures/font/ascii.png",
+            "minecraft/textures/gui/widgets.png",
+        ];
+        let model = [
+            "minecraft/models/block/pane.json",
+            "minecraft/textures/blocks/pane.png",
+            "minecraft/textures/blocks/pane.png.mcmeta",
+            "minecraft/textures/items/stick.png",
+        ];
+        for name in fixed
+            .into_iter()
+            .chain(model)
+            .chain(["minecraft/lang/en_US.lang"])
+        {
             std::os::unix::fs::symlink(&shared, pack.join(name)).unwrap();
         }
         let mut source = AssetSource::open(&pack).unwrap();
-        assert_eq!(source.read("pack.mcmeta").as_deref(), Some(&b"shared"[..]));
-        assert_eq!(source.read("pack.png").as_deref(), Some(&b"shared"[..]));
+        for name in fixed {
+            assert_eq!(source.read(name).as_deref(), Some(&b"shared"[..]));
+        }
+        for name in model {
+            let path = format!("assets/{name}");
+            assert!(source.read_model_asset(&path).is_none(), "{name}");
+        }
         assert_eq!(
             source.read_all("assets/minecraft/lang/en_US.lang"),
             [b"shared".to_vec()]

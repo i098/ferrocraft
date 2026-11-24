@@ -201,31 +201,18 @@ pub(crate) fn fallback_boxes(
     state: u16,
     nb: &dyn Fn(i32, i32, i32) -> u16,
     models: &Models,
-    fancy: bool,
 ) -> Vec<Bx> {
-    let mut boxes = boxes(state, nb);
-    if state >> 4 != 102 {
-        return boxes;
-    }
-    for (face, &[dx, dy, dz]) in DIRS.iter().enumerate().skip(2) {
-        let neighbour = nb(dx, dy, dz);
-        if neighbour >> 4 != 102 {
-            continue;
-        }
-        let adjacent = |x, y, z| nb(x + dx, y + dy, z + dz);
-        let quads = models.quads(neighbour, &adjacent);
-        for b in boxes.iter_mut().filter(|b| box_on_border(b, face)) {
-            if quads.is_none_or(|quads| {
-                quads
-                    .iter()
-                    .filter(|q| model_face_visible(q, neighbour, fancy, adjacent))
-                    .any(|q| covers_cap(q, b, face ^ 1))
-            }) {
-                b.mask &= !bit(face);
+    let mut shapes = boxes(state, nb);
+    if state >> 4 == 102 && !models.has_glass_panes() {
+        for (face, &[dx, dy, dz]) in DIRS.iter().enumerate().skip(2) {
+            if nb(dx, dy, dz) >> 4 == 102 {
+                for b in shapes.iter_mut().filter(|b| box_on_border(b, face)) {
+                    b.mask &= !bit(face);
+                }
             }
         }
     }
-    boxes
+    shapes
 }
 
 pub(crate) fn box_on_border(b: &Bx, face: usize) -> bool {
@@ -234,23 +221,6 @@ pub(crate) fn box_on_border(b: &Bx, face: usize) -> bool {
         1 | 2 | 4 => b.min[axis] <= 0.0,
         _ => b.max[axis] >= 1.0,
     }
-}
-
-fn covers_cap(q: &Quad, b: &Bx, face: usize) -> bool {
-    let axis = if face < 4 { 2 } else { 0 };
-    let plane = if face & 1 == 0 { 0.0 } else { 1.0 };
-    if !q.pos.iter().all(|p| p[axis] == plane) {
-        return false;
-    }
-    let across = 2 - axis;
-    let rectangular = (0..4).all(|i| {
-        let [p, next] = [q.pos[i], q.pos[(i + 1) % 4]];
-        (p[1] == next[1]) != (p[across] == next[across])
-    });
-    rectangular
-        && [1, across].into_iter().all(|a| {
-            q.pos.iter().any(|p| p[a] <= b.min[a]) && q.pos.iter().any(|p| p[a] >= b.max[a])
-        })
 }
 
 fn is_leaves(state: u16) -> bool {
@@ -419,7 +389,7 @@ impl Mesher<'_> {
                     self.modelled(at, quads, &l, state);
                     return;
                 }
-                let list = fallback_boxes(state, &nb, &self.atlas.models, self.fancy);
+                let list = fallback_boxes(state, &nb, &self.atlas.models);
                 // `waterlily.json`: four y turns picked by the position hash.
                 let orient = if state >> 4 == 111 {
                     self.orient_at(at, state)

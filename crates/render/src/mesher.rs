@@ -2,7 +2,7 @@
 //! a fixed pool of 2 workers and a bounded number of outstanding tasks. The render thread uploads the results.
 
 use crate::assets::Atlas;
-use crate::mesh::{mesh_chunk, Meshes, Neighborhood};
+use crate::mesh::{mesh, Meshes, Neighborhood};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -52,7 +52,6 @@ impl Job {
     pub fn run(self, atlas: &Atlas) -> Done {
         let hood = Neighborhood {
             origin: self.key,
-            has_skylight: self.has_skylight,
             center: &self.center,
             neighbors: std::array::from_fn(|i| self.neighbors[i].as_deref().map(Vec::as_slice)),
             biomes: std::array::from_fn(|i| self.biomes[i].as_deref()),
@@ -61,7 +60,7 @@ impl Job {
         Done {
             key: self.key,
             generation: self.generation,
-            meshes: mesh_chunk(&hood, atlas, self.smooth, self.fancy),
+            meshes: mesh(&hood, atlas, self.smooth, self.fancy, false, self.has_skylight),
         }
     }
 }

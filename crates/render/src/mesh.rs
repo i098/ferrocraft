@@ -74,7 +74,6 @@ pub struct Neighborhood<'a> {
     pub origin: (i32, i32),
     pub center: &'a Blocks,
     pub neighbors: [Option<&'a Blocks>; 8],
-    pub has_skylight: bool,
     /// Biome ids of the columns (index `z * 16 + x`) of the chunk and its neighbours, row by row over
     /// `dz` then `dx` in `-1..=1`; a missing column counts as plains.
     pub biomes: [Option<&'a [u8; 256]>; 9],
@@ -221,16 +220,24 @@ struct Mesher<'a> {
 }
 
 /// Mesh the chunk into opaque/cutout geometry and blended geometry, in chunk-local coordinates.
+/// Uses skylight for the supplied blocks.
 pub fn mesh_chunk(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool) -> Meshes {
-    mesh(hood, atlas, smooth, fancy, false)
+    mesh(hood, atlas, smooth, fancy, false, true)
 }
 
 /// [`mesh_chunk`] with vertex colors holding the tint alone, as vanilla's GUI item draws a block.
 pub fn mesh_chunk_flat(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool) -> Meshes {
-    mesh(hood, atlas, smooth, fancy, true)
+    mesh(hood, atlas, smooth, fancy, true, true)
 }
 
-fn mesh(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool, flat: bool) -> Meshes {
+pub(crate) fn mesh(
+    hood: &Neighborhood,
+    atlas: &Atlas,
+    smooth: bool,
+    fancy: bool,
+    flat: bool,
+    has_skylight: bool,
+) -> Meshes {
     let mut m = Mesher {
         flat,
         hood,
@@ -238,7 +245,7 @@ fn mesh(hood: &Neighborhood, atlas: &Atlas, smooth: bool, fancy: bool, flat: boo
         unmipped: false,
         smooth,
         fancy,
-        light: Light::compute(hood),
+        light: Light::compute(hood, has_skylight),
         out: Meshes::default(),
     };
     for y in 0..HEIGHT as i32 {
@@ -940,7 +947,6 @@ mod tests {
         mesh_chunk(
             &Neighborhood {
                 origin: (0, 0),
-                has_skylight: true,
                 center: c,
                 neighbors,
                 biomes: [None; 9],
@@ -988,7 +994,6 @@ mod tests {
         let leaves = |fancy| {
             let hood = Neighborhood {
                 origin: (0, 0),
-                has_skylight: true,
                 center: &c,
                 neighbors: [None; 8],
                 biomes: [None; 9],
@@ -1126,7 +1131,6 @@ mod tests {
         });
         let hood = Neighborhood {
             origin: (0, 0),
-            has_skylight: true,
             center: &c,
             neighbors: [None; 8],
             biomes: [None; 9],
@@ -1140,7 +1144,7 @@ mod tests {
             .filter(|q| q.iter().all(|v| (v.pos[0] - 4.001).abs() < 1e-4))
             .collect();
         assert!(!west.is_empty());
-        let light = Light::compute(&hood);
+        let light = Light::compute(&hood, true);
         let (side, above) = (light.get(3, 60, 4), light.get(3, 61, 4));
         let want = [
             f32::from(side.0.max(above.0)) / 15.0,
@@ -1297,7 +1301,6 @@ mod tests {
             for (lights, level) in [([None; 9], flooded_level), (server, 15.0)] {
                 let hood = Neighborhood {
                     origin: (0, 0),
-                    has_skylight: true,
                     center: &c,
                     neighbors: [None, None, None, None, Some(&east), None, None, None],
                     biomes: [None; 9],
@@ -1333,7 +1336,6 @@ mod tests {
         for lights in [[None; 9], server] {
             let hood = Neighborhood {
                 origin: (0, 0),
-                has_skylight: true,
                 center: &c,
                 neighbors: [None; 8],
                 biomes: [None; 9],
@@ -1368,11 +1370,10 @@ mod tests {
                     origin: (0, 0),
                     center: &c,
                     neighbors: [None; 8],
-                    has_skylight: false,
                     biomes: [None; 9],
                     lights,
                 };
-                let mesh = mesh_chunk(&hood, &Atlas::flat(), true, true);
+                let mesh = super::mesh(&hood, &Atlas::flat(), true, true, false, false);
                 let mut sides = 0;
                 for q in mesh.opaque.vertices.chunks_exact(4) {
                     if q[0].pos[1] != q[2].pos[1] {

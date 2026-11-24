@@ -100,8 +100,12 @@ pub struct Quad {
 }
 
 impl Quad {
-    /// The axis of `face` when all four corners lie in one plane perpendicular to it.
-    pub fn flat_axis(&self) -> Option<usize> {
+    /// The axis of `face` when the quad takes smooth lighting: a shaded, inset, uncullable face of a model
+    /// that allows occlusion, with all four corners in one plane perpendicular to it.
+    pub fn smooth_axis(&self) -> Option<usize> {
+        if !(self.ao && self.shade && !self.on_boundary && self.cull.is_none()) {
+            return None;
+        }
         let axis = [1, 2, 0][self.face / 2];
         let first = self.pos[0][axis];
         self.pos
@@ -401,12 +405,7 @@ fn bake_quad(
         if let Some(r) = el.rot {
             p = rotate_part(p, r);
         }
-        // `ModelRotation.X0_Y0` leaves the vertex alone; a turn about 0.5 and back would only add float noise.
-        pos[i] = if (x, y) == (0, 0) {
-            p
-        } else {
-            quarter(p.map(|v| v - 0.5), x, y).map(|v| v + 0.5)
-        };
+        pos[i] = turn_vertex(p, x, y);
         // `BlockFaceUV.func_178348_a` / `func_178346_a`: the face `rotation` shifts which uv corner a vertex gets.
         let k = (i + face.turns) % 4;
         uv[i] = [
@@ -445,6 +444,14 @@ fn bake_quad(
         tint: face.tint,
         ao: true,
     }
+}
+
+/// `ModelRotation.X0_Y0` leaves the vertex alone; a turn about 0.5 and back would only add float noise.
+fn turn_vertex(p: [f32; 3], x: u8, y: u8) -> [f32; 3] {
+    if (x, y) == (0, 0) {
+        return p;
+    }
+    quarter(p.map(|v| v - 0.5), x, y).map(|v| v + 0.5)
 }
 
 fn on_boundary(pos: &[[f32; 3]; 4], face: usize) -> bool {

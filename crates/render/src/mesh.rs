@@ -786,16 +786,13 @@ impl Mesher<'_> {
             }
             let light_face = q.cull.or(q.on_boundary.then_some(q.face));
             let flat_light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
-            let shade = if q.shade { SHADE[q.shade_face] } else { 1.0 };
-            let smooth = self.smooth && !self.flat && q.ao && crate::blocks::emission(state) == 0;
+            let smooth = self.smooth && !self.flat && crate::blocks::emission(state) == 0;
+            let axis = q.smooth_axis().filter(|_| smooth);
             let verts = std::array::from_fn(|i| {
-                let (light, ao) = match q
-                    .flat_axis()
-                    .filter(|_| smooth && q.shade && !q.on_boundary && q.cull.is_none())
-                {
-                    Some(axis) => self.model_corner(at, q.face, axis, q.pos[i]),
-                    None => (flat_light, 1.0),
-                };
+                let (light, ao) = axis.map_or((flat_light, 1.0), |a| {
+                    self.model_corner(at, q.face, a, q.pos[i])
+                });
+                let shade = if q.shade { SHADE[q.shade_face] } else { 1.0 };
                 let k = if q.shade || ao < 1.0 {
                     self.lit(shade * ao)
                 } else {

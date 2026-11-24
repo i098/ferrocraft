@@ -60,7 +60,14 @@ impl Job {
         Done {
             key: self.key,
             generation: self.generation,
-            meshes: mesh(&hood, atlas, self.smooth, self.fancy, false, self.has_skylight),
+            meshes: mesh(
+                &hood,
+                atlas,
+                self.smooth,
+                self.fancy,
+                false,
+                self.has_skylight,
+            ),
         }
     }
 }

@@ -91,11 +91,15 @@ fn a_firework_rocket_and_its_burst_draw() {
     };
     let mut frame = |ps: &Particles, d: &EntityDraw| {
         r.set_entities(std::slice::from_ref(d));
-        r.set_particles(
-            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.5, |p| {
-                r.light_at(p)
-            }),
-        );
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
+            0.5,
+            |p| r.light_at(p),
+        ));
         r.render_to_rgba(&cam, &[]).2
     };
     let generic = EntityDraw {

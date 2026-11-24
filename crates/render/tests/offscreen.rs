@@ -226,11 +226,15 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     ps.break_block([7, 66, 12], 1 << 4, |_, _| 1);
     ps.spawn_packet(26, [8.5, 66.0, 11.0], [0.5, 0.3, 0.5], 0.01, 30, &[]);
     ps.spawn_packet(34, [7.0, 66.5, 12.0], [0.5, 0.3, 0.5], 0.0, 8, &[]);
-    r.set_particles(
-        ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
-            r.light_at(p)
-        }),
-    );
+    r.set_particles(ps.vertices(
+        r.atlas(),
+        cam.yaw,
+        cam.pitch,
+        cam.pos,
+        (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
+        0.0,
+        |p| r.light_at(p),
+    ));
     let particles = frame(
         &mut r,
         0.0,
@@ -348,6 +352,55 @@ fn project(cam: &Camera, p: [f64; 3], w: f64, h: f64) -> (f64, f64) {
     ((x + 1.0) * w / 2.0, (1.0 - y) * h / 2.0)
 }
 
+/// The curse sits relative to the view entity's feet: a shorter-eyed viewer (sneaking, a baby mob) sees it
+/// higher on screen. Oracle: vanilla places it at feet + 1.8, so eyes at 1.27 with the camera at the eyes equal
+/// eyes at 1.62 with the camera 0.35 below them.
+#[test]
+fn curse_follows_view_entity_eye_height() {
+    let mut r = Renderer::new_offscreen(854, 480, None);
+    let cam = Camera {
+        pos: [8.0, 65.27, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut ps = Particles::new();
+    ps.spawn_packet(41, [8.0, 65.0, 8.0], [0.0; 3], 0.0, 0, &[]);
+    for _ in 0..14 {
+        ps.tick(|_, _, _| 0);
+    }
+    let empty = Particles::new();
+    let mut frame = |ps: &Particles, eye: [f64; 3], h: f32| {
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (eye, [cam.yaw, cam.pitch, h]),
+            0.5,
+            |p| r.light_at(p),
+        ));
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let w = 854;
+    let clear = frame(&empty, cam.pos, 1.62);
+    let sneak = frame(&ps, cam.pos, 1.27);
+    let tall = frame(&ps, [cam.pos[0], cam.pos[1] + 0.35, cam.pos[2]], 1.62);
+    let flat = frame(&ps, cam.pos, 1.62);
+    let b = |p: &[u8]| changed_box(&clear, p, w).expect("curse must draw");
+    let (s, t, f) = (b(&sneak), b(&tall), b(&flat));
+    let mid = |b: (usize, usize, usize, usize)| (b.1 + b.3) as i64 / 2;
+    assert!(
+        (mid(s) - mid(t)).abs() <= 6,
+        "same feet, same place: {s:?} vs {t:?}"
+    );
+    assert!(
+        mid(s) < mid(f) - 20,
+        "shorter eyes put the curse higher: {s:?} vs {f:?}"
+    );
+}
+
 /// The elder guardian curse (particle 41) draws in front of the camera, and the item, footprint and
 /// barrier particles each draw at their world position; with `RENDER_DIR` set the frames are written.
 #[test]
@@ -366,26 +419,35 @@ fn curse_and_item_particles_draw() {
         fov_deg: 70.0,
         ..Camera::default()
     };
-    let mut frame = |ps: &Particles, partial: f32| {
-        r.set_particles(
-            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, partial, |p| {
-                r.light_at(p)
-            }),
-        );
-        r.render_to_rgba(&cam, &[]).2
+    let eyes = (cam.eye(), [cam.yaw, cam.pitch, 1.62]);
+    let mut frame_from = |ps: &Particles, partial: f32, view: &Camera| {
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            view.yaw,
+            view.pitch,
+            view.pos,
+            eyes,
+            partial,
+            |p| r.light_at(p),
+        ));
+        r.render_to_rgba(view, &[]).2
     };
     let (w, h) = (854usize, 480usize);
-    let clear = frame(&Particles::new(), 0.0);
+    let clear = frame_from(&Particles::new(), 0.0, &cam);
     let mut ps = Particles::new();
     ps.spawn_packet(41, [8.0, 65.0, 8.0], [0.0; 3], 0.0, 0, &[]);
     // The entity exists after the first update: nothing is drawn before it.
-    assert_eq!(clear, frame(&ps, 0.5), "no guardian before the first tick");
+    assert_eq!(
+        clear,
+        frame_from(&ps, 0.5, &cam),
+        "no guardian before the first tick"
+    );
     ps.tick(|_, _, _| 0);
-    let early = frame(&ps, 0.5);
+    let early = frame_from(&ps, 0.5, &cam);
     for _ in 0..13 {
         ps.tick(|_, _, _| 0);
     }
-    let mid = frame(&ps, 0.5);
+    let mid = frame_from(&ps, 0.5, &cam);
     assert_ne!(early, mid, "the curse fades and turns over its life");
     // The guardian floats 1.5 blocks ahead of the eyes, so it covers the middle of the screen.
     let (_, ey0, _, ey1) = changed_box(&clear, &early, w).expect("the early curse must draw");
@@ -404,6 +466,27 @@ fn curse_and_item_particles_draw() {
         (ey0 + ey1) / 2 < cy,
         "the early curse sits above the mid curse"
     );
+    // Third person: the camera is 4 blocks behind the eyes, and the curse stays with the view entity, so it is
+    // seen from afar as a small model (`MobAppearanceParticle` reads the render view entity, not the camera).
+    let (sy, cy_) = f64::from(cam.yaw).to_radians().sin_cos();
+    let (sp, cp) = f64::from(cam.pitch).to_radians().sin_cos();
+    let back = Camera {
+        pos: [
+            cam.pos[0] + 4.0 * sy * cp,
+            cam.pos[1] + 4.0 * sp,
+            cam.pos[2] - 4.0 * cy_ * cp,
+        ],
+        ..cam
+    };
+    let far = frame_from(&ps, 0.5, &back);
+    let clear_back = frame_from(&Particles::new(), 0.0, &back);
+    let (fx0, fy0, fx1, fy1) =
+        changed_box(&clear_back, &far, w).expect("the third-person curse must draw");
+    assert!(
+        (fx1 - fx0) * 2 < x1 - x0 && (fy1 - fy0) * 2 < y1 - y0,
+        "third-person curse {fx0},{fy0},{fx1},{fy1} must be much smaller than first-person {x0},{y0},{x1},{y1}"
+    );
+    let far_name = ("curse_third_person".to_string(), far);
 
     if jar.is_none() {
         eprintln!(
@@ -421,7 +504,7 @@ fn curse_and_item_particles_draw() {
     ] {
         let mut one = Particles::new();
         one.spawn_packet(id, pos, vel, speed, count, &args);
-        let px = frame(&one, 0.0);
+        let px = frame_from(&one, 0.0, &cam);
         let (x0, y0, x1, y1) =
             changed_box(&clear, &px, w).unwrap_or_else(|| panic!("particle {id} must draw"));
         let (ex, ey) = project(&cam, pos.map(f64::from), w as f64, h as f64);
@@ -439,6 +522,7 @@ fn curse_and_item_particles_draw() {
             ("curse_clear", &clear),
             ("curse_early", &early),
             ("curse_mid", &mid),
+            (far_name.0.as_str(), &far_name.1),
         ]
         .into_iter()
         .map(|(n, p)| (n.to_string(), p))
@@ -1676,11 +1760,15 @@ fn parity_particles_draw_and_expire() {
     };
     let (w, h) = (854usize, 480usize);
     let mut frame = |ps: &Particles| {
-        r.set_particles(
-            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
-                r.light_at(p)
-            }),
-        );
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
+            0.0,
+            |p| r.light_at(p),
+        ));
         r.render_to_rgba(&cam, &[]).2
     };
     let clear = frame(&Particles::new());
@@ -1759,11 +1847,15 @@ fn clouds_never_cover_near_particles_below_cloud_height() {
             clouds,
             ..Environment::default()
         });
-        r.set_particles(
-            ps.vertices(r.atlas(), cam.yaw, cam.pitch, cam.pos, 0.0, |p| {
-                r.light_at(p)
-            }),
-        );
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
+            0.0,
+            |p| r.light_at(p),
+        ));
         r.render_to_rgba(&cam, &[]).2
     };
     let (clear_sky, clear_clouds) = (frame(0, &Particles::new()), frame(2, &Particles::new()));

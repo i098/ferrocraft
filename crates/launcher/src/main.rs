@@ -93,7 +93,6 @@ fn install_official(
     if host.is_file() {
         stage_file(&host, &engine_dir.join(HOST_JAR))?;
     }
-    written.push(engine_dir);
     Ok(())
 }
 

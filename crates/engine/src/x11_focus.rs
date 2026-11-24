@@ -34,8 +34,12 @@ impl FocusFallback {
     /// A click in the window while it lacks the X input focus takes the focus, as a click does in
     /// every other client. A tool such as `XSetInputFocus` on the WM frame leaves the window without
     /// key events, and the WM does not move the focus back on its own.
+    fn should_force_on_click(&self) -> bool {
+        !self.has_focus
+    }
+
     pub fn on_click(&self, window: &Window) {
-        if !self.has_focus {
+        if self.should_force_on_click() {
             set_input_focus(window, true);
         }
     }
@@ -139,9 +143,10 @@ mod tests {
 
         let mut g = FocusFallback::new();
         g.on_focused(true);
-        assert!(g.has_focus);
+        assert!(!g.should_force_on_click());
         g.on_focused(false);
-        assert!(!g.has_focus && g.focused);
+        assert!(g.should_force_on_click());
+        assert!(FocusFallback::new().should_force_on_click());
         g.on_focused(true);
         let t1 = Instant::now();
         assert!(!g.due(t1));

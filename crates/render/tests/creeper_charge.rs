@@ -142,3 +142,42 @@ fn enderman_eyes_add_to_the_body_texture() {
         .count();
     assert!(pale > 20, "pale pink eye pixels: {pale}");
 }
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn spider_eyes_add_to_the_body_texture() {
+    let cam = Camera {
+        pos: [0.0, 64.5, -3.0],
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let rgba = shot(&[mob(52, 0.0, (1.4, 0.9), 16.0)], &cam, "spider.png");
+    // `spider_eyes.png` is red-violet on black; the glow must reach the frame as saturated red.
+    let red = rgba
+        .chunks(4)
+        .filter(|p| p[0] > 180 && p[1] < 90 && p[2] < 120)
+        .count();
+    assert!(red > 10, "red eye pixels: {red}");
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn dragon_eyes_add_to_the_body_texture() {
+    let cam = Camera {
+        pos: [0.0, 70.0, -14.0],
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    // The dragon model faces the other way round from other mobs: turn it to show its head.
+    let mut d = mob(63, 0.0, (16.0, 8.0), 200.0);
+    d.yaw = 0.0;
+    d.head_yaw = 0.0;
+    let rgba = shot(&[d], &cam, "dragon.png");
+    let bright = rgba
+        .chunks(4)
+        .filter(|p| p[0] > 150 && p[2] > 150 && p[1] < 100)
+        .count();
+    assert!(bright > 5, "purple eye pixels: {bright}");
+}

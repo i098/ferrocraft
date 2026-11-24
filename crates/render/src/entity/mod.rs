@@ -244,6 +244,9 @@ pub const GHOST_ALPHA: f32 = 0.15;
 /// Vertex alpha that sends a layer to the blended pass at full strength (`LayerSlimeGel`:
 /// `enableBlend`, `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`); the texture alpha does the blending.
 pub const BLEND_ALPHA: f32 = 0.999;
+/// Vertex alpha that sends an eye layer to the additive pass (`LayerSpiderEyes`, `LayerEndermanEyes`,
+/// `LayerEnderDragonEyes`: `blendFunc(ONE, ONE)`), so the glow adds to the body texture.
+pub const EYES_ALPHA: f32 = 0.998;
 
 impl Default for Look {
     fn default() -> Look {
@@ -1172,15 +1175,19 @@ pub fn build(
 }
 
 /// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]) and slime gel (alpha
-/// [`BLEND_ALPHA`]) out of `mesh`, which the opaque entity pass draws, into `[ghosts, gel]` meshes
-/// for the blended pass.
-pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 2] {
-    let mut out = [MeshData::default(), MeshData::default()];
+/// [`BLEND_ALPHA`]) and eye layers ([`EYES_ALPHA`]) out of `mesh`, which the opaque entity pass draws,
+/// into `[ghosts, gel, eyes]` meshes for the blended passes.
+pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 3] {
+    let mut out = [
+        MeshData::default(),
+        MeshData::default(),
+        MeshData::default(),
+    ];
     let vertices = &mesh.vertices;
     let mut solid: Vec<[u32; 3]> = Vec::new();
     for t in mesh.indices.as_chunks::<3>().0 {
         let alpha = vertices[t[0] as usize].color[3];
-        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA]
+        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA, EYES_ALPHA]
             .iter()
             .position(|a| *a == alpha)
             .map(|i| &mut out[i])
@@ -1628,6 +1635,11 @@ fn emit_layers(out: &mut MeshData, xf: &Xf, m: &Model, d: &EntityDraw, skins: &S
             out.vertices[from..]
                 .iter_mut()
                 .for_each(|v| v.color[3] = BLEND_ALPHA);
+        }
+        if layer.bright {
+            out.vertices[from..]
+                .iter_mut()
+                .for_each(|v| v.color[3] = EYES_ALPHA);
         }
         if !layer.colors_when_damaged {
             plain.push(from..out.vertices.len());

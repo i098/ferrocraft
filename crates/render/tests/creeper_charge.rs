@@ -20,6 +20,10 @@ impl ChunkBlocks for Flat {
             _ => 0,
         }
     }
+    /// Full sky and block light everywhere, as at noon.
+    fn light_section(&self, _s: usize, _sky: bool) -> Option<&[u8; 2048]> {
+        Some(&[0xff; 2048])
+    }
 }
 
 /// A mob facing the camera, standing at `x`.
@@ -98,4 +102,43 @@ fn a_charged_creeper_wears_the_lightning_shell() {
         encode_png(&dir.join("before.png"), 800, 450, &before).unwrap();
         encode_png(&dir.join("after.png"), 800, 450, &after).unwrap();
     }
+}
+
+/// Renders `draws` on flat ground and returns the RGBA frame, saved as `name` under `MOBS_PROOF_DIR`.
+fn shot(draws: &[EntityDraw], cam: &Camera, name: &str) -> Vec<u8> {
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("client assets");
+    let mut r = Renderer::new_offscreen(800, 450, Some(std::path::Path::new(&jar)));
+    for cx in -2..=2 {
+        for cz in -2..=2 {
+            r.upload_chunk(&Flat(cx, cz));
+        }
+    }
+    // The first frame builds the chunk meshes and their light, which entities read.
+    r.render_to_rgba(cam, &[]);
+    r.set_entities(draws);
+    let rgba = r.render_to_rgba(cam, &[]).2;
+    if let Some(dir) = std::env::var_os("MOBS_PROOF_DIR") {
+        encode_png(&std::path::PathBuf::from(dir).join(name), 800, 450, &rgba).unwrap();
+    }
+    rgba
+}
+
+#[test]
+#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
+fn enderman_eyes_add_to_the_body_texture() {
+    let cam = Camera {
+        pos: [0.0, 65.5, -3.0],
+        pitch: 5.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut d = mob(58, 0.0, (0.6, 2.9), 40.0);
+    d.look.carried = 2 << 4;
+    let rgba = shot(&[d], &cam, "enderman.png");
+    // `enderman.png` paints the eyes white under the glow; `enderman_eyes.png` adds purple: pale pink.
+    let pale = rgba
+        .chunks(4)
+        .filter(|p| p[0] > 230 && p[1] > 100 && p[2] > 230)
+        .count();
+    assert!(pale > 20, "pale pink eye pixels: {pale}");
 }

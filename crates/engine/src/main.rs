@@ -8,6 +8,8 @@ mod game_state;
 mod link;
 mod log;
 mod outline;
+#[cfg(test)]
+mod partial_chunk_test;
 mod skins;
 mod swing;
 mod tag_gate;

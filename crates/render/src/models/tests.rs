@@ -501,7 +501,9 @@ fn glass_pane_fallback_caps_remain_beside_baked_panes() {
         let cracks = crate::crack::quads([4, 0, 4], pane, &world(&blocks), &atlas.models, true);
         let caps = |vertices: &[crate::mesh::Vertex]| {
             vertices
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|quad| quad.iter().all(|v| v.pos[axis] == boundary))
                 .count()
         };
@@ -521,7 +523,9 @@ fn glass_pane_fallback_caps_omit_shared_faces_without_models() {
         true,
     );
     assert!(!vertices
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .any(|quad| quad.iter().all(|v| v.pos[0] == 1.0)));
 }
 
@@ -559,7 +563,8 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
         true,
         true,
     );
-    let quads = meshes.opaque.vertices.chunks_exact(4);
+    let (quads, rest) = meshes.opaque.vertices.as_chunks::<4>();
+    assert!(rest.is_empty());
     let expected = [
         [1, 1],
         [2, 2],
@@ -571,7 +576,7 @@ fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
         [2, 2],
     ];
     assert_eq!(quads.len(), expected.len());
-    for (quad, levels) in quads.zip(expected) {
+    for (quad, levels) in quads.iter().zip(expected) {
         assert!(quad
             .iter()
             .all(|v| v.light == levels.map(|n| n as f32 / 15.0)));
@@ -1101,7 +1106,8 @@ fn resource_names_that_escape_the_asset_root_are_rejected() {
     let dir = std::env::temp_dir().join(format!("fc-models-escape-{}", std::process::id()));
     let minecraft = dir.join("assets/minecraft");
     std::fs::create_dir_all(minecraft.join("models")).unwrap();
-    let cube = r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#t"}}}]}"##;
+    let cube =
+        r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#t"}}}]}"##;
     std::fs::write(minecraft.join("models/inside.json"), cube).unwrap();
     std::fs::write(minecraft.join("outside.json"), cube).unwrap();
     let mut source = AssetSource::Dir(dir.clone());

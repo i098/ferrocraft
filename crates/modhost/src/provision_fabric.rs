@@ -216,7 +216,9 @@ impl Config {
         let relative = Path::new("config/fabric_loader_dependencies.json");
         let overrides = match fs::read(main.join(relative)) {
             Ok(bytes) => bytes,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => PYLON_DEPENDS_OVERRIDE.as_bytes().to_vec(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                PYLON_DEPENDS_OVERRIDE.as_bytes().to_vec()
+            }
             Err(e) => return Err(e.into()),
         };
         fs::create_dir_all(workspace.join("config"))?;
@@ -459,7 +461,10 @@ mod tests {
             ("windows", "x86_64", "windows"),
         ] {
             let (url, _) = lwjgl3_natives(os, arch).unwrap();
-            assert!(url.ends_with(&format!("-natives-{classifier}.jar")), "{url}");
+            assert!(
+                url.ends_with(&format!("-natives-{classifier}.jar")),
+                "{url}"
+            );
         }
     }
 
@@ -551,7 +556,10 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if host.client_brand().is_some()
-                && fs::read_dir(&processed).into_iter().flatten().flatten()
+                && fs::read_dir(&processed)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
                     .any(|entry| fs::read(entry.path()).is_ok_and(|bytes| bytes == nested))
             {
                 break;

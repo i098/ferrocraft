@@ -5,7 +5,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, GENERIC_READ, GENERIC_WRITE};
+use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
     AddAccessAllowedAceEx, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
@@ -55,7 +55,13 @@ fn user_acl(flags: u32) -> io::Result<UserAcl> {
         let mut acl: UserAcl = std::mem::zeroed();
         let raw = (&mut acl as *mut UserAcl).cast();
         if InitializeAcl(raw, size_of::<UserAcl>() as u32, ACL_REVISION) == 0
-            || AddAccessAllowedAceEx(raw, ACL_REVISION, flags, FILE_ALL_ACCESS, user.info.User.Sid) == 0
+            || AddAccessAllowedAceEx(
+                raw,
+                ACL_REVISION,
+                flags,
+                FILE_ALL_ACCESS,
+                user.info.User.Sid,
+            ) == 0
         {
             return Err(io::Error::last_os_error());
         }
@@ -116,14 +122,21 @@ pub(super) fn create(dir: &Path) -> io::Result<tempfile::NamedTempFile> {
         return Err(io::Error::last_os_error());
     }
     if flags & FILE_PERSISTENT_ACLS == 0 {
-        return Err(io::Error::other("Mod staging requires a volume with persistent ACLs"));
+        return Err(io::Error::other(
+            "Mod staging requires a volume with persistent ACLs",
+        ));
     }
     Ok(staged)
 }
 
 pub(super) fn restrict_directory(path: &Path) -> io::Result<()> {
     let acl = user_acl(CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE)?;
-    let path: Vec<u16> = path.canonicalize()?.as_os_str().encode_wide().chain([0]).collect();
+    let path: Vec<u16> = path
+        .canonicalize()?
+        .as_os_str()
+        .encode_wide()
+        .chain([0])
+        .collect();
     let status = unsafe {
         SetNamedSecurityInfoW(
             path.as_ptr(),

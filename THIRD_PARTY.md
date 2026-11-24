@@ -53,6 +53,9 @@ These crates use the MIT license or the Apache License 2.0 (texts in this file).
 `webpki-roots` 1.0 contains Mozilla CA data under [CDLA-Permissive-2.0](https://cdla.dev/permissive-2-0/).
 Each crate's source package contains its own copyright line and full license text.
 
+The `libsqlite3-sys` build uses `cc`, `find-msvc-tools`, `pkg-config`, `shlex`, `vcpkg`, and `version_check`.
+These are build tools and are not part of the release.
+
 The launcher tree (`cargo tree -p ferrocraft-launcher -e normal --target all`) also contains these crates.
 Each source package holds its copyright line and license text.
 They use the MIT license or the Apache License 2.0 (texts in this file): `arbitrary`, `derive_arbitrary`, `bytes`, `generic-array`, `libredox`, `proc-macro2`, `quote`, `redox_users`, `serde`, `serde_derive`, `syn`, `thiserror`, `thiserror-impl`, `utf8-zero`, `windows-targets`, and the `windows_*` target crates (`windows_aarch64_gnullvm`, `windows_aarch64_msvc`, `windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`, `windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`).

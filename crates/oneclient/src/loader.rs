@@ -144,7 +144,11 @@ mod tests {
             std::fs::write(d.join(".instance.json"), json).unwrap();
             assert_eq!(loader(&d).unwrap(), want, "{json}");
         }
-        for raw in ["{}", r#"{"mc_loader":"Forge"}"#, r#"{"mc_loader":"minecraft"}"#] {
+        for raw in [
+            "{}",
+            r#"{"mc_loader":"Forge"}"#,
+            r#"{"mc_loader":"minecraft"}"#,
+        ] {
             std::fs::write(d.join(".instance.json"), raw).unwrap();
             assert!(matches!(loader(&d), Err(Error::Format(_))));
         }
@@ -203,7 +207,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&r.jars[0]).unwrap().permissions().mode() & 0o077, 0);
+            assert_eq!(
+                std::fs::metadata(&r.jars[0]).unwrap().permissions().mode() & 0o077,
+                0
+            );
         }
         assert!(!out.join("renamed.jar").exists());
 

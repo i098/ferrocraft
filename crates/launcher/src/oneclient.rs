@@ -51,8 +51,10 @@ fn is_oneclient_process(line: &str, windows: bool) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            matches!(name, "oneclient_app" | "OneClient" | "OneClient.AppImage" | "OneClient.AppIm")
-                || name.starts_with("OneClient_")
+            matches!(
+                name,
+                "oneclient_app" | "OneClient" | "OneClient.AppImage" | "OneClient.AppIm"
+            ) || name.starts_with("OneClient_")
                 || name.starts_with("oneclient_app_")
         })
 }
@@ -101,7 +103,9 @@ pub(super) fn resolve_data_dir(standard: PathBuf, legacy: &Path) -> io::Result<S
     };
     let bytes = match fs::read(settings) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound && !has_legacy => return Ok((standard, None)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound && !has_legacy => {
+            return Ok((standard, None))
+        }
         Err(e) => {
             return Err(io::Error::new(
                 e.kind(),
@@ -220,15 +224,14 @@ pub fn prepare(
     resolve_storage: impl FnOnce() -> Result<Storage, String>,
 ) -> Result<(PathBuf, Storage), String> {
     #[cfg(windows)]
-    let installed = installed_windows(&base.join(format!("oneclient-{VERSION}")))
-        .map_err(|e| e.to_string())?;
+    let installed =
+        installed_windows(&base.join(format!("oneclient-{VERSION}"))).map_err(|e| e.to_string())?;
     #[cfg(not(windows))]
     let installed: Option<PathBuf> = None;
     let storage = resolve_storage()?;
     let app = match installed {
         Some(app) => app,
-        None => install(base)
-            .map_err(|e| format!("OneClient install failed: {e}"))?,
+        None => install(base).map_err(|e| format!("OneClient install failed: {e}"))?,
     };
     Ok((app, storage))
 }
@@ -497,9 +500,18 @@ mod tests {
         ] {
             assert!(is_oneclient_process(command, false), "{command}");
         }
-        assert!(is_oneclient_process(r#""oneclient_app.exe","123","Console""#, true));
-        assert!(is_oneclient_process(r#""ONECLIENT.EXE","123","Console""#, true));
-        assert!(!is_oneclient_process(r#""not-OneClient.exe","123","Console""#, true));
+        assert!(is_oneclient_process(
+            r#""oneclient_app.exe","123","Console""#,
+            true
+        ));
+        assert!(is_oneclient_process(
+            r#""ONECLIENT.EXE","123","Console""#,
+            true
+        ));
+        assert!(!is_oneclient_process(
+            r#""not-OneClient.exe","123","Console""#,
+            true
+        ));
         assert!(!is_oneclient_process("oneclient_app-helper", false));
     }
 

@@ -24,7 +24,11 @@ fn same_dir(a: &Path, b: &Path) -> bool {
             .is_some_and(|(a, b)| a == b)
 }
 
-fn case_alias(dir: &Path, name: &std::ffi::OsStr, other: &std::ffi::OsStr) -> std::io::Result<bool> {
+fn case_alias(
+    dir: &Path,
+    name: &std::ffi::OsStr,
+    other: &std::ffi::OsStr,
+) -> std::io::Result<bool> {
     let exists = |name: &std::ffi::OsStr| match fs::symlink_metadata(dir.join(name)) {
         Ok(_) => Ok(true),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
@@ -46,7 +50,9 @@ fn case_alias(dir: &Path, name: &std::ffi::OsStr, other: &std::ffi::OsStr) -> st
                 Err(e) => return Err(e),
             };
             let name = probe.path().file_name().unwrap().to_str().unwrap();
-            exists(std::ffi::OsStr::new(&name.replacen("Fc-case-", "fC-case-", 1)))
+            exists(std::ffi::OsStr::new(
+                &name.replacen("Fc-case-", "fC-case-", 1),
+            ))
         }
         _ => Ok(false),
     }
@@ -156,7 +162,8 @@ fn matches_destination(dir: &Path, name: &std::ffi::OsStr, target: &Path) -> boo
         .is_some_and(|(other, parent)| {
             same_dir(dir, parent)
                 && (name == other
-                    || name.eq_ignore_ascii_case(other) && case_alias(dir, name, other).unwrap_or(true))
+                    || name.eq_ignore_ascii_case(other)
+                        && case_alias(dir, name, other).unwrap_or(true))
         })
 }
 
@@ -175,9 +182,15 @@ fn uninstall_refusal(
     let recovery = if same_dir(root, active) {
         "remove it in OneClient before uninstalling".to_owned()
     } else if previous.is_some_and(|p| same_dir(root, p)) {
-        format!("clear {} in OneClient Storage before uninstalling", root.display())
+        format!(
+            "clear {} in OneClient Storage before uninstalling",
+            root.display()
+        )
     } else {
-        format!("remove the mod from the OneClient installation that uses {}", root.display())
+        format!(
+            "remove the mod from the OneClient installation that uses {}",
+            root.display()
+        )
     };
     format!("{issue} {}; {recovery}", target.display())
 }
@@ -189,7 +202,8 @@ pub fn check_reinstall(
 ) -> Result<(), String> {
     let active = storage.map(|(active, _)| active.as_path());
     let previous = storage.and_then(|(_, previous)| previous.as_deref());
-    let roots: BTreeSet<_> = active.into_iter()
+    let roots: BTreeSet<_> = active
+        .into_iter()
         .chain(previous)
         .chain(mods.iter().map(PathBuf::as_path).filter_map(data_root))
         .chain(recorded.iter().filter_map(|jar| data_root(jar.parent()?)))
@@ -197,15 +211,29 @@ pub fn check_reinstall(
     for root in roots {
         check_links(
             root,
-            |target| mods.iter().any(|dir| matches_destination(dir, FABRIC_JAR.as_ref(), target)),
+            |target| {
+                mods.iter()
+                    .any(|dir| matches_destination(dir, FABRIC_JAR.as_ref(), target))
+            },
             |target, exact| {
-                let kind = if exact { "mod at the install destination" } else { "bootstrap" };
+                let kind = if exact {
+                    "mod at the install destination"
+                } else {
+                    "bootstrap"
+                };
                 if previous.is_some_and(|p| same_dir(root, p))
                     && !active.is_some_and(|p| same_dir(root, p))
                 {
-                    format!("{}: clear {} in OneClient Storage before reinstalling", target.display(), root.display())
+                    format!(
+                        "{}: clear {} in OneClient Storage before reinstalling",
+                        target.display(),
+                        root.display()
+                    )
                 } else {
-                    format!("{}: remove the existing {kind} in OneClient before reinstalling", target.display())
+                    format!(
+                        "{}: remove the existing {kind} in OneClient before reinstalling",
+                        target.display()
+                    )
                 }
             },
         )?;

@@ -342,7 +342,10 @@ impl ModHost {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
-        let workspace = staging.as_ref().and_then(Staging::workspace).map(Path::to_path_buf);
+        let workspace = staging
+            .as_ref()
+            .and_then(Staging::workspace)
+            .map(Path::to_path_buf);
         let staging = staging.map(|dir| Arc::new(Mutex::new(Some(dir))));
         let token = token();
         let mut cmd = jvm_command(cfg, port, &token, workspace.as_deref());
@@ -1328,7 +1331,10 @@ printf '%s\n' "$PWD" > "$0.result"
                 .output()
                 .unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}");
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}"
+            );
             return;
         }
 
@@ -1342,7 +1348,10 @@ printf '%s\n' "$PWD" > "$0.result"
         std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
         for loader in [
             Loader::Forge,
-            Loader::Fabric { agent: tmp.path().join("agent.jar"), names: tmp.path().join("names.tiny") },
+            Loader::Fabric {
+                agent: tmp.path().join("agent.jar"),
+                names: tmp.path().join("names.tiny"),
+            },
         ] {
             let host = ModHost::start(&Config {
                 loader,
@@ -1354,7 +1363,10 @@ printf '%s\n' "$PWD" > "$0.result"
             .unwrap();
             assert!(host.child.lock().unwrap().wait().unwrap().success());
         }
-        assert_eq!(std::env::var("FERROCRAFT_ACCESS_TOKEN").unwrap(), "test-session");
+        assert_eq!(
+            std::env::var("FERROCRAFT_ACCESS_TOKEN").unwrap(),
+            "test-session"
+        );
     }
 
     #[test]
@@ -1366,7 +1378,9 @@ printf '%s\n' "$PWD" > "$0.result"
         let profile = root.path().join("profile");
         std::fs::create_dir(&profile).unwrap();
         let java = root.path().join("java");
-        std::fs::write(&java, r#"#!/bin/sh
+        std::fs::write(
+            &java,
+            r#"#!/bin/sh
 while [ "$#" -ne 0 ] && [ "$1" != --gameDir ]; do
     case "$1" in
         -Dferro.gameDir=*) agent_dir="${1#*=}";;
@@ -1379,14 +1393,19 @@ cat "$stage"/mods/*.jar > "$stage/loading" || exit 1
 mkdir -p config && cp "$stage/loading" "config/$(cat "$stage/loading").txt" || exit 1
 mv "$stage/loading" "$stage/loaded" || exit 1
 while [ ! -f "$stage/exit" ]; do sleep 0.02; done
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o700)).unwrap();
         let launch = |name: &str| {
             let dir = tempfile::tempdir_in(root.path()).unwrap();
             std::fs::create_dir(dir.path().join("mods")).unwrap();
             std::fs::write(dir.path().join("mods").join(name), name).unwrap();
             let cfg = Config {
-                loader: Loader::Fabric { agent: root.path().join("agent.jar"), names: root.path().join("names.tiny") },
+                loader: Loader::Fabric {
+                    agent: root.path().join("agent.jar"),
+                    names: root.path().join("names.tiny"),
+                },
                 java: java.clone(),
                 class_path: Vec::new(),
                 game_dir: profile.clone(),
@@ -1404,11 +1423,16 @@ while [ ! -f "$stage/exit" ]; do sleep 0.02; done
                 thread::sleep(Duration::from_millis(20));
             }
         };
-        wait_for(&|| std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
-            && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar"));
+        wait_for(&|| {
+            std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
+                && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar")
+        });
         std::fs::write(first.join("exit"), []).unwrap();
         wait_for(&|| !first.exists());
-        assert_eq!(std::fs::read(profile.join("config/first.jar.txt")).unwrap(), b"first.jar");
+        assert_eq!(
+            std::fs::read(profile.join("config/first.jar.txt")).unwrap(),
+            b"first.jar"
+        );
         assert!(second.is_dir());
         b.stop();
         assert!(!second.exists());

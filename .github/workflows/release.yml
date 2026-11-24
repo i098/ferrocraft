@@ -32,6 +32,7 @@ jobs:
           mkdir stage
           java/launcher/build.sh stage/ferrocraft-boot.jar
           curl -fsSL -o fabric-loader.jar "$FABRIC_LOADER_URL"
+          [ "$(openssl dgst -sha256 -r fabric-loader.jar | cut -d' ' -f1)" = "23557a7d6da3db971a6f9620cb62e7b6e6d1509f5138ebb87529877d2400e568" ]
           FABRIC_LOADER_JAR=$PWD/fabric-loader.jar loaders/fabric/build.sh stage/ferrocraft-fabric.jar
           export FERRO_JAVA_HOME="$JAVA_HOME" FERRO_LIB="$PWD/host-libs"
           mkdir "$FERRO_LIB"

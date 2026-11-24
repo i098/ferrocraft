@@ -108,10 +108,8 @@ public final class HookIndex {
     public static void settle() {
         Set<String> targets = new TreeSet<>();
         try {
-            // Mixins.getConfigs() holds only the configs that Mixin has not applied yet; the created ones stay in this map.
-            Map<String, ?> configs = allConfigs();
-            for (Object config : configs.values()) {
-                targets.addAll((Set<String>) R.call(R.call(config, "getConfig"), "getTargets"));
+            for (Object config : configs()) {
+                targets.addAll((Set<String>) R.call(config, "getTargets"));
             }
         } catch (RuntimeException e) {
             Host.log("hook table: no Mixin config list: " + e);
@@ -126,16 +124,40 @@ public final class HookIndex {
                 Host.log("hook table: " + target + " did not load: " + e);
             }
         }
+        Host.log("hook table: " + list().size() + " changed methods from " + targets.size() + " Mixin targets");
     }
 
-    /** Forge's Mixin has the method; Fabric's Mixin (0.17) keeps the same map in a private static field of Config. */
+    private static List<Object> configsOf(Map<String, ?> all) {
+        List<Object> out = new ArrayList<>();
+        for (Object c : all.values()) out.add(R.call(c, "getConfig"));
+        return out;
+    }
+
+    /**
+     * Every Mixin config that exists, as objects with getTargets. Mixin 0.7.11 (OneConfig's copy, which has neither getAllConfigs nor allConfigs) drops a config
+     * from Mixins.getConfigs() once its transformer selects it, and then keeps it in the transformer's configs and
+     * pendingConfigs lists. Fabric's Mixin (0.17) keeps every Config in a private static map of Config, and a Mixin with getAllConfigs returns that map.
+     */
     @SuppressWarnings("unchecked")
-    private static Map<String, ?> allConfigs() {
+    private static List<Object> configs() {
         Class<?> config = R.cls("org.spongepowered.asm.mixin.transformer.Config");
         for (java.lang.reflect.Method m : config.getDeclaredMethods()) {
-            if (m.getName().equals("getAllConfigs")) return (Map<String, ?>) R.call(config, "getAllConfigs");
+            if (m.getName().equals("getAllConfigs")) return configsOf((Map<String, ?>) R.call(config, "getAllConfigs"));
         }
-        return (Map<String, ?>) R.get(config, "allConfigs");
+        for (java.lang.reflect.Field f : config.getDeclaredFields()) {
+            if (f.getName().equals("allConfigs")) return configsOf((Map<String, ?>) R.get(config, "allConfigs"));
+        }
+        List<Object> out = new ArrayList<>();
+        for (Object c : (Set<Object>) R.call(R.cls("org.spongepowered.asm.mixin.Mixins"), "getConfigs")) {
+            out.add(R.call(c, "getConfig"));
+        }
+        Object env = R.call(R.cls("org.spongepowered.asm.mixin.MixinEnvironment"), "getCurrentEnvironment");
+        Object transformer = R.call(env, "getActiveTransformer");
+        if (transformer != null) {
+            out.addAll((List<Object>) R.get(transformer, "configs"));
+            out.addAll((List<Object>) R.get(transformer, "pendingConfigs"));
+        }
+        return out;
     }
 
     /**

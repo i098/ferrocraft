@@ -135,6 +135,8 @@ pub struct Renderer {
     gel_mesh: Option<GpuMesh>,
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
+    /// Contents of flower pots by position (`blocks::flower_pot_state`).
+    pot_states: HashMap<[i32; 3], u16>,
     tile_meshes: Vec<(Tex, GpuMesh)>,
     cart_meshes: Vec<(Tex, GpuMesh)>,
     /// Beacon beams: inner, then outer (`beacon.rs`).
@@ -508,6 +510,7 @@ impl Renderer {
             ghost_mesh: None,
             gel_mesh: None,
             block_entities: BlockEntities::default(),
+            pot_states: HashMap::new(),
             tile_meshes: Vec::new(),
             cart_meshes: Vec::new(),
             beam_meshes: [None, None],
@@ -861,6 +864,8 @@ impl Renderer {
             }
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
+        // The server sends a pot's contents in its block entity, so `set_block` holds them; a re-upload keeps them.
+        overlay_pots(&mut self.pot_states, key, &mut data);
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
         match crate::mesher::server_light(chunk, &data) {
@@ -878,6 +883,8 @@ impl Renderer {
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
         self.block_entities.remove_chunk(x, z);
+        self.pot_states
+            .retain(|p, _| (p[0].div_euclid(16), p[2].div_euclid(16)) != (x, z));
         self.biomes.remove(&(x, z));
         self.lights.remove(&(x, z));
         self.meshes.remove(&(x, z));
@@ -904,12 +911,13 @@ impl Renderer {
     /// Apply a single block change at world coordinates.
     pub fn set_block(&mut self, x: i32, y: i32, z: i32, state: u16) {
         let key = (x.div_euclid(16), z.div_euclid(16));
-        let Some(data) = self.blocks.get_mut(&key) else {
-            return;
-        };
         if !(0..HEIGHT as i32).contains(&y) {
             return;
         }
+        record_pot(&mut self.pot_states, [x, y, z], state);
+        let Some(data) = self.blocks.get_mut(&key) else {
+            return;
+        };
         let (lx, lz) = (x.rem_euclid(16), z.rem_euclid(16));
         // Copies only while a mesh job still reads the old data.
         Arc::make_mut(data)[index(lx as usize, y as usize, lz as usize)] = state;
@@ -3437,9 +3445,54 @@ struct FireFrame {
     buf: Option<wgpu::Buffer>,
 }
 
+fn record_pot(pots: &mut HashMap<[i32; 3], u16>, pos: [i32; 3], state: u16) {
+    if matches!(state >> 4, 140 | 255) {
+        pots.insert(pos, state);
+    } else {
+        pots.remove(&pos);
+    }
+}
+
+/// Writes the recorded pot contents of chunk `key` into `data`; an entry whose block is no longer a pot is dropped.
+fn overlay_pots(pots: &mut HashMap<[i32; 3], u16>, key: (i32, i32), data: &mut [u16]) {
+    pots.retain(|p, state| {
+        if (p[0].div_euclid(16), p[2].div_euclid(16)) != key {
+            return true;
+        }
+        let i = index(
+            p[0].rem_euclid(16) as usize,
+            p[1] as usize,
+            p[2].rem_euclid(16) as usize,
+        );
+        let is_pot = data[i] >> 4 == 140;
+        if is_pot {
+            data[i] = *state;
+        }
+        is_pot
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pot_contents_recorded_before_upload_overlay_the_empty_pot() {
+        let mut pots = HashMap::new();
+        let rose = (140 << 4) | 1;
+        record_pot(&mut pots, [-8, 64, 6], rose);
+        record_pot(&mut pots, [20, 64, 6], rose);
+        let mut data = vec![0u16; 16 * 16 * HEIGHT];
+        let at = index(8, 64, 6);
+        data[at] = 140 << 4;
+        overlay_pots(&mut pots, (-1, 0), &mut data);
+        assert_eq!(data[at], rose);
+        assert!(pots.contains_key(&[20, 64, 6]));
+        data[at] = 1 << 4;
+        overlay_pots(&mut pots, (-1, 0), &mut data);
+        assert_eq!(data[at], 1 << 4);
+        assert!(!pots.contains_key(&[-8, 64, 6]));
+    }
 
     fn clip_x(cam: &Camera, p: [f32; 3]) -> f32 {
         let m = view_proj(cam, 1.0);

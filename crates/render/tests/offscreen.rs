@@ -352,6 +352,55 @@ fn project(cam: &Camera, p: [f64; 3], w: f64, h: f64) -> (f64, f64) {
     ((x + 1.0) * w / 2.0, (1.0 - y) * h / 2.0)
 }
 
+/// The curse sits relative to the view entity's feet: a shorter-eyed viewer (sneaking, a baby mob) sees it
+/// higher on screen. Oracle: vanilla places it at feet + 1.8, so eyes at 1.27 with the camera at the eyes equal
+/// eyes at 1.62 with the camera 0.35 below them.
+#[test]
+fn curse_follows_view_entity_eye_height() {
+    let mut r = Renderer::new_offscreen(854, 480, None);
+    let cam = Camera {
+        pos: [8.0, 65.27, 8.0],
+        yaw: 20.0,
+        pitch: 10.0,
+        fov_deg: 70.0,
+        ..Camera::default()
+    };
+    let mut ps = Particles::new();
+    ps.spawn_packet(41, [8.0, 65.0, 8.0], [0.0; 3], 0.0, 0, &[]);
+    for _ in 0..14 {
+        ps.tick(|_, _, _| 0);
+    }
+    let empty = Particles::new();
+    let mut frame = |ps: &Particles, eye: [f64; 3], h: f32| {
+        r.set_particles(ps.vertices(
+            r.atlas(),
+            cam.yaw,
+            cam.pitch,
+            cam.pos,
+            (eye, [cam.yaw, cam.pitch, h]),
+            0.5,
+            |p| r.light_at(p),
+        ));
+        r.render_to_rgba(&cam, &[]).2
+    };
+    let w = 854;
+    let clear = frame(&empty, cam.pos, 1.62);
+    let sneak = frame(&ps, cam.pos, 1.27);
+    let tall = frame(&ps, [cam.pos[0], cam.pos[1] + 0.35, cam.pos[2]], 1.62);
+    let flat = frame(&ps, cam.pos, 1.62);
+    let b = |p: &[u8]| changed_box(&clear, p, w).expect("curse must draw");
+    let (s, t, f) = (b(&sneak), b(&tall), b(&flat));
+    let mid = |b: (usize, usize, usize, usize)| (b.1 + b.3) as i64 / 2;
+    assert!(
+        (mid(s) - mid(t)).abs() <= 6,
+        "same feet, same place: {s:?} vs {t:?}"
+    );
+    assert!(
+        mid(s) < mid(f) - 20,
+        "shorter eyes put the curse higher: {s:?} vs {f:?}"
+    );
+}
+
 /// The elder guardian curse (particle 41) draws in front of the camera, and the item, footprint and
 /// barrier particles each draw at their world position; with `RENDER_DIR` set the frames are written.
 #[test]

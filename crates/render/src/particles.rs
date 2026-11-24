@@ -1604,6 +1604,7 @@ impl Particles {
 
     /// Camera-facing quads for all live particles; `partial` is the tick fraction in `0..1`. `light` is
     /// `[sky, block]` (`0..=1`) in the block at a position, 0 when its chunk is not loaded (`Renderer::light_at`).
+    #[allow(clippy::too_many_arguments)] // camera yaw, pitch, position, eye and light are all per-frame inputs
     pub fn vertices(
         &self,
         atlas: &Atlas,

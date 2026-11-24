@@ -2,7 +2,7 @@
 //! a fixed pool of 2 workers and a bounded number of outstanding tasks. The render thread uploads the results.
 
 use crate::assets::Atlas;
-use crate::mesh::{mesh_chunk, Meshes, Neighborhood};
+use crate::mesh::{mesh, Meshes, Neighborhood};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -30,6 +30,7 @@ pub struct Job {
     pub generation: u64,
     pub center: SharedBlocks,
     pub neighbors: [Option<SharedBlocks>; 8],
+    pub has_skylight: bool,
     /// Biomes of the chunk and its neighbours, as `Neighborhood::biomes`.
     pub biomes: [Option<SharedBiomes>; 9],
     /// Server light of the chunk and its neighbours, as `Neighborhood::lights`.
@@ -59,7 +60,14 @@ impl Job {
         Done {
             key: self.key,
             generation: self.generation,
-            meshes: mesh_chunk(&hood, atlas, self.smooth, self.fancy),
+            meshes: mesh(
+                &hood,
+                atlas,
+                self.smooth,
+                self.fancy,
+                false,
+                self.has_skylight,
+            ),
         }
     }
 }

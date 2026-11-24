@@ -1,7 +1,7 @@
-//! Sky and block light of one chunk plus a one-block border, flood-filled like vanilla `World.checkLight`.
-//! The server sends light data but the renderer is fed blocks only, so light is recomputed here.
-//! The flood covers the chunk and its eight neighbours: light travels at most 15 blocks, so every source that can
-//! reach the border lies inside that 48 x 48 block window.
+//! Sky and block light for one chunk and the two-block border that slab sides sample.
+//! Use server light, as in vanilla `Chunk.getLightFor`, if every loaded chunk in the window has it.
+//! Otherwise, flood the chunk and its eight neighbors as in vanilla `World.checkLight`.
+//! Light loses at least one level per step in the flood. No source outside the 48 × 48 window can affect the border.
 
 use crate::blocks::{emission, light_opacity};
 use crate::mesh::{index, Neighborhood, HEIGHT};
@@ -12,6 +12,8 @@ use std::sync::LazyLock;
 /// Width of the flooded window and the offset of chunk-local coordinate 0 in it.
 const W: usize = 48;
 const OFF: i32 = 16;
+const BORDER: i32 = 2;
+const RING: usize = 16 + 2 * BORDER as usize;
 
 /// `(light_opacity, emission)` per block state.
 static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
@@ -21,32 +23,37 @@ static PROPS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
 });
 
 pub struct Light {
-    /// `sky << 4 | block` per cell, `x` and `z` in `-1..=16`, `y` below `height`.
+    /// `sky << 4 | block` per cell, `x` and `z` in `-2..=17`, `y` below `height`.
     cells: Vec<u8>,
-    /// Layers computed; above them the air is sky 15 with no block light.
+    /// Layers computed; above them there is no block light.
     height: usize,
+    sky_default: u8,
 }
 
 fn idx(x: i32, y: usize, z: i32) -> usize {
     (y * W + (z + OFF) as usize) * W + (x + OFF) as usize
 }
 
-/// Index into the 18 x 18 cells of the border ring.
 fn ring_idx(x: i32, y: usize, z: i32) -> usize {
-    (y * 18 + (z + 1) as usize) * 18 + (x + 1) as usize
+    (y * RING + (z + BORDER) as usize) * RING + (x + BORDER) as usize
 }
 
 impl Light {
-    pub fn compute(hood: &Neighborhood) -> Light {
-        // Above the highest block the column is open air at sky 15; block light reaches at most 14 cells above its source.
+    pub fn compute(hood: &Neighborhood, has_skylight: bool) -> Light {
+        // Keep enough layers above the highest block for its block light to fade out.
         let top = std::iter::once(hood.center)
             .chain(hood.neighbors.iter().flatten().copied())
             .filter_map(|b| b.iter().rposition(|&s| s != 0))
             .max()
             .map_or(0, |i| i / 256 + 1);
         let height = (top + 15).min(HEIGHT);
-        if let Some(cells) = server_cells(hood, height) {
-            return Light { cells, height };
+        let sky_default = if has_skylight { 15 } else { 0 };
+        if let Some(cells) = server_cells(hood, height, has_skylight) {
+            return Light {
+                cells,
+                height,
+                sky_default,
+            };
         }
         let n = height * W * W;
         let mut opacity = vec![0u8; n];
@@ -57,7 +64,7 @@ impl Light {
         for z in -OFF..W as i32 - OFF {
             for x in -OFF..W as i32 - OFF {
                 let known = loaded(x, z);
-                let mut level = 15u8;
+                let mut level = sky_default;
                 for y in (0..height).rev() {
                     let i = idx(x, y, z);
                     if !known {
@@ -79,43 +86,70 @@ impl Light {
             }
         }
         // Sky light that stays 15 straight down the column only needs to spread sideways where the neighbour is darker.
-        let sky_queue = darker_edges(&sky, height);
-        spread(&opacity, &mut sky, sky_queue, height);
+        if has_skylight {
+            let sky_queue = darker_edges(&sky, height);
+            spread(&opacity, &mut sky, sky_queue, height);
+        }
         spread(&opacity, &mut block, queue, height);
 
-        let mut cells = vec![0u8; height * 18 * 18];
-        for y in 0..height {
-            for z in -1..=16 {
-                for x in -1..=16 {
-                    let (sx, sz) = if loaded(x, z) {
-                        (x, z)
-                    } else {
-                        (x.clamp(0, 15), z.clamp(0, 15))
-                    };
-                    let from = idx(sx, y, sz);
-                    cells[ring_idx(x, y, z)] = sky[from] << 4 | block[from];
-                }
-            }
+        let cells = flood_ring(height, loaded, &sky, &block);
+        Light {
+            cells,
+            height,
+            sky_default,
         }
-        Light { cells, height }
     }
 
     /// `(sky, block)` light levels; `x` and `z` in `-1..=16`.
     pub fn get(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
-        if y >= self.height as i32 {
-            return (15, 0);
-        }
         if y < 0 {
             return (0, 0);
         }
-        let c = self.cells[ring_idx(x.clamp(-1, 16), y as usize, z.clamp(-1, 16))];
+        self.sample(x.clamp(-1, 16), y, z.clamp(-1, 16))
+    }
+
+    /// Sample within the two-block border without copying the chunk edge for missing neighbors.
+    /// Match vanilla `ChunkCache`: use the dimension's default light for unloaded chunks.
+    pub(crate) fn sample_slab(&self, hood: &Neighborhood, x: i32, y: i32, z: i32) -> (u8, u8) {
+        if !hood.loaded(x.div_euclid(16), z.div_euclid(16)) {
+            return (self.sky_default, 0);
+        }
+        self.sample(x, y, z)
+    }
+
+    fn sample(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
+        if !(0..self.height as i32).contains(&y) {
+            return (self.sky_default, 0);
+        }
+        let c = self.cells[ring_idx(x, y as usize, z)];
         (c >> 4, c & 15)
     }
 }
 
-/// The light the server sent, as `Chunk.getLightFor`, for every ring cell; `None` unless the chunk and every loaded
-/// neighbour kept it (a changed chunk is flooded again).
-fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
+fn flood_ring(
+    height: usize,
+    loaded: impl Fn(i32, i32) -> bool,
+    sky: &[u8],
+    block: &[u8],
+) -> Vec<u8> {
+    let mut cells = vec![0u8; height * RING * RING];
+    for y in 0..height {
+        for z in -BORDER..16 + BORDER {
+            for x in -BORDER..16 + BORDER {
+                let (sx, sz) = if loaded(x, z) {
+                    (x, z)
+                } else {
+                    (x.clamp(0, 15), z.clamp(0, 15))
+                };
+                let from = idx(sx, y, sz);
+                cells[ring_idx(x, y, z)] = sky[from] << 4 | block[from];
+            }
+        }
+    }
+    cells
+}
+
+fn server_cells(hood: &Neighborhood, height: usize, has_skylight: bool) -> Option<Vec<u8>> {
     let mut slots = [None; 9];
     for (slot, light) in hood.lights.iter().enumerate() {
         let (dx, dz) = (slot as i32 % 3 - 1, slot as i32 / 3 - 1);
@@ -126,10 +160,11 @@ fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
         }
     }
     slots[4]?;
-    let mut cells = vec![0u8; height * 18 * 18];
+    let mask = if has_skylight { 0xff } else { 0x0f };
+    let mut cells = vec![0u8; height * RING * RING];
     for y in 0..height {
-        for z in -1..=16i32 {
-            for x in -1..=16i32 {
+        for z in -BORDER..16 + BORDER {
+            for x in -BORDER..16 + BORDER {
                 let slot = (z.div_euclid(16) + 1) * 3 + x.div_euclid(16) + 1;
                 // An unloaded neighbour copies the edge of the chunk, as the flooded light does.
                 let (slot, x, z) = match slots[slot as usize] {
@@ -137,7 +172,7 @@ fn server_cells(hood: &Neighborhood, height: usize) -> Option<Vec<u8>> {
                     None => (4, x.clamp(0, 15), z.clamp(0, 15)),
                 };
                 let at = index(x.rem_euclid(16) as usize, y, z.rem_euclid(16) as usize);
-                cells[ring_idx(x, y, z)] = slots[slot]?[at];
+                cells[ring_idx(x, y, z)] = slots[slot]?[at] & mask;
             }
         }
     }
@@ -266,7 +301,7 @@ mod tests {
     #[test]
     fn open_air_is_full_sky_light() {
         let c = chunk(|_, y, _| if y < 60 { 1 << 4 } else { 0 });
-        let l = Light::compute(&hood_of(&c));
+        let l = Light::compute(&hood_of(&c), true);
         assert_eq!(l.get(5, 70, 5), (15, 0));
         assert_eq!(l.get(5, 30, 5), (0, 0));
     }
@@ -279,7 +314,7 @@ mod tests {
             _ if (x, z) == (0, 0) => 0,
             _ => 0,
         });
-        let l = Light::compute(&hood_of(&c));
+        let l = Light::compute(&hood_of(&c), true);
         assert_eq!(l.get(8, 40, 8).1, 14);
         assert_eq!(l.get(11, 40, 8).1, 11);
     }
@@ -292,7 +327,7 @@ mod tests {
             62 if x < 8 => 1 << 4,
             _ => 0,
         });
-        let l = Light::compute(&hood_of(&c));
+        let l = Light::compute(&hood_of(&c), true);
         assert_eq!(l.get(7, 60, 4).0, 14);
         assert_eq!(l.get(4, 60, 4).0, 11);
     }
@@ -312,7 +347,7 @@ mod tests {
             biomes: [None; 9],
             lights: [None; 9],
         };
-        let l = Light::compute(&hood);
+        let l = Light::compute(&hood, true);
         assert_eq!(l.get(16, 40, 8).1, 13);
         assert_eq!(l.get(15, 40, 8).1, 12);
     }
@@ -342,7 +377,7 @@ mod tests {
             lights: [None; 9],
         };
         // Two blocks across x and z plus nothing in y: 14 - 4 = 10.
-        assert_eq!(Light::compute(&hood).get(15, 40, 15).1, 10);
+        assert_eq!(Light::compute(&hood, true).get(15, 40, 15).1, 10);
     }
 
     #[test]
@@ -353,7 +388,7 @@ mod tests {
             80 => 18 << 4,
             _ => 0,
         });
-        let l = Light::compute(&hood_of(&c));
+        let l = Light::compute(&hood_of(&c), true);
         assert_eq!(l.get(5, 79, 5).0, 13);
         assert_eq!(l.get(5, 70, 5).0, 4);
         assert_eq!(l.get(5, 60, 5).0, 0);
@@ -367,13 +402,13 @@ mod tests {
         light[index(5, 70, 5)] = 3 << 4 | 9;
         let mut hood = hood_of(&c);
         hood.lights[4] = Some(&light);
-        let l = Light::compute(&hood);
+        let l = Light::compute(&hood, true);
         assert_eq!(l.get(5, 70, 5), (3, 9));
         assert_eq!(l.get(6, 70, 5), (15, 0));
         // A missing neighbour copy makes the whole hood flood again.
         let east = c.clone();
         hood.neighbors[4] = Some(&east);
-        assert_eq!(Light::compute(&hood).get(5, 70, 5), (15, 0));
+        assert_eq!(Light::compute(&hood, true).get(5, 70, 5), (15, 0));
     }
 
     struct Sent(Vec<Option<[u8; 2048]>>);

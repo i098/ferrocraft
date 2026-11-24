@@ -275,20 +275,8 @@ fn chunk_data(c: &cb::ChunkData, sky_light: bool) -> io::Result<Vec<NetEvent>> {
     if c.continuous {
         return Ok(vec![NetEvent::Chunk(Box::new(chunk))]);
     }
-    // A partial update must not replace the whole column: send its blocks one by one.
-    Ok((0..16usize)
-        .filter_map(|s| chunk.section(s).map(|sec| (s, sec)))
-        .flat_map(|(s, sec)| {
-            sec.iter().enumerate().map(move |(i, &state)| {
-                block_change(
-                    c.x * 16 + (i & 15) as i32,
-                    (s * 16 + (i >> 8)) as i32,
-                    c.z * 16 + (i >> 4 & 15) as i32,
-                    i32::from(state),
-                )
-            })
-        })
-        .collect())
+    // A partial update must not replace the whole column: it replaces only the sections it carries.
+    Ok(vec![NetEvent::ChunkSections(Box::new(chunk))])
 }
 
 fn chunk_bulk(b: &cb::MapChunkBulk) -> io::Result<Vec<NetEvent>> {

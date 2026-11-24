@@ -59,6 +59,8 @@ pub enum NetEvent {
     /// S24, S33 and S35 for chests, signs, skulls and banners.
     Tile(TileEvent),
     Chunk(Box<Chunk>),
+    /// A partial S21 (`!continuous`): only the sections it carries replace the loaded chunk's.
+    ChunkSections(Box<Chunk>),
     UnloadChunk(i32, i32),
     BlockChange {
         x: i32,

@@ -486,16 +486,21 @@ fn glass_pane_fallback_cracks_omit_shared_arm_caps() {
 }
 
 #[test]
-fn glass_pane_fallback_cap_depends_on_coverage_not_facing() {
+fn glass_pane_fallback_cap_depends_on_visible_coverage() {
     let pane = 102 << 4;
     let (_, key) = variant(pane, &world(&[((-1, 0), pane)])).unwrap();
     let blocks = [((0, 0), pane), ((1, 0), pane)];
-    for (from_x, to_x, face, expected_caps) in
-        [(0, 9, "west", 0), (1, 9, "west", 1), (-1, 0, "east", 0)]
-    {
+    for (from_x, to_x, face, below, fancy, expected_caps) in [
+        (0, 9, "west", 0, true, 0),
+        (1, 9, "west", 0, true, 1),
+        (-1, 0, "east", 0, true, 0),
+        (0, 9, "west", 1 << 4, true, 1),
+        (0, 9, "west", 18 << 4, false, 1),
+        (0, 9, "west", 18 << 4, true, 0),
+    ] {
         let json = format!(
             r#"{{"elements":[{{"from":[{from_x},0,7],"to":[{to_x},16,9],
-                "faces":{{"{face}":{{"texture":"blocks/glass"}}}}}}]}}"#
+                "faces":{{"{face}":{{"texture":"blocks/glass","cullface":"down"}}}}}}]}}"#
         );
         let quads = bake(&json, r#"{"model":"m"}"#);
         let models = Models {
@@ -505,7 +510,15 @@ fn glass_pane_fallback_cap_depends_on_coverage_not_facing() {
             )]),
             ..Models::default()
         };
-        let vertices = crate::crack::quads([0; 3], pane, &world(&blocks), &models, true);
+        let at = world(&blocks);
+        let nb = |x, y, z| {
+            if (x, y, z) == (1, -1, 0) {
+                below
+            } else {
+                at(x, y, z)
+            }
+        };
+        let vertices = crate::crack::quads([0; 3], pane, &nb, &models, fancy);
         assert_eq!(
             vertices
                 .chunks_exact(4)

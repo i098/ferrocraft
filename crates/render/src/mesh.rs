@@ -201,6 +201,7 @@ pub(crate) fn fallback_boxes(
     state: u16,
     nb: &dyn Fn(i32, i32, i32) -> u16,
     models: &Models,
+    fancy: bool,
 ) -> Vec<Bx> {
     let mut boxes = boxes(state, nb);
     if state >> 4 != 102 {
@@ -214,7 +215,12 @@ pub(crate) fn fallback_boxes(
         let adjacent = |x, y, z| nb(x + dx, y + dy, z + dz);
         let quads = models.quads(neighbour, &adjacent);
         for b in boxes.iter_mut().filter(|b| box_on_border(b, face)) {
-            if quads.is_none_or(|quads| quads.iter().any(|q| covers_cap(q, b, face ^ 1))) {
+            if quads.is_none_or(|quads| {
+                quads
+                    .iter()
+                    .filter(|q| model_face_visible(q, neighbour, fancy, adjacent))
+                    .any(|q| covers_cap(q, b, face ^ 1))
+            }) {
                 b.mask &= !bit(face);
             }
         }
@@ -413,7 +419,7 @@ impl Mesher<'_> {
                     self.modelled(at, quads, &l, state);
                     return;
                 }
-                let list = fallback_boxes(state, &nb, &self.atlas.models);
+                let list = fallback_boxes(state, &nb, &self.atlas.models, self.fancy);
                 // `waterlily.json`: four y turns picked by the position hash.
                 let orient = if state >> 4 == 111 {
                     self.orient_at(at, state)

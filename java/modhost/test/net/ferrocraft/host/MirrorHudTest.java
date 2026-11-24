@@ -41,7 +41,7 @@ public final class MirrorHudTest {
             R.call(R.cls("cc.polyfrost.oneconfig.internal.hud.HudCore"), "reInitHuds");
             List<String> texts = new ArrayList<>();
             for (int frame = 0; frame < 30 && !done(texts); frame++) {
-                out.write(mirror());
+                out.write(mirror(-1));
                 out.write(frameRequest());
                 out.flush();
                 texts = readFrame(in).texts;
@@ -75,7 +75,7 @@ public final class MirrorHudTest {
         return all.contains("FPS: 144") && all.contains("Taiga") && all.contains("mc.example:25565") && all.contains("Z: -7");
     }
 
-    static byte[] mirror() throws IOException {
+    static byte[] mirror(int helmet) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(b);
         w.writeByte('M');
@@ -91,7 +91,7 @@ public final class MirrorHudTest {
         w.writeByte(0);
         w.writeShort(0);
         for (int i = 0; i < 40; i++) {
-            w.writeShort(-1);
+            w.writeShort(i == 39 ? helmet : -1);
             w.writeByte(0);
             w.writeShort(0);
         }

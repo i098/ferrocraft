@@ -70,7 +70,7 @@ public final class OverlayHooksTest implements Opcodes {
     private static void assertCrosshairFrame(IEventListener listener, int hud, int images) throws IOException {
         RenderGameOverlayEvent.Pre crosshair = crosshairEvent();
         OverlayFilter.invoke(listener, crosshair);
-        new OverlayFilter().pre(crosshair);
+        new OverlayFilter(false).pre(crosshair);
         MirrorHudTest.Frame frame = MirrorHudTest.readFrame(new DataInputStream(new ByteArrayInputStream(Sink.take(false))));
         if (frame.hud != hud || frame.images.size() != images) {
             throw new AssertionError("only a successful mod cancellation must suppress the Rust crosshair");

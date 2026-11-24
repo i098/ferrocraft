@@ -50,17 +50,7 @@ impl AssetSource {
                 zip.by_name(name).ok()?.read_to_end(&mut bytes).ok()?;
                 Some(bytes)
             }
-            AssetSource::Dir(dir) => {
-                let root = dir.canonicalize().ok()?;
-                let read = |name: &str| {
-                    let path = root.join(name).canonicalize().ok()?;
-                    if !path.starts_with(&root) {
-                        return None;
-                    }
-                    std::fs::read(path).ok()
-                };
-                read(name).or_else(|| read(name.strip_prefix("assets/")?))
-            }
+            AssetSource::Dir(dir) => read_folder(dir, name),
             AssetSource::Layers(layers) => layers.iter_mut().find_map(|l| l.read(name)),
         }
     }
@@ -76,6 +66,30 @@ impl AssetSource {
             single => single.read(name).into_iter().collect(),
         }
     }
+}
+
+fn read_folder(dir: &Path, name: &str) -> Option<Vec<u8>> {
+    let stripped = name.strip_prefix("assets/").unwrap_or(name);
+    let contained = stripped
+        .split_once('/')
+        .and_then(|(_, path)| path.split_once('/'))
+        .is_some_and(|(kind, _)| matches!(kind, "models" | "textures"));
+    let root = if contained {
+        Some(dir.canonicalize().ok()?)
+    } else {
+        None
+    };
+    let read = |name: &str| match &root {
+        Some(root) => {
+            let path = root.join(name).canonicalize().ok()?;
+            if !path.starts_with(root) {
+                return None;
+            }
+            std::fs::read(path).ok()
+        }
+        None => std::fs::read(dir.join(name)).ok(),
+    };
+    read(name).or_else(|| (stripped != name).then(|| read(stripped)).flatten())
 }
 
 pub struct Image {
@@ -431,6 +445,27 @@ mod tests {
         let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
         assert!(near(u0, 1.0 / 16.0 + iu) && near(v0, 0.5 + iv));
         assert!(near(u1, 2.0 / 16.0 - iu) && near(v1, 1.0 - iv));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_pack_reads_shared_metadata_icon_and_language() {
+        let root = std::env::temp_dir().join(format!("assets_shared_{}", std::process::id()));
+        let pack = root.join("pack");
+        let shared = root.join("shared");
+        std::fs::create_dir_all(pack.join("minecraft/lang")).unwrap();
+        std::fs::write(&shared, b"shared").unwrap();
+        for name in ["pack.mcmeta", "pack.png", "minecraft/lang/en_US.lang"] {
+            std::os::unix::fs::symlink(&shared, pack.join(name)).unwrap();
+        }
+        let mut source = AssetSource::open(&pack).unwrap();
+        assert_eq!(source.read("pack.mcmeta").as_deref(), Some(&b"shared"[..]));
+        assert_eq!(source.read("pack.png").as_deref(), Some(&b"shared"[..]));
+        assert_eq!(
+            source.read_all("assets/minecraft/lang/en_US.lang"),
+            [b"shared".to_vec()]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

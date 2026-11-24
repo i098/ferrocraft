@@ -785,20 +785,55 @@ impl Mesher<'_> {
                 continue;
             }
             let light_face = q.cull.or(q.on_boundary.then_some(q.face));
-            let light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
-            let k = if q.shade {
-                self.lit(SHADE[q.shade_face])
-            } else {
-                1.0
-            };
-            let verts = std::array::from_fn(|i| Vertex {
-                pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
-                uv: self.atlas.uv(&q.tex, q.uv[i]),
-                color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
-                light,
+            let flat_light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
+            let shade = if q.shade { SHADE[q.shade_face] } else { 1.0 };
+            let smooth = self.smooth && !self.flat && q.ao && crate::blocks::emission(state) == 0;
+            let verts = std::array::from_fn(|i| {
+                let (light, ao) = match q
+                    .flat_axis()
+                    .filter(|_| smooth && q.shade && !q.on_boundary && q.cull.is_none())
+                {
+                    Some(axis) => self.model_corner(at, q.face, axis, q.pos[i]),
+                    None => (flat_light, 1.0),
+                };
+                let k = if q.shade || ao < 1.0 {
+                    self.lit(shade * ao)
+                } else {
+                    1.0
+                };
+                Vertex {
+                    pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
+                    uv: self.atlas.uv(&q.tex, q.uv[i]),
+                    color: [rgb[0] * k, rgb[1] * k, rgb[2] * k, 1.0],
+                    light,
+                }
             });
             self.push_quad(Pass::Opaque, verts, false);
         }
+    }
+
+    /// `AmbientOcclusionFace` for a flat model quad: the four face-corner values of `smooth`, blended by the
+    /// vertex position inside the face plane (the quad is the part of the plane it covers).
+    fn model_corner(&self, at: [i32; 3], face: usize, axis: usize, p: [f32; 3]) -> ([f32; 2], f32) {
+        let (b, c) = match axis {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let (u, v) = (p[b], p[c]);
+        let mut light = [0.0; 2];
+        let mut ao = 0.0;
+        for (cu, cv) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let w = (if cu == 1 { u } else { 1.0 - u }) * (if cv == 1 { v } else { 1.0 - v });
+            let mut corner = [0.0; 3];
+            corner[b] = cu as f32;
+            corner[c] = cv as f32;
+            let (l, a) = self.smooth(at, face, corner);
+            light[0] += l[0] * w;
+            light[1] += l[1] * w;
+            ao += a * w;
+        }
+        (light, ao)
     }
 
     /// `AmbientOcclusionFace` samples on the far side of the slab face's block boundary.

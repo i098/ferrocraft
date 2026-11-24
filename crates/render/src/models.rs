@@ -95,6 +95,20 @@ pub struct Quad {
     pub shade: bool,
     /// The face has a `tintindex`: the block's biome or fixed tint multiplies the texel.
     pub tint: bool,
+    /// The model lets the block use smooth lighting (`ambientocclusion`).
+    pub ao: bool,
+}
+
+impl Quad {
+    /// The axis of `face` when all four corners lie in one plane perpendicular to it.
+    pub fn flat_axis(&self) -> Option<usize> {
+        let axis = [1, 2, 0][self.face / 2];
+        let first = self.pos[0][axis];
+        self.pos
+            .iter()
+            .all(|p| (p[axis] - first).abs() < 1e-4)
+            .then_some(axis)
+    }
 }
 
 #[derive(Default)]
@@ -123,6 +137,8 @@ struct Element {
 struct Model {
     textures: HashMap<String, String>,
     elements: std::rc::Rc<Vec<Element>>,
+    /// `ModelBlock.ambientOcclusion`, inherited from the parent chain.
+    ao: bool,
 }
 
 fn vec3(v: &Value) -> Option<[f32; 3]> {
@@ -241,6 +257,10 @@ impl Loader<'_> {
                     .map(parse_element)
                     .collect::<Option<Vec<_>>>()?
                     .into(),
+                ao: json
+                    .get("ambientocclusion")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             },
             _ => return None,
         };
@@ -292,7 +312,9 @@ impl Loader<'_> {
             for (f, face) in el.faces.iter().enumerate() {
                 let Some(face) = face else { continue };
                 let tex = self.texture(&model, &face.tex)?;
-                quads.push(bake_quad(el, f, face, tex, (x, y), uvlock));
+                let mut quad = bake_quad(el, f, face, tex, (x, y), uvlock);
+                quad.ao = model.ao;
+                quads.push(quad);
             }
         }
         Some(quads)
@@ -313,12 +335,15 @@ impl Loader<'_> {
     }
 }
 
-/// `FaceBakery.rotatePart`: rotates `p` (1/16 units) about the element's `origin`.
+/// `FaceBakery.rotatePart`: rotates `p` (block units) about the element's `origin` (1/16 units) with the float
+/// operations of the vanilla `Matrix4f`, so a 45 degree quad ties between two facings as it does there.
 fn rotate_part(
     p: [f32; 3],
     (origin, axis, angle, rescale): ([f32; 3], usize, f32, bool),
 ) -> [f32; 3] {
-    let (s, c) = angle.to_radians().sin_cos();
+    let radians = f64::from(angle * (std::f32::consts::PI / 180.0));
+    let (s, c) = (radians.sin() as f32, radians.cos() as f32);
+    let origin = origin.map(|v| v * 0.0625);
     let q = [0, 1, 2].map(|a| p[a] - origin[a]);
     let (i, j) = ((axis + 1) % 3, (axis + 2) % 3);
     let mut r = q;
@@ -326,9 +351,9 @@ fn rotate_part(
     r[j] = q[i] * s + q[j] * c;
     if rescale {
         let k = if angle.abs() == 22.5 {
-            1.0 / 22.5f32.to_radians().cos() - 1.0
+            1.0 / f64::from(0.3926991f32).cos() as f32 - 1.0
         } else {
-            1.0 / 45.0f32.to_radians().cos() - 1.0
+            1.0 / 0.785_398_185_253_143_3f64.cos() as f32 - 1.0
         };
         for a in (0..3).filter(|a| *a != axis) {
             r[a] *= 1.0 + k;
@@ -337,19 +362,23 @@ fn rotate_part(
     [0, 1, 2].map(|a| r[a] + origin[a])
 }
 
-fn geometric_face(pos: &[[f32; 3]; 4], fallback: usize) -> usize {
-    let a: [f32; 3] = std::array::from_fn(|i| pos[1][i] - pos[0][i]);
-    let b: [f32; 3] = std::array::from_fn(|i| pos[2][i] - pos[0][i]);
-    let [x, y, z] = [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
+/// `FaceBakery.getFacingFromVertices`: the facing whose normal best matches the normalised cross product of the
+/// first three vertices, ties going to the first of DOWN, UP, NORTH, SOUTH, WEST, EAST.
+fn geometric_face(pos: &[[f32; 3]; 4]) -> usize {
+    let d1: [f32; 3] = std::array::from_fn(|i| pos[0][i] - pos[1][i]);
+    let d2: [f32; 3] = std::array::from_fn(|i| pos[2][i] - pos[1][i]);
+    let c = [
+        d2[1] * d1[2] - d2[2] * d1[1],
+        d2[2] * d1[0] - d2[0] * d1[2],
+        d2[0] * d1[1] - d2[1] * d1[0],
     ];
-    let mut face = fallback;
+    let len = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+    let mut face = 0;
     let mut best = 0.0;
-    for (i, score) in [y, -y, -z, z, -x, x].into_iter().enumerate() {
-        if score > best {
-            (face, best) = (i, score);
+    for i in [1, 0, 2, 3, 4, 5] {
+        let dot = (0..3).fold(0.0, |s, a| s + c[a] / len * NORMALS[i][a]);
+        if dot >= 0.0 && dot > best {
+            (face, best) = (i, dot);
         }
     }
     face
@@ -368,11 +397,16 @@ fn bake_quad(
     let mut pos = [[0.0; 3]; 4];
     let mut uv = [[0.0; 2]; 4];
     for (i, c) in VERTS[f].iter().enumerate() {
-        let mut p = [0, 1, 2].map(|a| if c[a] == 1 { el.to[a] } else { el.from[a] });
+        let mut p = [0, 1, 2].map(|a| if c[a] == 1 { el.to[a] } else { el.from[a] } / 16.0);
         if let Some(r) = el.rot {
             p = rotate_part(p, r);
         }
-        pos[i] = quarter(p.map(|v| v / 16.0 - 0.5), x, y).map(|v| v + 0.5);
+        // `ModelRotation.X0_Y0` leaves the vertex alone; a turn about 0.5 and back would only add float noise.
+        pos[i] = if (x, y) == (0, 0) {
+            p
+        } else {
+            quarter(p.map(|v| v - 0.5), x, y).map(|v| v + 0.5)
+        };
         // `BlockFaceUV.func_178348_a` / `func_178346_a`: the face `rotation` shifts which uv corner a vertex gets.
         let k = (i + face.turns) % 4;
         uv[i] = [
@@ -391,7 +425,7 @@ fn bake_quad(
     let shade_face =
         turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal");
     let geometric_face = if el.rot.is_some() {
-        geometric_face(&pos, shade_face)
+        geometric_face(&pos)
     } else {
         shade_face
     };
@@ -409,6 +443,7 @@ fn bake_quad(
         on_boundary,
         shade: el.shade,
         tint: face.tint,
+        ao: true,
     }
 }
 

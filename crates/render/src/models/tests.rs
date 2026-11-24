@@ -1094,3 +1094,25 @@ fn uvlock_uses_the_turned_position() {
         }
     }
 }
+
+/// Model-derived names that leave the asset root are refused before any file is read.
+#[test]
+fn resource_names_that_escape_the_asset_root_are_rejected() {
+    let dir = std::env::temp_dir().join(format!("fc-models-escape-{}", std::process::id()));
+    let minecraft = dir.join("assets/minecraft");
+    std::fs::create_dir_all(minecraft.join("models")).unwrap();
+    let cube = r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#t"}}}]}"##;
+    std::fs::write(minecraft.join("models/inside.json"), cube).unwrap();
+    std::fs::write(minecraft.join("outside.json"), cube).unwrap();
+    let mut source = AssetSource::Dir(dir.clone());
+    let mut loader = Loader {
+        source: &mut source,
+        models: HashMap::new(),
+        names: Vec::new(),
+    };
+    assert!(loader.model("inside", 0).is_some());
+    for name in ["../outside", "/outside", "a//b", "a\\b", "c:outside"] {
+        assert!(loader.model(name, 0).is_none(), "{name}");
+    }
+    std::fs::remove_dir_all(dir).ok();
+}

@@ -756,10 +756,6 @@ impl Renderer {
 
     /// Upload `tex` the first time a quad names it: white for `""`, the missing tile when absent.
     fn load_texture(&mut self, tex: &str) {
-        self.load_texture_asset(tex, false);
-    }
-
-    fn load_texture_asset(&mut self, tex: &str, model: bool) {
         if self.textures.contains_key(tex) {
             return;
         }
@@ -774,13 +770,7 @@ impl Renderer {
             let image = self
                 .source
                 .as_mut()
-                .and_then(|s| {
-                    if model {
-                        s.read_model_asset(&path)
-                    } else {
-                        s.read(&path)
-                    }
-                })
+                .and_then(|s| s.read(&path))
                 .and_then(|b| decode_png(&b));
             image.unwrap_or_else(|| {
                 eprintln!("ferrocraft-render: missing {path}");
@@ -1198,7 +1188,7 @@ impl Renderer {
                 if tex.starts_with("map/") && !self.textures.contains_key(tex) {
                     continue;
                 }
-                self.load_texture_asset(tex, true);
+                self.load_texture(tex);
             }
             if let Some(m) = self.upload_mesh(mesh, [0.0; 3]) {
                 self.item_meshes.push((tex, m));
@@ -1287,7 +1277,7 @@ impl Renderer {
                 continue;
             }
             let model = self.source.as_mut().and_then(|source| {
-                let mut read = |p: &str| source.read_model_asset(&format!("assets/minecraft/{p}"));
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
                 entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &self.dials)
             });
             self.item_models.insert(key, model);
@@ -1300,7 +1290,7 @@ impl Renderer {
                 continue;
             }
             let model = self.source.as_mut().and_then(|source| {
-                let mut read = |p: &str| source.read_model_asset(&format!("assets/minecraft/{p}"));
+                let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
                 entity::item::resolve(&mut read, &self.atlas, key.0, key.1, &turns)
             });
             self.frame_compasses.insert(key, model);
@@ -1708,10 +1698,10 @@ impl Renderer {
         for ((id, damage), quads) in items {
             layers.push((self.item_texture(id, damage), quads));
         }
-        for (i, (tex, quads)) in layers.into_iter().enumerate() {
+        for (tex, quads) in layers {
             let Some(tex) = tex else { continue };
             if let Some(m) = self.upload_mesh(quad_mesh(quads), offset) {
-                self.load_texture_asset(&tex, i != 0);
+                self.load_texture(&tex);
                 out.push((tex, m));
             }
         }
@@ -1738,7 +1728,7 @@ impl Renderer {
     fn flat_item(&mut self, id: i16, damage: i16, dye: Option<i32>) -> Option<Held> {
         let name = world::inventory::items::model(id, damage)?;
         let source = self.source.as_mut()?;
-        let mut read = |p: &str| source.read_model_asset(&format!("assets/minecraft/{p}"));
+        let mut read = |p: &str| source.read(&format!("assets/minecraft/{p}"));
         let (textures, display) = hand::flat_model(&mut read, name)?;
         let layers: Vec<_> = textures
             .iter()

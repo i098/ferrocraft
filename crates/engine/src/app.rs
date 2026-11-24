@@ -1421,16 +1421,21 @@ impl App {
                 no_crosshair: false,
                 spectator_aim,
             };
-            ferrocraft_modhost::ModHost::draw(self.mods.as_ref(), &mut g, &mut mod_textures, |g, owned| {
-                let mut frame = frame;
-                let without_armor;
-                if owned.has(ferrocraft_modhost::hud::Element::Armor) {
-                    without_armor = gui::Status { armor: 0, ..status };
-                    frame.status = Some(&without_armor);
-                }
-                owned.leave_out(&mut frame);
-                self.hud.draw(g, &frame);
-            });
+            ferrocraft_modhost::ModHost::draw(
+                self.mods.as_ref(),
+                &mut g,
+                &mut mod_textures,
+                |g, owned| {
+                    let mut frame = frame;
+                    let without_armor;
+                    if owned.has(ferrocraft_modhost::hud::Element::Armor) {
+                        without_armor = gui::Status { armor: 0, ..status };
+                        frame.status = Some(&without_armor);
+                    }
+                    owned.leave_out(&mut frame);
+                    self.hud.draw(g, &frame);
+                },
+            );
         }
         if let (Some(mods), Some(m)) = (&self.mods, self.mod_mirror()) {
             mods.set_mirror(m);

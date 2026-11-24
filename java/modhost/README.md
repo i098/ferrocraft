@@ -17,9 +17,10 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
 - `Host` posts Forge's `RenderGameOverlayEvent` so mods can draw the HUD.
   Rust draws the vanilla HUD unless a mod takes the element.
   A mod can cancel the pumpkin overlay, hotbar, debug screen, player list, or crosshair.
+  With VanillaHUD loaded, Forge owns the armor bar: Java always claims it (`ARMOR_BIT`).
   `ChatGui` detects when a mod owns chat.
   Java sends wire command `H` (`crates/modhost/src/hud.rs`) to tell Rust not to draw that element.
-  Cancellation of `ALL` claims all five elements.
+  Cancellation of `ALL` claims those five elements, plus armor when VanillaHUD is loaded.
   `Minecraft.setOverlayKeys` mirrors the F3 and Tab keys so Forge posts the debug and player list events.
   For `CROSSHAIRS`, the Forge event cancellation controls ownership regardless of the draw commands.
   PolyCrosshair draws a `DynamicTexture` with `Gui.drawScaledCustomSizeModalRect`.

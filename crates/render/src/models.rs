@@ -355,7 +355,7 @@ fn rotate_part(
     r[j] = q[i] * s + q[j] * c;
     if rescale {
         let k = if angle.abs() == 22.5 {
-            1.0 / f64::from(0.3926991f32).cos() as f32 - 1.0
+            1.0 / f64::from(std::f32::consts::FRAC_PI_8).cos() as f32 - 1.0
         } else {
             1.0 / 0.785_398_185_253_143_3f64.cos() as f32 - 1.0
         };

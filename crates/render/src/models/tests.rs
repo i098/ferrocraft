@@ -216,7 +216,7 @@ fn jar_variants_exist_for_every_state() {
     let nb = |_, _, _| 0u16;
     for id in [
         50u16, 75, 76, 93, 94, 149, 150, 127, 145, 34, 69, 70, 72, 147, 148, 65, 120, 131, 64, 71,
-        193, 194, 195, 196, 197, 29, 33, 55, 66, 27, 28, 157,
+        193, 194, 195, 196, 197, 29, 33, 55, 66, 27, 28, 157, 122,
     ] {
         for meta in 0..16u16 {
             // Meta values a block never uses (torch 0/6.., ladder 0/1, ...) may have no variant.
@@ -854,6 +854,29 @@ fn jar_tripwire_hook_keeps_vanilla_uv() {
 fn extent(quads: &[Quad], axis: usize) -> (f32, f32) {
     let v = quads.iter().flat_map(|q| q.pos).map(|p| p[axis] * 16.0);
     (v.clone().fold(99.0, f32::min), v.fold(-9.0, f32::max))
+}
+
+/// `dragon_egg.json`: eight stepped boxes, each face sampling its own `uv` rectangle of the texture.
+#[test]
+fn jar_dragon_egg_keeps_vanilla_boxes_and_uv() {
+    let Some(models) = jar_models() else { return };
+    let near = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+    let egg = models.quads(122 << 4, NB).unwrap();
+    assert_eq!(egg.len(), 48);
+    assert!(near(extent(egg, 0), (1.0, 15.0)) && near(extent(egg, 2), (1.0, 15.0)));
+    assert!(near(extent(egg, 1), (0.0, 16.0)));
+    let faces = [
+        ("dragon_egg", Some(UP), [6.0, 6.0, 10.0, 10.0], 0),
+        ("dragon_egg", Some(DOWN), [6.0, 6.0, 10.0, 10.0], 0),
+        ("dragon_egg", Some(NORTH), [6.0, 15.0, 10.0, 16.0], 0),
+        ("dragon_egg", Some(UP), [4.0, 4.0, 12.0, 12.0], 0),
+        ("dragon_egg", Some(SOUTH), [4.0, 13.0, 12.0, 14.0], 0),
+        ("dragon_egg", Some(UP), [1.0, 1.0, 15.0, 15.0], 0),
+        ("dragon_egg", Some(EAST), [1.0, 3.0, 15.0, 8.0], 0),
+        ("dragon_egg", Some(DOWN), [3.0, 3.0, 13.0, 13.0], 0),
+        ("dragon_egg", Some(WEST), [3.0, 0.0, 13.0, 1.0], 0),
+    ];
+    assert_drawn(&models, 122 << 4, NB, &faces);
 }
 
 /// pressure_plate_up/down (stone, wood, light, heavy), ladder and end_portal_frame_empty/filled: boxes and uv.

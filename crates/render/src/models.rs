@@ -34,7 +34,8 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 35] = [
+const BLOCKSTATES: [&str; 36] = [
+    "dragon_egg",
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",

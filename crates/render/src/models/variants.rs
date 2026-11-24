@@ -65,6 +65,7 @@ fn mechanism(id: u16, meta: usize, nb: Nb) -> Found {
 fn plant_or_block(id: u16, meta: usize, nb: Nb) -> Found {
     match id {
         81 => Some(("cactus", "normal".into())),
+        122 => Some(("dragon_egg", "normal".into())),
         138 => Some(("beacon", "normal".into())),
         106 => Some(("vine", vine_key(meta, nb))),
         140 | 255 => flower_pot(id, meta),

@@ -11,6 +11,8 @@ const WAIT: Duration = Duration::from_millis(500);
 pub struct FocusFallback {
     mapped: Option<Instant>,
     focused: bool,
+    /// The last focus state winit reported; false until the first event.
+    has_focus: bool,
     done: bool,
 }
 
@@ -19,12 +21,27 @@ impl FocusFallback {
         Self {
             mapped: None,
             focused: false,
+            has_focus: false,
             done: false,
         }
     }
 
     pub fn on_focused(&mut self, focused: bool) {
         self.focused |= focused;
+        self.has_focus = focused;
+    }
+
+    /// A click in the window while it lacks the X input focus takes the focus, as a click does in
+    /// every other client. A tool such as `XSetInputFocus` on the WM frame leaves the window without
+    /// key events, and the WM does not move the focus back on its own.
+    fn should_force_on_click(&self) -> bool {
+        !self.has_focus
+    }
+
+    pub fn on_click(&self, window: &Window) {
+        if self.should_force_on_click() {
+            set_input_focus(window, true);
+        }
     }
 
     /// True once, when the wait since the first poll is over and no focus event came.
@@ -42,13 +59,14 @@ impl FocusFallback {
 
     pub fn poll(&mut self, window: &Window) {
         if self.due(Instant::now()) {
-            set_input_focus(window);
+            set_input_focus(window, false);
         }
     }
 }
 
-/// X11 only, and only without a window manager: no-op under Wayland, macOS and Windows.
-fn set_input_focus(window: &Window) {
+/// X11 only: no-op under Wayland, macOS and Windows. Without `force` it also skips a session
+/// that has a window manager, because the WM then sends the focus events itself.
+fn set_input_focus(window: &Window, force: bool) {
     let Ok(handle) = window.window_handle() else {
         return;
     };
@@ -64,7 +82,7 @@ fn set_input_focus(window: &Window) {
         if dpy.is_null() {
             return;
         }
-        if has_window_manager(&xlib, dpy) {
+        if !force && has_window_manager(&xlib, dpy) {
             (xlib.XCloseDisplay)(dpy);
             return;
         }
@@ -124,6 +142,11 @@ mod tests {
         assert!(!f.due(t0 + WAIT * 2));
 
         let mut g = FocusFallback::new();
+        g.on_focused(true);
+        assert!(!g.should_force_on_click());
+        g.on_focused(false);
+        assert!(g.should_force_on_click());
+        assert!(FocusFallback::new().should_force_on_click());
         g.on_focused(true);
         let t1 = Instant::now();
         assert!(!g.due(t1));

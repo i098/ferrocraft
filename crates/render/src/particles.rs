@@ -2001,6 +2001,12 @@ fn tick_drip(
     } else {
         [1.0, 16.0 / (age + 16) as f32, 4.0 / (age + 8) as f32]
     };
+    if age == 0 {
+        // `setSize(0.01, 0.01)` keeps the box's min corner, which was `0.1` below the centre, so the first
+        // `moveEntity` recentres `posX` and `posZ` on the shrunk box: `0.1 - 0.01 / 2` toward -x and -z.
+        p.pos[0] -= 0.095;
+        p.pos[2] -= 0.095;
+    }
     p.vel[1] -= p.gravity;
     let tile = if age < 40 {
         p.vel = p.vel.map(|v| v * 0.02);
@@ -2632,6 +2638,17 @@ mod tests {
                 assert!((got - want).abs() < 1e-3, "age {age}: {got} vs {want}");
             }
         }
+    }
+
+    #[test]
+    fn drip_recentres_on_its_shrunk_box_at_the_first_tick() {
+        // Oracle: `setSize(0.01, 0.01)` keeps the min corner of the 0.2 box, so `moveEntity` puts posX/posZ 0.095 lower.
+        let mut ps = Particles::new();
+        ps.spawn(Kind::DripLava, [0.5, 100.0, 0.5], [0.0; 3], 0);
+        ps.tick(|_, _, _| 0);
+        ps.tick(|_, _, _| 0);
+        let p = &ps.list[0];
+        assert!((p.pos[0] - 0.405).abs() < 1e-9 && (p.pos[2] - 0.405).abs() < 1e-9);
     }
 
     #[test]

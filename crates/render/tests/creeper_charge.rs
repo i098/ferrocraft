@@ -135,12 +135,16 @@ fn enderman_eyes_add_to_the_body_texture() {
     let mut d = mob(58, 0.0, (0.6, 2.9), 40.0);
     d.look.carried = 2 << 4;
     let rgba = shot(&[d], &cam, "enderman.png");
-    // `enderman.png` paints the eyes white under the glow; `enderman_eyes.png` adds purple: pale pink.
-    let pale = rgba
-        .chunks(4)
-        .filter(|p| p[0] > 230 && p[1] > 100 && p[2] > 230)
-        .count();
-    assert!(pale > 20, "pale pink eye pixels: {pale}");
+    // Vanilla draws the eyes at half light: green 228 for the pale-pink texels and 184 for the purple ones.
+    let near = |g: u8, want: u8| g.abs_diff(want) <= 6;
+    let count = |want: u8| {
+        rgba.chunks(4)
+            .filter(|p| p[0] == 255 && p[2] == 255 && near(p[1], want))
+            .count()
+    };
+    let (pink, purple) = (count(228), count(184));
+    assert!(pink > 20, "eye pixels near (255, 228, 255): {pink}");
+    assert!(purple > 0, "eye pixels near (255, 184, 255): {purple}");
 }
 
 #[test]

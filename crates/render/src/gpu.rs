@@ -3000,7 +3000,7 @@ fn build_pipelines(
         true,
         false,
     );
-    // `LayerEndermanEyes`: `blendFunc(ONE, ONE)`, depth mask on, lit by the full-bright vertices.
+    // `LayerEndermanEyes`: `blendFunc(ONE, ONE)`, depth mask on, lit by the eye-light vertices.
     let entity_add_pipe = pipe(
         "vs_world",
         "fs_world",

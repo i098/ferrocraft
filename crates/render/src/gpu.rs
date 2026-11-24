@@ -133,6 +133,8 @@ pub struct Renderer {
     ghost_mesh: Option<GpuMesh>,
     /// Slime gel: blended with depth write, drawn after the ghosts.
     gel_mesh: Option<GpuMesh>,
+    /// Spider, enderman and dragon eyes: added to the body (`blendFunc(ONE, ONE)`), drawn after the gel.
+    eyes_mesh: Option<GpuMesh>,
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
     /// Contents of flower pots by position (`blocks::flower_pot_state`).
@@ -213,6 +215,7 @@ pub struct Renderer {
     entity_blend_pipe: wgpu::RenderPipeline,
     /// Invisible-body ghosts: blended, no culling, no depth write (`depthMask(false)`).
     entity_ghost_pipe: wgpu::RenderPipeline,
+    entity_add_pipe: wgpu::RenderPipeline,
     border_pipe: wgpu::RenderPipeline,
     /// The world border to draw, if any.
     border: Option<crate::Border>,
@@ -486,7 +489,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe, entity_pipe, curse_pipe, entity_blend_pipe, entity_ghost_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe, entity_pipe, curse_pipe, entity_blend_pipe, entity_ghost_pipe, entity_add_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view, axes_pipe);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -509,6 +512,7 @@ impl Renderer {
             entity_mesh: None,
             ghost_mesh: None,
             gel_mesh: None,
+            eyes_mesh: None,
             block_entities: BlockEntities::default(),
             pot_states: HashMap::new(),
             tile_meshes: Vec::new(),
@@ -557,6 +561,7 @@ impl Renderer {
             curse_pipe,
             entity_blend_pipe,
             entity_ghost_pipe,
+            entity_add_pipe,
             selection_pipe,
             entity_pipe,
             border_pipe,
@@ -1112,9 +1117,10 @@ impl Renderer {
             self.entity_skins.touch(key);
         }
         let mut mesh = entity::build(draws, &self.entity_skins, |p| self.light_at(p));
-        let [ghosts, gel] = entity::take_ghosts(&mut mesh);
+        let [ghosts, gel, eyes] = entity::take_ghosts(&mut mesh);
         self.ghost_mesh = self.upload_mesh(ghosts, [0.0; 3]);
         self.gel_mesh = self.upload_mesh(gel, [0.0; 3]);
+        self.eyes_mesh = self.upload_mesh(eyes, [0.0; 3]);
         self.entity_mesh = self.upload_mesh(mesh, [0.0; 3]);
         let items = self.upload_items(draws);
         let mut glint = entity::build_glint(draws, None);
@@ -2185,6 +2191,7 @@ impl Renderer {
             for (m, p) in [
                 (&self.ghost_mesh, &self.entity_ghost_pipe),
                 (&self.gel_mesh, &self.entity_blend_pipe),
+                (&self.eyes_mesh, &self.entity_add_pipe),
             ] {
                 let Some(g) = m else { continue };
                 pass.set_pipeline(p);
@@ -2581,7 +2588,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 27] {
+) -> [wgpu::RenderPipeline; 28] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2993,6 +3000,24 @@ fn build_pipelines(
         true,
         false,
     );
+    // `LayerEndermanEyes`: `blendFunc(ONE, ONE)`, depth mask on, lit by the full-bright vertices.
+    let entity_add_pipe = pipe(
+        "vs_world",
+        "fs_world",
+        stride,
+        &world_attrs,
+        Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        }),
+        true,
+        true,
+        false,
+    );
     [
         opaque_pipe,
         water_pipe,
@@ -3021,6 +3046,7 @@ fn build_pipelines(
         curse_pipe,
         entity_blend_pipe,
         entity_ghost_pipe,
+        entity_add_pipe,
     ]
 }
 

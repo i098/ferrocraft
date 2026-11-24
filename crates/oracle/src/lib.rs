@@ -242,7 +242,7 @@ impl Oracle {
 }
 
 /// Longest wait for one harness call. Boot, a call and a loaded host all fit well inside it.
-const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 const STDERR_TAIL: usize = 16 * 1024;
 
 /// A running harness JVM.

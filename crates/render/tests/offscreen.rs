@@ -231,7 +231,7 @@ fn rain_and_hand_draw_on_top_of_the_world() {
         cam.yaw,
         cam.pitch,
         cam.pos,
-        (cam.eye(), [cam.yaw, cam.pitch]),
+        (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
         0.0,
         |p| r.light_at(p),
     ));
@@ -370,7 +370,7 @@ fn curse_and_item_particles_draw() {
         fov_deg: 70.0,
         ..Camera::default()
     };
-    let eyes = (cam.eye(), [cam.yaw, cam.pitch]);
+    let eyes = (cam.eye(), [cam.yaw, cam.pitch, 1.62]);
     let mut frame_from = |ps: &Particles, partial: f32, view: &Camera| {
         r.set_particles(ps.vertices(
             r.atlas(),
@@ -1716,7 +1716,7 @@ fn parity_particles_draw_and_expire() {
             cam.yaw,
             cam.pitch,
             cam.pos,
-            (cam.eye(), [cam.yaw, cam.pitch]),
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
             0.0,
             |p| r.light_at(p),
         ));
@@ -1803,7 +1803,7 @@ fn clouds_never_cover_near_particles_below_cloud_height() {
             cam.yaw,
             cam.pitch,
             cam.pos,
-            (cam.eye(), [cam.yaw, cam.pitch]),
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
             0.0,
             |p| r.light_at(p),
         ));

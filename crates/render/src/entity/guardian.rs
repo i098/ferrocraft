@@ -15,8 +15,6 @@ const SCALE: f32 = 0.425_531_92;
 pub(super) const ELDER_SCALE: f32 = 2.35;
 /// `RendererLivingEntity.doRender` lifts the model by this much (`BODY_OFFSET` of the other models).
 const BODY_OFFSET: f32 = 1.507_812_5;
-/// `EntityPlayer.getEyeHeight`, the camera above the feet.
-const PLAYER_EYE: f32 = 1.62;
 /// `Entity.getEyeHeight` of an elder guardian: half of its 1.9975 height.
 const EYE_HEIGHT: f32 = 1.9975 * 0.5;
 
@@ -31,6 +29,8 @@ pub struct Curse {
     pub partial: f32,
     /// Yaw and pitch in degrees of the render view entity (`MobAppearanceParticle` reads the entity, not the camera).
     pub view: [f32; 2],
+    /// `Entity.getEyeHeight` of the view entity: its eyes above its feet.
+    pub eye_height: f32,
     /// World position of the viewer's eyes, the target the guardian's eye looks at.
     pub target: [f64; 3],
     /// Viewer's eyes minus camera: zero in first person, the third-person camera distance otherwise.
@@ -165,7 +165,7 @@ fn place(p: V3, c: &Curse) -> V3 {
     // the result is the offset from the camera, which `origin` places from the eyes one eye height higher.
     [
         m[0] + c.origin[0],
-        m[1] + 1.8 - PLAYER_EYE + c.origin[1],
+        m[1] + 1.8 - c.eye_height + c.origin[1],
         m[2] + c.origin[2],
     ]
 }
@@ -230,6 +230,7 @@ mod tests {
             tail: 0.5,
             partial: 0.0,
             view: [0.0, 0.0],
+            eye_height: 1.62,
             target: [0.0, 70.0, 0.0],
             origin: [0.0; 3],
         };
@@ -252,6 +253,7 @@ mod tests {
             tail: 0.5,
             partial: 0.0,
             view: [0.0, 0.0],
+            eye_height: 1.62,
             target: [0.0, 70.0, 0.0],
             origin,
         };

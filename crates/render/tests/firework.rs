@@ -96,7 +96,7 @@ fn a_firework_rocket_and_its_burst_draw() {
             cam.yaw,
             cam.pitch,
             cam.pos,
-            (cam.eye(), [cam.yaw, cam.pitch]),
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
             0.5,
             |p| r.light_at(p),
         ));

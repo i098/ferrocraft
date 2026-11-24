@@ -1610,7 +1610,7 @@ impl Particles {
         cam_yaw: f32,
         cam_pitch: f32,
         cam_pos: [f64; 3],
-        viewer: ([f64; 3], [f32; 2]),
+        viewer: ([f64; 3], [f32; 3]),
         partial: f32,
         light: impl Fn([f64; 3]) -> [f32; 2],
     ) -> Quads {
@@ -1642,7 +1642,8 @@ impl Particles {
                         progress: (p.age as f32 + partial) / guardian::LIFETIME as f32,
                         tail,
                         partial,
-                        view: viewer.1,
+                        view: [viewer.1[0], viewer.1[1]],
+                        eye_height: viewer.1[2],
                         target: viewer.0,
                         origin: [0, 1, 2].map(|i| (viewer.0[i] - cam_pos[i]) as f32),
                     });
@@ -2642,7 +2643,7 @@ mod tests {
             0.0,
             0.0,
             [0.0; 3],
-            ([0.0; 3], [0.0; 2]),
+            ([0.0; 3], [0.0; 3]),
             0.0,
             |_| [0.0, 1.0],
         );
@@ -2765,7 +2766,7 @@ mod tests {
                 0.0,
                 0.0,
                 [0.0; 3],
-                ([0.0; 3], [0.0; 2]),
+                ([0.0; 3], [0.0; 3]),
                 0.0,
                 |_| [1.0; 2],
             )
@@ -2782,7 +2783,7 @@ mod tests {
         let light = |p: [f64; 3]| if p[1] < 6.0 { [0.0; 2] } else { [0.5, 0.25] };
         let atlas = crate::assets::Atlas::flat();
         let lights = |ps: &Particles| {
-            let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], ([0.0; 3], [0.0; 2]), 0.0, light);
+            let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], ([0.0; 3], [0.0; 3]), 0.0, light);
             let mut v: Vec<[f32; 2]> = [q.sheet, q.block, q.explosion]
                 .into_iter()
                 .flatten()

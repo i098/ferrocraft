@@ -945,7 +945,21 @@ impl App {
             })
             .collect();
         // The guardian's eye looks at the camera entity's eyes (`GuardianModel.setupAnimation`).
-        let viewer = self.view_ray(frac).map_or(cam.pos, |r| r.0);
+        let ray = self.view_ray(frac);
+        let viewer = ray.map_or(cam.pos, |r| r.0);
+        let sneak_eye = eye_height(self.input.sneaking()) as f32;
+        // `MobAppearanceParticle` follows the render view entity, which third person moves off the camera.
+        let particle_viewer = ray.map_or(
+            (cam.eye(), [cam.yaw, cam.pitch, 1.62]),
+            |(eye, yaw, pitch, id, _)| {
+                let height = self
+                    .game
+                    .entities
+                    .get(id)
+                    .map_or(sneak_eye, |e| e.eye_height());
+                (eye, [yaw, pitch, height])
+            },
+        );
         for (e, d) in self.game.entities.iter().zip(&mut draws) {
             d.view = [cam.yaw, cam.pitch];
             d.look.viewer = viewer;
@@ -1100,18 +1114,12 @@ impl App {
         lines.extend(draws.iter().flat_map(render::bobber_line));
         r.set_lines(lines);
         r.set_cracks(self.game.cracks());
-        // `MobAppearanceParticle` follows the render view entity, which third person moves off the camera.
-        let viewer = self
-            .view_ray(frac)
-            .map_or((cam.eye(), [cam.yaw, cam.pitch]), |(eye, yaw, pitch, ..)| {
-                (eye, [yaw, pitch])
-            });
         let verts = self.particles.vertices(
             r.atlas(),
             cam.yaw,
             cam.pitch,
             cam.pos,
-            viewer,
+            particle_viewer,
             frac as f32,
             |p| r.light_at(p),
         );

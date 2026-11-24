@@ -119,6 +119,22 @@ impl Chunk {
         }
     }
 
+    /// `Chunk.fillChunk` of a partial update: the sections the packet carries replace this chunk's, blocks and light.
+    /// Light stays server light only while this chunk still has it; after a local block change it is flooded instead.
+    pub fn merge_sections(&mut self, mut update: Chunk) {
+        let keep_light = self.light != ServerLight::default();
+        for s in 0..16 {
+            if update.sections[s].is_none() {
+                continue;
+            }
+            self.sections[s] = update.sections[s].take();
+            if keep_light {
+                self.light.block[s] = update.light.block[s].take();
+                self.light.sky[s] = update.light.sky[s].take();
+            }
+        }
+    }
+
     /// Blocks of section `index` (0..16, bottom to top), or `None` if it is all air.
     pub fn section(&self, index: usize) -> Option<&Section> {
         self.sections.get(index)?.as_deref()
@@ -242,6 +258,14 @@ impl ChunkStore {
             c.set_block((x & 15) as usize, y as usize, (z & 15) as usize, state);
         }
     }
+
+    /// Applies a partial update to its loaded chunk; `None` when that chunk is not loaded.
+    pub fn merge_sections(&mut self, update: Chunk) -> Option<()> {
+        self.chunks
+            .get_mut(&(update.x, update.z))?
+            .merge_sections(update);
+        Some(())
+    }
 }
 
 #[cfg(test)]
@@ -313,5 +337,20 @@ mod tests {
         assert!(c.light().section(0, true).is_some());
         c.set_block(1, 2, 3, 0);
         assert!(c.light().section(0, true).is_none() && c.light().section(0, false).is_none());
+    }
+
+    /// A partial update carries its sections' light, which replaces the stale light; other sections keep theirs.
+    #[test]
+    fn partial_update_replaces_only_its_sections_and_their_light() {
+        let (mask, data) = payload(&[(0, 1 << 4), (1, 1 << 4)], true, true);
+        let (mut c, _) = Chunk::decode(0, 0, mask, &data, true, true).unwrap();
+        let (mask, mut data) = payload(&[(0, 2 << 4)], true, false);
+        data.iter_mut().skip(BLOCK_BYTES).for_each(|b| *b = 0x33);
+        let (update, _) = Chunk::decode(0, 0, mask, &data, true, false).unwrap();
+        c.merge_sections(update);
+        assert_eq!(c.block(1, 2, 3), 2 << 4);
+        assert_eq!(c.block(1, 16 + 2, 3), 1 << 4);
+        assert_eq!(c.light().section(0, true).unwrap()[0], 0x33);
+        assert_eq!(c.light().section(1, true).unwrap()[0], 0xFF);
     }
 }

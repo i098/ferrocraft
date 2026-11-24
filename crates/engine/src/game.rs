@@ -613,6 +613,11 @@ impl Game {
                 self.store.insert(*c);
                 return Some(Effect::Upload(at.0, at.1));
             }
+            NetEvent::ChunkSections(c) => {
+                let at = (c.x, c.z);
+                self.store.merge_sections(*c)?;
+                return Some(Effect::Upload(at.0, at.1));
+            }
             NetEvent::UnloadChunk(x, z) => {
                 self.store.remove(x, z);
                 return Some(Effect::Remove(x, z));

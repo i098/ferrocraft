@@ -135,6 +135,8 @@ pub struct Renderer {
     gel_mesh: Option<GpuMesh>,
     /// Chests, signs, skulls and banners, and worn heads, by texture (`block_entities.rs`).
     block_entities: BlockEntities,
+    /// Contents of flower pots by position (`blocks::flower_pot_state`).
+    pot_states: HashMap<[i32; 3], u16>,
     tile_meshes: Vec<(Tex, GpuMesh)>,
     cart_meshes: Vec<(Tex, GpuMesh)>,
     /// Beacon beams: inner, then outer (`beacon.rs`).
@@ -508,6 +510,7 @@ impl Renderer {
             ghost_mesh: None,
             gel_mesh: None,
             block_entities: BlockEntities::default(),
+            pot_states: HashMap::new(),
             tile_meshes: Vec::new(),
             cart_meshes: Vec::new(),
             beam_meshes: [None, None],
@@ -861,6 +864,22 @@ impl Renderer {
             }
         }
         let key = (chunk.chunk_x(), chunk.chunk_z());
+        // The server sends a pot's contents in its block entity, so `set_block` holds them; a re-upload keeps them.
+        self.pot_states.retain(|p, state| {
+            if (p[0].div_euclid(16), p[2].div_euclid(16)) != key {
+                return true;
+            }
+            let i = index(
+                p[0].rem_euclid(16) as usize,
+                p[1] as usize,
+                p[2].rem_euclid(16) as usize,
+            );
+            let is_pot = data[i] >> 4 == 140;
+            if is_pot {
+                data[i] = *state;
+            }
+            is_pot
+        });
         self.block_entities
             .load_chunk(key.0, key.1, |x, y, z| data[index(x, y, z)]);
         match crate::mesher::server_light(chunk, &data) {
@@ -878,6 +897,8 @@ impl Renderer {
     pub fn remove_chunk(&mut self, x: i32, z: i32) {
         self.blocks.remove(&(x, z));
         self.block_entities.remove_chunk(x, z);
+        self.pot_states
+            .retain(|p, _| (p[0].div_euclid(16), p[2].div_euclid(16)) != (x, z));
         self.biomes.remove(&(x, z));
         self.lights.remove(&(x, z));
         self.meshes.remove(&(x, z));
@@ -913,6 +934,11 @@ impl Renderer {
         let (lx, lz) = (x.rem_euclid(16), z.rem_euclid(16));
         // Copies only while a mesh job still reads the old data.
         Arc::make_mut(data)[index(lx as usize, y as usize, lz as usize)] = state;
+        if matches!(state >> 4, 140 | 255) {
+            self.pot_states.insert([x, y, z], state);
+        } else {
+            self.pot_states.remove(&[x, y, z]);
+        }
         // World.checkLight: the changed column is relit from its blocks from now on.
         self.lights.remove(&key);
         self.block_entities.set_state([x, y, z], state);

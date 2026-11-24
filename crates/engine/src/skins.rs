@@ -1,6 +1,6 @@
 //! Player skins: downloads `textures` skins in the background and hands the decoded images to the renderer.
 
-use ferrocraft_net_client::{fetch_skin, parse_textures};
+use ferrocraft_net_client::{fetch_skin, lookup_textures, parse_textures};
 use render::{decode_png, Image, Renderer};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -17,6 +17,10 @@ pub struct PlayerSkins {
     tab_sent: HashSet<u128>,
     tx: Sender<Download>,
     rx: Receiver<Download>,
+    /// Heads named by a bare `SkullOwner` string whose profile lookup started.
+    looked_up: HashSet<u128>,
+    profile_tx: Sender<(u128, String)>,
+    profile_rx: Receiver<(u128, String)>,
 }
 
 /// Name of the GUI texture of a tab list head.
@@ -67,6 +71,7 @@ impl PlayerSkins {
     /// `game_dir/assets/skins` holds the cache, as in the vanilla launcher.
     pub fn new(game_dir: &std::path::Path) -> PlayerSkins {
         let (tx, rx) = channel();
+        let (profile_tx, profile_rx) = channel();
         PlayerSkins {
             cache: game_dir.join("assets").join("skins"),
             requested: HashSet::new(),
@@ -75,7 +80,24 @@ impl PlayerSkins {
             tab_sent: HashSet::new(),
             tx,
             rx,
+            looked_up: HashSet::new(),
+            profile_tx,
+            profile_rx,
         }
+    }
+
+    /// Looks up the profile of a head named only by `name` once, in the background; its skin then
+    /// downloads under `uuid` like any other.
+    pub fn resolve_head(&mut self, uuid: u128, name: &str) {
+        if !self.looked_up.insert(uuid) {
+            return;
+        }
+        let (tx, name) = (self.profile_tx.clone(), name.to_owned());
+        std::thread::spawn(move || {
+            if let Some(textures) = lookup_textures(&name) {
+                let _ = tx.send((uuid, textures));
+            }
+        });
     }
 
     /// Starts the download of `textures` once per player.
@@ -101,6 +123,9 @@ impl PlayerSkins {
 
     /// Takes in the downloads that finished.
     fn poll(&mut self) {
+        while let Ok((uuid, textures)) = self.profile_rx.try_recv() {
+            self.request(uuid, &textures);
+        }
         while let Ok(d) = self.rx.try_recv() {
             if let Some(img) = decode_png(&d.skin) {
                 self.ready.insert(d.uuid, (img, d.slim));

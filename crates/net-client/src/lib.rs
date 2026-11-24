@@ -35,7 +35,7 @@ use screens::DEFAULT_PORT;
 pub use screens::{
     base64, load_servers, ping, save_servers, split_address, PingError, ServerEntry, ServerStatus,
 };
-pub use skin::{fetch as fetch_skin, parse_textures, SkinInfo};
+pub use skin::{fetch as fetch_skin, lookup_textures, parse_textures, SkinInfo};
 pub use tile::TileEvent;
 pub use world::chunk::Chunk;
 

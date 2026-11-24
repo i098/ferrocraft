@@ -1313,16 +1313,15 @@ impl App {
             return;
         };
         for i in 0..self.game.inv.slot_count() {
-            let Some((uuid, Some(textures))) = self
-                .game
-                .inv
-                .slot(i)
-                .as_ref()
-                .and_then(gui::inventory::icons::skull_profile)
+            let stack = self.game.inv.slot(i).as_ref();
+            let Some((uuid, textures)) = stack.and_then(gui::inventory::icons::skull_profile)
             else {
                 continue;
             };
-            if let Some(img) = self.skins.tab_head(uuid, Some(textures)) {
+            if let Some(name) = stack.and_then(gui::inventory::icons::skull_name) {
+                self.skins.resolve_head(uuid, name);
+            }
+            if let Some(img) = self.skins.tab_head(uuid, textures) {
                 r.register_image(&crate::skins::tab_texture(uuid), &img);
             }
             if self.skins.has_tab(uuid) {

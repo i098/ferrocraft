@@ -557,6 +557,19 @@ pub fn skull_profile(s: &ItemStack) -> Option<(u128, Option<&str>)> {
     }
 }
 
+/// The name of a player head whose `SkullOwner` is a bare string: the client resolves its profile itself
+/// (`TileEntityItemStackRenderer`), so the server sent no `textures` property.
+pub fn skull_name(s: &ItemStack) -> Option<&str> {
+    use world::inventory::Tag;
+    if s.id != 397 || s.damage != 3 {
+        return None;
+    }
+    match tooltip::get(&s.nbt.as_ref()?.root, "SkullOwner")? {
+        Tag::String(n) if !n.is_empty() => Some(n),
+        _ => None,
+    }
+}
+
 /// The `gui` display transform of the nearest model in the chain that has one.
 fn gui_display(chain: &[(String, Value)]) -> Display {
     chain

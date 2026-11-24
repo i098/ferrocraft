@@ -182,37 +182,24 @@ static CPU: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     }
 });
 
-/// `(maxMemory, totalMemory, used)` in bytes for this process: `Runtime.maxMemory`'s rule, the resident
-/// size now, and its peak resident size. Zero where `/proc` is missing.
+/// `Runtime.maxMemory` of the stock launcher's `-Xmx1G`: 1 GiB less one survivor space, shown as 910 MB.
+const LAUNCHER_MAX_MEMORY: u64 = 954_728_448;
+
+/// `(maxMemory, totalMemory, used)` in bytes for this process: the launcher's heap limit (raised to the
+/// allocation when that is larger), the peak resident size and the resident size now. Zero where `/proc` is missing.
 fn process_memory() -> (u64, u64, u64) {
-    let kb = |text: &str, key: &str| {
-        text.lines()
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = |key: &str| {
+        status
+            .lines()
             .find_map(|l| l.strip_prefix(key))
             .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
             .unwrap_or(0)
             * 1024
     };
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let used = kb(&status, "VmRSS:");
-    let total = kb(&status, "VmHWM:").max(used);
-    let limit = |p| std::fs::read_to_string(p).ok();
-    let max = jvm_max_memory(
-        limit("/sys/fs/cgroup/memory.max").as_deref(),
-        limit("/sys/fs/cgroup/memory/memory.limit_in_bytes").as_deref(),
-        kb(&meminfo, "MemTotal:"),
-    );
-    (max, total, used)
-}
-
-/// The cgroup v2 or v1 memory limit when one is set, else a quarter of the machine's memory.
-fn jvm_max_memory(cgroup_v2: Option<&str>, cgroup_v1: Option<&str>, mem_total: u64) -> u64 {
-    [cgroup_v2, cgroup_v1]
-        .into_iter()
-        .flatten()
-        .filter_map(|s| s.trim().parse::<u64>().ok())
-        .find(|&v| v < 1 << 60)
-        .unwrap_or(mem_total / 4)
+    let used = kb("VmRSS:");
+    let total = kb("VmHWM:").max(used);
+    (LAUNCHER_MAX_MEMORY.max(total), total, used)
 }
 
 /// `RenderManager.shouldRender` for one entity: in range, in a visible section and inside the frustum.
@@ -241,26 +228,4 @@ fn entity_in_view(
         (d.pos[2].floor() as i32) >> 4,
     );
     dist < reach * reach && sections.contains(&section) && frustum.contains(min, max)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::jvm_max_memory;
-
-    const GIB: u64 = 1 << 30;
-
-    #[test]
-    fn max_memory_follows_the_jvm_rule() {
-        assert_eq!(
-            jvm_max_memory(Some("2147483648\n"), None, 16 * GIB),
-            2 * GIB
-        );
-        assert_eq!(jvm_max_memory(Some("max\n"), None, 16 * GIB), 4 * GIB);
-        assert_eq!(jvm_max_memory(None, Some("1073741824\n"), 16 * GIB), GIB);
-        assert_eq!(
-            jvm_max_memory(None, Some("9223372036854771712\n"), 16 * GIB),
-            4 * GIB
-        );
-        assert_eq!(jvm_max_memory(None, None, 16 * GIB), 4 * GIB);
-    }
 }

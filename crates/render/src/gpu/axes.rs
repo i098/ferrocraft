@@ -1,7 +1,7 @@
 //! `EntityRenderer.drawDebugAxes`: while F3 shows the full debug screen the client draws three world axes
 //! 0.1 in front of the camera, after the hand and ignoring its depth (vanilla clears it), in place of the crosshair. The view is
 //! `translate(0, 0, -0.1)`, the pitch, the yaw and the hand projection: no bobbing, no hurt tilt. Each axis is a box
-//! outline of 2 px lines (`glLineWidth(2.0)`, drawn here as two 1 px lines because wgpu has no line width): x red 0.005 long, z blue 0.005 long, y green 0.0033 long, each 0.0001 wide.
+//! outline of 2 px lines (`glLineWidth(2.0)`, drawn here as two 1 px lines because wgpu has no line width; the vertical green box is one pixel wide as in the vanilla client): x red 0.005 long, z blue 0.005 long, y green 0.0033 long, each 0.0001 wide.
 
 use super::*;
 
@@ -87,34 +87,32 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
-/// Each line of `base` projected by the column-major `m`, then twice: GL covers the pixels whose centres lie within
-/// 1 px of the line across its minor axis, so the second copy sits one pixel toward the nearer side. Lines behind the
-/// camera are collapsed to a point.
 /// One edge's clip-space ends as NDC positions, and the same ends moved one pixel across the minor axis.
+/// x-major edges cover two pixel rows: GL takes the pixels whose centres lie within 1 px of the line, so the second
+/// copy sits one pixel toward the nearer side. The vanilla client's y-major edges (the green axis) were measured
+/// one pixel wide, on the column left of a line that falls on a pixel boundary: both copies snap to that column.
 fn widen_edge(ends: [[f32; 4]; 2], (w, h): (f32, f32)) -> ([[f32; 3]; 2], [[f32; 3]; 2]) {
     let ndc = |c: [f32; 4]| [c[0] / c[3], c[1] / c[3], c[2] / c[3]];
     let [na, nb] = ends.map(ndc);
     let x_major = ((nb[0] - na[0]) * w).abs() >= ((nb[1] - na[1]) * h).abs();
-    let centre = if x_major {
-        (na[1] + nb[1]) * h
-    } else {
-        (na[0] + nb[0]) * w
-    } / 4.0;
+    if !x_major {
+        let px = (na[0] + nb[0]) * w / 4.0 + w / 2.0;
+        let x = ((px - 0.01).ceil() - 0.5) * 2.0 / w - 1.0;
+        let snap = |n: [f32; 3]| [x, n[1], n[2]];
+        return ([snap(na), snap(nb)], [snap(na), snap(nb)]);
+    }
+    let centre = (na[1] + nb[1]) * h / 4.0;
     let sign = if centre - centre.floor() <= 0.5 {
         -1.0
     } else {
         1.0
     };
-    let shift = |n: [f32; 3]| {
-        if x_major {
-            [n[0], n[1] + sign * 2.0 / h, n[2]]
-        } else {
-            [n[0] + sign * 2.0 / w, n[1], n[2]]
-        }
-    };
+    let shift = |n: [f32; 3]| [n[0], n[1] + sign * 2.0 / h, n[2]];
     ([na, nb], [shift(na), shift(nb)])
 }
 
+/// Each line of `base` projected by the column-major `m`, then widened by `widen_edge`. Lines behind the
+/// camera are collapsed to a point.
 fn widen(base: &[Vertex], m: &[[f32; 4]; 4], (w, h): (u32, u32)) -> Vec<Vertex> {
     let (w, h) = (w as f32, h as f32);
     let clip = |v: &Vertex| {
@@ -204,5 +202,19 @@ mod tests {
         assert_eq!(out[0].pos[1], 0.0);
         assert!(((out[2].pos[1] - out[0].pos[1]).abs() - 0.02).abs() < 1.0e-6);
         assert_eq!(out[2].pos[0], out[0].pos[0]);
+    }
+
+    #[test]
+    fn a_vertical_line_on_a_pixel_boundary_is_one_column_left_of_it() {
+        let v = |x: f32, y: f32| Vertex {
+            pos: [x, y, 0.5],
+            uv: [0.0; 2],
+            color: [1.0; 4],
+            light: [1.0; 2],
+        };
+        // On a 100 px wide target x = 0 is the boundary between columns 49 and 50; both copies draw column 49.
+        let out = widen(&[v(0.0, -0.1), v(0.0, 0.1)], &IDENTITY, (100, 100));
+        let column = |x: f32| ((x + 1.0) * 50.0).floor();
+        assert!(out.iter().all(|p| column(p.pos[0]) == 49.0));
     }
 }

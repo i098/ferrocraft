@@ -1649,6 +1649,14 @@ impl ApplicationHandler for App {
                 self.resize_screens();
             }
             WindowEvent::Focused(f) => self.x11_focus.on_focused(f),
+            WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                ..
+            } => {
+                if let Some(w) = &self.window {
+                    self.x11_focus.on_click(w);
+                }
+            }
             WindowEvent::RedrawRequested => self.draw(),
             _ => {}
         }

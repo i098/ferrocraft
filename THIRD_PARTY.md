@@ -44,6 +44,15 @@ The database reader also uses `fallible-iterator`, `fallible-streaming-iterator`
 The launcher uses these ZIP and database dependencies under the MIT license below:
 `zip`, `crc32fast`, `flate2`, `indexmap`, `hashbrown`, `equivalent`, `crossbeam-utils`, `miniz_oxide`, `adler2`, `simd-adler32`, and `smallvec`.
 
+The launcher downloads OneClient over HTTPS with `ureq` 3.5.1, `ureq-proto`, `http`, `httparse`, `base64`, `percent-encoding`, `sha1`, `zeroize`, `rustls-pki-types`, and `log`.
+These crates use the MIT license or the Apache License 2.0 (texts in this file).
+`rustls` 0.23 uses Apache-2.0, ISC, or MIT; this release uses it under the MIT license.
+`rustls-webpki` 0.103 and `untrusted` 0.9 use the ISC license.
+`ring` 0.17 uses Apache-2.0 and ISC.
+`subtle` 2.6 uses the BSD-3-Clause license.
+`webpki-roots` 1.0 contains Mozilla CA data under [CDLA-Permissive-2.0](https://cdla.dev/permissive-2-0/).
+Each crate's source package contains its own copyright line and full license text.
+
 The upstream MIT files for some of these crates, including `fastrand`, do not contain a copyright line.
 The `rustix` and `linux-raw-sys` contributors retain their copyrights.
 
@@ -337,4 +346,51 @@ the following restrictions:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+## ISC and BSD-3-Clause notices
+
+```text
+Copyright 2015-2016 Brian Smith (ring, rustls-webpki, untrusted)
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHORS DISCLAIM ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+```text
+Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved. (subtle)
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
 ```

@@ -54,12 +54,13 @@ fn is_fabric_189(dir: &Path) -> bool {
         };
         if instance.get("mc_loader").is_some() {
             let loader = &instance["mc_loader"];
-            if loader != 4 && loader != 5 {
-                return instance["mc_version"] == "1.8.9" && loader == "Ornithe";
-            }
             if instance["mc_version"] != "1.8.9" {
                 return false;
             }
+            if loader == 4 || loader == 5 || loader == "Ornithe" {
+                return true;
+            }
+            return false;
         }
     }
     let mut text = dir
@@ -131,6 +132,7 @@ mod tests {
             ("1.8.9 Fabric legacy", "1.8.9", serde_json::json!(5)),
             ("fabric-numeric", "1.8.9", serde_json::json!(4)),
             ("pvp", "1.8.9", serde_json::json!(4)),
+            ("pvp5", "1.8.9", serde_json::json!(5)),
             ("fabric-string", "1.8.9", serde_json::json!("Fabric")),
             ("forge", "1.8.9", serde_json::json!(1)),
             ("other-version", "1.21", serde_json::json!("Ornithe")),
@@ -154,7 +156,10 @@ mod tests {
             [
                 c.join("1.8.9 Fabric legacy/mods"),
                 c.join("fabric-numeric/mods"),
-                c.join("ornithe/mods")
+                c.join("ornithe/mods"),
+                c.join("ornithe-numeric/mods"),
+                c.join("pvp/mods"),
+                c.join("pvp5/mods")
             ]
         );
         fs::remove_dir_all(root).unwrap();

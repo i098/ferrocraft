@@ -41,9 +41,8 @@ Ornithe keeps mod settings, saves, and options in the OneClient profile.
 Each launch stages and extracts mod JARs in a private temporary directory.
 Lunar Client and Badlion cannot start custom versions.
 
-For a OneClient install, run `~/.ferrocraft/ferrocraft-engine` on Unix.
-On Windows, run `& "$HOME\.ferrocraft\ferrocraft-engine.exe"` in PowerShell.
-For an official-only install with `--minecraft-dir DIR`, run the engine in `DIR/ferrocraft`.
+To run a OneClient install, open OneClient and launch the Ferrocraft profile.
+For an official-only install, start the `ferrocraft-1.8.9` version in the official launcher.
 Close OneClient before you uninstall a OneClient mod.
 Run `~/.ferrocraft/ferrocraft-launcher uninstall` to remove the Ferrocraft files.
 The uninstall command preserves OneClient and the profile's data.

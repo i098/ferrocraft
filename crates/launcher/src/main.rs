@@ -82,12 +82,13 @@ fn install_official(
     let engine_dir = mc.join("ferrocraft");
     let engine_dst = engine_dir.join(engine_file_name(engine));
     fs::create_dir_all(&vdir).map_err(|e| format!("{}: {e}", vdir.display()))?;
+    written.push(vdir.clone());
     let json = serde_json::to_string_pretty(&version_json()).unwrap();
     fs::write(vdir.join(format!("{VERSION_ID}.json")), json).map_err(|e| e.to_string())?;
-    written.push(vdir);
     stage_file(boot_jar, &jar_dst)?;
     written.push(jar_dst);
     stage_file(engine, &engine_dst)?;
+    written.push(engine_dir.clone());
     let host = engine.with_file_name(HOST_JAR);
     if host.is_file() {
         stage_file(&host, &engine_dir.join(HOST_JAR))?;

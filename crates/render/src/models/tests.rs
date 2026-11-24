@@ -767,24 +767,32 @@ fn jar_piston_head_keeps_vanilla_uv() {
     );
 }
 
-/// lever.json / lever_off.json: cobblestone base and handle uv, unpowered and powered.
+/// lever.json / lever_off.json: cobblestone base and handle uv, unpowered and powered. The handle faces are
+/// those the real `FaceBakery.getFacingFromVertices` picks for the 45 degree element turn (ties between two
+/// facings go to the one the vertex floats favour), measured on the 1.8.9 client.
 #[test]
 fn jar_lever_keeps_vanilla_uv() {
     let Some(models) = jar_models() else { return };
     let c = "cobblestone";
-    let faces = [
+    let base = [
         (c, Some(DOWN), [5.0, 4.0, 11.0, 12.0], 0),
         (c, Some(UP), [5.0, 4.0, 11.0, 12.0], 0),
         (c, Some(NORTH), [5.0, 0.0, 11.0, 3.0], 0),
         (c, Some(SOUTH), [5.0, 0.0, 11.0, 3.0], 0),
         (c, Some(WEST), [4.0, 0.0, 12.0, 3.0], 0),
         (c, Some(EAST), [4.0, 0.0, 12.0, 3.0], 0),
-        ("lever", Some(DOWN), [7.0, 6.0, 9.0, 8.0], 0),
-        ("lever", Some(UP), [7.0, 6.0, 9.0, 8.0], 0),
-        ("lever", Some(NORTH), [7.0, 6.0, 9.0, 16.0], 0),
+        ("lever", Some(WEST), [7.0, 6.0, 9.0, 16.0], 0),
         ("lever", Some(EAST), [7.0, 6.0, 9.0, 16.0], 0),
     ];
-    for meta in [5u16, 13] {
+    // (meta, face of the handle's up, down, north and south quads)
+    for (meta, [up, down, north, south]) in
+        [(5u16, [UP, NORTH, UP, DOWN]), (13, [UP, SOUTH, DOWN, UP])]
+    {
+        let mut faces = base.to_vec();
+        faces.push(("lever", Some(up), [7.0, 6.0, 9.0, 8.0], 0));
+        faces.push(("lever", Some(down), [7.0, 6.0, 9.0, 8.0], 0));
+        faces.push(("lever", Some(north), [7.0, 6.0, 9.0, 16.0], 0));
+        faces.push(("lever", Some(south), [7.0, 6.0, 9.0, 16.0], 0));
         assert_drawn(&models, 69 << 4 | meta, NB, &faces);
     }
 }

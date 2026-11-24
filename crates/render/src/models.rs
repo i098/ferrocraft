@@ -34,7 +34,7 @@ const NORMALS: [[f32; 3]; 6] = [
 ];
 
 /// Blockstates this renderer draws from their models, by name.
-const BLOCKSTATES: [&str; 34] = [
+const BLOCKSTATES: [&str; 35] = [
     "torch",
     "redstone_torch",
     "unlit_redstone_torch",
@@ -68,6 +68,7 @@ const BLOCKSTATES: [&str; 34] = [
     "beacon",
     "cobblestone_wall",
     "mossy_cobblestone_wall",
+    "glass_pane",
     "bed",
 ];
 /// The other door blockstates, one per wood.
@@ -85,11 +86,11 @@ pub struct Quad {
     pub pos: [[f32; 3]; 4],
     pub uv: [[f32; 2]; 4],
     pub tex: Arc<str>,
-    /// Face used for the brightness (`BakedQuad.getFace`), after the blockstate rotation.
     pub face: usize,
+    pub shade_face: usize,
     /// `cullface` after the blockstate rotation: hidden when that neighbour is opaque.
     pub cull: Option<usize>,
-    /// The element's `shade`: false draws at full brightness.
+    pub on_boundary: bool,
     pub shade: bool,
     /// The face has a `tintindex`: the block's biome or fixed tint multiplies the texel.
     pub tint: bool,
@@ -117,7 +118,7 @@ struct Element {
     faces: [Option<Face>; 6],
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Model {
     textures: HashMap<String, String>,
     elements: std::rc::Rc<Vec<Element>>,
@@ -170,6 +171,9 @@ fn parse_element(e: &Value) -> Option<Element> {
             tint: f.get("tintindex").is_some(),
         });
     }
+    if faces.iter().all(Option::is_none) {
+        return None;
+    }
     Some(Element {
         from,
         to,
@@ -186,20 +190,58 @@ struct Loader<'a> {
     names: Vec<Arc<str>>,
 }
 
-impl Loader<'_> {
-    fn json(&mut self, path: &str) -> Option<Value> {
-        serde_json::from_slice(&self.source.read(&format!("assets/minecraft/{path}.json"))?).ok()
-    }
+fn valid_resource_path(name: &str) -> bool {
+    !name.contains(['\\', ':']) && name.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
 
+fn blockstate_variants(source: &mut AssetSource, name: &str) -> serde_json::Map<String, Value> {
+    let path = format!("assets/minecraft/blockstates/{name}.json");
+    let decode = |bytes: Vec<u8>| {
+        let mut json = serde_json::from_slice::<serde_json::Map<String, Value>>(&bytes).ok()?;
+        match json.remove("variants")? {
+            Value::Object(variants) => Some(variants),
+            _ => None,
+        }
+    };
+    if name != "glass_pane" {
+        return source.read(&path).and_then(decode).unwrap_or_default();
+    }
+    source
+        .read_all(&path)
+        .into_iter()
+        .filter_map(decode)
+        .flatten()
+        .collect()
+}
+
+impl Loader<'_> {
     /// `ModelBlock` with its `parent` chain: the child's textures win, its elements replace the parent's.
     fn model(&mut self, name: &str, depth: u8) -> Option<Model> {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        if depth > 16 || name.starts_with("builtin/") || !valid_resource_path(name) {
+            return None;
+        }
         if let Some(m) = self.models.get(name) {
             return Some(m.clone());
         }
-        let json = self.json(&format!("models/{}", with_prefix(name)))?;
-        let mut model = match json.get("parent").and_then(Value::as_str) {
-            Some(p) if depth < 16 && !p.starts_with("builtin/") => self.model(p, depth + 1)?,
-            _ => Model::default(),
+        let path = format!("assets/minecraft/models/{name}.json");
+        let json: serde_json::Map<String, Value> =
+            serde_json::from_slice(&self.source.read(&path)?).ok()?;
+        let parent = json.get("parent").map_or(Some(""), Value::as_str)?;
+        let elements = json
+            .get("elements")
+            .map_or(Some(&[][..]), |list| list.as_array().map(Vec::as_slice))?;
+        let mut model = match (parent.is_empty(), elements.is_empty()) {
+            (false, true) => self.model(parent, depth + 1)?,
+            (true, false) => Model {
+                textures: HashMap::new(),
+                elements: elements
+                    .iter()
+                    .map(parse_element)
+                    .collect::<Option<Vec<_>>>()?
+                    .into(),
+            },
+            _ => return None,
         };
         if let Some(t) = json.get("textures").and_then(Value::as_object) {
             for (k, v) in t {
@@ -207,13 +249,6 @@ impl Loader<'_> {
                     model.textures.insert(k.clone(), v.to_owned());
                 }
             }
-        }
-        if let Some(list) = json.get("elements").and_then(Value::as_array) {
-            model.elements = list
-                .iter()
-                .filter_map(parse_element)
-                .collect::<Vec<_>>()
-                .into();
         }
         self.models.insert(name.to_owned(), model.clone());
         Some(model)
@@ -228,10 +263,11 @@ impl Loader<'_> {
                 None => break,
             }
         }
-        if r.starts_with('#') {
+        let r = r.strip_prefix("minecraft:").unwrap_or(r);
+        let name = r.strip_prefix("blocks/")?;
+        if !valid_resource_path(name) {
             return None;
         }
-        let name = r.rsplit('/').next()?;
         if let Some(known) = self.names.iter().find(|n| &***n == name) {
             return Some(known.clone());
         }
@@ -240,36 +276,39 @@ impl Loader<'_> {
         Some(new)
     }
 
-    fn bake(&mut self, spec: &Value) -> Vec<Quad> {
-        let Some(model) = spec
-            .get("model")
-            .and_then(Value::as_str)
-            .and_then(|m| self.model(m, 0))
-        else {
-            return Vec::new();
+    fn bake(&mut self, spec: &Value) -> Option<Vec<Quad>> {
+        let name = spec.get("model")?.as_str()?;
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let model = self.model(&format!("block/{name}"), 0)?;
+        let turn = |k| {
+            let angle = spec.get(k).map_or(Some(0), Value::as_i64)?.rem_euclid(360);
+            (angle % 90 == 0).then_some((angle / 90) as u8)
         };
-        let turn = |k| (spec.get(k).and_then(Value::as_u64).unwrap_or(0) / 90) as u8;
-        let (x, y) = (turn("x"), turn("y"));
+        let (x, y) = (turn("x")?, turn("y")?);
         let uvlock = spec.get("uvlock").and_then(Value::as_bool) == Some(true);
         let mut quads = Vec::new();
         for el in model.elements.iter() {
             for (f, face) in el.faces.iter().enumerate() {
                 let Some(face) = face else { continue };
-                let Some(tex) = self.texture(&model, &face.tex) else {
-                    continue;
-                };
+                let tex = self.texture(&model, &face.tex)?;
                 quads.push(bake_quad(el, f, face, tex, (x, y), uvlock));
             }
         }
-        quads
+        Some(quads)
     }
-}
 
-fn with_prefix(name: &str) -> String {
-    if name.contains('/') {
-        name.to_owned()
-    } else {
-        format!("block/{name}")
+    fn bake_variant(&mut self, spec: &Value, try_later_entries: bool) -> Option<Vec<Quad>> {
+        let entries = spec
+            .as_array()
+            .map_or(std::slice::from_ref(spec), Vec::as_slice);
+        let limit = if try_later_entries { entries.len() } else { 1 };
+        entries.iter().take(limit).find_map(|entry| {
+            let start = self.names.len();
+            self.bake(entry).or_else(|| {
+                self.names.truncate(start);
+                None
+            })
+        })
     }
 }
 
@@ -295,6 +334,24 @@ fn rotate_part(
         }
     }
     [0, 1, 2].map(|a| r[a] + origin[a])
+}
+
+fn geometric_face(pos: &[[f32; 3]; 4], fallback: usize) -> usize {
+    let a: [f32; 3] = std::array::from_fn(|i| pos[1][i] - pos[0][i]);
+    let b: [f32; 3] = std::array::from_fn(|i| pos[2][i] - pos[0][i]);
+    let [x, y, z] = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    let mut face = fallback;
+    let mut best = 0.0;
+    for (i, score) in [y, -y, -z, z, -x, x].into_iter().enumerate() {
+        if score > best {
+            (face, best) = (i, score);
+        }
+    }
+    face
 }
 
 /// `FaceBakery.makeBakedQuad` for one face of `el`, then the blockstate rotation `(x, y)` in quarter turns.
@@ -330,20 +387,39 @@ fn bake_quad(
             } / 16.0,
         ];
     }
-    let face_after_turn =
+    let shade_face =
         turned(NORMALS[f]).expect("a quarter turn maps a face normal to a face normal");
+    let geometric_face = if el.rot.is_some() {
+        geometric_face(&pos, shade_face)
+    } else {
+        shade_face
+    };
     if uvlock {
-        lock_uv(&mut uv, &pos, face_after_turn, face.turns);
+        lock_uv(&mut uv, &pos, shade_face, face.turns);
     }
+    let on_boundary = on_boundary(&pos, geometric_face);
     Quad {
         pos,
         uv,
         tex,
-        face: face_after_turn,
+        face: geometric_face,
+        shade_face,
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
+        on_boundary,
         shade: el.shade,
         tint: face.tint,
     }
+}
+
+fn on_boundary(pos: &[[f32; 3]; 4], face: usize) -> bool {
+    let axis = [1, 2, 0][face / 2];
+    let plane = pos[0][axis];
+    let reaches_boundary = if NORMALS[face][axis] < 0.0 {
+        plane < 0.0001
+    } else {
+        plane > 0.9999
+    };
+    reaches_boundary && pos[1..].iter().all(|p| p[axis] == plane)
 }
 
 /// `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its
@@ -368,19 +444,16 @@ impl Models {
             .chain(&variants::STAIRS)
             .chain(&variants::GATES)
         {
-            let Some(json) = loader.json(&format!("blockstates/{name}")) else {
-                continue;
-            };
-            let Some(variants) = json.get("variants").and_then(Value::as_object) else {
-                continue;
-            };
-            let mut baked = HashMap::new();
-            for (key, spec) in variants {
-                // A list is a weighted random choice; the first entry stands for it.
-                let spec = spec.as_array().and_then(|a| a.first()).unwrap_or(spec);
-                baked.insert(key.clone(), loader.bake(spec));
+            let baked: HashMap<_, _> = blockstate_variants(loader.source, name)
+                .into_iter()
+                .filter_map(|(key, spec)| {
+                    let quads = loader.bake_variant(&spec, *name == "glass_pane")?;
+                    Some((key, quads))
+                })
+                .collect();
+            if !baked.is_empty() {
+                states.insert((*name).to_owned(), baked);
             }
-            states.insert((*name).to_owned(), baked);
         }
         Models {
             states,
@@ -391,6 +464,10 @@ impl Models {
     /// Textures the quads use that the block atlas must hold.
     pub fn textures(&self) -> &[Arc<str>] {
         &self.textures
+    }
+
+    pub(crate) fn has_glass_panes(&self) -> bool {
+        self.states.contains_key("glass_pane")
     }
 
     /// The model quads of `state`, or `None` when this block is not drawn from a model (or none was loaded).

@@ -1,9 +1,13 @@
 //! Block crack overlay: `RenderGlobal.renderMiningProgress` draws the model of each block being
 //! mined again with the `destroy_stage_N` sprite, mapped like the block's own faces.
 
-use crate::blocks::{cached, is_opaque_cube, Kind, UP};
-use crate::mesh::{cross_quads, face_uv, rot_uv, Vertex, CORNERS, DIRS};
-use crate::shapes::{boxes, Bx};
+use crate::blocks::{cached, Kind, UP};
+use crate::mesh::{
+    box_on_border, cross_quads, face_uv, fallback_boxes, model_face_visible, rot_uv, view_opaque,
+    Vertex, CORNERS, DIRS,
+};
+use crate::models::Models;
+use crate::shapes::Bx;
 
 /// Vanilla `color4f(1, 1, 1, 0.5)`.
 const COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.5];
@@ -25,7 +29,34 @@ fn cross(at: [i32; 3], state: u16) -> Vec<Vertex> {
 
 /// Quads (four vertices each, world space) of the block `state` at `at`, whose faces are culled
 /// against `block`, the state of any world position. Liquids have no crack model here.
-pub fn quads(at: [i32; 3], state: u16, block: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Vertex> {
+pub fn quads(
+    at: [i32; 3],
+    state: u16,
+    block: &dyn Fn(i32, i32, i32) -> u16,
+    models: &Models,
+    fancy: bool,
+) -> Vec<Vertex> {
+    let nb = |dx, dy, dz| block(at[0] + dx, at[1] + dy, at[2] + dz);
+    let clear_pane = state >> 4 == 102;
+    let pane_quads = if clear_pane {
+        models.quads(state, &nb)
+    } else {
+        None
+    };
+    if let Some(quads) = pane_quads {
+        return quads
+            .iter()
+            .filter(|q| model_face_visible(q, state, fancy, nb))
+            .flat_map(|q| {
+                std::array::from_fn::<_, 4, _>(|i| Vertex {
+                    pos: [0, 1, 2].map(|a| at[a] as f32 + q.pos[i][a]),
+                    uv: face_uv(q.face, q.pos[i]),
+                    color: COLOR,
+                    light: [1.0; 2],
+                })
+            })
+            .collect();
+    }
     let unit = Bx {
         min: [0.0; 3],
         max: [1.0; 3],
@@ -37,31 +68,28 @@ pub fn quads(at: [i32; 3], state: u16, block: &dyn Fn(i32, i32, i32) -> u16) -> 
     };
     let list = match cached(state).kind {
         Kind::Opaque | Kind::Cutout => vec![unit],
-        Kind::Shape => boxes(state, &|dx, dy, dz| {
-            block(at[0] + dx, at[1] + dy, at[2] + dz)
-        }),
+        Kind::Shape => fallback_boxes(state, &nb, models),
         Kind::Cross => return cross(at, state),
         _ => Vec::new(),
     };
+    box_vertices(at, &list, nb, !clear_pane || fancy)
+}
+
+fn box_vertices(
+    at: [i32; 3],
+    boxes: &[Bx],
+    nb: impl Fn(i32, i32, i32) -> u16,
+    fancy: bool,
+) -> Vec<Vertex> {
     let mut out = Vec::new();
-    for b in &list {
+    for b in boxes {
         for f in 0..6 {
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = [
-                b.max[1] >= 1.0,
-                b.min[1] <= 0.0,
-                b.min[2] <= 0.0,
-                b.max[2] >= 1.0,
-                b.min[0] <= 0.0,
-                b.max[0] >= 1.0,
-            ][f];
-            let d = DIRS[f];
-            if b.cull
-                && on_border
-                && is_opaque_cube(block(at[0] + d[0], at[1] + d[1], at[2] + d[2]))
-            {
+            let on_border = box_on_border(b, f);
+            let [dx, dy, dz] = DIRS[f];
+            if b.cull && on_border && view_opaque(nb(dx, dy, dz), fancy) {
                 continue;
             }
             for c in &CORNERS[f] {
@@ -86,23 +114,27 @@ pub fn quads(at: [i32; 3], state: u16, block: &dyn Fn(i32, i32, i32) -> u16) -> 
 mod tests {
     use super::*;
 
+    fn fallback(state: u16, block: &dyn Fn(i32, i32, i32) -> u16) -> Vec<Vertex> {
+        quads([0; 3], state, block, &Models::default(), true)
+    }
+
     #[test]
     fn stone_next_to_stone_hides_the_shared_face() {
         let stone = 1 << 4;
-        let alone = quads([0, 0, 0], stone, &|_, _, _| 0);
-        let beside = quads([0, 0, 0], stone, &|x, _, _| if x == 1 { stone } else { 0 });
+        let alone = fallback(stone, &|_, _, _| 0);
+        let beside = fallback(stone, &|x, _, _| if x == 1 { stone } else { 0 });
         assert_eq!((alone.len(), beside.len()), (24, 20));
     }
 
     #[test]
     fn air_has_no_crack() {
-        assert!(quads([0, 0, 0], 0, &|_, _, _| 0).is_empty());
+        assert!(fallback(0, &|_, _, _| 0).is_empty());
     }
 
     #[test]
     fn plants_get_every_plane_of_their_model() {
         // Poppy: two crossed planes, both windings; wheat: four planes, both windings.
-        assert_eq!(quads([0, 0, 0], 38 << 4, &|_, _, _| 0).len(), 16);
-        assert_eq!(quads([0, 0, 0], (59 << 4) | 7, &|_, _, _| 0).len(), 32);
+        assert_eq!(fallback(38 << 4, &|_, _, _| 0).len(), 16);
+        assert_eq!(fallback((59 << 4) | 7, &|_, _, _| 0).len(), 32);
     }
 }

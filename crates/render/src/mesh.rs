@@ -9,8 +9,8 @@ use crate::blocks::{
     tint_color, uses_neighbor_light, Kind, Look, Tint, DOWN, NORTH, SOUTH, UP, WEST,
 };
 use crate::light::Light;
-use crate::models::Quad;
-use crate::shapes::{boxes, Bx, BREWING_SPOKES};
+use crate::models::{Models, Quad};
+use crate::shapes::{bit, boxes, Bx, BREWING_SPOKES};
 use bytemuck::{Pod, Zeroable};
 
 mod flow;
@@ -184,6 +184,45 @@ pub fn view_opaque(state: u16, fancy: bool) -> bool {
     is_opaque_cube(state) || (!fancy && is_leaves(state))
 }
 
+pub(crate) fn model_face_visible(
+    quad: &Quad,
+    state: u16,
+    fancy: bool,
+    nb: impl FnOnce(i32, i32, i32) -> u16,
+) -> bool {
+    !quad.cull.is_some_and(|face| {
+        let [dx, dy, dz] = DIRS[face];
+        let neighbour = nb(dx, dy, dz);
+        view_opaque(neighbour, fancy) || (state >> 4 == 102 && neighbour >> 4 == 102)
+    })
+}
+
+pub(crate) fn fallback_boxes(
+    state: u16,
+    nb: &dyn Fn(i32, i32, i32) -> u16,
+    models: &Models,
+) -> Vec<Bx> {
+    let mut shapes = boxes(state, nb);
+    if state >> 4 == 102 && !models.has_glass_panes() {
+        for (face, &[dx, dy, dz]) in DIRS.iter().enumerate().skip(2) {
+            if nb(dx, dy, dz) >> 4 == 102 {
+                for b in shapes.iter_mut().filter(|b| box_on_border(b, face)) {
+                    b.mask &= !bit(face);
+                }
+            }
+        }
+    }
+    shapes
+}
+
+pub(crate) fn box_on_border(b: &Bx, face: usize) -> bool {
+    let axis = [1, 2, 0][face / 2];
+    match face {
+        1 | 2 | 4 => b.min[axis] <= 0.0,
+        _ => b.max[axis] >= 1.0,
+    }
+}
+
 fn is_leaves(state: u16) -> bool {
     matches!(state >> 4, 18 | 161)
 }
@@ -347,10 +386,10 @@ impl Mesher<'_> {
             Kind::Shape => {
                 let nb = |dx, dy, dz| self.hood.block(at[0] + dx, at[1] + dy, at[2] + dz);
                 if let Some(quads) = self.atlas.models.quads(state, &nb) {
-                    self.modelled(at, quads, &l);
+                    self.modelled(at, quads, &l, state);
                     return;
                 }
-                let list = boxes(state, &nb);
+                let list = fallback_boxes(state, &nb, &self.atlas.models);
                 // `waterlily.json`: four y turns picked by the position hash.
                 let orient = if state >> 4 == 111 {
                     self.orient_at(at, state)
@@ -735,19 +774,20 @@ impl Mesher<'_> {
     }
 
     /// Quads baked from the block's vanilla model: explicit uv, face and element rotation are kept.
-    fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look) {
+    fn modelled(&mut self, at: [i32; 3], quads: &[Quad], l: &Look, state: u16) {
         let (plain, tinted) = (
             self.base_color(l, Tint::None, at),
             self.base_color(l, l.tint, at),
         );
         for q in quads {
             let rgb = if q.tint { tinted } else { plain };
-            if q.cull.is_some_and(|c| self.opaque(self.st(at, DIRS[c]))) {
+            if !model_face_visible(q, state, self.fancy, |dx, dy, dz| self.st(at, [dx, dy, dz])) {
                 continue;
             }
-            let light = self.flat_light(at, q.cull.map_or([0; 3], |c| DIRS[c]));
+            let light_face = q.cull.or(q.on_boundary.then_some(q.face));
+            let light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
             let k = if q.shade {
-                self.lit(SHADE[q.face])
+                self.lit(SHADE[q.shade_face])
             } else {
                 1.0
             };
@@ -843,14 +883,7 @@ impl Mesher<'_> {
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = [
-                b.max[1] >= 1.0,
-                b.min[1] <= 0.0,
-                b.min[2] <= 0.0,
-                b.max[2] >= 1.0,
-                b.min[0] <= 0.0,
-                b.max[0] >= 1.0,
-            ][f];
+            let on_border = box_on_border(b, f);
             if b.cull && on_border && self.opaque(self.st(at, DIRS[f])) {
                 continue;
             }
@@ -978,7 +1011,7 @@ mod tests {
             };
             let at = [16, 4, chunk_z * 16 + 3];
             let terrain = mesh_chunk(&hood, &atlas, true, true).opaque.vertices;
-            let damage = crate::crack::quads(at, poppy, &|_, _, _| 0);
+            let damage = crate::crack::quads(at, poppy, &|_, _, _| 0, &atlas.models, true);
             for (path, vertices, origin) in [
                 ("terrain", terrain, [16.0, 0.0, (chunk_z * 16) as f32]),
                 ("damage", damage, [0.0; 3]),

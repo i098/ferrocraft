@@ -687,7 +687,13 @@ impl Renderer {
                     }
                     _ => 0,
                 };
-                verts.extend(crack::quads(at, at_block(at[0], at[1], at[2]), &at_block));
+                verts.extend(crack::quads(
+                    at,
+                    at_block(at[0], at[1], at[2]),
+                    &at_block,
+                    &self.atlas.models,
+                    self.fancy_graphics,
+                ));
             }
             let tex = format!("textures/blocks/destroy_stage_{stage}.png");
             if let Some(m) = self.upload_mesh(quad_mesh(verts), [0.0; 3]) {

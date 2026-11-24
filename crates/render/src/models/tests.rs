@@ -17,7 +17,7 @@ fn bake(model: &str, spec: &str) -> Vec<Quad> {
     let spec = serde_json::from_str(spec).unwrap();
     let quads = loader.bake(&spec);
     std::fs::remove_dir_all(dir).ok();
-    quads
+    quads.unwrap()
 }
 
 fn sorted(mut v: Vec<([i32; 3], [i32; 2])>) -> Vec<([i32; 3], [i32; 2])> {
@@ -142,9 +142,17 @@ fn repeater_door_and_piston_faces_follow_vanilla_uv_rules() {
 #[test]
 fn blockstate_turn_of_270_degrees_turns_the_face() {
     let json = r##"{"textures": {"t": "blocks/stone"}, "elements": [{"from": [0,0,0], "to": [16,16,16],
-        "faces": {"north": {"texture": "#t"}}}]}"##;
+        "faces": {"north": {"texture": "#t", "cullface": "north"}}}]}"##;
     assert_eq!(bake(json, r#"{"model": "m", "y": 270}"#)[0].face, 4);
     assert_eq!(bake(json, r#"{"model": "m", "x": 270}"#)[0].face, 0);
+    assert_eq!(
+        bake(json, r#"{"model": "m", "y": -270, "uvlock": true}"#),
+        bake(json, r#"{"model": "m", "y": 90, "uvlock": true}"#)
+    );
+    assert_eq!(
+        bake(json, r#"{"model": "m", "x": -90, "uvlock": true}"#),
+        bake(json, r#"{"model": "m", "x": 270, "uvlock": true}"#)
+    );
 }
 
 /// Element `rotation` leans a wall torch toward the room: the top moves out by tan(22.5 degrees) per block.
@@ -157,6 +165,28 @@ fn element_rotation_leans_the_wall_torch() {
     let (bottom, top): (Vec<_>, Vec<_>) = quads[0].pos.iter().partition(|p| p[1] < 0.5);
     let x = |v: &[&[f32; 3]]| v.iter().map(|p| p[0]).sum::<f32>() / v.len() as f32;
     assert!(x(&top) - x(&bottom) > 0.3, "top leans east");
+}
+
+#[test]
+fn rotated_east_face_projects_cracks_from_above_without_changing_material_uv() {
+    let json = r#"{"elements":[{"from":[7,0,7],"to":[8,8,9],
+        "rotation":{"origin":[8,0,8],"axis":"z","angle":45,"rescale":true},
+        "faces":{"east":{"texture":"blocks/glass","cullface":"east"}}}]}"#;
+    let quads = bake(json, r#"{"model":"m","uvlock":true}"#);
+    let quad = &quads[0];
+    assert_eq!(quad.face, UP);
+    assert_eq!(quad.uv[1], [7.0 / 16.0, 1.0]);
+    assert_eq!(quad.cull, Some(EAST));
+    assert_eq!(quad.shade_face, EAST);
+    assert!(!quad.on_boundary);
+    let pane = 102 << 4;
+    let (name, key) = variant(pane, NB).unwrap();
+    let models = Models {
+        states: HashMap::from([(name.to_owned(), HashMap::from([(key, quads)]))]),
+        ..Models::default()
+    };
+    let cracks = crate::crack::quads([0; 3], pane, NB, &models, true);
+    assert_eq!(cracks[1].uv, [0.5, 9.0 / 16.0]);
 }
 
 fn jar() -> Option<AssetSource> {
@@ -300,6 +330,333 @@ const NORTH: usize = 2;
 const SOUTH: usize = 3;
 const WEST: usize = 4;
 const EAST: usize = 5;
+
+fn glass_pane_pack_models(case: &str) -> Models {
+    let dir = std::env::temp_dir().join(format!("fc-pane-pack-{}-{case}", std::process::id()));
+    let write = |layer: &str, path: &str, json: &str| {
+        let file = dir.join(layer).join("assets/minecraft").join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, json).unwrap();
+    };
+    write(
+        "base",
+        "blockstates/glass_pane.json",
+        r#"{"variants":{
+            "east=false,north=false,south=false,west=false":{"model":"pane_nsew"},
+            "east=true,north=false,south=false,west=false":[{"model":"missing"},{"model":"wrong_texture_root"},{"model":"pane_nsew"}],
+            "east=false,north=true,south=false,west=false":{"model":"missing"},
+            "east=false,north=false,south=true,west=false":{"model":"empty"},
+            "east=false,north=false,south=false,west=true":{"model":"broken_parent"},
+            "east=true,north=true,south=false,west=false":{"model":"no_elements"},
+            "east=false,north=false,south=true,west=true":{"model":"unknown_builtin"},
+            "east=false,north=true,south=true,west=false":{"model":"two_sources"}
+        }}"#,
+    );
+    write(
+        "pack",
+        "blockstates/glass_pane.json",
+        r#"{"variants":{"east=false,north=false,south=false,west=false":{"model":"minecraft:decor/glass_pane_nsew"}}}"#,
+    );
+    write(
+        "base",
+        "blockstates/lever.json",
+        r#"{"variants":{"facing=east,powered=false":{"model":"pane_nsew"}}}"#,
+    );
+    write(
+        "pack",
+        "blockstates/lever.json",
+        r#"{"variants":{
+            "facing=west,powered=false":{"model":"pane_nsew"},
+            "facing=south,powered=false":[{"model":"missing"},{"model":"pane_nsew"}]
+        }}"#,
+    );
+    write(
+        "pack",
+        "models/block/decor/glass_pane_nsew.json",
+        r#"{"parent":"minecraft:block/pane_nsew","textures":{"edge":"minecraft:blocks/decor/glass_pane_top"},"elements":[]}"#,
+    );
+    write(
+        "base",
+        "models/block/pane_nsew.json",
+        r##"{"parent":"","textures":{"edge":"blocks/glass"},"elements":[
+            {"from":[0,0,0],"to":[16,16,16],"shade":false,"faces":{
+                "up":{"texture":"#edge"},
+                "down":{"texture":"#edge"},
+                "north":{"texture":"#edge","cullface":"north"},
+                "south":{"texture":"#edge"},
+                "west":{"texture":"#edge"},
+                "east":{"texture":"#edge"}
+            }},
+            {"from":[7,0,7],"to":[9,16,9],"shade":false,"faces":{
+                "north":{"texture":"#edge","uv":[0,0,16,16]},
+                "south":{"texture":"#edge","cullface":"down"}
+            }}
+        ]}"##,
+    );
+    write(
+        "base",
+        "models/block/wrong_texture_root.json",
+        r#"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{
+            "up":{"texture":"blocks/rejected"},
+            "west":{"texture":"minecraft:items/glass"}
+        }}]}"#,
+    );
+    write("base", "models/block/empty.json", r#"{"elements":[]}"#);
+    write(
+        "base",
+        "models/block/broken_parent.json",
+        r#"{"parent":"minecraft:block/missing"}"#,
+    );
+    write("base", "models/block/no_elements.json", "{}");
+    write(
+        "base",
+        "models/block/unknown_builtin.json",
+        r#"{"parent":"minecraft:builtin/unknown"}"#,
+    );
+    write(
+        "base",
+        "models/block/two_sources.json",
+        r#"{"parent":"block/pane_nsew","elements":[{"from":[7,0,7],"to":[9,16,9],"faces":{"north":{"texture":"blocks/glass"}}}]}"#,
+    );
+    let models = Models::load(&mut AssetSource::Layers(vec![
+        AssetSource::Dir(dir.join("pack")),
+        AssetSource::Dir(dir.join("base")),
+    ]));
+    std::fs::remove_dir_all(dir).unwrap();
+    models
+}
+
+#[test]
+fn glass_pane_pack_overrides_only_its_variant_and_connects_to_both_leaves() {
+    let models = glass_pane_pack_models("variants");
+    assert!(!models.textures().iter().any(|t| &**t == "rejected"));
+    assert!(models.quads(69 << 4 | 1, NB).is_none());
+    assert!(models.quads(69 << 4 | 2, NB).is_some());
+    assert!(models.quads(69 << 4 | 3, NB).is_none());
+    let pane = 102 << 4;
+    assert_eq!(
+        &*models.quads(pane, NB).unwrap()[0].tex,
+        "decor/glass_pane_top"
+    );
+    for id in [18, 102, 161] {
+        let east = [((1, 0), id << 4)];
+        assert_eq!(&*models.quads(pane, &world(&east)).unwrap()[0].tex, "glass");
+    }
+    for neighbours in [
+        &[(0, -1)][..],
+        &[(-1, 0)],
+        &[(0, 1)],
+        &[(1, 0), (0, -1)],
+        &[(0, 1), (-1, 0)],
+        &[(0, -1), (0, 1)],
+    ] {
+        let blocks: Vec<_> = neighbours.iter().map(|&p| (p, pane)).collect();
+        assert!(models.quads(pane, &world(&blocks)).is_none());
+    }
+}
+
+#[test]
+fn glass_pane_fallback_caps_remain_beside_baked_panes() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
+    let pane = 102 << 4;
+    for (dx, dz, axis, boundary, face) in [
+        (0, -1, 2, 4.0, "south"),
+        (0, 1, 2, 5.0, "north"),
+        (-1, 0, 0, 4.0, "east"),
+        (1, 0, 0, 5.0, "west"),
+    ] {
+        let (_, key) = variant(pane, &world(&[((-dx, -dz), pane)])).unwrap();
+        let json = format!(
+            r#"{{"elements":[{{"from":[0,0,0],"to":[16,16,16],
+                "faces":{{"{face}":{{"texture":"blocks/glass"}}}}}}]}}"#
+        );
+        let atlas = Atlas {
+            models: Models {
+                states: HashMap::from([(
+                    "glass_pane".to_owned(),
+                    HashMap::from([(key, bake(&json, r#"{"model":"m"}"#))]),
+                )]),
+                ..Models::default()
+            },
+            ..Atlas::flat()
+        };
+        let mut center = vec![0; 16 * 16 * HEIGHT];
+        center[index(4, 70, 4)] = pane;
+        center[index((4 + dx) as usize, 70, (4 + dz) as usize)] = pane;
+        let meshes = mesh_chunk(
+            &Neighborhood {
+                origin: (0, 0),
+                center: &center,
+                neighbors: [None; 8],
+                biomes: [None; 9],
+                lights: [None; 9],
+            },
+            &atlas,
+            true,
+            true,
+        );
+        let blocks = [((4, 4), pane), ((4 + dx, 4 + dz), pane)];
+        let cracks = crate::crack::quads([4, 0, 4], pane, &world(&blocks), &atlas.models, true);
+        let caps = |vertices: &[crate::mesh::Vertex]| {
+            vertices
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|quad| quad.iter().all(|v| v.pos[axis] == boundary))
+                .count()
+        };
+        assert_eq!(caps(&meshes.opaque.vertices), 2, "{face}");
+        assert_eq!(caps(&cracks), 1, "{face}");
+    }
+}
+
+#[test]
+fn glass_pane_fallback_caps_omit_shared_faces_without_models() {
+    let pane = 102 << 4;
+    let vertices = crate::crack::quads(
+        [0; 3],
+        pane,
+        &world(&[((1, 0), pane)]),
+        &Models::default(),
+        true,
+    );
+    assert!(!vertices
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|quad| quad.iter().all(|v| v.pos[0] == 1.0)));
+}
+
+#[test]
+fn glass_pane_boundary_light_uses_adjacent_cells_without_shading() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
+    let atlas = Atlas {
+        textured: true,
+        models: glass_pane_pack_models("light"),
+        ..Atlas::flat()
+    };
+    let mut center = vec![0; 16 * 16 * HEIGHT];
+    center[index(4, 70, 4)] = 102 << 4;
+    let mut light = vec![0; center.len()];
+    light[index(4, 70, 4)] = 0xaf;
+    light[index(4, 71, 4)] = 0x11;
+    light[index(4, 69, 4)] = 0x22;
+    light[index(4, 70, 3)] = 0x33;
+    light[index(4, 70, 5)] = 0x44;
+    light[index(3, 70, 4)] = 0x55;
+    light[index(5, 70, 4)] = 0x66;
+    let mut lights: [Option<&[u8]>; 9] = [None; 9];
+    lights[4] = Some(&light);
+    let meshes = mesh_chunk(
+        &Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [None; 8],
+            biomes: [None; 9],
+            lights,
+        },
+        &atlas,
+        true,
+        true,
+    );
+    let (quads, rest) = meshes.opaque.vertices.as_chunks::<4>();
+    assert!(rest.is_empty());
+    let expected = [
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+        [6, 6],
+        [6, 6],
+        [2, 2],
+    ];
+    assert_eq!(quads.len(), expected.len());
+    for (quad, levels) in quads.iter().zip(expected) {
+        assert!(quad
+            .iter()
+            .all(|v| v.light == levels.map(|n| n as f32 / 15.0)));
+        assert!(quad.iter().all(|v| v.color == [1.0; 4]));
+    }
+}
+
+#[test]
+fn glass_pane_cracks_follow_pack_geometry_and_hide_shared_faces() {
+    let models = glass_pane_pack_models("cracks");
+    let pane = 102 << 4;
+    let at = [4, 70, 4];
+    for (below, fancy, count) in [(0, true, 32), (pane, true, 28), (18 << 4, false, 28)] {
+        let nb = |x, y, z| if (x, y, z) == (4, 69, 4) { below } else { 0 };
+        let vertices = crate::crack::quads(at, pane, &nb, &models, fancy);
+        assert_eq!(vertices.len(), count);
+        let edge = vertices
+            .iter()
+            .find(|v| v.pos == [4.5625, 71.0, 4.4375])
+            .unwrap();
+        assert_eq!(edge.uv, [7.0 / 16.0, 0.0]);
+        assert_eq!(vertices.iter().any(|v| v.pos[2] == 4.5625), below == 0);
+    }
+}
+
+#[test]
+fn jar_isolated_glass_pane_draws_unshaded_vertical_edges() {
+    let Some(models) = jar_models() else { return };
+    let quads = models.quads(102 << 4, NB).unwrap();
+    assert_eq!(quads.len(), 12);
+    assert!(quads.iter().all(|q| !q.shade));
+    for face in [NORTH, SOUTH, WEST, EAST] {
+        let edge = quads.iter().find(|q| q.cull == Some(face)).unwrap();
+        assert_eq!(&*edge.tex, "glass_pane_top");
+        assert_eq!(
+            edge.uv,
+            [
+                [7.0 / 16.0, 0.0],
+                [7.0 / 16.0, 1.0],
+                [9.0 / 16.0, 1.0],
+                [9.0 / 16.0, 0.0],
+            ]
+        );
+    }
+}
+
+#[test]
+fn jar_connected_glass_panes_omit_the_shared_edge_faces() {
+    use crate::assets::Atlas;
+    use crate::mesh::{index, mesh_chunk, Neighborhood, HEIGHT};
+
+    let Some(models) = jar_models() else { return };
+    let pane = 102 << 4;
+    assert_eq!(
+        models.quads(pane, &world(&[((1, 0), pane)])).unwrap().len(),
+        6
+    );
+
+    let atlas = Atlas {
+        models,
+        ..Atlas::flat()
+    };
+    let mut center = vec![0; 16 * 16 * HEIGHT];
+    center[index(4, 70, 4)] = pane;
+    center[index(5, 70, 4)] = pane;
+    let meshes = mesh_chunk(
+        &Neighborhood {
+            origin: (0, 0),
+            center: &center,
+            neighbors: [None; 8],
+            biomes: [None; 9],
+            lights: [None; 9],
+        },
+        &atlas,
+        true,
+        true,
+    );
+    // Two six-face elements lose the east and west faces at their shared border.
+    assert_eq!(meshes.opaque.vertices.len(), 10 * 4);
+}
 
 /// comparator_unlit.json, repeater_1tick.json, cocoa_age1_s.json and normal_torch_wall.json.
 #[test]
@@ -741,4 +1098,27 @@ fn uvlock_uses_the_turned_position() {
             assert!((uv[0] - p[0]).abs() < 1e-4 && (uv[1] - p[2]).abs() < 1e-4);
         }
     }
+}
+
+/// Model-derived names that leave the asset root are refused before any file is read.
+#[test]
+fn resource_names_that_escape_the_asset_root_are_rejected() {
+    let dir = std::env::temp_dir().join(format!("fc-models-escape-{}", std::process::id()));
+    let minecraft = dir.join("assets/minecraft");
+    std::fs::create_dir_all(minecraft.join("models")).unwrap();
+    let cube =
+        r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#t"}}}]}"##;
+    std::fs::write(minecraft.join("models/inside.json"), cube).unwrap();
+    std::fs::write(minecraft.join("outside.json"), cube).unwrap();
+    let mut source = AssetSource::Dir(dir.clone());
+    let mut loader = Loader {
+        source: &mut source,
+        models: HashMap::new(),
+        names: Vec::new(),
+    };
+    assert!(loader.model("inside", 0).is_some());
+    for name in ["../outside", "/outside", "a//b", "a\\b", "c:outside"] {
+        assert!(loader.model(name, 0).is_none(), "{name}");
+    }
+    std::fs::remove_dir_all(dir).ok();
 }

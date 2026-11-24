@@ -3,7 +3,8 @@
 
 use crate::blocks::{cached, Kind, UP};
 use crate::mesh::{
-    cross_quads, face_uv, model_face_visible, rot_uv, view_opaque, Vertex, CORNERS, DIRS,
+    box_on_border, cross_quads, face_uv, fallback_boxes, model_face_visible, rot_uv, view_opaque,
+    Vertex, CORNERS, DIRS,
 };
 use crate::models::Models;
 use crate::shapes::Bx;
@@ -67,7 +68,7 @@ pub fn quads(
     };
     let list = match cached(state).kind {
         Kind::Opaque | Kind::Cutout => vec![unit],
-        Kind::Shape => crate::mesh::fallback_boxes(state, &nb, models),
+        Kind::Shape => fallback_boxes(state, &nb, models),
         Kind::Cross => return cross(at, state),
         _ => Vec::new(),
     };
@@ -86,7 +87,7 @@ fn box_vertices(
             if b.mask >> f & 1 == 0 {
                 continue;
             }
-            let on_border = crate::mesh::box_on_border(b, f);
+            let on_border = box_on_border(b, f);
             let [dx, dy, dz] = DIRS[f];
             if b.cull && on_border && view_opaque(nb(dx, dy, dz), fancy) {
                 continue;

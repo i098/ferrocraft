@@ -1011,7 +1011,7 @@ mod tests {
             };
             let at = [16, 4, chunk_z * 16 + 3];
             let terrain = mesh_chunk(&hood, &atlas, true, true).opaque.vertices;
-            let damage = crate::crack::quads(at, poppy, &|_, _, _| 0);
+            let damage = crate::crack::quads(at, poppy, &|_, _, _| 0, &atlas.models, true);
             for (path, vertices, origin) in [
                 ("terrain", terrain, [16.0, 0.0, (chunk_z * 16) as f32]),
                 ("damage", damage, [0.0; 3]),

@@ -857,6 +857,7 @@ impl App {
                 riding: self.game.vehicle.is_some(),
                 local: true,
                 ghost: self.sees_own_ghost(),
+                spectator: self.game.gamemode == 3,
                 stand: StandLook {
                     head_damage: self.game.inv.player[5].as_ref().map_or(0, |s| s.damage),
                     ..StandLook::default()
@@ -965,6 +966,7 @@ impl App {
             d.look.viewer = viewer;
             self.team_tag(e, d);
             d.look.ghost = self.sees_ghost(e, d);
+            d.look.spectator = e.uuid.is_some_and(|u| self.hud.tablist.is_spectator(u));
             self.held_and_line(e, d, frac);
             d.look.leash = self.leash_holder(e, frac);
             vehicle::snap(&self.game.store, e, d);

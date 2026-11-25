@@ -233,6 +233,8 @@ pub struct Look {
     pub dragon: Option<Box<world::mob_anim::DragonPose>>,
     /// An invisible entity the viewer can see (`!isInvisibleTo(viewer)`): the body draws at [`GHOST_ALPHA`].
     pub ghost: bool,
+    /// A player in spectator mode (`NetworkPlayerInfo.getGameType`): the model shows only head and hat.
+    pub spectator: bool,
     /// The local player's own draw (`EntityPlayerSP`): `RenderPlayer.doRender` does not lower it when it sneaks.
     pub local: bool,
     /// Experience orb: `xpValue`, which picks the icon of `RenderXPOrb`.
@@ -289,6 +291,7 @@ impl Default for Look {
             viewer: [0.0; 3],
             dragon: None,
             ghost: false,
+            spectator: false,
             local: false,
             xp: 0,
         }
@@ -1599,8 +1602,12 @@ fn draw_body(out: &mut MeshData, d: &EntityDraw, skins: &Skins) -> Drawn {
         && m.parts.len() == 1;
     let xf = Xf::new(d, generic);
     let player = matches!(d.class, Class::Player { .. });
-    let shown =
-        |i: usize| !player || player_part_bit(i).is_none_or(|bit| d.look.skin_parts & bit != 0);
+    // `RenderPlayer.setModelVisibilities`: a spectator shows only the head and the hat layer.
+    let shown = |i: usize| match player {
+        false => true,
+        true if d.look.spectator => i <= 1,
+        true => player_part_bit(i).is_none_or(|bit| d.look.skin_parts & bit != 0),
+    };
 
     emit_body(out, &xf, &m, (d, skins), (skin, tint), shown);
     let holds = matches!(

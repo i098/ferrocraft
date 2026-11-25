@@ -145,15 +145,21 @@ fn draws_hud_to_png() {
     // The horizon fog tints the sky, so the reference is the same frame without any GUI quads.
     let (_, _, bare) = r.render_to_rgba(&Camera::default(), &[]);
     let top_right = (5 * w + (w - 5)) as usize * 4;
+    // The fog gradient runs down the sky plane, so each pixel is compared with the same pixel of `bare`.
+    let bare_at = |x: u32, y: u32| -> [u8; 4] {
+        bare[((y * w + x) * 4) as usize..][..4]
+            .try_into()
+            .expect("four bytes")
+    };
     assert_eq!(sky, bare[top_right..][..4], "top-right is plain sky");
     // `GuiOverlayDebug.renderDebugInfoLeft` fills from GUI (1, 1) with 0x90505050; the scale is 2.
     assert_eq!(
         at(1, 1),
-        sky,
+        bare_at(1, 1),
         "nothing is drawn left of or above GUI (1, 1)"
     );
     let alpha = f32::from(0x90_u8) / 255.0;
-    for (i, s) in sky.iter().take(3).enumerate() {
+    for (i, s) in bare_at(3, 3).iter().take(3).enumerate() {
         let want = f32::from(*s) * (1.0 - alpha) + f32::from(0x50_u8) * alpha;
         assert!(
             (f32::from(at(3, 3)[i]) - want).abs() <= 2.0,

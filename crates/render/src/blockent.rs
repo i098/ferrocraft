@@ -468,6 +468,43 @@ fn chest_texture(id: u16, double: bool) -> &'static str {
     }
 }
 
+/// `RenderItem`'s half-scale and Y turn, followed by `TileEntityItemStackRenderer`.
+pub(crate) fn held_block_entity(id: i16, damage: i16, skins: &Skins) -> Option<(Tex, MeshData)> {
+    let mut out = Batches::default();
+    let at = Mat::at([0.0; 3]).rotate_y(180.0).translate([-0.5; 3]);
+    match id {
+        54 | 130 | 146 => {
+            let model = at.translate([0.0, 1.0, 1.0]).scale([1.0, -1.0, -1.0]);
+            emit_chest(&mut out, id as u16, false, &model, 0.0);
+        }
+        397 => {
+            let model = at.translate([-0.5, 0.0, -0.5]).scale([2.0; 3]);
+            emit_skull(
+                &mut out,
+                &model.translate([0.5, 0.0, 0.5]),
+                0.0,
+                damage as u8,
+                None,
+                skins,
+            );
+        }
+        425 => {
+            let key = banner_key(&Banner {
+                base: (damage & 15) as u8,
+                layers: Vec::new(),
+            });
+            emit_banner(
+                out.mesh(Tex::Named(key)),
+                item_banner_frame(at),
+                true,
+                banner_sway(0.0),
+            );
+        }
+        _ => return None,
+    }
+    out.0.pop()
+}
+
 fn dist3(p: &[f64; 3], c: &[f64; 3]) -> f64 {
     (0..3).map(|i| (p[i] - c[i]).powi(2)).sum()
 }
@@ -963,10 +1000,33 @@ fn banner_block(
     };
     let phase =
         (pos[0] * 7 + pos[1] * 9 + pos[2] * 13) as f32 + view.world_time as f32 + view.partial;
-    let sway =
-        (-0.0125 + 0.01 * (phase * std::f32::consts::PI * 0.02).cos()) * std::f32::consts::PI;
-    let model = m.scale([f, -f, -f]);
     let target = out.mesh(Tex::Named(banner_key(banner)));
+    emit_banner(target, m, standing, banner_sway(phase));
+}
+
+fn banner_sway(phase: f32) -> f32 {
+    (-0.0125 + 0.01 * (phase * std::f32::consts::PI * 0.02).cos()) * std::f32::consts::PI
+}
+
+fn item_banner_frame(at: Mat) -> Mat {
+    at.translate([0.5, 0.75 * SIGN_SCALE, 0.5])
+}
+
+/// The standing banner model used for a stack has no world, so its sway phase is zero.
+pub fn banner_item_mesh() -> MeshData {
+    let mut mesh = MeshData::default();
+    emit_banner(
+        &mut mesh,
+        item_banner_frame(Mat::at([0.0; 3])),
+        true,
+        banner_sway(0.0),
+    );
+    mesh
+}
+
+fn emit_banner(target: &mut MeshData, at: Mat, standing: bool, sway: f32) {
+    let f = SIGN_SCALE;
+    let model = at.scale([f, -f, -f]);
     let tex = [64.0, 64.0];
     Cube::new([-10.0, 0.0, -2.0], [20.0, 40.0, 1.0], (0.0, 0.0))
         .at([0.0, -32.0, 0.0], [sway, 0.0, 0.0])

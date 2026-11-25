@@ -89,7 +89,9 @@ enum Held {
     Block(MeshData, hand::Mat),
     /// Extruded sprite and its item texture, bound with the hand globals.
     Flat(Box<hand::Flat>, wgpu::BindGroup, Strip),
-    /// No model (unknown item, entity models such as skulls): nothing is drawn.
+    /// A built-in item uses tile-entity geometry and its own texture.
+    BuiltIn(MeshData, hand::Mat, wgpu::BindGroup),
+    /// No model (unknown item): nothing is drawn.
     Nothing,
 }
 
@@ -99,6 +101,7 @@ enum HandTex {
     Skin,
     Atlas,
     Item,
+    BuiltIn,
     /// A part of the held map.
     Map(hand::MapTex),
 }
@@ -770,6 +773,12 @@ impl Renderer {
                 height: 1,
                 rgba: vec![255; 4],
             }
+        } else if let Some(base) = tex
+            .strip_prefix("banner:")
+            .and_then(|key| key.strip_suffix(':'))
+            .and_then(|base| base.parse().ok())
+        {
+            self.banner_item_image(base).unwrap_or_else(missing_tile)
         } else {
             let path = format!("assets/minecraft/{tex}");
             let image = self
@@ -1658,6 +1667,9 @@ impl Renderer {
                 vec![(hand::block(&hand, mesh, *display), HandTex::Atlas)]
             }
             Some(Held::Flat(flat, _, _)) => vec![(hand::flat(&hand, flat), HandTex::Item)],
+            Some(Held::BuiltIn(mesh, display, _)) => {
+                vec![(hand::block(&hand, mesh, *display), HandTex::BuiltIn)]
+            }
             _ => Vec::new(),
         }
     }
@@ -1683,6 +1695,9 @@ impl Renderer {
                 if let Some(flat) = self.flat_item(id, damage, dye) {
                     return flat;
                 }
+                if let Some(held) = self.builtin_item(id, damage) {
+                    return held;
+                }
                 if !(1..256).contains(&id) {
                     return Held::Nothing;
                 }
@@ -1695,6 +1710,38 @@ impl Renderer {
                 hand::block_display(&mut |p| source.read(&format!("assets/minecraft/{p}")), name)
             });
         Held::Block(hand::held_mesh(state, &self.atlas, false), display)
+    }
+
+    fn banner_item_image(&mut self, base: u8) -> Option<Image> {
+        let source = self.source.as_mut()?;
+        crate::blockent::banner_image(
+            &mut |name| {
+                let bytes = source.read(&format!("assets/minecraft/textures/entity/{name}.png"))?;
+                decode_png(&bytes)
+            },
+            &crate::Banner {
+                base,
+                layers: Vec::new(),
+            },
+        )
+    }
+
+    fn builtin_item(&mut self, id: i16, damage: i16) -> Option<Held> {
+        let (crate::blockent::Tex::Named(tex), mesh) =
+            crate::blockent::held_block_entity(id, damage, &self.entity_skins)?
+        else {
+            return None;
+        };
+        let name = world::inventory::items::model(id, damage)?;
+        let source = self.source.as_mut()?;
+        let display =
+            hand::block_display(&mut |p| source.read(&format!("assets/minecraft/{p}")), name);
+        let image = if id == 425 {
+            self.banner_item_image((damage & 15) as u8)?
+        } else {
+            decode_png(&source.read(&format!("assets/minecraft/{tex}"))?)?
+        };
+        Some(Held::BuiltIn(mesh, display, self.hand_texture(&image)))
     }
 
     /// Meshes of the footprint quads and of each item's icon quads, with their textures uploaded.
@@ -1750,6 +1797,16 @@ impl Renderer {
             })
             .collect();
         let image = hand::composite(&layers)?;
+        let group = self.hand_texture(&image);
+        let flat = Box::new(hand::Flat::new(
+            &image,
+            display,
+            self.dials.frame(id, hand::strip_frames(&image)),
+        ));
+        Some(Held::Flat(flat, group, Strip { id, image, display }))
+    }
+
+    fn hand_texture(&self, image: &Image) -> wgpu::BindGroup {
         let view = upload_texture(
             &self.device,
             &self.queue,
@@ -1757,19 +1814,13 @@ impl Renderer {
             image.height as u32,
             &image.rgba,
         );
-        let group = bind_group(
+        bind_group(
             &self.device,
             &self.layout_bg,
             &self.hand_globals,
             &self.sampler,
             &view,
-        );
-        let flat = Box::new(hand::Flat::new(
-            &image,
-            display,
-            self.dials.frame(id, hand::strip_frames(&image)),
-        ));
-        Some(Held::Flat(flat, group, Strip { id, image, display }))
+        )
     }
 
     fn hand_group(&self, tex: HandTex) -> &wgpu::BindGroup {
@@ -1781,6 +1832,7 @@ impl Renderer {
                 .unwrap_or(group),
             (HandTex::Map(t), _, _) => self.map_group(t),
             (HandTex::Item, _, Some((_, Held::Flat(_, group, _)))) => group,
+            (HandTex::BuiltIn, _, Some((_, Held::BuiltIn(_, _, group)))) => group,
             _ => &self.hand_atlas_group,
         }
     }
@@ -1852,7 +1904,8 @@ impl Renderer {
         mut draw: hand::Draw,
         tex: HandTex,
     ) -> Option<(GpuMesh, HandTex, Option<GpuMesh>)> {
-        let glint = self.hand.is_some_and(|h| h.glint && h.held.is_some());
+        let glint = !matches!(tex, HandTex::BuiltIn)
+            && self.hand.is_some_and(|h| h.glint && h.held.is_some());
         if glint {
             self.load_texture(entity::GLINT_TEXTURE);
         }

@@ -204,6 +204,21 @@ fn rain_and_hand_draw_on_top_of_the_world() {
     assert_ne!(armed, holding, "a held block must differ from the arm");
     assert_ne!(holding, sword, "a flat sword must differ from a held block");
     assert_ne!(sword, torch, "a flat torch must differ from the sword");
+    for id in [54, 397, 425] {
+        let built_in = frame(
+            &mut r,
+            0.0,
+            Some(Hand {
+                held: Some(HeldKind::Item {
+                    id,
+                    damage: 0,
+                    dye: None,
+                }),
+                ..bare
+            }),
+        );
+        assert_ne!(built_in, clear, "built-in item {id} is invisible");
+    }
     let enchanted = frame(
         &mut r,
         0.0,

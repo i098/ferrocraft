@@ -45,7 +45,7 @@ pub use sky::{celestial_angle, Dimension, Environment, Fluid};
 pub use ambient::{random_display_ticks, Effect as AmbientEffect};
 pub use assets::{decode_png, encode_png, AssetSource, Font, Image};
 pub use biome::splashes;
-pub use blockent::{book_quads, Banner, BookQuad, Skull, WornHead};
+pub use blockent::{banner_item_mesh, book_quads, Banner, BookQuad, Skull, WornHead};
 pub use blocks::flower_pot_state;
 pub use entity::{
     bobber_line, nametags, CapeSway, Class, EntityDraw, HorseLook, Look, NameTag, StandLook,

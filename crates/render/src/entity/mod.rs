@@ -247,6 +247,8 @@ pub const BLEND_ALPHA: f32 = 0.999;
 /// Vertex alpha that sends an eye layer to the additive pass (`LayerSpiderEyes`, `LayerEndermanEyes`,
 /// `LayerEnderDragonEyes`: `blendFunc(ONE, ONE)`), so the glow adds to the body texture.
 pub const EYES_ALPHA: f32 = 0.998;
+/// `RenderXPOrb.doRender`: the orb colour carries alpha 128 of 255; it draws in the blended pass.
+pub const ORB_ALPHA: f32 = 128.0 / 255.0;
 
 impl Default for Look {
     fn default() -> Look {
@@ -1187,9 +1189,11 @@ pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 3] {
     let mut solid: Vec<[u32; 3]> = Vec::new();
     for t in mesh.indices.as_chunks::<3>().0 {
         let alpha = vertices[t[0] as usize].color[3];
-        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA, EYES_ALPHA]
+        // The orb blends like the gel: source alpha, depth written.
+        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA, EYES_ALPHA, ORB_ALPHA]
             .iter()
             .position(|a| *a == alpha)
+            .map(|i| [0, 1, 2, 1][i])
             .map(|i| &mut out[i])
         else {
             solid.push(*t);
@@ -1220,9 +1224,15 @@ pub(crate) fn light_level(
         };
         light([at[0], at[1] + f64::from(d.eye_height), at[2]])
     };
+    // `EntityXPOrb.getBrightnessForRender` adds 120 of 240 to the block light.
+    let block = if d.class == Class::Orb {
+        (level[1] + 0.5).min(1.0)
+    } else {
+        level[1]
+    };
     [
         level[0],
-        level[1]
+        block
             + if flash && hurt_flash(d) {
                 HURT_FLAG
             } else {
@@ -2678,6 +2688,14 @@ pub(crate) mod tests {
         let ys = out.vertices.iter().map(|v| v.pos[1]);
         let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(l, h), y| (l.min(y), h.max(y)));
         assert!((lo + 0.075).abs() < 1e-5 && (hi - 0.225).abs() < 1e-5);
+        // Half transparent: the quad leaves the opaque pass for the blended one.
+        assert!(out.vertices.iter().all(|v| v.color[3] == ORB_ALPHA));
+        let [ghosts, gel, eyes] = take_ghosts(&mut out);
+        assert_eq!(
+            (out.indices.len(), ghosts.indices.len(), eyes.indices.len()),
+            (0, 0, 0)
+        );
+        assert_eq!(gel.indices.len(), 6);
     }
 
     #[test]

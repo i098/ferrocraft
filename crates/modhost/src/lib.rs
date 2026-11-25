@@ -466,20 +466,24 @@ impl ModHost {
     }
 
     /// Draw the vanilla HUD, then the mod commands from the same frame if a host is present.
+    /// `draw_hud(gui, owned, late)` runs before the commands with `late` false. A mod that draws the hotbar covers what
+    /// is under it, so the status bars (health, food, XP) that vanilla draws over the hotbar are drawn in a second call
+    /// with `late` true, after the commands.
     /// Images the renderer has not seen yet are appended to `textures` as PNG files under the name quads use.
     pub fn draw(
         host: Option<&Self>,
         g: &mut gui::Gui,
         textures: &mut Vec<(String, Vec<u8>)>,
         hotbar: Option<(&gui::HotbarItems, f32)>,
-        draw_hud: impl FnOnce(&mut gui::Gui, hud::Owned),
+        mut draw_hud: impl FnMut(&mut gui::Gui, hud::Owned, bool),
     ) {
         let Some(host) = host else {
-            draw_hud(g, hud::Owned::default());
+            draw_hud(g, hud::Owned::default(), false);
             return;
         };
         let mut s = host.link.state.lock().unwrap();
-        draw_hud(g, s.hud);
+        let owned = s.hud;
+        draw_hud(g, owned, false);
         let Shared {
             commands,
             sources,
@@ -606,6 +610,9 @@ impl ModHost {
             }
         }
         g.set_clip(None);
+        if owned.has(hud::Element::Hotbar) {
+            draw_hud(g, owned, true);
+        }
     }
 
     /// One tick of the stand-in `EntityPlayerSP.onLivingUpdate` in the JVM, which the mods hook, and the sprint

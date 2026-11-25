@@ -41,6 +41,7 @@ impl Owned {
         }
         if self.has(Element::Hotbar) {
             f.player_view = false;
+            f.status_late = true;
         }
         if self.has(Element::Debug) {
             // An empty screen, not `None`: the crosshair still follows F3.
@@ -74,7 +75,7 @@ mod tests {
                     | 1 << Element::PlayerList as u32,
             )
             .leave_out(&mut f);
-        assert!(!f.player_view && !f.player_list);
+        assert!(!f.player_view && !f.player_list && f.status_late);
         assert!(f.helmet_pumpkin && !f.no_crosshair);
         assert_eq!(f.debug.map(|(l, r)| l.len() + r.len()), Some(0));
     }

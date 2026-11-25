@@ -349,9 +349,8 @@ impl ModHost {
         let staging = staging.map(|dir| Arc::new(Mutex::new(Some(dir))));
         let token = token();
         let mut cmd = jvm_command(cfg, port, &token, workspace.as_deref());
-        if staging.is_some() {
-            cmd.current_dir(&cfg.game_dir);
-        }
+        // Forge's launcher runs in the game directory; OneConfig reads `./OneConfig` from the working directory.
+        cmd.current_dir(&cfg.game_dir);
         let child = cmd.spawn()?;
         let host = Self {
             child: Arc::new(Mutex::new(child)),
@@ -471,6 +470,7 @@ impl ModHost {
         host: Option<&Self>,
         g: &mut gui::Gui,
         textures: &mut Vec<(String, Vec<u8>)>,
+        hotbar: Option<(&gui::HotbarItems, f32)>,
         draw_hud: impl FnOnce(&mut gui::Gui, hud::Owned),
     ) {
         let Some(host) = host else {
@@ -589,6 +589,11 @@ impl ModHost {
                     }
                 }
                 DrawCmd::Clip(rect) => g.set_clip(*rect),
+                DrawCmd::HotbarItem { slot, pos, scale } => {
+                    if let Some((items, partial)) = hotbar {
+                        gui::draw_mod_hotbar_item(g, items, usize::from(*slot), *pos, *scale, partial);
+                    }
+                }
                 DrawCmd::Define { .. } | DrawCmd::Hud(_) => {}
             }
         }

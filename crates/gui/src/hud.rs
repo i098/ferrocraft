@@ -289,25 +289,42 @@ impl Hud {
 
 /// `renderHotbarItem` for all nine slots: the pop squash, the icon and the count.
 fn draw_hotbar_items(gui: &mut Gui, items: &HotbarItems, partial_ticks: f32) {
-    for (i, slot) in items.slots.iter().enumerate() {
-        let Some(s) = slot else { continue };
+    for i in 0..9 {
         let (x, y) = hotbar_item_pos(gui, i as i32);
-        let f = items.bob[i] as f32 - partial_ticks;
-        if f > 0.0 {
-            let f1 = 1.0 + f / 5.0;
-            let (cx, cy) = ((x + 8) as f32, (y + 12) as f32);
-            gui.push();
-            gui.translate(cx, cy);
-            gui.scale(1.0 / f1, (f1 + 1.0) / 2.0);
-            gui.translate(-cx, -cy);
-        }
-        let mut c = GuiCanvas::new(gui);
-        items.icons.draw(&mut c, s, x, y);
-        if f > 0.0 {
-            c.gui.pop();
-        }
-        items.icons.overlay(&mut c, s, x, y, None);
+        draw_hotbar_item(gui, items, i, x, y, partial_ticks);
     }
+}
+
+/// `renderHotbarItem` for slot `i` with its top left at `(x, y)` in the current matrix.
+fn draw_hotbar_item(gui: &mut Gui, items: &HotbarItems, i: usize, x: i32, y: i32, partial_ticks: f32) {
+    let Some(s) = items.slots[i] else { return };
+    let f = items.bob[i] as f32 - partial_ticks;
+    if f > 0.0 {
+        let f1 = 1.0 + f / 5.0;
+        let (cx, cy) = ((x + 8) as f32, (y + 12) as f32);
+        gui.push();
+        gui.translate(cx, cy);
+        gui.scale(1.0 / f1, (f1 + 1.0) / 2.0);
+        gui.translate(-cx, -cy);
+    }
+    let mut c = GuiCanvas::new(gui);
+    items.icons.draw(&mut c, s, x, y);
+    if f > 0.0 {
+        c.gui.pop();
+    }
+    items.icons.overlay(&mut c, s, x, y, None);
+}
+
+/// A mod's `renderHotbarItem`: slot `i`'s item with its top left at `(x, y)` on the screen, drawn at `scale`.
+pub fn draw_mod_hotbar_item(gui: &mut Gui, items: &HotbarItems, i: usize, at: [f32; 2], scale: f32, partial_ticks: f32) {
+    if i >= 9 {
+        return;
+    }
+    gui.push();
+    gui.translate(at[0], at[1]);
+    gui.scale(scale, scale);
+    draw_hotbar_item(gui, items, i, 0, 0, partial_ticks);
+    gui.pop();
 }
 
 /// Top-left of hotbar slot `i`'s item (`renderHotbarItem`).

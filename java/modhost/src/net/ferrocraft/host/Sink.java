@@ -19,7 +19,7 @@ import java.util.Set;
  * sent once per name. 'I' image: the name as in 'D', 4 f32, i32 argb, u8 recolor (an SVG takes the color of argb), u8 blend (0 source alpha over, 1 inverts the destination, 2 darkens it, 3 adds).
  * 'C' clip: u8 on, then 4 f32 when on; later commands are cut to it. 'S' shape: u8 kind; kind 0 a rounded rect: 4 f32
  * box, 4 f32 radii (top left, top right, bottom right, bottom left), i32 argb; kind 1 a line: 4 f32 (x0 y0 x1 y1), f32 width,
- * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
+ * i32 argb. 'H' HUD owner: i32 bit set of the vanilla HUD elements that Java owns this frame. 'K' hotbar item: u8 slot, f32 x y (the matrix applied) and f32 scale; Rust draws the item of that slot there. Rect, gradient, image, shape and clip coordinates already include the GL matrix.
  */
 public final class Sink {
     private static int hudBits;
@@ -244,6 +244,21 @@ public final class Sink {
             out.writeByte(box == null ? 0 : 1);
             if (box != null) for (float v : box) out.writeFloat(v);
             clip = box != null;
+            count++;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** {@code GuiIngame.renderHotbarItem}: slot {@code slot}'s item at {@code x},{@code y}; the command holds the screen position and scale, which the mod's matrix gave. */
+    public static synchronized void hotbarItem(int slot, int x, int y) {
+        float[] m = STACK[top];
+        try {
+            out.writeByte('K');
+            out.writeByte(slot);
+            out.writeFloat(m[0] * x + m[1]);
+            out.writeFloat(m[0] * y + m[2]);
+            out.writeFloat(m[0]);
             count++;
         } catch (IOException e) {
             throw new IllegalStateException(e);

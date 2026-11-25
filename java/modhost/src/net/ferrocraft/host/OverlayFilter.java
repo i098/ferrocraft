@@ -50,9 +50,33 @@ public final class OverlayFilter {
         int bit = bit(e.type);
         if (bit != 0 && e.isCanceled()) {
             Sink.hud(bit);
+        } else if (e.type == ElementType.HOTBAR && modHotbar()) {
+            // Forge draws the bar through GuiIngame.renderTooltip, where the mod's Mixin moves and scales it; the items go to Rust as 'K' commands.
+            Sink.hud(bit);
         } else {
             e.setCanceled(true);
         }
+    }
+
+    private static final String[] HOTBAR_CHANGED = {
+        "net/minecraft/client/gui/GuiIngame.func_180479_a(", // renderTooltip
+        "net/minecraft/client/gui/GuiIngame.func_175184_a(", // renderHotbarItem
+    };
+
+    private static Boolean modHotbar;
+
+    /** Whether a mod changed the hotbar drawing; fixed once the hook table is complete, which is before the first frame. */
+    private static synchronized boolean modHotbar() {
+        if (modHotbar == null) {
+            modHotbar = false;
+            for (String hook : HookIndex.list()) {
+                for (String prefix : HOTBAR_CHANGED) {
+                    if (hook.startsWith(prefix)) modHotbar = true;
+                }
+            }
+            if (modHotbar) Host.log("a mod changed the hotbar: Java draws it");
+        }
+        return modHotbar;
     }
 
     public static void invoke(IEventListener listener, Event event) {

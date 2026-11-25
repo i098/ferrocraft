@@ -1442,6 +1442,7 @@ impl App {
                 self.mods.as_ref(),
                 &mut g,
                 &mut mod_textures,
+                frame.hotbar.as_ref().map(|h| (h, frame.partial_ticks)),
                 |g, owned| {
                     let mut frame = frame;
                     let without_armor;
@@ -1496,7 +1497,7 @@ impl App {
         let mut textures = std::mem::take(&mut c.pending_textures);
         // On the main menu a mod screen draws over the menu.
         if let (Some(mods), false, true) = (&self.mods, show_hud, self.mod_screen()) {
-            ferrocraft_modhost::ModHost::draw(Some(mods), &mut g, &mut mod_textures, |_, _| {});
+            ferrocraft_modhost::ModHost::draw(Some(mods), &mut g, &mut mod_textures, None, |_, _| {});
         }
         textures.extend(mod_textures);
         let (entities, quads) = (g.take_entities(), g.into_quads());

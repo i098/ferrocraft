@@ -206,8 +206,6 @@ pub struct Renderer {
     portal_add_pipe: wgpu::RenderPipeline,
     /// `LayerWitherAura` and `LayerCreeperCharge`: `blendFunc(ONE, ONE)`, depth tested, depth written (`depthMask(!invisible)`), no culling.
     aura_pipe: wgpu::RenderPipeline,
-    /// `MobAppearanceParticle`: `depthMask(true)`, blended, no culling (`RendererLivingEntity.doRender` calls `disableCull`).
-    curse_pipe: wgpu::RenderPipeline,
     selection_pipe: wgpu::RenderPipeline,
     /// Entity models: opaque like `opaque_pipe`, but with no culling, as `RendererLivingEntity.doRender` calls `disableCull`.
     entity_pipe: wgpu::RenderPipeline,
@@ -489,7 +487,7 @@ impl Renderer {
         let entity_group = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let entity_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &entity_view);
         let block_atlas = bind_group(&device, &layout_bg, &globals, &sampler, &flat_view);
-        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe, entity_pipe, curse_pipe, entity_blend_pipe, entity_ghost_pipe, entity_add_pipe] =
+        let [opaque_pipe, water_pipe, translucent_pipe, sky_pipe, sky_add_pipe, sky_fog_pipe, cloud_pipe, cloud_depth_pipe, hand_pipe, line_pipe, axes_pipe, crack_pipe, bolt_pipe, fire_pipe, shadow_pipe, hand_glint_pipe, border_pipe, beam_pipe, beam_glow_pipe, portal_sky_pipe, portal_add_pipe, aura_pipe, selection_pipe, entity_pipe, entity_blend_pipe, entity_ghost_pipe, entity_add_pipe] =
             build_pipelines(&device, &layout_bg, format);
         let axes = axes::Axes::new(&device, &layout_bg, &sampler, &flat_view, axes_pipe);
         let gui_pipes = gui_pipelines(&device, &layout_bg, format);
@@ -558,7 +556,6 @@ impl Renderer {
             portal_sky_pipe,
             portal_add_pipe,
             aura_pipe,
-            curse_pipe,
             entity_blend_pipe,
             entity_ghost_pipe,
             entity_add_pipe,
@@ -2282,7 +2279,7 @@ impl Renderer {
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             if let Some(m) = &particle_curse {
-                pass.set_pipeline(&self.curse_pipe);
+                pass.set_pipeline(&self.entity_blend_pipe);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 draw_mesh(&mut pass, m);
                 pass.set_bind_group(0, &self.world_group, &[]);
@@ -2588,7 +2585,7 @@ fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
-) -> [wgpu::RenderPipeline; 28] {
+) -> [wgpu::RenderPipeline; 27] {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -2970,16 +2967,6 @@ fn build_pipelines(
         true,
         false,
     );
-    let curse_pipe = pipe(
-        "vs_world",
-        "fs_world",
-        stride,
-        &world_attrs,
-        alpha,
-        true,
-        true,
-        false,
-    );
     let entity_blend_pipe = pipe(
         "vs_world",
         "fs_world",
@@ -3043,7 +3030,6 @@ fn build_pipelines(
         aura_pipe,
         selection_pipe,
         entity_pipe,
-        curse_pipe,
         entity_blend_pipe,
         entity_ghost_pipe,
         entity_add_pipe,

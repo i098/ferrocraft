@@ -54,9 +54,8 @@ pub fn requires_tool(id: u16) -> bool {
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
 /// `None` when the block ray passes through (air, water, lava, fire). Doors, chests, fences,
 /// panes, walls and vines read their neighbours. Stairs, which vanilla traces as several boxes,
-/// pistons (29, 33, 34), the brewing stand (117), cocoa (127), tripwire hooks and wires (131,
-/// 132), anvils (145), skulls (144), double plants (175), banners (176, 177) and end rods (198)
-/// are full cubes here.
+/// pistons (29, 33, 34), the brewing stand (117), tripwire hooks and wires (131, 132),
+/// double plants (175), banners (176, 177) and end rods (198) are full cubes here.
 pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     let state = at(pos);
     let id = state >> 4;

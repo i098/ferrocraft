@@ -66,15 +66,9 @@ fn mob(id: u8, x: f64, z: f64, size: (f32, f32), child: bool) -> EntityDraw {
 }
 
 
-fn shot(draws: &[EntityDraw], cam: &Camera, night: bool) -> Vec<u8> {
+fn shot(draws: &[EntityDraw], cam: &Camera) -> Vec<u8> {
     let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("FERROCRAFT_CLIENT_JAR must name the 1.8.9 client jar");
     let mut r = Renderer::new_offscreen(1280, 720, Some(std::path::Path::new(&jar)));
-    if night {
-        r.set_environment(render::Environment {
-            world_time: 13000,
-            ..Default::default()
-        });
-    }
     for cx in -2..=2 {
         for cz in -2..=2 {
             r.upload_chunk(&Flat(cx, cz));
@@ -110,8 +104,8 @@ fn a_saddled_pig_draws_the_saddle() {
         d
     };
     let c = cam(64.62, 20.0);
-    let plain = shot(&[pig(0)], &c, false);
-    let saddled = shot(&[pig(1)], &c, false);
+    let plain = shot(&[pig(0)], &c);
+    let saddled = shot(&[pig(1)], &c);
     save("pig.png", &saddled);
     let changed = plain.chunks(4).zip(saddled.chunks(4)).filter(|(a, b)| a != b).count();
     assert!(changed > 300, "the saddle moved {changed} pixels");
@@ -127,8 +121,8 @@ fn the_wither_armor_stays_translucent() {
         d
     };
     let c = cam(65.62, 0.0);
-    let plain = shot(&[wither(300.0)], &c, false);
-    let armored = shot(&[wither(100.0)], &c, false);
+    let plain = shot(&[wither(300.0)], &c);
+    let armored = shot(&[wither(100.0)], &c);
     save("wither.png", &armored);
     save("wither_plain.png", &plain);
     let diffs: Vec<u32> = plain

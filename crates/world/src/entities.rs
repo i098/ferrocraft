@@ -310,7 +310,7 @@ pub struct Entity {
     pub squid: crate::squid::Squid,
     /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
     pub dragon: Option<Box<crate::mob_anim::Dragon>>,
-    /// Arrows, thrown objects, items, TNT, falling blocks and bobbers: the client-side flight state.
+    /// Arrows, thrown objects, items, TNT, falling blocks, bobbers and experience orbs: the client-side flight state.
     pub(crate) proj: crate::projectile::State,
 }
 
@@ -655,16 +655,14 @@ impl Entity {
         }
     }
 
-    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers; an arrow that ends on a hit
+    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks, bobbers and experience orbs; an arrow that ends on a hit
     /// plays its sound.
     fn fly(
         &mut self,
         at: &dyn Fn([i32; 3]) -> u16,
         targets: &[crate::projectile::Target],
     ) -> Option<Fx> {
-        let Some(object) = self.sim_id() else {
-            return None;
-        };
+        let object = self.sim_id()?;
         if !crate::projectile::simulated(object) {
             return None;
         }

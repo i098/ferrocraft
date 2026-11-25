@@ -1,5 +1,5 @@
 //! Client-side flight of the entities the server sends rarely: arrows, thrown objects, dropped items, primed TNT,
-//! falling blocks and fishing bobbers. Each `step` is one `onUpdate` of the 1.8.9 class, run once per tick.
+//! falling blocks, fishing bobbers and experience orbs. Each `step` is one `onUpdate` of the 1.8.9 class, run once per tick.
 //!
 //! Entity hits of arrows and bobbers run here as the client runs them (`takeDamage` answers on a client world).
 //!

@@ -551,7 +551,7 @@ impl App {
         // `getFOVModifier`: dying zooms out, being in water zooms in.
         let mut zoom = 1.0;
         if self.game.health <= 0.0 {
-            let t = f32::from(self.game.death_ticks) + frac as f32;
+            let t = f32::from(self.game.death_time()) + frac as f32;
             zoom /= (1.0 - 500.0 / (t + 500.0)) * 2.0 + 1.0;
         }
         if self.fluid_at(cam.pos) == Some(Fluid::Water) {
@@ -576,7 +576,7 @@ impl App {
         let g = &self.game;
         let mut roll = 0.0;
         if g.health <= 0.0 {
-            roll += 40.0 - 8000.0 / (f32::from(g.death_ticks) + frac + 200.0);
+            roll += 40.0 - 8000.0 / (f32::from(g.death_time()) + frac + 200.0);
         }
         let t = f32::from(g.hurt_timer) - frac;
         if t >= 0.0 {

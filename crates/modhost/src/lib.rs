@@ -468,7 +468,7 @@ impl ModHost {
     /// Draw the vanilla HUD, then the mod commands from the same frame if a host is present.
     /// `draw_hud(gui, owned, late)` runs before the commands with `late` false. A mod that draws the hotbar covers what
     /// is under it, so the status bars (health, food, XP) that vanilla draws over the hotbar are drawn in a second call
-    /// with `late` true, after the commands; the callback does nothing then unless a mod owns the hotbar.
+    /// with `late` true, once, after the commands that come before the first hotbar item, so the item icons and their counts cover the first hearts as in Forge; the callback does nothing then unless a mod owns the hotbar.
     /// Images the renderer has not seen yet are appended to `textures` as PNG files under the name quads use.
     pub fn draw(
         host: Option<&Self>,
@@ -491,6 +491,7 @@ impl ModHost {
             ..
         } = &mut *s;
         let factor = g.scale.factor.max(1);
+        let (mut clip, mut late_done) = (None, false);
         for c in commands.iter() {
             match c {
                 DrawCmd::Rect {
@@ -593,8 +594,17 @@ impl ModHost {
                         );
                     }
                 }
-                DrawCmd::Clip(rect) => g.set_clip(*rect),
+                DrawCmd::Clip(rect) => {
+                    clip = *rect;
+                    g.set_clip(clip);
+                }
                 DrawCmd::HotbarItem { slot, pos, scale } => {
+                    if !late_done {
+                        late_done = true;
+                        g.set_clip(None);
+                        draw_hud(g, owned, true);
+                        g.set_clip(clip);
+                    }
                     if let Some((items, partial)) = hotbar {
                         gui::draw_mod_hotbar_item(
                             g,
@@ -610,7 +620,9 @@ impl ModHost {
             }
         }
         g.set_clip(None);
-        draw_hud(g, owned, true);
+        if !late_done {
+            draw_hud(g, owned, true);
+        }
     }
 
     /// One tick of the stand-in `EntityPlayerSP.onLivingUpdate` in the JVM, which the mods hook, and the sprint

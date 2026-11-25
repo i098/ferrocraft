@@ -440,7 +440,13 @@ fn dead_player_sends_movement_for_twenty_ticks_only() {
     let mut app = idle_app(port, &out, &rx);
     app.game.health = 0.0;
     let moves = (0..30)
-        .map(|_| tick(&mut app, &rx).0.iter().filter(|i| (3..=6).contains(*i)).count())
+        .map(|_| {
+            tick(&mut app, &rx)
+                .0
+                .iter()
+                .filter(|i| (3..=6).contains(*i))
+                .count()
+        })
         .sum::<usize>();
     assert_eq!(moves, 20);
 }

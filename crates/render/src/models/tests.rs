@@ -1164,3 +1164,12 @@ fn resource_names_that_escape_the_asset_root_are_rejected() {
     }
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// An inset flat quad is planar but not on the boundary; `Block.isFullCube` (frame) decides the rest in the mesher.
+#[test]
+fn inset_quad_is_planar_without_reaching_the_boundary() {
+    let json = r#"{"elements":[{"from":[4,13,4],"to":[12,16,12],
+        "faces":{"south":{"texture":"blocks/stone"}}}]}"#;
+    let quad = &bake(json, r#"{"model":"m"}"#)[0];
+    assert!(quad.planar && !quad.on_boundary);
+}

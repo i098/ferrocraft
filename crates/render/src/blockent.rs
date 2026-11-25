@@ -4,7 +4,8 @@
 //! (`TileEntityBannerRenderer`). The renderer keeps the position of every such block and the data
 //! the server sends for it, and meshes all of them again each frame.
 //!
-//! Sign text takes the item lighting of its fixed normal. Not ported: the obfuscated, underlined
+//! Sign text takes the item lighting of its fixed normal, which `glNormal3f(0, 0, -f3)` leaves
+//! `f3` long, so only the ambient 0.4 of the item lighting shows. Not ported: the obfuscated, underlined
 //! and struck-through text styles of sign lines, glyphs outside `ascii.png`, the destroy-stage
 //! overlay, and the sounds.
 
@@ -907,9 +908,11 @@ fn sign(
     let f3 = 0.015_625 * f;
     let text = m.translate([0.0, 0.5 * f, 0.07 * f]).scale([f3, -f3, f3]);
     let target = out.mesh(Tex::Named(FONT_TEXTURE.into()));
-    // The renderer sets `glNormal3f(0, 0, -1)` for the text under the item lighting.
+    // The renderer sets `glNormal3f(0, 0, -f3)` under the item lighting with `RESCALE_NORMAL`:
+    // the normal keeps its length `f3`, so the two diffuse lights add almost nothing to 0.4.
     let (a, b) = (text.apply([0.0; 3]), text.apply([0.0, 0.0, -1.0]));
-    let shade = gl_light([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    let lit = gl_light([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    let shade = 0.4 + (lit - 0.4) * f3;
     for (j, line) in lines.iter().enumerate() {
         let line = first_line(font, line, SIGN_LINE_WIDTH);
         let x = -(string_width(font, &line) / 2);
@@ -1409,19 +1412,11 @@ mod tests {
     }
 
     #[test]
-    fn sign_text_takes_item_lighting_of_its_normal() {
-        // Vanilla `glNormal3f(0, 0, -1)` under the two item lights: 0.4 + 0.6 * 0.7 / |(0.2, 1, 0.7)|.
-        // A sign turned a quarter has its text normal along x: 0.4 + 0.6 * 0.2 / |(0.2, 1, 0.7)|.
-        for (meta, expected) in [
-            (0, 0.4 + 0.6 * 0.7 / (0.04_f32 + 1.0 + 0.49).sqrt()),
-            (4, 0.4 + 0.6 * 0.2 / (0.04_f32 + 1.0 + 0.49).sqrt()),
-        ] {
+    fn sign_text_shows_only_the_ambient_light() {
+        // Vanilla 1.8.9 sign text measures 101 of 255 for `§c` red (FF5555 -> 101/34/34).
+        for meta in [0, 4] {
             for v in &sign_text_mesh("§fW", meta).vertices {
-                assert!(
-                    (v.color[0] - expected).abs() < 0.01,
-                    "meta {meta}: {}",
-                    v.color[0]
-                );
+                assert!((v.color[0] - 0.4).abs() < 0.01, "meta {meta}: {}", v.color[0]);
             }
         }
     }

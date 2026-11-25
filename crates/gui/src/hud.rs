@@ -221,9 +221,18 @@ impl Hud {
         }
     }
 
+    /// The whole overlay, or with `late` only the status bars over a hotbar that a mod drew.
+    pub fn draw_pass(&mut self, gui: &mut Gui, f: &Frame, late: bool) {
+        if late {
+            self.draw_status_bars(gui, f);
+        } else {
+            self.draw(gui, f);
+        }
+    }
+
     /// Health, food, armor, air and XP over a hotbar that a mod drew; the second pass of a frame with `status_late`.
     pub fn draw_status_bars(&mut self, gui: &mut Gui, f: &Frame) {
-        if let Some(s) = f.status {
+        if let Some(s) = f.status.filter(|_| f.status_late) {
             gui.set_blend(Blend::Alpha);
             self.draw_status(gui, s);
             gui.set_color(0xFFFF_FFFF);

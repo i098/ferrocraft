@@ -1456,11 +1456,7 @@ impl App {
                         frame.status = Some(&without_armor);
                     }
                     owned.leave_out(&mut frame);
-                    if late {
-                        self.hud.draw_status_bars(g, &frame);
-                    } else {
-                        self.hud.draw(g, &frame);
-                    }
+                    self.hud.draw_pass(g, &frame, late);
                 },
             );
         }

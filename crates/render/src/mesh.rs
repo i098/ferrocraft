@@ -785,13 +785,16 @@ impl Mesher<'_> {
             if !model_face_visible(q, state, self.fancy, |dx, dy, dz| self.st(at, [dx, dy, dz])) {
                 continue;
             }
-            let light_face = q.cull.or(q.on_boundary.then_some(q.face));
+            // `fillQuadBounds`: a flat quad is on the boundary when `isFullCube`, which only the end portal frame
+            // among the modelled blocks keeps at its default of true.
+            let on_boundary = q.on_boundary || (q.planar && state >> 4 == 120);
+            let light_face = q.cull.or(on_boundary.then_some(q.face));
             let flat_light = self.light_at(at, light_face.map_or([0; 3], |f| DIRS[f]));
             let smooth = self.smooth && !self.flat && crate::blocks::emission(state) == 0;
             let axis = q.smooth_axis().filter(|_| smooth);
             let verts = std::array::from_fn(|i| {
                 let (light, ao) = axis.map_or((flat_light, 1.0), |a| {
-                    self.model_corner(at, q.face, a, q.pos[i], !q.on_boundary)
+                    self.model_corner(at, q.face, a, q.pos[i], !on_boundary)
                 });
                 let shade = if q.shade { SHADE[q.shade_face] } else { 1.0 };
                 let k = if q.shade || ao < 1.0 {

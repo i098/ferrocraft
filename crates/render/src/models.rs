@@ -92,6 +92,9 @@ pub struct Quad {
     /// `cullface` after the blockstate rotation: hidden when that neighbour is opaque.
     pub cull: Option<usize>,
     pub on_boundary: bool,
+    /// The corners share one plane: `fillQuadBounds` also counts it as on the boundary for a block whose
+    /// `isFullCube` is true.
+    pub planar: bool,
     pub shade: bool,
     /// The face has a `tintindex`: the block's biome or fixed tint multiplies the texel.
     pub tint: bool,
@@ -432,7 +435,7 @@ fn bake_quad(
     if uvlock {
         lock_uv(&mut uv, &pos, shade_face, face.turns);
     }
-    let on_boundary = on_boundary(&pos, geometric_face);
+    let (planar, on_boundary) = plane_flags(&pos, geometric_face);
     Quad {
         pos,
         uv,
@@ -441,6 +444,7 @@ fn bake_quad(
         shade_face,
         cull: face.cull.and_then(|c| turned(NORMALS[c])),
         on_boundary,
+        planar,
         shade: el.shade,
         tint: face.tint,
         ao: true,
@@ -455,7 +459,8 @@ fn turn_vertex(p: [f32; 3], x: u8, y: u8) -> [f32; 3] {
     quarter(p.map(|v| v - 0.5), x, y).map(|v| v + 0.5)
 }
 
-fn on_boundary(pos: &[[f32; 3]; 4], face: usize) -> bool {
+/// `(planar, on_boundary)`: all four corners share one plane; that plane is the block boundary.
+fn plane_flags(pos: &[[f32; 3]; 4], face: usize) -> (bool, bool) {
     let axis = [1, 2, 0][face / 2];
     let plane = pos[0][axis];
     let reaches_boundary = if NORMALS[face][axis] < 0.0 {
@@ -463,7 +468,8 @@ fn on_boundary(pos: &[[f32; 3]; 4], face: usize) -> bool {
     } else {
         plane > 0.9999
     };
-    reaches_boundary && pos[1..].iter().all(|p| p[axis] == plane)
+    let planar = pos[1..].iter().all(|p| p[axis] == plane);
+    (planar, planar && reaches_boundary)
 }
 
 /// `FaceBakery.func_178401_a`: the texture stays fixed to the world; each vertex takes the default uv of its

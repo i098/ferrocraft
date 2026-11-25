@@ -206,7 +206,7 @@ pub struct Renderer {
     portal_add_pipe: wgpu::RenderPipeline,
     /// `LayerWitherAura` and `LayerCreeperCharge`: `blendFunc(ONE, ONE)`, depth tested, depth written (`depthMask(!invisible)`), no culling.
     aura_pipe: wgpu::RenderPipeline,
-    /// `MobAppearanceParticle`: `depthMask(true)`, blended, back faces culled.
+    /// `MobAppearanceParticle`: `depthMask(true)`, blended, no culling (`RendererLivingEntity.doRender` calls `disableCull`).
     curse_pipe: wgpu::RenderPipeline,
     selection_pipe: wgpu::RenderPipeline,
     /// Entity models: opaque like `opaque_pipe`, but with no culling, as `RendererLivingEntity.doRender` calls `disableCull`.
@@ -2978,7 +2978,7 @@ fn build_pipelines(
         alpha,
         true,
         true,
-        true,
+        false,
     );
     let entity_blend_pipe = pipe(
         "vs_world",

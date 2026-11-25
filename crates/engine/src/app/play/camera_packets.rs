@@ -415,14 +415,14 @@ fn packets_are_sent_over_an_unloaded_chunk() {
 }
 
 /// `onDeathUpdate` calls `setDead()` at `deathTime == 20` and `World.updateEntities` skips the player
-/// from then on, so a dead rider sends no look, steer or horse jump either.
+/// from the next tick on, so a dead rider sends no look, steer or horse jump either.
 #[test]
 fn dead_rider_sends_nothing_after_twenty_death_ticks() {
     let (port, rx, out) = server();
     let mut app = idle_app(port, &out, &rx);
     app.game.vehicle = Some(OTHER_ID);
     app.game.health = 0.0;
-    for _ in 0..20 {
+    for _ in 0..21 {
         app.tick_once();
     }
     sent_so_far(&mut app, &rx);
@@ -430,4 +430,23 @@ fn dead_rider_sends_nothing_after_twenty_death_ticks() {
     assert!(app.game.player_removed());
     let (ids, _) = tick(&mut app, &rx);
     assert_eq!(ids, Vec::<u8>::new());
+}
+
+/// Issue #706: vanilla sends C03-C06 in each of the 20 updates up to and including the one that calls
+/// `setDead()` (`EntityPlayerSP.onUpdate` runs `onUpdateWalkingPlayer` after `super.onUpdate()`), then none.
+#[test]
+fn dead_player_sends_movement_for_twenty_ticks_only() {
+    let (port, rx, out) = server();
+    let mut app = idle_app(port, &out, &rx);
+    app.game.health = 0.0;
+    let moves = (0..30)
+        .map(|_| {
+            tick(&mut app, &rx)
+                .0
+                .iter()
+                .filter(|i| (3..=6).contains(*i))
+                .count()
+        })
+        .sum::<usize>();
+    assert_eq!(moves, 20);
 }

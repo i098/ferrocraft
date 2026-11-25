@@ -828,10 +828,16 @@ impl Game {
         landed && flying
     }
 
-    /// `onDeathUpdate` calls `setDead()` at `deathTime == 20`; `World.updateEntities`
-    /// then skips the player, so no C03-C06, C0B or C0C goes out until the respawn.
+    /// `deathTime`: `death_ticks` runs one past it, to the tick after `setDead()`.
+    pub fn death_time(&self) -> u8 {
+        self.death_ticks.min(20)
+    }
+
+    /// `onDeathUpdate` calls `setDead()` at `deathTime == 20`, inside the same `onUpdate` that still ends
+    /// in `onUpdateWalkingPlayer`. `World.updateEntities` skips the player from the next tick on, so no
+    /// C03-C06, C0B or C0C goes out until the respawn.
     pub fn player_removed(&self) -> bool {
-        self.health <= 0.0 && self.death_ticks >= 20
+        self.health <= 0.0 && self.death_ticks > 20
     }
 
     /// One 20 TPS step. The player stays frozen until the chunk under it has arrived, so
@@ -854,7 +860,7 @@ impl Game {
         self.death_ticks = if self.health > 0.0 {
             0
         } else {
-            (self.death_ticks + 1).min(20)
+            (self.death_ticks + 1).min(21)
         };
         let store = &self.store;
         let rained_on = raining_at(store, self.weather.strengths().0);
@@ -1533,7 +1539,7 @@ mod tests {
         for _ in 0..30 {
             g.tick(IDLE);
         }
-        assert_eq!(g.death_ticks, 20);
+        assert_eq!(g.death_ticks, 21);
         assert!(g.player_removed());
         g.apply(hp(20.0));
         g.tick(IDLE);

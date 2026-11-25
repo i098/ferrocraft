@@ -812,7 +812,14 @@ impl Mesher<'_> {
 
     /// `AmbientOcclusionFace` for a flat model quad: the four face-corner values of `smooth`, blended by the
     /// vertex position inside the face plane (the quad is the part of the plane it covers).
-    fn model_corner(&self, at: [i32; 3], face: usize, axis: usize, p: [f32; 3]) -> ([f32; 2], f32) {
+    fn model_corner(
+        &self,
+        at: [i32; 3],
+        face: usize,
+        axis: usize,
+        p: [f32; 3],
+        inset: bool,
+    ) -> ([f32; 2], f32) {
         let (b, c) = match axis {
             0 => (1, 2),
             1 => (0, 2),

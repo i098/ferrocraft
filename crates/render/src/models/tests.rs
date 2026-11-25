@@ -189,6 +189,17 @@ fn rotated_east_face_projects_cracks_from_above_without_changing_material_uv() {
     assert_eq!(cracks[1].uv, [0.5, 9.0 / 16.0]);
 }
 
+/// `renderModelAmbientOcclusionQuads` lights every quad: a piston body face on the block boundary, with a
+/// `cullface`, takes smooth lighting like an inset one.
+#[test]
+fn boundary_cullface_quads_take_smooth_lighting() {
+    let json = r#"{"elements":[{"from":[0,0,0],"to":[16,16,16],
+        "faces":{"north":{"texture":"blocks/stone","cullface":"north"}}}]}"#;
+    let quad = &bake(json, r#"{"model":"m"}"#)[0];
+    assert!(quad.on_boundary && quad.cull == Some(NORTH));
+    assert_eq!(quad.smooth_axis(), Some(2));
+}
+
 fn jar() -> Option<AssetSource> {
     let Some(path) = std::env::var_os("FERROCRAFT_CLIENT_JAR") else {
         eprintln!("FERROCRAFT_CLIENT_JAR not set; skipping");

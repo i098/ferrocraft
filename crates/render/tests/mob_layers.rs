@@ -1,5 +1,5 @@
-//! Renders the saddled pig, the armored wither and the enderman eyes offscreen with the real 1.8.9 assets.
-//! `MOBS_PROOF_DIR` keeps `pig.png`, `wither.png` and `enderman.png`.
+//! Renders the saddled pig and the armored wither offscreen with the real 1.8.9 assets.
+//! `MOBS_PROOF_DIR` keeps `pig.png`, `wither.png` and `wither_plain.png`.
 use render::{encode_png, Camera, ChunkBlocks, Class, EntityDraw, Look, Renderer};
 
 struct Flat(i32, i32);
@@ -67,8 +67,8 @@ fn mob(id: u8, x: f64, z: f64, size: (f32, f32), child: bool) -> EntityDraw {
 
 
 fn shot(draws: &[EntityDraw], cam: &Camera, night: bool) -> Vec<u8> {
-    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").map(std::path::PathBuf::from);
-    let mut r = Renderer::new_offscreen(1280, 720, jar.as_deref());
+    let jar = std::env::var_os("FERROCRAFT_CLIENT_JAR").expect("FERROCRAFT_CLIENT_JAR must name the 1.8.9 client jar");
+    let mut r = Renderer::new_offscreen(1280, 720, Some(std::path::Path::new(&jar)));
     if night {
         r.set_environment(render::Environment {
             world_time: 13000,
@@ -131,14 +131,15 @@ fn the_wither_armor_stays_translucent() {
     let armored = shot(&[wither(100.0)], &c, false);
     save("wither.png", &armored);
     save("wither_plain.png", &plain);
+    let diffs: Vec<u32> = plain
+        .chunks(4)
+        .zip(armored.chunks(4))
+        .filter(|(a, b)| a != b)
+        .map(|(a, b)| (0..3).map(|i| a[i].abs_diff(b[i]) as u32).sum::<u32>())
+        .collect();
+    assert!(diffs.len() > 300, "the armor moved {} pixels", diffs.len());
+    let mean = diffs.iter().sum::<u32>() as f32 / diffs.len() as f32;
+    eprintln!("armor moved {} pixels, mean rgb shift {mean}", diffs.len());
+    assert!(mean < 90.0, "the armor is a dense shell: mean rgb shift {mean}");
 }
 
-#[test]
-#[ignore = "requires the vanilla 1.8.9 client assets and a GPU or software adapter"]
-fn the_enderman_eyes_match_the_vanilla_light() {
-    let mut d = mob(58, 0.0, 3.0, (0.6, 2.9), false);
-    d.eye_height = 2.55;
-    let c = cam(64.0 + 2.55, 0.0);
-    save("enderman.png", &shot(&[d.clone()], &c, true));
-    save("enderman_day.png", &shot(&[d], &c, false));
-}

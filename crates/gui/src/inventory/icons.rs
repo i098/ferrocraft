@@ -631,7 +631,9 @@ fn entity_faces(name: &str) -> Option<Vec<Face>> {
         }
         "banner" => render::banner_item_mesh()
             .vertices
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|face| Face {
                 pts: std::array::from_fn(|i| face[i].pos),
                 uv: std::array::from_fn(|i| face[i].uv),

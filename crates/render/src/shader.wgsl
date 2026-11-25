@@ -175,6 +175,17 @@ fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
     return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
 }
 
+// `LayerWitherAura`, `LayerCreeperCharge`: entities draw with the alpha test on (`alphaFunc(GREATER, 0.1)`), so a
+// texel of alpha 0.1 or less is dropped with its colour and its depth, however bright its RGB is.
+@fragment
+fn fs_aura(i: WorldOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, i.uv);
+    if (t.a * i.color.a <= 0.1) {
+        discard;
+    }
+    return vec4<f32>(t.rgb * i.color.rgb, t.a * i.color.a);
+}
+
 // `renderSky` plane and dark discs: vertex color in the world fog, linear from 0 (`setupFog(-1)`), no light map.
 @fragment
 fn fs_sky_fog(i: WorldOut) -> @location(0) vec4<f32> {

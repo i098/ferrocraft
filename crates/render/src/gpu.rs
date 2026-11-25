@@ -2993,7 +2993,7 @@ fn build_pipelines(
     // nearest face of the shell adds light.
     let aura_pipe = pipe(
         "vs_world",
-        "fs_sky",
+        "fs_aura",
         stride,
         &world_attrs,
         Some(wgpu::BlendState {

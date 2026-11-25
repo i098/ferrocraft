@@ -265,6 +265,10 @@ impl Environment {
         // `BiomeGenBase.getSkyColorByTemp`.
         let t = (temperature / 3.0).clamp(-1.0, 1.0);
         let mut sky = hsb_to_rgb(0.622_222_24 - t * 0.05, 0.5 + t * 0.1, 1.0).map(|c| c * day);
+        if self.dimension == Dimension::End {
+            // Measured against vanilla 1.8.9: the End fog takes no blue from the day sky colour.
+            sky = [0.0; 3];
+        }
         if self.rain > 0.0 {
             sky = desaturate(sky, 0.6, 1.0 - self.rain * 0.75);
         }

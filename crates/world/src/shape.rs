@@ -375,21 +375,21 @@ pub(crate) fn push_boxes(at: At, pos: [i32; 3], out: &mut Vec<Cell>) {
         139 => out.extend(selection_box(at, pos).map(|b| [b[0], b[1], b[2], b[3], 1.5, b[5]])),
         64 | 71 | 193..=197 => out.extend(selection_box(at, pos)),
         _ if id > 197 || NO_COLLISION.contains(&id) => {}
-        _ => table_boxes(id, meta, out),
+        _ => out.extend_from_slice(table_boxes(id, meta)),
     }
 }
 
 /// The boxes of a block state from `SHAPES`; a full cube for ids without an entry.
-fn table_boxes(id: u16, meta: u16, out: &mut Vec<Cell>) {
+pub(crate) fn table_boxes(id: u16, meta: u16) -> &'static [Cell] {
     match SHAPES.iter().find(|s| s.0 == id) {
-        None => out.push([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+        None => &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
         Some((_, groups)) => {
             // A metadata value that vanilla rejects falls back to the first group.
             let group = groups
                 .iter()
                 .find(|g| g.0 >> meta & 1 != 0)
                 .unwrap_or(&groups[0]);
-            out.extend_from_slice(group.1);
+            group.1
         }
     }
 }

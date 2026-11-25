@@ -54,9 +54,8 @@ pub fn requires_tool(id: u16) -> bool {
 /// Selectable box of the block at `pos` relative to its cell as `[x0, y0, z0, x1, y1, z1]`, or
 /// `None` when the block ray passes through (air, water, lava, fire). Doors, chests, fences,
 /// panes, walls and vines read their neighbours. Stairs, which vanilla traces as several boxes,
-/// pistons (29, 33, 34), the brewing stand (117), cocoa (127), tripwire hooks and wires (131,
-/// 132), anvils (145), skulls (144), double plants (175), banners (176, 177) and end rods (198)
-/// are full cubes here.
+/// pistons (29, 33, 34), the brewing stand (117), tripwire hooks and wires (131, 132),
+/// double plants (175), banners (176, 177) and end rods (198) are full cubes here.
 pub fn selection_box(at: &dyn Fn([i32; 3]) -> u16, pos: [i32; 3]) -> Option<[f64; 6]> {
     let state = at(pos);
     let id = state >> 4;
@@ -228,6 +227,14 @@ fn state_box(state: u16) -> Option<[f64; 6]> {
     let (id, meta) = (state >> 4, state & 15);
     if matches!(id, 0 | 8..=11 | 51) {
         return None;
+    }
+    match id {
+        // Cocoa and skull selection and collision use the same state bounds.
+        127 | 144 => return crate::shape::table_boxes(id, meta).first().copied(),
+        // BlockAnvil.setBlockBoundsBasedOnState uses the facing axis, not the damage.
+        145 if meta & 1 == 0 => return Some([0.125, 0.0, 0.0, 0.875, 1.0, 1.0]),
+        145 => return Some([0.0, 0.0, 0.125, 1.0, 1.0, 0.875]),
+        _ => {}
     }
     let full = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
     Some(
@@ -1316,6 +1323,48 @@ mod tests {
         assert_eq!(raycast(&door, [0.8, 64.5, 0.5], 0.0, 0.0, 4.5), None);
         let hit = raycast(&door, [0.1, 65.5, 0.5], 0.0, 0.0, 4.5);
         assert_eq!(hit.map(|h| (h.pos, h.face)), Some(([0, 65, 2], 2)));
+    }
+
+    #[test]
+    fn ray_misses_empty_space_next_to_anvils_skulls_and_cocoa() {
+        for state in [
+            145 << 4,
+            (144 << 4) | 1,
+            127 << 4,
+            (127 << 4) | 4,
+            (127 << 4) | 8,
+        ] {
+            let at = |p| if p == [0, 64, 2] { state } else { 0 };
+            assert_eq!(raycast(&at, [0.05, 64.49, 0.5], 0.0, 0.0, 4.5), None);
+            assert_eq!(
+                raycast(&at, [0.5, 64.49, 0.5], 0.0, 0.0, 4.5).map(|h| h.pos),
+                Some([0, 64, 2])
+            );
+        }
+    }
+
+    #[test]
+    fn selection_matches_vanilla_anvil_skull_and_cocoa_bounds() {
+        let cases = [
+            ((145 << 4) | 8, [0.125, 0.0, 0.0, 0.875, 1.0, 1.0]),
+            ((145 << 4) | 9, [0.0, 0.0, 0.125, 1.0, 1.0, 0.875]),
+            ((144 << 4) | 1, [0.25, 0.0, 0.25, 0.75, 0.5, 0.75]),
+            ((144 << 4) | 10, [0.25, 0.25, 0.5, 0.75, 0.75, 1.0]),
+            (127 << 4, [0.375, 0.4375, 0.6875, 0.625, 0.75, 0.9375]),
+            (
+                (127 << 4) | 4,
+                [0.3125, 0.3125, 0.5625, 0.6875, 0.75, 0.9375],
+            ),
+            ((127 << 4) | 8, [0.25, 0.1875, 0.4375, 0.75, 0.75, 0.9375]),
+            ((127 << 4) | 11, [0.4375, 0.1875, 0.25, 0.9375, 0.75, 0.75]),
+        ];
+        for (state, expected) in cases {
+            assert_eq!(
+                selection_box(&|_| state, [0, 0, 0]),
+                Some(expected),
+                "state {state}"
+            );
+        }
     }
 
     #[test]

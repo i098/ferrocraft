@@ -18,11 +18,12 @@ pub use ferrocraft_protocol::codec::{ItemStack, Slot};
 pub use ferrocraft_protocol::nbt::{Compound, Nbt, Tag};
 use items::{Item, ENCHANTED_BOOK};
 
-/// `ItemStack.hasEffect`: enchanted stacks plus the items that always shine.
+/// `ItemStack.hasEffect`: enchanted stacks plus the items that always shine (`ItemEnchantedBook.hasEffect` is true
+/// even with no stored enchantment).
 pub fn glint(s: &ItemStack) -> bool {
     let count = |key| s.nbt.as_ref().map_or(0, |n| n.list_len(key));
     count("ench") > 0
-        || (s.id == ENCHANTED_BOOK && count("StoredEnchantments") > 0)
+        || s.id == ENCHANTED_BOOK
         || items::variant(s.id, s.damage).is_some_and(|v| v.glint)
 }
 
@@ -1138,6 +1139,12 @@ mod tests {
             damage: 0,
             nbt: None,
         })
+    }
+
+    #[test]
+    fn an_enchanted_book_shines_with_no_stored_enchantment() {
+        assert!(glint(&stack(ENCHANTED_BOOK, 1).unwrap()));
+        assert!(!glint(&stack(1, 1).unwrap()));
     }
 
     #[test]

@@ -2634,6 +2634,12 @@ fn gui_pipelines(
     })
 }
 
+/// Whether the pipeline draws with `glPolygonOffset(-3, -3)`: the crack overlay, and the flash of
+/// primed TNT (`fs_sky`, depth tested, no depth write).
+fn polygon_offset(fs: &str, depth: bool, depth_write: bool) -> bool {
+    fs == "fs_crack" || (fs == "fs_sky" && depth && !depth_write)
+}
+
 fn build_pipelines(
     device: &wgpu::Device,
     layout_bg: &wgpu::BindGroupLayout,
@@ -2727,10 +2733,7 @@ fn build_pipelines(
                     wgpu::CompareFunction::Always
                 },
                 stencil: Default::default(),
-                // `glPolygonOffset(-3, -3)` keeps the crack overlay and the white flash of primed
-                // TNT (`bolt_pipe`: additive, depth tested, no depth write) in front of the face
-                // they cover.
-                bias: if fs == "fs_crack" || (fs == "fs_sky" && depth && !depth_write) {
+                bias: if polygon_offset(fs, depth, depth_write) {
                     wgpu::DepthBiasState {
                         constant: -3,
                         slope_scale: -3.0,

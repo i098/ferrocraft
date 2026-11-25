@@ -247,8 +247,6 @@ pub const BLEND_ALPHA: f32 = 0.999;
 /// Vertex alpha that sends an eye layer to the additive pass (`LayerSpiderEyes`, `LayerEndermanEyes`,
 /// `LayerEnderDragonEyes`: `blendFunc(ONE, ONE)`), so the glow adds to the body texture.
 pub const EYES_ALPHA: f32 = 0.998;
-/// `RenderXPOrb.doRender`: the orb colour carries alpha 128 of 255; it draws in the blended pass.
-pub const ORB_ALPHA: f32 = 128.0 / 255.0;
 
 impl Default for Look {
     fn default() -> Look {
@@ -1177,7 +1175,7 @@ pub fn build(
 }
 
 /// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]), slime gel (alpha
-/// [`BLEND_ALPHA`]), XP orbs ([`ORB_ALPHA`], into the gel mesh) and eye layers ([`EYES_ALPHA`]) out of
+/// [`BLEND_ALPHA`]) and eye layers ([`EYES_ALPHA`]) out of
 /// `mesh`, which the opaque entity pass draws, into `[ghosts, gel, eyes]` meshes for the blended passes.
 pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 3] {
     let mut out = [
@@ -1189,11 +1187,9 @@ pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 3] {
     let mut solid: Vec<[u32; 3]> = Vec::new();
     for t in mesh.indices.as_chunks::<3>().0 {
         let alpha = vertices[t[0] as usize].color[3];
-        // The orb blends like the gel: source alpha, depth written.
-        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA, EYES_ALPHA, ORB_ALPHA]
+        let Some(dst) = [GHOST_ALPHA, BLEND_ALPHA, EYES_ALPHA]
             .iter()
             .position(|a| *a == alpha)
-            .map(|i| [0, 1, 2, 1][i])
             .map(|i| &mut out[i])
         else {
             solid.push(*t);
@@ -2688,14 +2684,14 @@ pub(crate) mod tests {
         let ys = out.vertices.iter().map(|v| v.pos[1]);
         let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(l, h), y| (l.min(y), h.max(y)));
         assert!((lo + 0.075).abs() < 1e-5 && (hi - 0.225).abs() < 1e-5);
-        // Half transparent: the quad leaves the opaque pass for the blended one.
-        assert!(out.vertices.iter().all(|v| v.color[3] == ORB_ALPHA));
+        // `RenderXPOrb` never enables blending, so the alpha 128 of its colour does nothing: the quad stays opaque.
+        assert!(out.vertices.iter().all(|v| v.color[3] == 1.0));
         let [ghosts, gel, eyes] = take_ghosts(&mut out);
         assert_eq!(
-            (out.indices.len(), ghosts.indices.len(), eyes.indices.len()),
+            (ghosts.indices.len(), gel.indices.len(), eyes.indices.len()),
             (0, 0, 0)
         );
-        assert_eq!(gel.indices.len(), 6);
+        assert_eq!(out.indices.len(), 6);
     }
 
     #[test]

@@ -1176,9 +1176,9 @@ pub fn build(
     out
 }
 
-/// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]) and slime gel (alpha
-/// [`BLEND_ALPHA`]) and eye layers ([`EYES_ALPHA`]) out of `mesh`, which the opaque entity pass draws,
-/// into `[ghosts, gel, eyes]` meshes for the blended passes.
+/// Moves the triangles of translucent bodies (alpha [`GHOST_ALPHA`]), slime gel (alpha
+/// [`BLEND_ALPHA`]), XP orbs ([`ORB_ALPHA`], into the gel mesh) and eye layers ([`EYES_ALPHA`]) out of
+/// `mesh`, which the opaque entity pass draws, into `[ghosts, gel, eyes]` meshes for the blended passes.
 pub fn take_ghosts(mesh: &mut MeshData) -> [MeshData; 3] {
     let mut out = [
         MeshData::default(),

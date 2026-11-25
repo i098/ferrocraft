@@ -27,10 +27,9 @@ final class Minecraft {
         R.set(settings, "field_74354_ai", new File(gameDir, "options.txt")); // optionsFile
         R.call(settings, "func_74300_a"); // loadOptions: the key binds the player set, which Rust reads too
         R.set(mc, "field_71474_y", settings); // gameSettings
-        // sessionService: mods look profiles up through it (VanillaHUD's TabListManager). An offline client gets the profile back unchanged; no Mojang request.
-        Class<?> sessionService = R.cls("com.mojang.authlib.minecraft.MinecraftSessionService");
-        R.set(mc, "field_152355_az", java.lang.reflect.Proxy.newProxyInstance(sessionService.getClassLoader(), new Class<?>[] {sessionService},
-                (proxy, method, args) -> method.getName().equals("fillProfileProperties") ? args[0] : null));
+        Object auth = R.neu("com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService",
+                java.net.Proxy.NO_PROXY, java.util.UUID.randomUUID().toString());
+        R.set(mc, "field_152355_az", R.call(auth, "createMinecraftSessionService"));
 
         Object metadata = R.neu("net.minecraft.client.resources.data.IMetadataSerializer");
         R.set(mc, "field_110452_an", metadata);

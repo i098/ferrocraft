@@ -629,7 +629,16 @@ fn entity_faces(name: &str) -> Option<Vec<Face>> {
             ];
             skull(kinds.iter().position(|k| *k == n).unwrap_or(0) as i16)
         }
-        // shortcut: banners (TileEntityBannerRenderer with patterns) draw nothing yet; add when banner patterns are ported.
+        "banner" => render::banner_item_mesh()
+            .vertices
+            .chunks_exact(4)
+            .map(|face| Face {
+                pts: std::array::from_fn(|i| face[i].pos),
+                uv: std::array::from_fn(|i| face[i].uv),
+                tex: String::new(),
+                tint: None,
+            })
+            .collect(),
         _ => return None,
     })
 }
@@ -832,6 +841,7 @@ impl Icons {
                 }
             }
             Model::Solid { faces, gui } => {
+                let banner = (s.id == 425).then(|| format!("banner:{}:", s.damage & 15));
                 let owner_skin = skull_profile(s).map(|(u, _)| {
                     if self.heads.contains(&u) {
                         head_texture(u)
@@ -860,12 +870,12 @@ impl Icons {
                 for (_, pts, f, color) in &shown {
                     let k = self.frame_scale(&f.tex);
                     let uv = [0, 3, 2, 1].map(|i| [f.uv[i][0], f.uv[i][1] * k]);
-                    let tex = owner_skin
+                    let tex = banner
                         .as_deref()
-                        .filter(|_| f.tex == STEVE)
+                        .or_else(|| owner_skin.as_deref().filter(|_| f.tex == STEVE))
                         .unwrap_or(&f.tex);
                     c.quad(tex, *pts, uv, [*color; 4]);
-                    if glint {
+                    if glint && banner.is_none() {
                         self.glint_masked(c, *pts, uv, uv, self.masks.get(&f.tex), &f.tex);
                     }
                 }

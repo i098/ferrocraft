@@ -54,6 +54,46 @@ fn trusted(url: &str) -> bool {
         || std::env::var("FERROCRAFT_SKIN_HOST").is_ok_and(|h| h == host)
 }
 
+/// `TileEntitySkull.updateGameprofile` for a head named only by its owner: the `textures` property
+/// value of the profile that Mojang's name lookup and session server return, `None` when either fails.
+pub fn lookup_textures(name: &str) -> Option<String> {
+    if name.is_empty()
+        || name.len() > 16
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return None;
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .into();
+    let get = |url: String| -> Option<Value> {
+        serde_json::from_str(
+            &agent
+                .get(&url)
+                .call()
+                .ok()?
+                .into_body()
+                .read_to_string()
+                .ok()?,
+        )
+        .ok()
+    };
+    let id = get(format!(
+        "https://api.mojang.com/users/profiles/minecraft/{name}"
+    ))?;
+    let id = id["id"].as_str()?;
+    let profile = get(format!(
+        "https://sessionserver.mojang.com/session/minecraft/profile/{id}"
+    ))?;
+    profile["properties"]
+        .as_array()?
+        .iter()
+        .find(|p| p["name"] == "textures")?["value"]
+        .as_str()
+        .map(str::to_owned)
+}
+
 /// The PNG bytes of `url`, from `cache_dir` when present, else downloaded and stored there.
 pub fn fetch(url: &str, cache_dir: &Path) -> Option<Vec<u8>> {
     let hash: String = Sha1::digest(url.as_bytes())

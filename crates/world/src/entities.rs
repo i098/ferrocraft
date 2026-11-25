@@ -310,7 +310,7 @@ pub struct Entity {
     pub squid: crate::squid::Squid,
     /// Ender dragons: the wing clock and the ring buffer of past yaws and heights.
     pub dragon: Option<Box<crate::mob_anim::Dragon>>,
-    /// Arrows, thrown objects, items, TNT, falling blocks and bobbers: the client-side flight state.
+    /// Arrows, thrown objects, items, TNT, falling blocks, bobbers and experience orbs: the client-side flight state.
     pub(crate) proj: crate::projectile::State,
 }
 
@@ -615,7 +615,7 @@ impl Entity {
         self.target.pos = raw.map(fixed);
         self.target.yaw = yaw;
         self.target.pitch = pitch;
-        if matches!(self.kind, Kind::Object(t) if crate::projectile::snaps(t)) {
+        if self.sim_id().is_some_and(crate::projectile::snaps) {
             // `Entity.lerpPositionAndAngles` of a non-living entity sets the pose at once.
             (self.pos, self.yaw, self.pitch) = (self.target.pos, yaw, pitch);
             self.target.steps = 0;
@@ -646,16 +646,23 @@ impl Entity {
         self.on_ground = on_ground;
     }
 
-    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks and bobbers; an arrow that ends on a hit
+    /// What `projectile` calls this entity when the client moves it between packets: its object id, or `ORB`.
+    fn sim_id(&self) -> Option<i8> {
+        match self.kind {
+            Kind::Object(id) => Some(id),
+            Kind::ExperienceOrb => Some(crate::projectile::ORB),
+            _ => None,
+        }
+    }
+
+    /// Client-side flight of arrows, thrown objects, items, TNT, falling blocks, bobbers and experience orbs; an arrow that ends on a hit
     /// plays its sound.
     fn fly(
         &mut self,
         at: &dyn Fn([i32; 3]) -> u16,
         targets: &[crate::projectile::Target],
     ) -> Option<Fx> {
-        let Kind::Object(object) = self.kind else {
-            return None;
-        };
+        let object = self.sim_id()?;
         if !crate::projectile::simulated(object) {
             return None;
         }
@@ -1868,6 +1875,26 @@ mod tests {
         let item = es.get(5).unwrap();
         assert_eq!(item.pos[1], 64.0);
         assert!(item.on_ground);
+    }
+
+    /// `EntityXPOrb.onUpdate`: an orb spawned above a stone floor falls under gravity 0.03 and hops on it, never sinking.
+    #[test]
+    fn an_experience_orb_falls_and_stays_on_a_block() {
+        let stone = |p: [i32; 3]| if p[1] < 64 { 1 << 4 } else { 0 };
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnExperienceOrb {
+            id: 5,
+            pos: [0, 66 * 32, 0],
+            count: 5,
+        });
+        es.tick_in(&stone);
+        let first = es.get(5).unwrap();
+        assert!((first.pos[1] - (66.0 - 0.03)).abs() < 1e-6);
+        for _ in 0..80 {
+            es.tick_in(&stone);
+            assert!(es.get(5).unwrap().pos[1] >= 64.0);
+        }
+        assert!(es.get(5).unwrap().pos[1] < 64.1);
     }
 
     /// `ThrownEntity.tick`: a snowball falls 0.03 per tick under drag 0.99 and ignores blocks on the client.

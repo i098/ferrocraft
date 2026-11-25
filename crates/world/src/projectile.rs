@@ -1,5 +1,5 @@
 //! Client-side flight of the entities the server sends rarely: arrows, thrown objects, dropped items, primed TNT,
-//! falling blocks and fishing bobbers. Each `step` is one `onUpdate` of the 1.8.9 class, run once per tick.
+//! falling blocks, fishing bobbers and experience orbs. Each `step` is one `onUpdate` of the 1.8.9 class, run once per tick.
 //!
 //! Entity hits of arrows and bobbers run here as the client runs them (`takeDamage` answers on a client world).
 //!
@@ -51,6 +51,7 @@ enum Class {
     Tnt,
     Falling,
     Bobber,
+    Orb,
 }
 
 fn class(object: i8) -> Option<Class> {
@@ -59,6 +60,7 @@ fn class(object: i8) -> Option<Class> {
         61 | 62 | 65 => Class::Thrown(0.03),
         73 => Class::Thrown(0.05),
         75 => Class::Thrown(0.07),
+        ORB => Class::Orb,
         2 => Class::Item,
         50 => Class::Tnt,
         70 => Class::Falling,
@@ -66,6 +68,9 @@ fn class(object: i8) -> Option<Class> {
         _ => return None,
     })
 }
+
+/// The id the projectile code gives an experience orb, which has no object id.
+pub(crate) const ORB: i8 = -1;
 
 /// Entities that the client moves between packets.
 pub(crate) fn simulated(object: i8) -> bool {
@@ -141,6 +146,7 @@ pub(crate) fn step(object: i8, e: &mut Body, at: At) {
         Class::Tnt => tnt(e, at),
         Class::Falling => falling(e, at),
         Class::Bobber => bobber(e, at),
+        Class::Orb => orb(e, at),
     }
 }
 
@@ -450,6 +456,26 @@ fn item(e: &mut Body, at: At) {
     e.vel[2] *= f64::from(f);
     if e.on_ground {
         e.vel[1] *= -0.5;
+    }
+}
+
+/// `EntityXPOrb.onUpdate`: gravity 0.03, a lava kick, drag 0.98 (the floor's slipperiness on the ground) and a
+/// bounce of 0.9.
+// shortcut: no pull toward the nearest player and no push out of a block; the server's packets move the orb.
+fn orb(e: &mut Body, at: At) {
+    e.vel[1] -= 0.029_999_999_329_447_746;
+    lava_kick(e, at);
+    move_entity(e, at, e.vel);
+    let mut f = 0.98_f32;
+    if e.on_ground {
+        let id = at([floor(e.pos[0]), floor(e.pos[1]) - 1, floor(e.pos[2])]) >> 4;
+        f = shape::slipperiness(id) * 0.98;
+    }
+    e.vel[0] *= f64::from(f);
+    e.vel[1] *= 0.98;
+    e.vel[2] *= f64::from(f);
+    if e.on_ground {
+        e.vel[1] *= -0.9;
     }
 }
 

@@ -139,7 +139,7 @@ pub(super) fn orb(out: &mut MeshData, d: &EntityDraw, skins: &Skins) {
                 (cell_v + v * 16.0) / tex[1] + at[1],
             ],
         );
-        vx.color = [red, 1.0, blue, super::ORB_ALPHA];
+        vx.color = [red, 1.0, blue, 1.0];
         vx
     };
     push_quad(

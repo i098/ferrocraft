@@ -1416,7 +1416,11 @@ mod tests {
         // Vanilla 1.8.9 sign text measures 101 of 255 for `§c` red (FF5555 -> 101/34/34).
         for meta in [0, 4] {
             for v in &sign_text_mesh("§fW", meta).vertices {
-                assert!((v.color[0] - 0.4).abs() < 0.01, "meta {meta}: {}", v.color[0]);
+                assert!(
+                    (v.color[0] - 0.4).abs() < 0.01,
+                    "meta {meta}: {}",
+                    v.color[0]
+                );
             }
         }
     }

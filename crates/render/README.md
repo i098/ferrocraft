@@ -49,7 +49,7 @@ Post effects: `set_post(Some("shaders/post/<name>.json"))` loads a `shaders/post
 Chunk meshing runs on 2 worker threads (`mesher.rs`, as vanilla `ChunkRenderDispatcher`), nearest chunk first, at most 100 outstanding jobs.
 With Smooth Lighting on, the sides of upper and lower slabs receive light and ambient occlusion per corner.
 The top and bottom faces of these slabs still use flat lighting.
-Inset, shaded, planar model quads (levers, buttons) of blocks that emit no light and whose model allows `ambientocclusion` take the same per-corner light and occlusion, blended by vertex position. Light-emitting blocks such as torches stay flat-lit.
+Shaded, planar model quads (levers, buttons, piston bodies, wall arms) of blocks that emit no light and whose model allows `ambientocclusion` take the same per-corner light and occlusion, blended by vertex position. Light-emitting blocks such as torches stay flat-lit.
 Chunk lighting uses no sky light in the Nether or the End, even when Smooth Lighting is off.
 `render` uploads finished meshes for about 2 ms per frame. A `set_block` remeshes the changed chunk (and an edge neighbour) on the render thread in that frame; the eight surrounding chunks remesh on the workers because light crosses chunk edges and corners.
 Plant models and their block damage overlays use the same offsets as the vanilla standard renderer.

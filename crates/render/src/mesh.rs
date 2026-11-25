@@ -557,15 +557,16 @@ impl Mesher<'_> {
             (true, _) => (self.flat_light(at, DIRS[f]), 1.0),
             // `BlockModelRenderer.renderModelFlat`: the light of the cell the face looks at.
             (false, false) => (self.light_at(at, DIRS[f]), 1.0),
-            (false, true) => self.smooth(at, f, c),
+            (false, true) => self.smooth(at, f, c, false),
         }
     }
 
     /// Vanilla smooth lighting at one corner of a face: light is the average of the four cells around
-    /// the corner on the face's outer side; occlusion darkens corners next to opaque blocks.
-    fn smooth(&self, at: [i32; 3], face: usize, corner: [f32; 3]) -> ([f32; 2], f32) {
-        let dir = DIRS[face];
-        let axis = dir.iter().position(|d| *d != 0).unwrap();
+    /// the corner on the face's outer side (the block's own cell when `inset`, as `updateVertexBrightness`
+    /// does for quads off the block boundary); occlusion darkens corners next to opaque blocks.
+    fn smooth(&self, at: [i32; 3], face: usize, corner: [f32; 3], inset: bool) -> ([f32; 2], f32) {
+        let dir = if inset { [0; 3] } else { DIRS[face] };
+        let axis = DIRS[face].iter().position(|d| *d != 0).unwrap();
         let (b, c) = match axis {
             0 => (1, 2),
             1 => (0, 2),
@@ -790,7 +791,7 @@ impl Mesher<'_> {
             let axis = q.smooth_axis().filter(|_| smooth);
             let verts = std::array::from_fn(|i| {
                 let (light, ao) = axis.map_or((flat_light, 1.0), |a| {
-                    self.model_corner(at, q.face, a, q.pos[i])
+                    self.model_corner(at, q.face, a, q.pos[i], !q.on_boundary)
                 });
                 let shade = if q.shade { SHADE[q.shade_face] } else { 1.0 };
                 let k = if q.shade || ao < 1.0 {
@@ -811,7 +812,14 @@ impl Mesher<'_> {
 
     /// `AmbientOcclusionFace` for a flat model quad: the four face-corner values of `smooth`, blended by the
     /// vertex position inside the face plane (the quad is the part of the plane it covers).
-    fn model_corner(&self, at: [i32; 3], face: usize, axis: usize, p: [f32; 3]) -> ([f32; 2], f32) {
+    fn model_corner(
+        &self,
+        at: [i32; 3],
+        face: usize,
+        axis: usize,
+        p: [f32; 3],
+        inset: bool,
+    ) -> ([f32; 2], f32) {
         let (b, c) = match axis {
             0 => (1, 2),
             1 => (0, 2),
@@ -825,7 +833,7 @@ impl Mesher<'_> {
             let mut corner = [0.0; 3];
             corner[b] = cu as f32;
             corner[c] = cv as f32;
-            let (l, a) = self.smooth(at, face, corner);
+            let (l, a) = self.smooth(at, face, corner, inset);
             light[0] += l[0] * w;
             light[1] += l[1] * w;
             ao += a * w;

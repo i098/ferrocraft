@@ -100,10 +100,11 @@ pub struct Quad {
 }
 
 impl Quad {
-    /// The axis of `face` when the quad takes smooth lighting: a shaded, inset, uncullable face of a model
-    /// that allows occlusion, with all four corners in one plane perpendicular to it.
+    /// The axis of `face` when the quad takes smooth lighting: a shaded face of a model that allows occlusion,
+    /// with all four corners in one plane perpendicular to it. Boundary and `cullface` quads count too:
+    /// `BlockModelRenderer.renderModelAmbientOcclusionQuads` lights every quad.
     pub fn smooth_axis(&self) -> Option<usize> {
-        if !(self.ao && self.shade && !self.on_boundary && self.cull.is_none()) {
+        if !(self.ao && self.shade) {
             return None;
         }
         let axis = [1, 2, 0][self.face / 2];

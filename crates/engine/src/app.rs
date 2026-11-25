@@ -1436,6 +1436,7 @@ impl App {
                         .is_some_and(|s| s.id == PUMPKIN),
                 nausea: self.game.effects.has(Fx::NAUSEA),
                 no_crosshair: false,
+                status_late: false,
                 spectator_aim,
             };
             ferrocraft_modhost::ModHost::draw(
@@ -1447,7 +1448,7 @@ impl App {
                     .as_ref()
                     .filter(|_| self.game.gamemode != 3)
                     .map(|h| (h, frame.partial_ticks)),
-                |g, owned| {
+                |g, owned, late| {
                     let mut frame = frame;
                     let without_armor;
                     if owned.has(ferrocraft_modhost::hud::Element::Armor) {
@@ -1455,7 +1456,7 @@ impl App {
                         frame.status = Some(&without_armor);
                     }
                     owned.leave_out(&mut frame);
-                    self.hud.draw(g, &frame);
+                    self.hud.draw_pass(g, &frame, late);
                 },
             );
         }
@@ -1510,7 +1511,7 @@ impl App {
                 &mut g,
                 &mut mod_textures,
                 None,
-                |_, _| {},
+                |_, _, _| {},
             );
         }
         textures.extend(mod_textures);

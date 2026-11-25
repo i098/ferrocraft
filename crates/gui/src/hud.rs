@@ -86,6 +86,8 @@ pub struct Frame<'a> {
     pub nausea: bool,
     /// A mod draws the crosshair (it cancelled `CROSSHAIRS`): the vanilla one is left out.
     pub no_crosshair: bool,
+    /// The hotbar is a mod's: the status bars come later, over it, from `Hud::draw_status_bars`.
+    pub status_late: bool,
     /// A spectator aims at an entity or at an inventory block, which keeps the crosshair.
     pub spectator_aim: bool,
 }
@@ -161,7 +163,7 @@ impl Hud {
         gui.set_blend(Blend::Alpha);
         self.boss.draw(gui);
         let survival = f.status.is_some_and(Status::survival);
-        if let Some(s) = f.status {
+        if let Some(s) = f.status.filter(|_| !f.status_late) {
             self.draw_status(gui, s);
         }
         self.draw_bar_tooltip(gui, f, spectator, survival);
@@ -216,6 +218,24 @@ impl Hud {
         gui.blit(WIDGETS, x, h - 22 - 1, 0, 22, 24, 22);
         if let Some(items) = &f.hotbar {
             draw_hotbar_items(gui, items, f.partial_ticks);
+        }
+    }
+
+    /// The whole overlay, or with `late` only the status bars over a hotbar that a mod drew.
+    pub fn draw_pass(&mut self, gui: &mut Gui, f: &Frame, late: bool) {
+        if late {
+            self.draw_status_bars(gui, f);
+        } else {
+            self.draw(gui, f);
+        }
+    }
+
+    /// Health, food, armor, air and XP over a hotbar that a mod drew; the second pass of a frame with `status_late`.
+    pub fn draw_status_bars(&mut self, gui: &mut Gui, f: &Frame) {
+        if let Some(s) = f.status.filter(|_| f.status_late) {
+            gui.set_blend(Blend::Alpha);
+            self.draw_status(gui, s);
+            gui.set_color(0xFFFF_FFFF);
         }
     }
 

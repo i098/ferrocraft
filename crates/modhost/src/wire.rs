@@ -5,8 +5,9 @@
 //! table of `hooks.rs`: the vanilla methods that a mod changed.
 //!
 //! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
-//! u8 force unicode, u8 screen open, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event
-//! count, then per event: u8 kind, i32 argument, u8 state, u16 character. Kinds: `'K'` key (LWJGL code; state
+//! u8 force unicode, u8 screen open, u8 overlays (bit 0: debug, bit 1: player list, bit 2: spectator),
+//! i32 mouse x, i32 mouse y (pixels, origin top left), u16 event count, then per event: u8 kind,
+//! i32 argument, u8 state, u16 character. Kinds: `'K'` key (LWJGL code; state
 //! bit 0 down, bit 1 repeat; character is the UTF-16 unit the key typed, 0 for none), `'B'` mouse button (LWJGL
 //! number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel (argument is the LWJGL delta, 120 per
 //! notch). The character is 0 for buttons and wheel. State bit 2 on any kind: a screen was open when the event
@@ -55,6 +56,7 @@ pub struct Input {
     pub debug: bool,
     /// The player list key is held: Java presses `keyBindPlayerList`.
     pub player_list: bool,
+    pub spectator: bool,
     pub mouse: (i32, i32),
     /// Transitions since the previous frame, each with whether a screen was open when it arrived.
     pub events: Vec<(Event, bool)>,
@@ -135,7 +137,7 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     }
     b.push(u8::from(i.unicode));
     b.push(u8::from(i.screen));
-    b.push(u8::from(i.debug) | u8::from(i.player_list) << 1);
+    b.push(u8::from(i.debug) | u8::from(i.player_list) << 1 | u8::from(i.spectator) << 2);
     b.extend(i.mouse.0.to_be_bytes());
     b.extend(i.mouse.1.to_be_bytes());
     let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
@@ -459,6 +461,7 @@ mod tests {
             screen: true,
             debug: true,
             player_list: false,
+            spectator: true,
             mouse: (5, 6),
             events: vec![
                 (
@@ -485,7 +488,7 @@ mod tests {
         for v in [854i32, 480, 2] {
             want.extend(v.to_be_bytes());
         }
-        want.extend([1, 1, 1]);
+        want.extend([1, 1, 5]);
         want.extend(5i32.to_be_bytes());
         want.extend(6i32.to_be_bytes());
         want.extend([0, 3]);

@@ -1442,7 +1442,11 @@ impl App {
                 self.mods.as_ref(),
                 &mut g,
                 &mut mod_textures,
-                frame.hotbar.as_ref().map(|h| (h, frame.partial_ticks)),
+                frame
+                    .hotbar
+                    .as_ref()
+                    .filter(|_| self.game.gamemode != 3)
+                    .map(|h| (h, frame.partial_ticks)),
                 |g, owned| {
                     let mut frame = frame;
                     let without_armor;
@@ -1460,7 +1464,11 @@ impl App {
             mods.set_lists(self.mod_lists());
         }
         if let Some(mods) = &self.mods {
-            mods.set_overlays(self.show_debug, self.input.player_list_held());
+            mods.set_overlays(
+                self.show_debug,
+                self.input.player_list_held(),
+                self.game.gamemode == 3,
+            );
             mods.set_view(
                 w as i32,
                 h as i32,

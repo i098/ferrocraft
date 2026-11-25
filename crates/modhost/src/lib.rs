@@ -421,11 +421,12 @@ impl ModHost {
         self.link.view.notify_one();
     }
 
-    /// Set the F3 flag and the player list key state for the next frame: Java mirrors them so that Forge posts the DEBUG and PLAYER_LIST events.
-    pub fn set_overlays(&self, debug: bool, player_list: bool) {
+    /// Set overlay state for the next Java frame.
+    pub fn set_overlays(&self, debug: bool, player_list: bool, spectator: bool) {
         let mut s = self.link.state.lock().unwrap();
         s.input.debug = debug;
         s.input.player_list = player_list;
+        s.input.spectator = spectator;
     }
 
     /// Set the engine state that HUD mods read; it goes to the JVM with the next frame.

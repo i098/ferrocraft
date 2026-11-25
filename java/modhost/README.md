@@ -22,6 +22,7 @@ Java 8 side of the mod host. The Rust engine starts this JVM (`crates/modhost`) 
   Java sends wire command `H` (`crates/modhost/src/hud.rs`) to tell Rust not to draw that element.
   Cancellation of `ALL` claims those five elements, plus armor when VanillaHUD is loaded.
   Java draws the hotbar only when a mod hooks `GuiIngame.func_180479_a` or `func_175184_a` (exact keys in `HookIndex`; `OverlayFilter.modHotbar`). Forge then draws the bar and its items go to Rust as wire `K` commands. In spectator mode Java never draws it: Rust draws the spectator menu.
+  When a mod owns the hotbar, Rust draws the status bars (health, food, armor, air, XP) in a second pass over it, after the commands before the first `K` command (`ModHost::draw`).
   `Minecraft.setOverlayKeys` mirrors the F3 and Tab keys so Forge posts the debug and player list events.
   For `CROSSHAIRS`, the Forge event cancellation controls ownership regardless of the draw commands.
   PolyCrosshair draws a `DynamicTexture` with `Gui.drawScaledCustomSizeModalRect`.

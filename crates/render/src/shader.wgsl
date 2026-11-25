@@ -125,7 +125,7 @@ fn fs_world(i: WorldOut) -> @location(0) vec4<f32> {
         // `setBrightness`: GL_INTERPOLATE of the red constant over the lit texture by 0.3.
         rgb = mix(rgb, g.hurt.rgb, g.hurt.a);
     }
-    let d = 1.0 / i.clip.w; // GL fog: eye-space depth, not radial distance
+    let d = length(i.world - g.eye.xyz);
     var fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     if (g.fog.x < 0.0) {
         // In a liquid: exponential fog of density g.fog.y.
@@ -142,7 +142,7 @@ fn fs_fire(i: WorldOut) -> @location(0) vec4<f32> {
     if (t.a < 0.1) {
         discard;
     }
-    let d = 1.0 / i.clip.w;
+    let d = length(i.world - g.eye.xyz);
     let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb, fog), t.a);
 }
@@ -151,7 +151,7 @@ fn fs_fire(i: WorldOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_shadow(i: WorldOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
-    let d = 1.0 / i.clip.w;
+    let d = length(i.world - g.eye.xyz);
     let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb, fog), t.a * i.color.a);
 }
@@ -178,7 +178,7 @@ fn fs_sky(i: WorldOut) -> @location(0) vec4<f32> {
 // `renderSky` plane and dark discs: vertex color in the world fog, linear from 0 (`setupFog(-1)`), no light map.
 @fragment
 fn fs_sky_fog(i: WorldOut) -> @location(0) vec4<f32> {
-    let d = 1.0 / i.clip.w;
+    let d = length(i.world - g.eye.xyz);
     var fog = clamp((g.fog.y - d) / g.fog.y, 0.0, 1.0);
     if (g.fog.x < 0.0) {
         fog = exp(-g.fog.y * d);
@@ -190,7 +190,7 @@ fn fs_sky_fog(i: WorldOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
-    let d = 1.0 / i.clip.w;
+    let d = length(i.world - g.eye.xyz);
     let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb * i.color.rgb, fog), t.a * i.color.a);
 }
@@ -200,7 +200,7 @@ fn fs_cloud(i: WorldOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_portal(i: WorldOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, i.uv);
-    let d = 1.0 / i.clip.w;
+    let d = length(i.world - g.eye.xyz);
     let fog = clamp((g.fog.y - d) / (g.fog.y - g.fog.x), 0.0, 1.0);
     return vec4<f32>(mix(g.fog_color.rgb, t.rgb * i.color.rgb, fog), t.a * i.color.a);
 }

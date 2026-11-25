@@ -102,6 +102,10 @@ public final class MirrorHudTest {
     }
 
     static byte[] frameRequest() throws IOException {
+        return frameRequest(false);
+    }
+
+    static byte[] frameRequest(boolean spectator) throws IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(b);
         w.writeByte('F');
@@ -110,7 +114,7 @@ public final class MirrorHudTest {
         w.writeInt(2);
         w.writeByte(0);
         w.writeByte(0);
-        w.writeByte(0);
+        w.writeByte(spectator ? 4 : 0);
         w.writeInt(0);
         w.writeInt(0);
         w.writeShort(0);
@@ -120,8 +124,21 @@ public final class MirrorHudTest {
     static final class Frame {
         final List<String> texts = new ArrayList<>();
         final List<Image> images = new ArrayList<>();
+        final List<HotbarItem> hotbarItems = new ArrayList<>();
         final java.util.Map<String, byte[]> definitions = new java.util.HashMap<>();
         int hud;
+    }
+
+    static final class HotbarItem {
+        final int slot;
+        final float x, y, scale;
+
+        HotbarItem(DataInputStream in) throws IOException {
+            slot = in.readUnsignedByte();
+            x = in.readFloat();
+            y = in.readFloat();
+            scale = in.readFloat();
+        }
     }
 
     static final class Image {
@@ -165,6 +182,7 @@ public final class MirrorHudTest {
                     }
                     break;
                 case 'H': frame.hud |= in.readInt(); break;
+                case 'K': frame.hotbarItems.add(new HotbarItem(in)); break;
                 case 'G': skip(in, 16 + 8); break;
                 case 'T':
                     skip(in, 8 + 4 + 1 + 12);

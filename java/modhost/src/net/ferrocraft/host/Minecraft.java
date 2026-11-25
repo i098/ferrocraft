@@ -27,6 +27,12 @@ final class Minecraft {
         R.set(settings, "field_74354_ai", new File(gameDir, "options.txt")); // optionsFile
         R.call(settings, "func_74300_a"); // loadOptions: the key binds the player set, which Rust reads too
         R.set(mc, "field_71474_y", settings); // gameSettings
+        Class<?> sessionService = R.cls("com.mojang.authlib.minecraft.MinecraftSessionService");
+        R.set(mc, "field_152355_az", java.lang.reflect.Proxy.newProxyInstance(
+                sessionService.getClassLoader(), new Class<?>[] {sessionService}, (proxy, method, args) -> {
+                    if (method.getName().equals("fillProfileProperties")) return args[0];
+                    throw new UnsupportedOperationException(method.getName());
+                }));
 
         Object metadata = R.neu("net.minecraft.client.resources.data.IMetadataSerializer");
         R.set(mc, "field_110452_an", metadata);

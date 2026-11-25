@@ -20,6 +20,7 @@ import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 public final class VanillaHudTest {
+    private static final int HOTBAR = 1 << 1;
     private static final int CROSSHAIR = 1 << 4;
     private static final int ARMOR = 1 << 5;
     private static final int DIAMOND_HELMET = 310;
@@ -70,6 +71,10 @@ public final class VanillaHudTest {
             R.set(armor.getClass(), "healthLink", false);
             R.set(armor.getClass(), "mountLink", false);
             R.call(R.get(armor, "position"), "setPosition", (float) ARMOR_X, (float) ARMOR_Y, 427f, 240f);
+            Object hotbar = R.get(R.cls("org.polyfrost.vanillahud.hud.Hotbar"), "hud");
+            R.set(hotbar, "scale", 1.5f);
+            R.set(hotbar.getClass(), "hotbarMode", true);
+            R.call(R.get(hotbar, "position"), "setPosition", 32f, 40f, 427f, 240f);
             BufferedImage icons;
             try (InputStream asset = configClass.getResourceAsStream("/assets/minecraft/textures/gui/icons.png")) {
                 if (asset == null) throw new IOException("missing Minecraft HUD texture");
@@ -82,6 +87,14 @@ public final class VanillaHudTest {
             if (probe.checkFrame(in, out, icons) != owned) throw new AssertionError("failure changed completed HUD claims");
             if (!probe.failureInvoked) throw new AssertionError("the failing handler did not run");
             probe.fail = false;
+            out.write(MirrorHudTest.frameRequest(true));
+            out.flush();
+            MirrorHudTest.Frame spectator = MirrorHudTest.readFrame(in);
+            probe.textures.putAll(spectator.definitions);
+            if (!spectator.texts.contains(OVERLAY_DONE) || (spectator.hud & HOTBAR) != 0
+                    || !spectator.hotbarItems.isEmpty()) {
+                throw new AssertionError("spectator frame must complete without a Java hotbar");
+            }
             probe.checkFrame(in, out, icons);
             System.out.println("VanillaHudTest passed");
             code = 0;
@@ -107,6 +120,11 @@ public final class VanillaHudTest {
         if (matches != 1) throw new AssertionError("expected one visible PolyCrosshair image, got " + matches);
         if ((frame.hud & ARMOR) == 0) throw new AssertionError("missing VanillaHUD armor ownership");
         checkArmor(frame, icons);
+        if ((frame.hud & HOTBAR) == 0 || frame.hotbarItems.size() != 9
+                || frame.hotbarItems.stream().noneMatch(item ->
+                    item.slot == 2 && item.x == 96.5f && item.y == 44.5f && item.scale == 1.5f)) {
+            throw new AssertionError("missing slot 2 at the configured hotbar position and scale");
+        }
         if (fail && !hasRecoveryProbe(frame)) {
             throw new AssertionError("Minecraft's cached GL calls did not draw the recovery probe");
         }

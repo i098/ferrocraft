@@ -20,6 +20,6 @@ pub mod title;
 pub mod toolkit;
 
 pub use canvas::GuiCanvas;
-pub use hud::{Frame, HotbarItems, Hud};
+pub use hud::{draw_mod_hotbar_item, Frame, HotbarItems, Hud};
 pub use status::Status;
 pub use toolkit::{Button, Gui, GuiScale, Metrics};

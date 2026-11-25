@@ -349,9 +349,8 @@ impl ModHost {
         let staging = staging.map(|dir| Arc::new(Mutex::new(Some(dir))));
         let token = token();
         let mut cmd = jvm_command(cfg, port, &token, workspace.as_deref());
-        if staging.is_some() {
-            cmd.current_dir(&cfg.game_dir);
-        }
+        // Forge's launcher runs in the game directory; OneConfig reads `./OneConfig` from the working directory.
+        cmd.current_dir(&cfg.game_dir);
         let child = cmd.spawn()?;
         let host = Self {
             child: Arc::new(Mutex::new(child)),
@@ -422,11 +421,12 @@ impl ModHost {
         self.link.view.notify_one();
     }
 
-    /// Set the F3 flag and the player list key state for the next frame: Java mirrors them so that Forge posts the DEBUG and PLAYER_LIST events.
-    pub fn set_overlays(&self, debug: bool, player_list: bool) {
+    /// Set overlay state for the next Java frame.
+    pub fn set_overlays(&self, debug: bool, player_list: bool, spectator: bool) {
         let mut s = self.link.state.lock().unwrap();
         s.input.debug = debug;
         s.input.player_list = player_list;
+        s.input.spectator = spectator;
     }
 
     /// Set the engine state that HUD mods read; it goes to the JVM with the next frame.
@@ -471,6 +471,7 @@ impl ModHost {
         host: Option<&Self>,
         g: &mut gui::Gui,
         textures: &mut Vec<(String, Vec<u8>)>,
+        hotbar: Option<(&gui::HotbarItems, f32)>,
         draw_hud: impl FnOnce(&mut gui::Gui, hud::Owned),
     ) {
         let Some(host) = host else {
@@ -589,6 +590,18 @@ impl ModHost {
                     }
                 }
                 DrawCmd::Clip(rect) => g.set_clip(*rect),
+                DrawCmd::HotbarItem { slot, pos, scale } => {
+                    if let Some((items, partial)) = hotbar {
+                        gui::draw_mod_hotbar_item(
+                            g,
+                            items,
+                            usize::from(*slot),
+                            *pos,
+                            *scale,
+                            partial,
+                        );
+                    }
+                }
                 DrawCmd::Define { .. } | DrawCmd::Hud(_) => {}
             }
         }

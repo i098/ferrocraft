@@ -65,6 +65,8 @@ public class BridgeTransformer implements IClassTransformer {
                 return Anchor.patchDispatcher(bytes);
             case "net/minecraft/client/renderer/WorldRenderer":
                 return Anchor.patch(bytes);
+            case "net/minecraft/client/gui/GuiIngame":
+                return patch(bytes, BridgeTransformer::guiIngameMethod);
             case "net/minecraft/client/gui/Gui":
                 return patch(bytes, BridgeTransformer::guiMethod);
             case "cc/polyfrost/oneconfig/internal/renderer/LwjglManagerImpl":
@@ -299,6 +301,16 @@ public class BridgeTransformer implements IClassTransformer {
     private static InsnList defaultBody(MethodNode m) {
         InsnList l = new InsnList();
         returnDefault(l, Type.getReturnType(m.desc));
+        return l;
+    }
+
+    /** GuiIngame.renderHotbarItem draws an item with the GL item renderer; Rust draws it, at the place and scale the mod's matrix gives. */
+    private static InsnList guiIngameMethod(MethodNode m) {
+        if (!(m.name + m.desc).equals("func_175184_a(IIIFLnet/minecraft/entity/player/EntityPlayer;)V")) return null;
+        InsnList l = new InsnList();
+        for (int slot = 1; slot <= 3; slot++) l.add(new VarInsnNode(Opcodes.ILOAD, slot));
+        call(l, SINK, "hotbarItem", "(III)V");
+        l.add(new InsnNode(Opcodes.RETURN));
         return l;
     }
 

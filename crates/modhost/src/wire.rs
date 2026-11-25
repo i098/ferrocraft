@@ -5,8 +5,9 @@
 //! table of `hooks.rs`: the vanilla methods that a mod changed.
 //!
 //! Rust to Java, one frame: `'F'`, i32 width in pixels, i32 height in pixels, i32 GUI scale setting,
-//! u8 force unicode, u8 screen open, i32 mouse x, i32 mouse y (pixels, origin top left), u16 event
-//! count, then per event: u8 kind, i32 argument, u8 state, u16 character. Kinds: `'K'` key (LWJGL code; state
+//! u8 force unicode, u8 screen open, u8 overlays (bit 0: debug, bit 1: player list, bit 2: spectator),
+//! i32 mouse x, i32 mouse y (pixels, origin top left), u16 event count, then per event: u8 kind,
+//! i32 argument, u8 state, u16 character. Kinds: `'K'` key (LWJGL code; state
 //! bit 0 down, bit 1 repeat; character is the UTF-16 unit the key typed, 0 for none), `'B'` mouse button (LWJGL
 //! number 0 left, 1 right, 2 middle; state bit 0 down), `'W'` wheel (argument is the LWJGL delta, 120 per
 //! notch). The character is 0 for buttons and wheel. State bit 2 on any kind: a screen was open when the event
@@ -19,7 +20,7 @@
 //! alpha over, 1 inverts the destination, 2 darkens it, 3 adds),
 //! `'C'` clip (u8 on, then four f32 corners when on), `'S'` shape (u8 kind: 0 a rounded rect with four f32 corners, four
 //! f32 radii and i32 ARGB; 1 a line with four f32 end coordinates, f32 width and i32 ARGB).
-//! `'H'` HUD owner (u32 bit set): the vanilla HUD elements that Java owns this frame, see `hud.rs`; Rust does not draw them.
+//! `'K'` hotbar item (u8 slot, f32 x, f32 y, f32 scale), `'H'` HUD owner (u32 bit set): the vanilla HUD elements that Java owns this frame, see `hud.rs`; Rust does not draw them.
 //! `'O'` world values, once per frame: see `overrides.rs`.
 //! Rust to Java, also `'P'` (player tick) and `'C'` (a received chat line, see `chat.rs`).
 
@@ -55,6 +56,7 @@ pub struct Input {
     pub debug: bool,
     /// The player list key is held: Java presses `keyBindPlayerList`.
     pub player_list: bool,
+    pub spectator: bool,
     pub mouse: (i32, i32),
     /// Transitions since the previous frame, each with whether a screen was open when it arrived.
     pub events: Vec<(Event, bool)>,
@@ -111,6 +113,12 @@ pub enum DrawCmd {
     Clip(Option<[f32; 4]>),
     /// Elements of the vanilla HUD that Java owns this frame, as the bit set of `hud::Element`.
     Hud(u32),
+    /// A mod's `renderHotbarItem`: the item of hotbar slot `slot`, top left at `pos` on the screen, drawn at `scale`.
+    HotbarItem {
+        slot: u8,
+        pos: [f32; 2],
+        scale: f32,
+    },
 }
 
 /// A resource file above this many bytes means a corrupt stream.
@@ -129,7 +137,7 @@ pub fn write_input(w: &mut impl Write, i: &Input) -> io::Result<()> {
     }
     b.push(u8::from(i.unicode));
     b.push(u8::from(i.screen));
-    b.push(u8::from(i.debug) | u8::from(i.player_list) << 1);
+    b.push(u8::from(i.debug) | u8::from(i.player_list) << 1 | u8::from(i.spectator) << 2);
     b.extend(i.mouse.0.to_be_bytes());
     b.extend(i.mouse.1.to_be_bytes());
     let n = u16::try_from(i.events.len()).map_err(|_| io::Error::other("too many events"))?;
@@ -246,6 +254,11 @@ fn read_command(r: &mut impl Read) -> io::Result<DrawCmd> {
             None
         })),
         b'H' => Ok(DrawCmd::Hud(u32_(r)?)),
+        b'K' => Ok(DrawCmd::HotbarItem {
+            slot: u8_(r)?,
+            pos: [f32_(r)?, f32_(r)?],
+            scale: f32_(r)?,
+        }),
         b'S' => match u8_(r)? {
             0 => Ok(DrawCmd::Round {
                 rect: rect(r)?,
@@ -305,7 +318,7 @@ mod tests {
     /// resource, an image, the two forms of clip and a HUD owner set.
     fn frame() -> Vec<u8> {
         let mut b = vec![1];
-        b.extend(7u32.to_be_bytes());
+        b.extend(8u32.to_be_bytes());
         b.push(b'R');
         for v in [1.0f32, 2.0, 21.0, 22.0] {
             b.extend(v.to_be_bytes());
@@ -342,6 +355,10 @@ mod tests {
         }
         b.push(b'H');
         b.extend(0b10u32.to_be_bytes());
+        b.extend([b'K', 3]);
+        for v in [10.0f32, 20.0, 2.5] {
+            b.extend(v.to_be_bytes());
+        }
         b
     }
 
@@ -378,6 +395,11 @@ mod tests {
                 DrawCmd::Clip(None),
                 DrawCmd::Clip(Some([1.0, 2.0, 3.0, 4.0])),
                 DrawCmd::Hud(0b10),
+                DrawCmd::HotbarItem {
+                    slot: 3,
+                    pos: [10.0, 20.0],
+                    scale: 2.5
+                },
             ]
         );
     }
@@ -439,6 +461,7 @@ mod tests {
             screen: true,
             debug: true,
             player_list: false,
+            spectator: true,
             mouse: (5, 6),
             events: vec![
                 (
@@ -465,7 +488,7 @@ mod tests {
         for v in [854i32, 480, 2] {
             want.extend(v.to_be_bytes());
         }
-        want.extend([1, 1, 1]);
+        want.extend([1, 1, 5]);
         want.extend(5i32.to_be_bytes());
         want.extend(6i32.to_be_bytes());
         want.extend([0, 3]);

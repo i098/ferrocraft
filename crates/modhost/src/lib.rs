@@ -592,7 +592,14 @@ impl ModHost {
                 DrawCmd::Clip(rect) => g.set_clip(*rect),
                 DrawCmd::HotbarItem { slot, pos, scale } => {
                     if let Some((items, partial)) = hotbar {
-                        gui::draw_mod_hotbar_item(g, items, usize::from(*slot), *pos, *scale, partial);
+                        gui::draw_mod_hotbar_item(
+                            g,
+                            items,
+                            usize::from(*slot),
+                            *pos,
+                            *scale,
+                            partial,
+                        );
                     }
                 }
                 DrawCmd::Define { .. } | DrawCmd::Hud(_) => {}

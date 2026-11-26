@@ -1464,7 +1464,9 @@ while [ ! -f "$stage/exit" ]; do sleep 0.02; done
                 && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar")
         });
         std::fs::write(first.join("exit"), []).unwrap();
-        wait_for("first host workspace removed after exit", &|| !first.exists());
+        wait_for("first host workspace removed after exit", &|| {
+            !first.exists()
+        });
         assert_eq!(
             std::fs::read(profile.join("config/first.jar.txt")).unwrap(),
             b"first.jar"

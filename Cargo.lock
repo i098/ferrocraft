@@ -919,6 +919,7 @@ dependencies = [
  "ferrocraft-protocol",
  "gui",
  "input-audio",
+ "oracle",
  "render",
  "winit",
  "world",

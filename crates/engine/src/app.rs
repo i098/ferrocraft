@@ -777,8 +777,17 @@ impl App {
         })
     }
 
+    /// `EntityPlayer.getUUID` of the session profile: the account uuid, else the offline uuid of the name.
+    fn local_uuid(&self) -> u128 {
+        self.args
+            .auth
+            .as_ref()
+            .and_then(|a| u128::from_str_radix(&a.uuid().replace('-', ""), 16).ok())
+            .unwrap_or_else(|| gui::inventory::icons::offline_uuid(&self.args.username))
+    }
+
     fn local_slim(&self) -> bool {
-        u128::from_str_radix(&self.ui.player_id.replace('-', ""), 16).is_ok_and(default_slim)
+        default_slim(self.local_uuid())
     }
 
     fn self_draw(&self, frac: f64) -> Option<EntityDraw> {

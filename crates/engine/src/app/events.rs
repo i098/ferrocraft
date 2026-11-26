@@ -1250,6 +1250,42 @@ mod tests {
         }
     }
 
+    /// The offline uuid and the default skin model of the local player against the real client.
+    #[test]
+    fn offline_player_skin_matches_the_real_client() {
+        let names = [
+            "Qrv", "Ferro", "Vanilla", "Steve", "Alex", "Dead", "Notch", "a",
+        ];
+        let script: String = names
+            .iter()
+            .map(|n| {
+                let hex: String = n.bytes().map(|b| format!("{b:02x}")).collect();
+                format!("skin {hex}\n")
+            })
+            .collect();
+        let lines = oracle::Oracle::get().run(&script).unwrap();
+        let mut slim = [false; 2];
+        for (name, line) in names.iter().zip(lines) {
+            let (uuid, flag) = line.split_once(' ').unwrap();
+            let app = App::new(Args {
+                username: (*name).into(),
+                auth: None,
+                assets_dir: None,
+                server: None,
+                game_dir: std::env::temp_dir().join("ferrocraft-no-such-game-dir"),
+                ..Default::default()
+            });
+            assert_eq!(
+                app.local_uuid(),
+                u128::from_str_radix(uuid, 16).unwrap(),
+                "{name}"
+            );
+            assert_eq!(app.local_slim(), flag == "1", "{name}");
+            slim[usize::from(app.local_slim())] = true;
+        }
+        assert_eq!(slim, [true, true], "the names must cover both skins");
+    }
+
     #[test]
     fn pack_prompt_waits_for_terrain_screen_to_close() {
         let mut app = App::new(Args {

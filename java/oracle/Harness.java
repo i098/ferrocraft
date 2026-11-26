@@ -514,6 +514,13 @@ public class Harness {
         return toHex(out);
     }
 
+    /** The uuid of a session profile without an account id and its default skin model: `EntityPlayer.getUUID`, `DefaultPlayerSkin.getSkinType`. */
+    static String offlineSkin(String hexName) {
+        UUID id = PlayerEntity.getUuid(new GameProfile(null, fromHex(hexName)));
+        boolean slim = "slim".equals(net.minecraft.flat.DefaultSkinUtils.getDefaultModelType(id));
+        return String.format("%016x%016x %d", id.getMostSignificantBits(), id.getLeastSignificantBits(), slim ? 1 : 0);
+    }
+
     /** One line of `C12PacketUpdateSign.writePacketData`: `IChatComponent.Serializer.componentToJson(new ChatComponentText(line))`. */
     static String signLine(String hexText) {
         return toHex(net.minecraft.flat.Text.Serializer.toJson(new net.minecraft.flat.LiteralText(fromHex(hexText))));
@@ -924,6 +931,9 @@ public class Harness {
                     break;
                 case "bidi":
                     System.out.println(bidiReorder(t.length > 1 ? t[1] : ""));
+                    break;
+                case "skin":
+                    System.out.println(offlineSkin(t[1]));
                     break;
                 case "signjson":
                     System.out.println(signLine(t.length > 1 ? t[1] : ""));

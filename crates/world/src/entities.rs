@@ -610,6 +610,14 @@ impl Entity {
         }
     }
 
+    /// The rest of `setPositionAndRotation2` after a server move snapped this entity: lift it out of the blocks.
+    fn settle(&mut self, at: &dyn Fn([i32; 3]) -> u16) {
+        if std::mem::take(&mut self.proj.snapped) {
+            let size = self.size();
+            crate::projectile::settle(&mut self.pos, size, at);
+        }
+    }
+
     fn set_target(&mut self, raw: [i32; 3], yaw: f32, pitch: f32) {
         self.server_pos = raw;
         self.target.pos = raw.map(fixed);
@@ -712,10 +720,7 @@ impl Entity {
         }
         self.use_ticks =
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
-        if std::mem::take(&mut self.proj.snapped) {
-            let size = self.size();
-            crate::projectile::settle(&mut self.pos, size, at);
-        }
+        self.settle(at);
         self.prev_pos = self.pos;
         (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
         self.last_body_yaw = self.body_yaw;

@@ -462,14 +462,11 @@ fn head(out: &mut Items, d: &EntityDraw, m: &ItemModel, level: [f32; 2]) {
     out.piece(m, &to_world, &normal, level, None);
 }
 
-/// `LayerHeldItemWitch`: the block pose is for chests (`isRenderTypeChest`): chest, ender chest, trapped chest.
+/// `ItemInHandLayer`: only blocks of `getRenderType() == 2` take the held-block tilt and the 0.375
+/// scale. In 1.8.9 those are the chests (`BlockChest`, `BlockEnderChest`, also the trapped chest);
+/// the torches, lever, rail and the other flat block items draw as plain flat items.
 pub(crate) fn is_chest(id: i16) -> bool {
     matches!(id, 54 | 130 | 146)
-}
-
-/// Blocks of `getRenderType() == 2`, the torches and the chests: `ItemInHandLayer` tilts them as held blocks.
-fn is_tilted_block(id: i16) -> bool {
-    matches!(id, 50 | 75 | 76) || is_chest(id)
 }
 
 /// The chest a player or mob holds: its block id and the frame `RenderItem.renderItem` leaves
@@ -530,7 +527,7 @@ fn hand_matrix(d: &EntityDraw) -> Option<Mat> {
         rotate(arm.rot[0].to_degrees(), 0),
         translate(-0.0625, 0.4375, 0.0625),
     ]);
-    if is_tilted_block(d.held) {
+    if is_chest(d.held) {
         mat = chain(&[
             mat,
             translate(0.0, 0.1875, -0.3125),
@@ -635,6 +632,24 @@ mod tests {
         d.class = Class::Player { slim: true };
         let slim = hand_matrix(&d).unwrap();
         assert!(((slim[3][0] - wide[3][0]).abs() - 1.0 / 16.0).abs() < 1e-5);
+    }
+
+    /// Oracle: the `LayerHeldItem` bytecode of the 1.8.9 client tilts only `getRenderType() == 2`
+    /// blocks, and only the chests return 2. A torch, lever, rail, ladder or sapling keeps the
+    /// pose of an apple; the tilt would shrink it to 0.375 and turn it away from the hand.
+    #[test]
+    fn flat_block_items_take_the_plain_hand_pose_and_only_chests_tilt() {
+        let mut d = super::super::tests::steve();
+        d.held = 260;
+        let plain = hand_matrix(&d).unwrap();
+        for id in [50, 75, 76, 69, 66, 65, 6, 1] {
+            d.held = id;
+            assert_eq!(hand_matrix(&d).unwrap(), plain, "block {id}");
+        }
+        for id in [54, 130, 146] {
+            d.held = id;
+            assert_ne!(hand_matrix(&d).unwrap(), plain, "chest {id}");
+        }
     }
 
     /// `LayerHeldItemWitch`: only chests take the block pose.

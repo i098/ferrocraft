@@ -615,10 +615,12 @@ impl Entity {
         self.target.pos = raw.map(fixed);
         self.target.yaw = yaw;
         self.target.pitch = pitch;
-        if self.sim_id().is_some_and(crate::projectile::snaps) {
+        let object = self.sim_id();
+        if object.is_some_and(crate::projectile::snaps) {
             // `Entity.lerpPositionAndAngles` of a non-living entity sets the pose at once.
             (self.pos, self.yaw, self.pitch) = (self.target.pos, yaw, pitch);
             self.target.steps = 0;
+            self.proj.snapped = object.is_some_and(crate::projectile::lifts);
         } else {
             self.target.steps = STEPS;
         }
@@ -710,6 +712,10 @@ impl Entity {
         }
         self.use_ticks =
             (self.flags & flag::USING_ITEM != 0).then(|| self.use_ticks.map_or(0, |t| t + 1));
+        if std::mem::take(&mut self.proj.snapped) {
+            let size = self.size();
+            crate::projectile::settle(&mut self.pos, size, at);
+        }
         self.prev_pos = self.pos;
         (self.prev_yaw, self.prev_pitch) = (self.yaw, self.pitch);
         self.last_body_yaw = self.body_yaw;
@@ -1895,6 +1901,33 @@ mod tests {
             assert!(es.get(5).unwrap().pos[1] >= 64.0);
         }
         assert!(es.get(5).unwrap().pos[1] < 64.1);
+    }
+
+    /// `Entity.setPositionAndRotation2`: the server floors the y of a resting orb to 1/32 (63.96875 for a floor at
+    /// 64), and the client lifts it back onto the block. Without the lift it sank through the floor (#919).
+    #[test]
+    fn an_experience_orb_rounded_into_its_floor_is_lifted_back_onto_it() {
+        let stone = |p: [i32; 3]| if p[1] < 64 { 1 << 4 } else { 0 };
+        let mut es = Entities::default();
+        es.apply(EntityEvent::SpawnExperienceOrb {
+            id: 5,
+            pos: [0, 65 * 32, 0],
+            count: 5,
+        });
+        for _ in 0..40 {
+            es.tick_in(&stone);
+        }
+        es.apply(EntityEvent::Teleport {
+            id: 5,
+            pos: [0, 64 * 32 - 1, 0],
+            yaw: 0,
+            pitch: 0,
+            on_ground: true,
+        });
+        for _ in 0..80 {
+            es.tick_in(&stone);
+            assert_eq!(es.get(5).unwrap().pos[1], 64.0);
+        }
     }
 
     /// `ThrownEntity.tick`: a snowball falls 0.03 per tick under drag 0.99 and ignores blocks on the client.

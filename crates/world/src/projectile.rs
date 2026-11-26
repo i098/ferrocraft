@@ -24,6 +24,8 @@ pub struct State {
     air_ticks: u32,
     /// Seed of the xorshift stand-in for `Entity.rand`.
     rng: u32,
+    /// A server move just snapped the entity: `settle` runs at the next tick.
+    pub(crate) snapped: bool,
 }
 
 impl State {
@@ -80,6 +82,32 @@ pub(crate) fn simulated(object: i8) -> bool {
 /// `Entity.lerpPositionAndAngles` snaps; only the bobber (and living entities) ease over 3 ticks.
 pub(crate) fn snaps(object: i8) -> bool {
     simulated(object) && object != 90
+}
+
+/// Entities whose server move runs `Entity.setPositionAndRotation2`, which lifts them out of blocks. `ArrowEntity`
+/// overrides it with a plain `setPosition`.
+pub(crate) fn lifts(object: i8) -> bool {
+    snaps(object) && object != 60
+}
+
+/// The rest of `Entity.setPositionAndRotation2` after a server move: if the box, shrunk by 1/32 on x and z, meets a
+/// block, the entity moves up so its feet stand on the highest top among the blocks it meets. A position rounded
+/// down to 1/32 would otherwise leave a resting entity inside its floor, and gravity would sink it through.
+// shortcut: block boxes only, no boxes of other entities (boats, minecarts); add them if a stack of those shows.
+pub(crate) fn settle(pos: &mut [f64; 3], size: (f32, f32), at: At) {
+    let b = body(*pos, size);
+    let area = Aabb {
+        min: [b.min[0] + 0.03125, b.min[1], b.min[2] + 0.03125],
+        max: [b.max[0] - 0.03125, b.max[1], b.max[2] - 0.03125],
+    };
+    // `Block.addCollisionBoxesToList` keeps only the boxes that intersect the area.
+    let mut met = Player::colliding_boxes(&Blocks(at), &area)
+        .into_iter()
+        .filter(|c| (0..3).all(|a| c.max[a] > area.min[a] && c.min[a] < area.max[a]))
+        .peekable();
+    if met.peek().is_some() {
+        pos[1] += met.map(|c| c.max[1]).fold(0.0, f64::max) - b.min[1];
+    }
 }
 
 struct Blocks<'a>(At<'a>);

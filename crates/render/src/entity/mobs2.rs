@@ -60,9 +60,12 @@ pub(super) fn cube_scale(d: &EntityDraw) -> [f32; 2] {
     [k * size, 1.0 / k * size]
 }
 
-/// `EntityMagmaCube.getBrightnessForRender` and `EntityBlaze.getBrightnessForRender` are 15728880.
+/// `EntityMagmaCube`, `EntityBlaze` and `EntityWither.getBrightnessForRender` are 15728880.
 pub(super) fn glows(d: &EntityDraw) -> bool {
-    matches!(d.class, super::Class::Mob(MAGMA_CUBE | BLAZE))
+    matches!(
+        d.class,
+        super::Class::Mob(MAGMA_CUBE | BLAZE | super::wither::WITHER)
+    )
 }
 
 /// `RenderBat.rotateCorpse`: a flying bat bobs by `cos(age * 0.3) * 0.1`, a roosting one hangs 0.1 low.

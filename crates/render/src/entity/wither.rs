@@ -175,4 +175,14 @@ mod tests {
         d.look.health = 150.0;
         assert_eq!(count(&d), 9 * 24);
     }
+
+    #[test]
+    fn the_wither_is_lit_at_full_brightness_in_a_dark_place() {
+        // `EntityWither.getBrightnessForRender` is 15728880, whatever the light of its block.
+        let d = wither_draw();
+        assert_eq!(
+            super::super::light_level(&d, &|_| [0.0, 0.0], false),
+            [1.0, 1.0]
+        );
+    }
 }

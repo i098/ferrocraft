@@ -24,3 +24,4 @@ arboard = { version = "3", default-features = false }
 
 [dev-dependencies]
 ferrocraft-protocol = { path = "../protocol" }
+oracle = { path = "../oracle" }

@@ -518,19 +518,14 @@ pub fn head_texture(uuid: u128) -> String {
 /// The owner of a player head: `EntityPlayer.getUUID` of its `SkullOwner` profile, and the
 /// `textures` property that the server resolved (`TileEntitySkull.updateGameprofile`).
 pub fn skull_profile(s: &ItemStack) -> Option<(u128, Option<&str>)> {
+    use world::entities::offline_uuid;
     use world::inventory::Tag;
     if s.id != 397 || s.damage != 3 {
         return None;
     }
     let root = &s.nbt.as_ref()?.root;
-    let offline = |n: &str| {
-        let mut b = md5::compute(format!("OfflinePlayer:{n}")).0;
-        b[6] = b[6] & 0x0f | 0x30;
-        b[8] = b[8] & 0x3f | 0x80;
-        u128::from_be_bytes(b)
-    };
     match tooltip::get(root, "SkullOwner")? {
-        Tag::String(n) if !n.is_empty() => Some((offline(n), None)),
+        Tag::String(n) if !n.is_empty() => Some((offline_uuid(n), None)),
         Tag::Compound(c) => {
             let text = |k| match tooltip::get(c, k) {
                 Some(Tag::String(v)) if !v.is_empty() => Some(v.as_str()),
@@ -539,7 +534,7 @@ pub fn skull_profile(s: &ItemStack) -> Option<(u128, Option<&str>)> {
             let id = text("Id").and_then(|i| {
                 u128::from_str_radix(&i.chars().filter(|&c| c != '-').collect::<String>(), 16).ok()
             });
-            let uuid = id.or_else(|| text("Name").map(offline))?;
+            let uuid = id.or_else(|| text("Name").map(offline_uuid))?;
             let value = tooltip::compound(c, "Properties")
                 .map(|p| tooltip::list(p, "textures"))
                 .and_then(|l| {

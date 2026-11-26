@@ -919,6 +919,7 @@ dependencies = [
  "ferrocraft-protocol",
  "gui",
  "input-audio",
+ "oracle",
  "render",
  "winit",
  "world",
@@ -1254,7 +1255,6 @@ name = "gui"
 version = "0.1.0"
 dependencies = [
  "ferrocraft-net-client",
- "md5",
  "oracle",
  "render",
  "serde_json",
@@ -5054,6 +5054,7 @@ name = "world"
 version = "0.1.0"
 dependencies = [
  "ferrocraft-protocol",
+ "md5",
  "oracle",
 ]
 

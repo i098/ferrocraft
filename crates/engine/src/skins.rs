@@ -1,10 +1,21 @@
 //! Player skins: downloads `textures` skins in the background and hands the decoded images to the renderer.
 
-use ferrocraft_net_client::{fetch_skin, lookup_textures, parse_textures};
+use ferrocraft_net_client::{fetch_skin, lookup_textures, parse_textures, Auth};
 use render::{decode_png, Image, Renderer};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
+
+/// `DefaultPlayerSkin.getSkinType`: the default skin of an odd uuid hash is the slim one.
+pub fn default_slim(u: u128) -> bool {
+    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
+}
+
+/// `EntityPlayer.getUUID` of the session profile: the account uuid, else the offline uuid of the name.
+pub fn local_uuid(auth: Option<&Auth>, username: &str) -> u128 {
+    auth.and_then(|a| u128::from_str_radix(&a.uuid().replace('-', ""), 16).ok())
+        .unwrap_or_else(|| world::entities::offline_uuid(username))
+}
 
 pub struct PlayerSkins {
     cache: PathBuf,

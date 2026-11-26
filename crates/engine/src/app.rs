@@ -80,6 +80,8 @@ type HandItem = (i16, i16, bool, Option<i32>);
 
 pub struct App {
     args: Args,
+    /// `EntityPlayer.getUUID` of the session profile: fixed for the run, so no frame hashes it.
+    session_uuid: u128,
     link: Link,
     game: Game,
     input: InputState,
@@ -196,7 +198,9 @@ impl App {
             .auth
             .as_ref()
             .map_or_else(|| args.username.clone(), |auth| auth.uuid().to_owned());
+        let session_uuid = crate::skins::local_uuid(args.auth.as_ref(), &args.username);
         let mut app = App {
+            session_uuid,
             skins: PlayerSkins::new(&args.game_dir),
             input: InputState::new(ui.settings.mouse_sensitivity),
             link: Link::Offline,
@@ -777,8 +781,13 @@ impl App {
         })
     }
 
+    /// `EntityPlayer.getUUID` of the session profile: the account uuid, else the offline uuid of the name.
+    fn local_uuid(&self) -> u128 {
+        self.session_uuid
+    }
+
     fn local_slim(&self) -> bool {
-        u128::from_str_radix(&self.ui.player_id.replace('-', ""), 16).is_ok_and(default_slim)
+        crate::skins::default_slim(self.local_uuid())
     }
 
     fn self_draw(&self, frac: f64) -> Option<EntityDraw> {
@@ -1776,11 +1785,6 @@ fn stand_look(e: &Entity) -> StandLook {
     .with_pose(e.meta.pose)
 }
 
-/// `DefaultPlayerSkin.getSkinType`: the default skin of an odd uuid hash is the slim one.
-fn default_slim(u: u128) -> bool {
-    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
-}
-
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
@@ -1793,7 +1797,7 @@ fn entity_draw(
 ) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
-            slim: slim.unwrap_or_else(|| e.uuid.is_some_and(default_slim)),
+            slim: slim.unwrap_or_else(|| e.uuid.is_some_and(crate::skins::default_slim)),
         },
         Kind::Mob(id) => Class::Mob(id),
         Kind::Object(id) => Class::Object(id),

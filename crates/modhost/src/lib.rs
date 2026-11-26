@@ -1450,19 +1450,23 @@ while [ ! -f "$stage/exit" ]; do sleep 0.02; done
         };
         let (_a, first) = launch("first.jar");
         let (mut b, second) = launch("second.jar");
-        let wait_for = |ready: &dyn Fn() -> bool| {
-            let until = Instant::now() + Duration::from_secs(5);
+        // Slow CI runners need far more than 5s to start two shell "JVMs"; a host that never
+        // becomes ready still fails after the deadline.
+        let wait_for = |what: &str, ready: &dyn Fn() -> bool| {
+            let until = Instant::now() + Duration::from_secs(60);
             while !ready() {
-                assert!(Instant::now() < until);
+                assert!(Instant::now() < until, "timed out: {what}");
                 thread::sleep(Duration::from_millis(20));
             }
         };
-        wait_for(&|| {
+        wait_for("both hosts loaded their mods", &|| {
             std::fs::read(first.join("loaded")).is_ok_and(|b| b == b"first.jar")
                 && std::fs::read(second.join("loaded")).is_ok_and(|b| b == b"second.jar")
         });
         std::fs::write(first.join("exit"), []).unwrap();
-        wait_for(&|| !first.exists());
+        wait_for("first host workspace removed after exit", &|| {
+            !first.exists()
+        });
         assert_eq!(
             std::fs::read(profile.join("config/first.jar.txt")).unwrap(),
             b"first.jar"

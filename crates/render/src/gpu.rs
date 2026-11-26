@@ -9,7 +9,7 @@ use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
 use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks, SharedLight};
-use crate::particles::Quads;
+use crate::particles::{Layers, Quads};
 use crate::post::Post;
 use crate::sky::{
     build_clouds, build_end_sky, build_sky, Dimension, EnvTexture, Environment, SkyGeometry,
@@ -64,6 +64,35 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
+}
+
+/// The meshes of one `particles::Layers`.
+struct ParticleMeshes {
+    block: Option<GpuMesh>,
+    sheet: Option<GpuMesh>,
+    explosion: Option<GpuMesh>,
+    textured: Vec<(String, GpuMesh)>,
+}
+
+/// Draws the meshes of one particle pass with the pipeline already set.
+fn draw_particles<'a>(
+    pass: &mut wgpu::RenderPass<'a>,
+    textures: &'a HashMap<String, wgpu::BindGroup>,
+    world_group: &'a wgpu::BindGroup,
+    set: &'a ParticleMeshes,
+) {
+    set.block.iter().for_each(|m| draw_mesh(pass, m));
+    let sheets = [
+        (PARTICLE_SHEET, set.sheet.as_ref()),
+        (EXPLOSION_SHEET, set.explosion.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(tex, m)| m.map(|m| (tex, m)));
+    for (tex, m) in sheets.chain(set.textured.iter().map(|(tex, m)| (tex.as_str(), m))) {
+        pass.set_bind_group(0, &textures[tex], &[]);
+        draw_mesh(pass, m);
+        pass.set_bind_group(0, world_group, &[]);
+    }
 }
 
 #[derive(Default)]
@@ -1766,6 +1795,26 @@ impl Renderer {
         out
     }
 
+    /// Meshes of one `Layers` with their textures uploaded.
+    fn upload_particle_layers(&mut self, layers: Layers, offset: [f32; 3]) -> ParticleMeshes {
+        let block = self.upload_mesh(quad_mesh(layers.block), offset);
+        let sheet = self.upload_mesh(quad_mesh(layers.sheet), offset);
+        let explosion = self.upload_mesh(quad_mesh(layers.explosion), offset);
+        if explosion.is_some() {
+            self.load_texture(EXPLOSION_SHEET);
+        }
+        if sheet.is_some() {
+            self.load_texture(PARTICLE_SHEET);
+        }
+        let textured = self.textured_particles(layers.footprint, layers.items, offset);
+        ParticleMeshes {
+            block,
+            sheet,
+            explosion,
+            textured,
+        }
+    }
+
     /// The `layer0` texture path of a flat item model, cached.
     fn item_texture(&mut self, id: i16, damage: i16) -> Option<String> {
         if let Some(t) = self.item_textures.get(&(id, damage)) {
@@ -2118,16 +2167,8 @@ impl Renderer {
         self.prepare_portals(cam);
         let crack_meshes = self.crack_meshes();
         let quads = std::mem::take(&mut self.particles);
-        let particle_block = self.upload_mesh(quad_mesh(quads.block), offset);
-        let particle_sheet = self.upload_mesh(quad_mesh(quads.sheet), offset);
-        let particle_explosion = self.upload_mesh(quad_mesh(quads.explosion), offset);
-        if particle_explosion.is_some() {
-            self.load_texture(EXPLOSION_SHEET);
-        }
-        if particle_sheet.is_some() {
-            self.load_texture(PARTICLE_SHEET);
-        }
-        let particle_textured = self.textured_particles(quads.footprint, quads.items, offset);
+        let particles_blend = self.upload_particle_layers(quads.blend, offset);
+        let particles_solid = self.upload_particle_layers(quads.solid, offset);
         let curse = entity::guardian::build(&quads.curses, &self.entity_skins);
         let particle_curse = self.upload_mesh(curse, offset);
 
@@ -2314,22 +2355,14 @@ impl Renderer {
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             // `EffectRenderer.renderParticles` runs after entities and before the translucent layer.
-            pass.set_pipeline(&self.water_pipe);
-            particle_block.iter().for_each(|m| draw_mesh(&mut pass, m));
-            if let Some(m) = &particle_sheet {
-                pass.set_bind_group(0, &self.textures[PARTICLE_SHEET], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
-            }
-            if let Some(m) = &particle_explosion {
-                pass.set_bind_group(0, &self.textures[EXPLOSION_SHEET], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
-            }
-            for (tex, m) in &particle_textured {
-                pass.set_bind_group(0, &self.textures[tex], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
+            // The particles added with alpha below 1 first, without depth writes; then those with alpha 1 that
+            // write depth, so the water surface behind them does not paint over them.
+            for (pipe, set) in [
+                (&self.water_pipe, &particles_blend),
+                (&self.entity_blend_pipe, &particles_solid),
+            ] {
+                pass.set_pipeline(pipe);
+                draw_particles(&mut pass, &self.textures, &self.world_group, set);
             }
             if let Some(m) = &particle_curse {
                 pass.set_pipeline(&self.entity_blend_pipe);

@@ -80,6 +80,8 @@ type HandItem = (i16, i16, bool, Option<i32>);
 
 pub struct App {
     args: Args,
+    /// `EntityPlayer.getUUID` of the session profile: fixed for the run, so no frame hashes it.
+    session_uuid: u128,
     link: Link,
     game: Game,
     input: InputState,
@@ -196,7 +198,9 @@ impl App {
             .auth
             .as_ref()
             .map_or_else(|| args.username.clone(), |auth| auth.uuid().to_owned());
+        let session_uuid = crate::skins::local_uuid(args.auth.as_ref(), &args.username);
         let mut app = App {
+            session_uuid,
             skins: PlayerSkins::new(&args.game_dir),
             input: InputState::new(ui.settings.mouse_sensitivity),
             link: Link::Offline,
@@ -779,7 +783,7 @@ impl App {
 
     /// `EntityPlayer.getUUID` of the session profile: the account uuid, else the offline uuid of the name.
     fn local_uuid(&self) -> u128 {
-        crate::skins::local_uuid(self.args.auth.as_ref(), &self.args.username)
+        self.session_uuid
     }
 
     fn local_slim(&self) -> bool {

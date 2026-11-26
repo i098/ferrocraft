@@ -1264,6 +1264,7 @@ mod tests {
             })
             .collect();
         let lines = oracle::Oracle::get().run(&script).unwrap();
+        assert_eq!(lines.len(), names.len(), "one oracle line per name");
         let mut slim = [false; 2];
         for (name, line) in names.iter().zip(lines) {
             let (uuid, flag) = line.split_once(' ').unwrap();

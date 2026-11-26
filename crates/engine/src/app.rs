@@ -779,15 +779,11 @@ impl App {
 
     /// `EntityPlayer.getUUID` of the session profile: the account uuid, else the offline uuid of the name.
     fn local_uuid(&self) -> u128 {
-        self.args
-            .auth
-            .as_ref()
-            .and_then(|a| u128::from_str_radix(&a.uuid().replace('-', ""), 16).ok())
-            .unwrap_or_else(|| gui::inventory::icons::offline_uuid(&self.args.username))
+        crate::skins::local_uuid(self.args.auth.as_ref(), &self.args.username)
     }
 
     fn local_slim(&self) -> bool {
-        default_slim(self.local_uuid())
+        crate::skins::default_slim(self.local_uuid())
     }
 
     fn self_draw(&self, frac: f64) -> Option<EntityDraw> {
@@ -1785,11 +1781,6 @@ fn stand_look(e: &Entity) -> StandLook {
     .with_pose(e.meta.pose)
 }
 
-/// `DefaultPlayerSkin.getSkinType`: the default skin of an odd uuid hash is the slim one.
-fn default_slim(u: u128) -> bool {
-    (u as u32 ^ (u >> 32) as u32 ^ (u >> 64) as u32 ^ (u >> 96) as u32) & 1 == 1
-}
-
 /// `skin` and `slim` come from a downloaded skin; without one the player has the default skin
 /// that `DefaultPlayerSkin` picks from the uuid.
 fn entity_draw(
@@ -1802,7 +1793,7 @@ fn entity_draw(
 ) -> EntityDraw {
     let class = match e.kind {
         Kind::Player => Class::Player {
-            slim: slim.unwrap_or_else(|| e.uuid.is_some_and(default_slim)),
+            slim: slim.unwrap_or_else(|| e.uuid.is_some_and(crate::skins::default_slim)),
         },
         Kind::Mob(id) => Class::Mob(id),
         Kind::Object(id) => Class::Object(id),

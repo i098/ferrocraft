@@ -515,17 +515,10 @@ pub fn head_texture(uuid: u128) -> String {
     format!("skin/{uuid:032x}")
 }
 
-/// `EntityPlayer.getOfflineUUID`: `UUID.nameUUIDFromBytes("OfflinePlayer:" + name)`.
-pub fn offline_uuid(name: &str) -> u128 {
-    let mut b = md5::compute(format!("OfflinePlayer:{name}")).0;
-    b[6] = b[6] & 0x0f | 0x30;
-    b[8] = b[8] & 0x3f | 0x80;
-    u128::from_be_bytes(b)
-}
-
 /// The owner of a player head: `EntityPlayer.getUUID` of its `SkullOwner` profile, and the
 /// `textures` property that the server resolved (`TileEntitySkull.updateGameprofile`).
 pub fn skull_profile(s: &ItemStack) -> Option<(u128, Option<&str>)> {
+    use world::entities::offline_uuid;
     use world::inventory::Tag;
     if s.id != 397 || s.damage != 3 {
         return None;

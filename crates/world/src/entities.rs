@@ -1806,6 +1806,14 @@ pub fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
     [-y.sin() * p.cos(), -p.sin(), y.cos() * p.cos()]
 }
 
+/// `EntityPlayer.getOfflineUUID`: `UUID.nameUUIDFromBytes("OfflinePlayer:" + name)`.
+pub fn offline_uuid(name: &str) -> u128 {
+    let mut b = md5::compute(format!("OfflinePlayer:{name}")).0;
+    b[6] = b[6] & 0x0f | 0x30;
+    b[8] = b[8] & 0x3f | 0x80;
+    u128::from_be_bytes(b)
+}
+
 #[cfg(test)]
 mod tests {
 

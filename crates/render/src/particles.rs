@@ -273,6 +273,19 @@ pub struct Layers {
     pub items: Vec<((i16, i16), Vec<Vertex>)>,
 }
 
+impl Layers {
+    /// The quads a particle of `layer` goes to.
+    fn target(&mut self, layer: Layer) -> &mut Vec<Vertex> {
+        match layer {
+            Layer::Block => &mut self.block,
+            Layer::Sheet => &mut self.sheet,
+            Layer::Explosion => &mut self.explosion,
+            Layer::Footprint => &mut self.footprint,
+            Layer::Item(key) => item_quads(&mut self.items, key),
+        }
+    }
+}
+
 /// The particle quads of one frame. `EffectRenderer` draws a layer in two passes: first the particles added with
 /// alpha below 1 (`depthMask(false)`), then those added with alpha 1 (`depthMask(true)`).
 #[derive(Default)]
@@ -281,6 +294,17 @@ pub struct Quads {
     pub solid: Layers,
     /// Elder guardians of the curse effect, drawn last (`MobAppearanceParticle` is layer 3).
     pub curses: Vec<Curse>,
+}
+
+impl Quads {
+    /// The pass a particle goes to: the depth-writing one when it was added with alpha 1.
+    fn layers(&mut self, depth: bool) -> &mut Layers {
+        if depth {
+            &mut self.solid
+        } else {
+            &mut self.blend
+        }
+    }
 }
 
 impl Particles {
@@ -1667,22 +1691,12 @@ impl Particles {
             let Some((layer, uv)) = sprite_uv(p, atlas, partial) else {
                 continue;
             };
-            let layers = if p.depth {
-                &mut out.solid
-            } else {
-                &mut out.blend
-            };
+            let layers = out.layers(p.depth);
             if let Layer::Footprint = layer {
                 push_footprint(&mut layers.footprint, p, partial, c, light(p.pos));
                 continue;
             }
-            let target = match layer {
-                Layer::Block => &mut layers.block,
-                Layer::Sheet => &mut layers.sheet,
-                Layer::Explosion => &mut layers.explosion,
-                Layer::Item(key) => item_quads(&mut layers.items, key),
-                Layer::Footprint => continue,
-            };
+            let target = layers.target(layer);
             let scale = render_scale(p, partial);
             if scale <= 0.0 {
                 continue;

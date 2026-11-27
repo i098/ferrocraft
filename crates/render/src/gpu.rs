@@ -9,7 +9,7 @@ use crate::entity::{self, EntityDraw, Skins};
 use crate::hand::{self, Hand, HeldKind};
 use crate::mesh::{index, MeshData, Vertex, AROUND, HEIGHT};
 use crate::mesher::{Done, Job, Mesher, SharedBiomes, SharedBlocks, SharedLight};
-use crate::particles::{Layers, Quads};
+use crate::particles::Quads;
 use crate::post::Post;
 use crate::sky::{
     build_clouds, build_end_sky, build_sky, Dimension, EnvTexture, Environment, SkyGeometry,
@@ -64,35 +64,6 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
-}
-
-/// The meshes of one `particles::Layers`.
-struct ParticleMeshes {
-    block: Option<GpuMesh>,
-    sheet: Option<GpuMesh>,
-    explosion: Option<GpuMesh>,
-    textured: Vec<(String, GpuMesh)>,
-}
-
-/// Draws the meshes of one particle pass with the pipeline already set.
-fn draw_particles<'a>(
-    pass: &mut wgpu::RenderPass<'a>,
-    textures: &'a HashMap<String, wgpu::BindGroup>,
-    world_group: &'a wgpu::BindGroup,
-    set: &'a ParticleMeshes,
-) {
-    set.block.iter().for_each(|m| draw_mesh(pass, m));
-    let sheets = [
-        (PARTICLE_SHEET, set.sheet.as_ref()),
-        (EXPLOSION_SHEET, set.explosion.as_ref()),
-    ]
-    .into_iter()
-    .filter_map(|(tex, m)| m.map(|m| (tex, m)));
-    for (tex, m) in sheets.chain(set.textured.iter().map(|(tex, m)| (tex.as_str(), m))) {
-        pass.set_bind_group(0, &textures[tex], &[]);
-        draw_mesh(pass, m);
-        pass.set_bind_group(0, world_group, &[]);
-    }
 }
 
 #[derive(Default)]
@@ -1795,26 +1766,6 @@ impl Renderer {
         out
     }
 
-    /// Meshes of one `Layers` with their textures uploaded.
-    fn upload_particle_layers(&mut self, layers: Layers, offset: [f32; 3]) -> ParticleMeshes {
-        let block = self.upload_mesh(quad_mesh(layers.block), offset);
-        let sheet = self.upload_mesh(quad_mesh(layers.sheet), offset);
-        let explosion = self.upload_mesh(quad_mesh(layers.explosion), offset);
-        if explosion.is_some() {
-            self.load_texture(EXPLOSION_SHEET);
-        }
-        if sheet.is_some() {
-            self.load_texture(PARTICLE_SHEET);
-        }
-        let textured = self.textured_particles(layers.footprint, layers.items, offset);
-        ParticleMeshes {
-            block,
-            sheet,
-            explosion,
-            textured,
-        }
-    }
-
     /// The `layer0` texture path of a flat item model, cached.
     fn item_texture(&mut self, id: i16, damage: i16) -> Option<String> {
         if let Some(t) = self.item_textures.get(&(id, damage)) {
@@ -3166,6 +3117,8 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
 mod axes;
 mod block_entities;
 mod outline;
+mod particle_draw;
+use particle_draw::{draw_particles, ParticleMeshes};
 mod shadow;
 
 /// The camera in the coordinates of the chunk at `origin`.

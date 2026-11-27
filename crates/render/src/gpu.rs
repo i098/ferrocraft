@@ -3118,7 +3118,7 @@ mod axes;
 mod block_entities;
 mod outline;
 mod particle_draw;
-use particle_draw::{draw_particles, ParticleMeshes};
+use particle_draw::draw_particles;
 mod shadow;
 
 /// The camera in the coordinates of the chunk at `origin`.

@@ -220,6 +220,8 @@ struct Particle {
     fade: Option<[f32; 3]>,
     trail: bool,
     flicker: bool,
+    /// Whether the particle writes depth: its alpha was 1 when it was added.
+    depth: bool,
 }
 
 /// `FireworksParticles.Starter`: draws nothing; every other tick it makes one explosion of the rocket.
@@ -261,7 +263,7 @@ pub struct Particles {
 /// Quads split by texture: `block` samples the block atlas, `sheet` samples `particles.png`,
 /// `explosion` samples `textures/entity/explosion.png`.
 #[derive(Default)]
-pub struct Quads {
+pub struct Layers {
     pub block: Vec<Vertex>,
     pub sheet: Vec<Vertex>,
     pub explosion: Vec<Vertex>,
@@ -269,8 +271,40 @@ pub struct Quads {
     pub footprint: Vec<Vertex>,
     /// Quads per item `(id, damage)` whose icon texture they sample.
     pub items: Vec<((i16, i16), Vec<Vertex>)>,
+}
+
+impl Layers {
+    /// The quads a particle of `layer` goes to.
+    fn target(&mut self, layer: Layer) -> &mut Vec<Vertex> {
+        match layer {
+            Layer::Block => &mut self.block,
+            Layer::Sheet => &mut self.sheet,
+            Layer::Explosion => &mut self.explosion,
+            Layer::Footprint => &mut self.footprint,
+            Layer::Item(key) => item_quads(&mut self.items, key),
+        }
+    }
+}
+
+/// The particle quads of one frame. `EffectRenderer` draws a layer in two passes: first the particles added with
+/// alpha below 1 (`depthMask(false)`), then those added with alpha 1 (`depthMask(true)`).
+#[derive(Default)]
+pub struct Quads {
+    pub blend: Layers,
+    pub solid: Layers,
     /// Elder guardians of the curse effect, drawn last (`MobAppearanceParticle` is layer 3).
     pub curses: Vec<Curse>,
+}
+
+impl Quads {
+    /// The pass a particle goes to: the depth-writing one when it was added with alpha 1.
+    fn layers(&mut self, depth: bool) -> &mut Layers {
+        if depth {
+            &mut self.solid
+        } else {
+            &mut self.blend
+        }
+    }
 }
 
 impl Particles {
@@ -349,10 +383,13 @@ impl Particles {
             fade: None,
             trail: false,
             flicker: false,
+            depth: false,
         }
     }
 
-    fn push(&mut self, p: Particle) {
+    /// `EffectRenderer.addEffect`: a particle added with alpha 1 is drawn with depth writes, any other without.
+    fn push(&mut self, mut p: Particle) {
+        p.depth = p.alpha == 1.0;
         if self.list.len() >= MAX_PARTICLES {
             self.list.remove(0);
         }
@@ -1654,17 +1691,12 @@ impl Particles {
             let Some((layer, uv)) = sprite_uv(p, atlas, partial) else {
                 continue;
             };
+            let layers = out.layers(p.depth);
             if let Layer::Footprint = layer {
-                push_footprint(&mut out.footprint, p, partial, c, light(p.pos));
+                push_footprint(&mut layers.footprint, p, partial, c, light(p.pos));
                 continue;
             }
-            let target = match layer {
-                Layer::Block => &mut out.block,
-                Layer::Sheet => &mut out.sheet,
-                Layer::Explosion => &mut out.explosion,
-                Layer::Item(key) => item_quads(&mut out.items, key),
-                Layer::Footprint => continue,
-            };
+            let target = layers.target(layer);
             let scale = render_scale(p, partial);
             if scale <= 0.0 {
                 continue;
@@ -2667,7 +2699,7 @@ mod tests {
             |_| [0.0, 1.0],
         );
         // Age 0 colour is (1, 1, 0.5).
-        let c = q.sheet[0].color;
+        let c = q.solid.sheet[0].color;
         assert!(
             (c[0] - 0.5).abs() < 1e-3 && (c[1] - 0.5).abs() < 1e-3 && (c[2] - 0.25).abs() < 1e-2
         );
@@ -2791,6 +2823,7 @@ mod tests {
                 0.0,
                 |_| [1.0; 2],
             )
+            .solid
             .footprint;
         assert_eq!(fresh.len(), 4);
         assert!(fresh.iter().all(|v| v.color[3] < 0.05 && v.pos[1] == 5.0));
@@ -2805,10 +2838,14 @@ mod tests {
         let atlas = crate::assets::Atlas::flat();
         let lights = |ps: &Particles| {
             let q = ps.vertices(&atlas, 0.0, 0.0, [0.0; 3], ([0.0; 3], [0.0; 3]), 0.0, light);
-            let mut v: Vec<[f32; 2]> = [q.sheet, q.block, q.explosion]
+            let mut v: Vec<[f32; 2]> = [q.blend, q.solid]
                 .into_iter()
-                .flatten()
-                .chain(q.items.into_iter().flat_map(|g| g.1))
+                .flat_map(|l| {
+                    [l.sheet, l.block, l.explosion]
+                        .into_iter()
+                        .flatten()
+                        .chain(l.items.into_iter().flat_map(|g| g.1))
+                })
                 .map(|v| v.light)
                 .collect();
             v.dedup();
@@ -2839,5 +2876,26 @@ mod tests {
         let mut crack = one(37, 6.0, &[1]);
         crack.list[0].pos[1] = 0.0;
         assert_eq!(lights(&crack), [[0.5, 0.25]]);
+    }
+
+    /// `EffectRenderer.addEffect` files a particle by alpha: alpha 1 writes depth, so the water surface drawn
+    /// later does not blend over a bubble underwater (#854, #579).
+    #[test]
+    fn particles_written_with_alpha_one_go_to_the_depth_pass() {
+        let mut ps = Particles::new();
+        ps.spawn(Kind::Bubble, [0.0, 5.0, 0.0], [0.0; 3], 0);
+        ps.spawn(Kind::MobSpellAmbient, [0.0, 5.0, 0.0], [0.0; 3], 0);
+        let atlas = crate::assets::Atlas::flat();
+        let q = ps.vertices(
+            &atlas,
+            0.0,
+            0.0,
+            [0.0; 3],
+            ([0.0; 3], [0.0; 3]),
+            0.0,
+            |_| [1.0; 2],
+        );
+        assert_eq!((q.solid.sheet.len(), q.blend.sheet.len()), (4, 4));
+        assert!(q.blend.sheet.iter().all(|v| v.color[3] < 1.0));
     }
 }

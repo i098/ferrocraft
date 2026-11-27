@@ -2118,16 +2118,8 @@ impl Renderer {
         self.prepare_portals(cam);
         let crack_meshes = self.crack_meshes();
         let quads = std::mem::take(&mut self.particles);
-        let particle_block = self.upload_mesh(quad_mesh(quads.block), offset);
-        let particle_sheet = self.upload_mesh(quad_mesh(quads.sheet), offset);
-        let particle_explosion = self.upload_mesh(quad_mesh(quads.explosion), offset);
-        if particle_explosion.is_some() {
-            self.load_texture(EXPLOSION_SHEET);
-        }
-        if particle_sheet.is_some() {
-            self.load_texture(PARTICLE_SHEET);
-        }
-        let particle_textured = self.textured_particles(quads.footprint, quads.items, offset);
+        let particles_blend = self.upload_particle_layers(quads.blend, offset);
+        let particles_solid = self.upload_particle_layers(quads.solid, offset);
         let curse = entity::guardian::build(&quads.curses, &self.entity_skins);
         let particle_curse = self.upload_mesh(curse, offset);
 
@@ -2314,22 +2306,14 @@ impl Renderer {
                 pass.set_bind_group(0, &self.world_group, &[]);
             }
             // `EffectRenderer.renderParticles` runs after entities and before the translucent layer.
-            pass.set_pipeline(&self.water_pipe);
-            particle_block.iter().for_each(|m| draw_mesh(&mut pass, m));
-            if let Some(m) = &particle_sheet {
-                pass.set_bind_group(0, &self.textures[PARTICLE_SHEET], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
-            }
-            if let Some(m) = &particle_explosion {
-                pass.set_bind_group(0, &self.textures[EXPLOSION_SHEET], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
-            }
-            for (tex, m) in &particle_textured {
-                pass.set_bind_group(0, &self.textures[tex], &[]);
-                draw_mesh(&mut pass, m);
-                pass.set_bind_group(0, &self.world_group, &[]);
+            // The particles added with alpha below 1 first, without depth writes; then those with alpha 1 that
+            // write depth, so the water surface behind them does not paint over them.
+            for (pipe, set) in [
+                (&self.water_pipe, &particles_blend),
+                (&self.entity_blend_pipe, &particles_solid),
+            ] {
+                pass.set_pipeline(pipe);
+                draw_particles(&mut pass, &self.textures, &self.world_group, set);
             }
             if let Some(m) = &particle_curse {
                 pass.set_pipeline(&self.entity_blend_pipe);
@@ -3133,6 +3117,8 @@ fn quad_mesh(vertices: Vec<Vertex>) -> MeshData {
 mod axes;
 mod block_entities;
 mod outline;
+mod particle_draw;
+use particle_draw::draw_particles;
 mod shadow;
 
 /// The camera in the coordinates of the chunk at `origin`.
